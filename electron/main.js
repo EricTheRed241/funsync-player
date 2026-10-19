@@ -585,6 +585,13 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
   };
 });
 
+// macOS Finder AppleDouble resource-fork sidecars (`._Video.mp4`).
+// Leading basename prefix only — `foo._bar.mp4` is a real file and is kept.
+// Never delete these; skip them at ingest.
+function isAppleDoubleSidecar(name) {
+  return typeof name === 'string' && name.startsWith('._');
+}
+
 // Enumerate video files in a directory. Used by the VR Format panel's
 // "Apply to all videos in this folder" button. Non-recursive — only
 // direct children of `dirPath`. Skips symlinks pointing outside the
@@ -602,6 +609,7 @@ ipcMain.handle('enumerate-folder-videos', async (_event, dirPath) => {
       if (dent.isDirectory()) continue;
       if (dent.isSymbolicLink()) continue;
       const name = dent.name;
+      if (isAppleDoubleSidecar(name)) continue;
       const dotAt = name.lastIndexOf('.');
       if (dotAt < 0) continue;
       const ext = name.slice(dotAt).toLowerCase();
@@ -1135,6 +1143,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
       const dirEntries = await fs.promises.readdir(dp, { withFileTypes: true, recursive: true });
       rawEntryCount += dirEntries.length;
       for (const entry of dirEntries) {
+        if (isAppleDoubleSidecar(entry.name)) continue;
         const parent = entry.parentPath || entry.path || dp;
         const full = canonicalise(path.join(parent, entry.name));
         if (seenPaths.has(full)) continue;

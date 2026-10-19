@@ -16,6 +16,10 @@ const FUNSCRIPT_EXTENSIONS = ['.funscript'];
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt'];
 const ALL_ACCEPTED = [...VIDEO_EXTENSIONS, ...FUNSCRIPT_EXTENSIONS, ...SUBTITLE_EXTENSIONS];
 
+function isAppleDoubleSidecar(filename) {
+  return typeof filename === 'string' && filename.startsWith('._');
+}
+
 export class DragDrop {
   constructor({ dropZoneElement, onVideoFile, onFunscriptFile, onSubtitleFile, onUnsupported }) {
     // Override is allowed but the default is the global overlay.
@@ -55,6 +59,8 @@ export class DragDrop {
       if (!files || files.length === 0) return;
 
       for (const fileData of files) {
+        if (isAppleDoubleSidecar(fileData.name)) continue;
+
         const ext = this._getExtension(fileData.name);
 
         if (VIDEO_EXTENSIONS.includes(ext)) {
@@ -208,6 +214,8 @@ export class DragDrop {
     let acceptedCount = 0;
     let rejectedNames = [];
     for (const file of files) {
+      if (isAppleDoubleSidecar(file.name)) continue;
+
       const ext = this._getExtension(file.name);
       const path = this._resolvePath(file);
       if (VIDEO_EXTENSIONS.includes(ext)) {

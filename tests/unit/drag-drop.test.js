@@ -71,6 +71,19 @@ describe('DragDrop', () => {
       expect(onSubtitle).not.toHaveBeenCalled();
     });
 
+    it('skips macOS AppleDouble sidecars with a leading ._ prefix', () => {
+      dropFiles([
+        new File([''], '._Sample Clip.mp4'),
+        new File(['{}'], '._Sample Clip.funscript'),
+        new File([''], 'foo._bar.mp4'),
+        new File(['{}'], 'foo._bar.funscript'),
+      ]);
+      expect(onVideo).toHaveBeenCalledTimes(1);
+      expect(onVideo.mock.calls[0][0].name).toBe('foo._bar.mp4');
+      expect(onFunscript).toHaveBeenCalledTimes(1);
+      expect(onFunscript.mock.calls[0][0].name).toBe('foo._bar.funscript');
+    });
+
     it('routes multiple files of different types', () => {
       dropFiles([
         new File([''], 'video.mp4'),

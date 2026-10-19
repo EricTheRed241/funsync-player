@@ -28,7 +28,11 @@ function scanDirectory(entries, dirPath) {
   };
   const pathBasename = (name, ext) => ext ? name.slice(0, name.length - ext.length) : name;
 
+  // Skip macOS AppleDouble sidecars (`._Video.mp4`). Prefix only.
+  entries = entries.filter((entry) => !entry.name.startsWith('._'));
+
   // Collect funscript basenames for matching
+
   const funscriptMap = new Map();
   for (const entry of entries) {
     if (!entry.isFile) continue;
@@ -259,6 +263,24 @@ describe('scan-directory', () => {
     const result = scanDirectory(entries, '/dir');
     expect(result.videos[0].hasFunscript).toBe(false);
     expect(result.videos[0].funscriptPath).toBeNull();
+  });
+
+  it('skips macOS AppleDouble sidecars with a leading ._ prefix', () => {
+    const entries = [
+      file('Sample Clip.mp4'),
+      file('Sample Clip.funscript'),
+      file('._Sample Clip.mp4'),
+      file('._Sample Clip.funscript'),
+      file('foo._bar.mp4'),
+      file('foo._bar.funscript'),
+    ];
+    const result = scanDirectory(entries, '/dir');
+    expect(result.videos.map((v) => v.name)).toEqual([
+      'foo._bar.mp4',
+      'Sample Clip.mp4',
+    ]);
+    expect(result.videos.every((v) => v.hasFunscript)).toBe(true);
+    expect(result.unmatchedFunscripts).toEqual([]);
   });
 });
 
