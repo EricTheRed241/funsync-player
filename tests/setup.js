@@ -10,6 +10,19 @@
 // Genuinely DOM-only patches (HTMLCanvasElement) are explicitly guarded.
 import { vi } from 'vitest';
 
+// --- localStorage on Node 25+ ---
+// Node 25+ defines its own global `localStorage`, which is undefined unless
+// the process starts with --localstorage-file. Vitest does not replace an
+// existing global with jsdom's, so jsdom files saw `localStorage` as
+// undefined (CI on Node 22 never did). Point it back at jsdom's storage.
+if (globalThis.jsdom && globalThis.localStorage === undefined) {
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: globalThis.jsdom.window.localStorage,
+    configurable: true,
+    writable: true,
+  });
+}
+
 // --- window.funsync IPC mock (matches electron/preload.js) ---
 globalThis.funsync = {
   openFileDialog: vi.fn().mockResolvedValue([]),
