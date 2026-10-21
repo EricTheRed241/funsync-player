@@ -60,6 +60,7 @@ const { EroScriptsAPI } = require('./eroscripts-api');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
+const { underscoreVariant } = require('./script-variant');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -1189,14 +1190,19 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // "Title (Nude).mp4" script-less and hidden under the Matched tab.
   const videoBaseLocal = new Set();  // dir + '\0' + normalizedBase
   const videoBaseGlobal = new Set(); // normalizedBase
+  const videoStemsByDir = new Map(); // dir → raw basenames, for `Title_label` variants
   await yieldTick();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const vext = path.extname(entry.name).toLowerCase();
     if (!VIDEO_EXTS.includes(vext)) continue;
-    const vbase = normalizeName(path.basename(entry.name, vext));
-    videoBaseLocal.add(entryDir(entry) + '\0' + vbase);
+    const vstem = path.basename(entry.name, vext);
+    const vbase = normalizeName(vstem);
+    const vdir = entryDir(entry);
+    videoBaseLocal.add(vdir + '\0' + vbase);
     videoBaseGlobal.add(vbase);
+    if (!videoStemsByDir.has(vdir)) videoStemsByDir.set(vdir, []);
+    videoStemsByDir.get(vdir).push(vstem);
   }
 
   // Collect all funscripts with variant/axis classification
@@ -1220,6 +1226,10 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 
     let videoBase, variantLabel;
     let isAmbiguousDotVariant = false;
+    // Runs before the dot rule: `Animex 3.0.1_hard` would otherwise be
+    // split at its last dot and demoted to a primary with no video.
+    const uVariant = (isAxis || parenMatch) ? null
+      : underscoreVariant(nameNoExt, videoStemsByDir.get(entryDir(entry)));
     if (isAxis) {
       let stem = nameNoExt.slice(0, dotIdx);
       if (stem.toLowerCase().endsWith('.generated')) stem = stem.slice(0, -'.generated'.length);
@@ -1241,6 +1251,9 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
         videoBase = normalizeName(parenMatch[1]);
         variantLabel = parenMatch[2].trim();
       }
+    } else if (uVariant) {
+      videoBase = normalizeName(uVariant.stem);
+      variantLabel = uVariant.label;
     } else if (dotSuffix && dotIdx > 0) {
       // AMBIGUOUS — could be a real variant ("video.intense.funscript")
       // OR just a filename that happens to contain a dot ("S01.E03.funscript",
@@ -1488,6 +1501,20 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
         video.variants = fuzzyVariants;
       }
     }
+  }
+
+  // Axis companions belong to the stroke script they are named after
+  // (`Title_hardcore.generated.twist` → `Title_hardcore.funscript`), or to a
+  // video of that name when the scene ships axes only. Without this pass
+  // every axis file of a paired scene was listed as unmatched.
+  const pairedStems = new Set();
+  for (const fs of funscriptList) {
+    if (fs._used && !fs.isAxis) pairedStems.add(fs.dir + '\0' + fs.fullNormalisedBase);
+  }
+  for (const fs of funscriptList) {
+    if (!fs.isAxis) continue;
+    const key = fs.dir + '\0' + fs.videoBase;
+    if (pairedStems.has(key) || videoBaseLocal.has(key)) fs._used = true;
   }
 
   // Collect unmatched funscripts (not paired to any video)

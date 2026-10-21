@@ -5,7 +5,7 @@ import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
-import { getAxisBySuffix } from './multi-axis.js';
+import { getAxisBySuffix, variantAxes } from './multi-axis.js';
 import { sourcesToProbe } from './source-state.js';
 import { BackendBannerState } from './backend-banner-state.js';
 
@@ -9212,6 +9212,21 @@ class App {
       // Reload all sync engines
       if (this.buttplugSync?._active) this.buttplugSync.reloadActions();
       if (this.tcodeSync?._active) this.tcodeSync.reloadActions();
+
+      // Multi-axis: the twist/roll/pitch must follow the stroke, or a
+      // `_hardcore` variant plays over the default script's generated axes.
+      // Custom routing assigns scripts per device and is left alone.
+      const baseMulti = this._currentMultiAxis;
+      if (baseMulti?.axes && !this._customRoutingActive) {
+        const axes = variant.path === baseMulti.main
+          ? baseMulti.axes
+          : variantAxes(
+            baseMulti.axes,
+            variant.path,
+            (this.library?.getAllFunscripts() || []).map((f) => f.path),
+          );
+        await this._loadMultiAxisScripts({ ...baseMulti, axes: { ...axes } });
+      }
 
       // Re-upload to Handy (stop first so start() doesn't early-return).
        // _uploadAndStartSync hides the overlay + resumes playback when

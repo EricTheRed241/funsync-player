@@ -171,6 +171,34 @@ export function detectCompanionFiles(primaryPath, allFiles) {
 }
 
 /**
+ * Axis scripts to play while a stroke variant is active.
+ *
+ * A variant's own companions (`Title_hardcore.generated.twist.funscript`
+ * for `Title_hardcore.funscript`) replace the video's for those axes; any
+ * axis the variant lacks keeps the video's file. Only companions in the
+ * variant's own folder count, so a same-named script elsewhere in the
+ * library cannot leak in.
+ *
+ * @param {Object<string,string>} baseAxes — the video's axes, suffix → path
+ * @param {string} variantPath — the variant's stroke funscript
+ * @param {string[]} allFiles — every funscript path in the library
+ * @returns {Object<string,string>} suffix → path
+ */
+export function variantAxes(baseAxes, variantPath, allFiles) {
+  const axes = { ...(baseAxes || {}) };
+  if (!variantPath) return axes;
+  const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
+  const dir = dirOf(variantPath);
+  const own = new Set();
+  for (const c of detectCompanionFiles(variantPath, allFiles)) {
+    if (dirOf(c.path) !== dir || own.has(c.axis.suffix)) continue;
+    own.add(c.axis.suffix);
+    axes[c.axis.suffix] = c.path;
+  }
+  return axes;
+}
+
+/**
  * Build a display path for a companion axis file.
  * Given a video path, returns the expected funscript path for a given axis.
  *

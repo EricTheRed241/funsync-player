@@ -26,7 +26,7 @@ A local desktop video player with device synchronization for funscript playback.
 - Sort by name, duration, average speed, max speed (matched tab only)
 - Playlists, categories, and collections with pin-folder-as-collection support
 - Multi-select for bulk playlist/category assignment
-- Script variant detection — auto-detects multiple funscript versions per video
+- Script variant detection — `Title (Soft)`, `Title_hardcore` and `Title.intense` scripts next to `Title.mp4` become variants of that video
 
 ### Remote access
 - **Web Remote** — control FunSync from your phone on the same WiFi. Library, playback, device sync. Installable as a PWA from the phone's home screen.
@@ -46,7 +46,7 @@ A local desktop video player with device synchronization for funscript playback.
 - Gap indicators on the seek bar showing idle sections
 - Manual funscript association with fuzzy-ranked suggestions
 - Script variations — switch between multiple script versions during playback (V key)
-- Multi-axis funscript support (TCode convention, 10 axes)
+- Multi-axis funscript support (TCode convention, 10 axes); switching variants also switches to that variant's own axis files
 - **Custom routing** — assign different scripts to different devices per video, stable across Intiface restarts (index-first matching with name auto-heal)
 - Speed stats (average/max) displayed on library cards
 

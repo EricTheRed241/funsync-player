@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AXIS_DEFINITIONS, parseAxisSuffix, getBaseName, detectCompanionFiles,
   buildCompanionPath, getAxisBadges, tcodeToFeature,
-  getAxisBySuffix, axisSuffixVariants,
+  getAxisBySuffix, axisSuffixVariants, variantAxes,
 } from '../../renderer/js/multi-axis.js';
 
 describe('multi-axis', () => {
@@ -290,6 +290,37 @@ describe('multi-axis', () => {
         expect(axis.label).toBeTruthy();
         expect(['linear', 'rotate', 'vibrate']).toContain(axis.type);
       }
+    });
+  });
+
+  describe('variantAxes', () => {
+    const base = {
+      twist: '/lib/T/Title.generated.twist.funscript',
+      roll: '/lib/T/Title.generated.roll.funscript',
+    };
+
+    it("swaps in the variant's own companions and keeps the video's for the rest", () => {
+      const all = [
+        '/lib/T/Title.funscript',
+        ...Object.values(base),
+        '/lib/T/Title_hardcore.funscript',
+        '/lib/T/Title_hardcore.generated.twist.funscript',
+      ];
+      expect(variantAxes(base, '/lib/T/Title_hardcore.funscript', all)).toEqual({
+        twist: '/lib/T/Title_hardcore.generated.twist.funscript',
+        roll: '/lib/T/Title.generated.roll.funscript',
+      });
+    });
+
+    it('ignores same-named companions in another folder', () => {
+      const all = ['/lib/Other/Title_hardcore.generated.twist.funscript'];
+      expect(variantAxes(base, '/lib/T/Title_hardcore.funscript', all)).toEqual(base);
+    });
+
+    it('does not mutate the base map', () => {
+      const copy = { ...base };
+      variantAxes(base, '/lib/T/Title_x.funscript', ['/lib/T/Title_x.pitch.funscript']);
+      expect(base).toEqual(copy);
     });
   });
 });
