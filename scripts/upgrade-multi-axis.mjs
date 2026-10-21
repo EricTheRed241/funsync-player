@@ -37,6 +37,7 @@ const {
   serialiseUpgradeWrites,
   companionPathForScript,
 } = await import('../renderer/js/upgrade-multi-axis.js');
+const { pairUpgradeJobs } = await import('./upgrade-pairing.mjs');
 
 const VIDEO_EXTS = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov']);
 const MODE_LABEL = {
@@ -56,10 +57,6 @@ const enabled = new Set();
 if (flags.has('--surge')) enabled.add('L1');
 if (flags.has('--sway')) enabled.add('L2');
 if (flags.has('--valve')) enabled.add('A0');
-
-function normStem(name) {
-  return name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
-}
 
 function isFunscript(p) {
   return p.toLowerCase().endsWith('.funscript');
@@ -104,6 +101,7 @@ async function siblingStroke(video) {
 async function collect(roots) {
   const videos = [];
   const scripts = [];
+  const explicit = new Set();
   for (const root of roots) {
     let st;
     try {
@@ -113,7 +111,10 @@ async function collect(roots) {
       continue;
     }
     if (st.isDirectory()) await walk(root, videos, scripts);
-    else classify(path.resolve(root), videos, scripts);
+    else {
+      classify(path.resolve(root), videos, scripts);
+      explicit.add(path.resolve(root));
+    }
   }
   const known = new Set(scripts.map((s) => path.resolve(s)));
   for (const video of videos) {
@@ -123,36 +124,7 @@ async function collect(roots) {
       known.add(path.resolve(sib));
     }
   }
-  return pair(videos, scripts);
-}
-
-function pair(videos, scripts) {
-  if (videos.length === 1 && scripts.length === 1) {
-    return { jobs: [{ video: videos[0], script: scripts[0] }], unmatchedVideos: [] };
-  }
-  const byStem = new Map();
-  for (const script of scripts) {
-    const stem = normStem(path.basename(script, '.funscript'));
-    if (!byStem.has(stem)) byStem.set(stem, []);
-    byStem.get(stem).push(script);
-  }
-  const used = new Set();
-  const jobs = [];
-  const unmatchedVideos = [];
-  for (const video of videos) {
-    const stem = normStem(path.basename(video, path.extname(video)));
-    const hit = (byStem.get(stem) || []).find((s) => !used.has(s));
-    if (!hit) {
-      unmatchedVideos.push(video);
-      continue;
-    }
-    used.add(hit);
-    jobs.push({ video, script: hit });
-  }
-  for (const script of scripts) {
-    if (!used.has(script)) jobs.push({ video: null, script });
-  }
-  return { jobs, unmatchedVideos };
+  return pairUpgradeJobs(videos, scripts, explicit);
 }
 
 function outputAnchor(video, script) {
@@ -193,9 +165,12 @@ Does not overwrite the stroke file. Skips an axis whose companion already exists
     process.exit(1);
   }
 
-  const { jobs, unmatchedVideos } = await collect(paths);
+  const { jobs, unmatchedVideos, orphanScripts } = await collect(paths);
   for (const video of unmatchedVideos) {
     console.log(`no stroke script: ${video}`);
+  }
+  for (const script of orphanScripts) {
+    console.log(`no video, skipped: ${script}`);
   }
   if (jobs.length === 0) {
     console.error('no stroke funscripts found');
