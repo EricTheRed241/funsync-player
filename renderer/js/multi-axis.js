@@ -96,7 +96,6 @@ export function parseAxisSuffix(filename) {
   // Strip .funscript extension
   const base = lower.slice(0, -'.funscript'.length);
 
-  // Look for a known suffix before .funscript
   const dotIdx = base.lastIndexOf('.');
   if (dotIdx < 0) return null; // no suffix → primary axis
 
@@ -129,6 +128,7 @@ export function getBaseName(filepath) {
     const suffix = base.slice(dotIdx + 1).toLowerCase();
     if (_suffixMap.has(suffix)) {
       base = base.slice(0, dotIdx);
+      if (base.toLowerCase().endsWith('.generated')) base = base.slice(0, -'.generated'.length);
     }
   }
 

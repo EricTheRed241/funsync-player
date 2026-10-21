@@ -16,6 +16,7 @@
     "updates:archive": "node scripts/archive-updates.mjs",
     "updates:archive:write": "node scripts/archive-updates.mjs --write",
     "specs:check": "node scripts/device-spec-check.mjs",
+    "upgrade:axes": "node scripts/upgrade-multi-axis.mjs",
     "specs:update": "node scripts/device-spec-check.mjs --update",
     "specs:coverage": "node scripts/buttplug-coverage.mjs",
     "vault:check": "node scripts/vault-freshness.mjs",

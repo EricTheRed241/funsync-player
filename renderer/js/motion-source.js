@@ -238,3 +238,41 @@ export function normaliseMotionConfig(cfg) {
     pattern: PATTERN_TYPES.includes(cfg.pattern) ? cfg.pattern : DEFAULT_PATTERN,
   };
 }
+
+/**
+ * Sample a motion config once per stroke keyframe.
+ *
+ * Same contract as tcode-sync's generated axes: timing comes from the
+ * main script, one value per action, not a free-running clock. `link`
+ * reuses the stroke position; `random` / `pattern` sample the existing
+ * noise / waveform at that keyframe's timestamp. Per-axis `axisPhase`
+ * keeps R0/R1/R2 from lockstep when they share a noise field.
+ *
+ * @param {Array<{at:number, pos?:number}>} strokeActions
+ * @param {{mode:string, depth?:number, half?:string, speed?:number, pattern?:string}} cfg
+ * @param {{tcode?: string, noise?: (t:number)=>number}} [opts]
+ *        Pass `noise` to inject a seeded field (tests / reproducible writes).
+ *        Do not use Math.random — white noise slams the device.
+ * @returns {Array<{at:number, pos:number}>} values clamped to 0-100
+ */
+export function generateAxisActions(strokeActions, cfg, { tcode = '', noise = null } = {}) {
+  const norm = normaliseMotionConfig(cfg);
+  if (!norm || !Array.isArray(strokeActions) || strokeActions.length === 0) return [];
+  const noiseFn = noise || createNoise1D();
+  const phase = axisPhase(tcode);
+  const out = [];
+  for (const a of strokeActions) {
+    if (!a || !Number.isFinite(a.at)) continue;
+    const tSec = (a.at / 1000) * norm.speed;
+    let raw;
+    if (norm.mode === 'link') {
+      raw = Number.isFinite(a.pos) ? a.pos : 50;
+    } else if (norm.mode === 'pattern') {
+      raw = patternValue(norm.pattern, tSec + phase);
+    } else {
+      raw = noiseToPercent(fbm(noiseFn, tSec + phase));
+    }
+    out.push({ at: a.at, pos: shapeGeneratedValue(raw, norm) });
+  }
+  return out;
+}

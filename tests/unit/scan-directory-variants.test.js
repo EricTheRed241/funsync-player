@@ -53,8 +53,11 @@ function classify(funscriptFilenames, dir = '/lib', videoFilenames = []) {
     let videoBase, variantLabel;
     let isAmbiguousDotVariant = false;
     if (isAxis) {
-      videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
+      let stem = nameNoExt.slice(0, dotIdx);
+      if (stem.toLowerCase().endsWith('.generated')) stem = stem.slice(0, -'.generated'.length);
+      videoBase = normalizeName(stem);
       variantLabel = null;
+
     } else if (parenMatch) {
       const fullBase = normalizeName(nameNoExt);
       if (videoBaseLocal.has(dir + '\0' + fullBase) || videoBaseGlobal.has(fullBase)) {
@@ -146,6 +149,13 @@ describe('Funscript variant classifier — dot-disambiguation', () => {
 
   it('foo.twist.funscript is always treated as axis (sacred)', () => {
     const result = classify(['foo.twist.funscript']);
+    expect(result[0].isAxis).toBe(true);
+    expect(result[0].axisSuffix).toBe('twist');
+    expect(result[0].videoBase).toBe('foo');
+  });
+
+  it('foo.generated.twist.funscript pairs with foo, not foo.generated', () => {
+    const result = classify(['foo.generated.twist.funscript']);
     expect(result[0].isAxis).toBe(true);
     expect(result[0].axisSuffix).toBe('twist');
     expect(result[0].videoBase).toBe('foo');

@@ -1221,7 +1221,9 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
     let videoBase, variantLabel;
     let isAmbiguousDotVariant = false;
     if (isAxis) {
-      videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
+      let stem = nameNoExt.slice(0, dotIdx);
+      if (stem.toLowerCase().endsWith('.generated')) stem = stem.slice(0, -'.generated'.length);
+      videoBase = normalizeName(stem);
       variantLabel = null; // axis, not a variant
     } else if (parenMatch) {
       const fullBase = normalizeName(nameNoExt);

@@ -20,6 +20,7 @@ import {
   shapeGeneratedValue,
   axisPhase,
   normaliseMotionConfig,
+  generateAxisActions,
 } from '../../renderer/js/motion-source.js';
 
 describe('createNoise1D', () => {
@@ -294,5 +295,52 @@ describe('sampleMotion', () => {
     const vals = sampleMotion({ mode: 'link' }, { samples: 50 });
     expect(vals).toHaveLength(50);
     expect(Math.max(...vals) - Math.min(...vals)).toBeGreaterThan(50);
+  });
+});
+
+describe('generateAxisActions', () => {
+  const stroke = [
+    { at: 0, pos: 0 },
+    { at: 500, pos: 100 },
+    { at: 1000, pos: 0 },
+  ];
+
+  it('emits one value per stroke keyframe, same timestamps', () => {
+    const out = generateAxisActions(stroke, { mode: 'link' }, { tcode: 'R0' });
+    expect(out.map((a) => a.at)).toEqual(stroke.map((a) => a.at));
+  });
+
+  it('link reuses stroke positions, clamped to 0-100', () => {
+    const out = generateAxisActions(
+      [{ at: 0, pos: -20 }, { at: 100, pos: 150 }],
+      { mode: 'link' },
+      { tcode: 'R0' },
+    );
+    expect(out.map((a) => a.pos)).toEqual([0, 100]);
+  });
+
+  it('does not mutate the stroke array', () => {
+    const copy = stroke.map((a) => ({ ...a }));
+    generateAxisActions(stroke, { mode: 'random' }, { tcode: 'R1', noise: createNoise1D(7) });
+    expect(stroke).toEqual(copy);
+  });
+
+  it('random is deterministic for an injected noise function', () => {
+    const a = generateAxisActions(stroke, { mode: 'random' }, { tcode: 'R1', noise: createNoise1D(42) });
+    const b = generateAxisActions(stroke, { mode: 'random' }, { tcode: 'R1', noise: createNoise1D(42) });
+    expect(a).toEqual(b);
+    expect(a.some((p, i) => p.pos !== stroke[i].pos)).toBe(true);
+  });
+
+  it('phase-separates axes sharing one noise field', () => {
+    const noise = createNoise1D(9);
+    const r1 = generateAxisActions(stroke, { mode: 'random' }, { tcode: 'R1', noise });
+    const r2 = generateAxisActions(stroke, { mode: 'random' }, { tcode: 'R2', noise });
+    expect(r1.map((a) => a.pos)).not.toEqual(r2.map((a) => a.pos));
+  });
+
+  it('rejects scripted/unknown config', () => {
+    expect(generateAxisActions(stroke, { mode: 'script' })).toEqual([]);
+    expect(generateAxisActions(stroke, null)).toEqual([]);
   });
 });
