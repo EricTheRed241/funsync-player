@@ -1276,6 +1276,11 @@
     "downloadFailed": "Download fehlgeschlagen",
     "savedToast": "Skript gespeichert: {name}",
     "sessionExpired": "EroScripts-Sitzung abgelaufen — bitte erneut über das EroScripts-Panel anmelden",
+    "conflictTitle": "Skript existiert bereits",
+    "conflictMessage": "{name} liegt bereits in diesem Ordner. Ersetzen oder beide behalten und das neue als Variante speichern?",
+    "conflictReplace": "Ersetzen",
+    "conflictKeepBoth": "Beide behalten",
+    "zipUnsupported": "{name} ist ein ZIP-Archiv — FunSync kann ZIP-Downloads noch nicht öffnen",
     "inline": {
       "title": "Skript auf EroScripts finden",
       "axesLine": "Haupt + {count} Achsen ({list})",

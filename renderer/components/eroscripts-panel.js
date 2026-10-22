@@ -6,6 +6,10 @@ import { t } from '../js/i18n.js';
 import { recordScriptTags } from '../js/script-tags.js';
 import { createResultThumb } from './result-thumb.js';
 import { joinPath, dirOfPath } from '../js/path-utils.js';
+import { parseAxisSuffix } from '../js/multi-axis.js';
+import { planTargets } from '../js/eroscripts-save.js';
+import { targetFileName } from './eroscripts-inline-search.js';
+import { askSaveConflict } from './eroscripts-conflict.js';
 
 export class EroScriptsPanel {
   constructor({ settings }) {
@@ -371,38 +375,55 @@ export class EroScriptsPanel {
   }
 
   async _downloadAttachment(attachment, btn, topic = null) {
+    // Nothing extracts archives yet. Saving one under the video's script
+    // name used to hand the player a zip pretending to be a funscript.
+    if (/\.zip$/i.test(attachment.name)) {
+      showToast(t('eroscripts.zipUnsupported', { name: attachment.name }), 'warn', 6000);
+      return;
+    }
+
+    const resetBtn = (label = t('eroscripts.getScript')) => {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    };
     if (btn) { btn.disabled = true; btn.textContent = t('eroscripts.savingScript'); }
 
     const sources = (this._settings.get('library.sources') || []).filter(s => s.enabled !== false);
     const playerContainer = document.getElementById('player-container');
     const videoPath = playerContainer?.dataset?.videoPath;
+    // An axis file keeps its suffix, so `Scene.roll.funscript` lands as the
+    // video's roll companion instead of replacing its main script.
+    const axis = parseAxisSuffix(attachment.name);
 
-    let savePath;
-    let savedName = attachment.name;
+    let intended;
     if (videoPath && (videoPath.includes('/') || videoPath.includes('\\'))) {
-      // Auto-rename to match video filename for auto-pairing
-      const videoDir = videoPath.replace(/[\\/][^\\/]+$/, '');
-      const videoBase = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
-      savedName = `${videoBase}.funscript`;
-      savePath = joinPath(videoDir, savedName);
+      // Renamed after the video so it auto-pairs.
+      intended = joinPath(dirOfPath(videoPath), targetFileName(videoPath, axis?.suffix || null));
     } else if (sources.length === 1) {
       // Exactly one source → safe to save there without asking
-      savePath = joinPath(sources[0].path, attachment.name);
+      intended = joinPath(sources[0].path, attachment.name);
+    }
+
+    let savePath;
+    let overwrite = false;
+    if (intended) {
+      const plan = await planTargets([intended], askSaveConflict);
+      if (!plan) { resetBtn(); return; }
+      savePath = plan.paths[0];
+      overwrite = plan.overwrite;
     } else {
       // No open video, OR multi-source library — ask the user where to save rather
       // than arbitrarily picking sources[0]. Dialog pre-fills the attachment name.
       const result = await window.funsync.saveFunscript('', attachment.name);
-      if (!result) { if (btn) { btn.disabled = false; btn.textContent = t('eroscripts.getScript'); } return; }
+      if (!result) { resetBtn(); return; }
       savePath = result;
+      // The save dialog already confirmed any replace, and created the file.
+      overwrite = true;
     }
+    const savedName = savePath.split(/[\\/]/).pop();
 
-    // No separator rewrite: this used to force every '/' to '\\', which on
-    // Linux turned an absolute path into one backslash-laden filename.
-    // `joinPath` above already used the right separator for the platform.
+    const { success, error } = await window.funsync.eroscriptsDownload(attachment.url, savePath, { overwrite });
 
-    const { success, error } = await window.funsync.eroscriptsDownload(attachment.url, savePath);
-
-    if (btn) { btn.disabled = false; btn.textContent = success ? t('eroscripts.scriptSaved') : t('eroscripts.getScript'); }
+    resetBtn(success ? t('eroscripts.scriptSaved') : t('eroscripts.getScript'));
 
     if (success) {
       // Record the post's tags against the video this script just became
@@ -411,7 +432,7 @@ export class EroScriptsPanel {
       // nothing, so there is no key to file the tags under.
       if (videoPath && topic) recordScriptTags(this._settings, videoPath, topic);
       showToast(t('eroscripts.savedToast', { name: savedName }), 'info');
-      if (this.onScriptDownloaded) this.onScriptDownloaded(savePath, savedName);
+      if (this.onScriptDownloaded) this.onScriptDownloaded(savePath, savedName, { axis: axis?.suffix || null });
     } else {
       showToast(error || t('eroscripts.downloadFailed'), 'error');
     }

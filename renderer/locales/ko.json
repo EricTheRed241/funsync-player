@@ -1276,6 +1276,11 @@
     "downloadFailed": "다운로드 실패",
     "savedToast": "스크립트 저장됨: {name}",
     "sessionExpired": "EroScripts 세션 만료됨 — EroScripts 패널을 통해 다시 로그인하세요",
+    "conflictTitle": "스크립트가 이미 있습니다",
+    "conflictMessage": "{name}이(가) 이미 이 폴더에 있습니다. 교체할까요, 아니면 둘 다 유지하고 새 파일을 변형으로 저장할까요?",
+    "conflictReplace": "교체",
+    "conflictKeepBoth": "둘 다 유지",
+    "zipUnsupported": "{name}은(는) ZIP 압축 파일입니다 — FunSync는 아직 ZIP 다운로드를 열 수 없습니다",
     "inline": {
       "title": "EroScripts에서 스크립트 찾기",
       "axesLine": "메인 + {count}개 축 ({list})",

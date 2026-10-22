@@ -38,7 +38,7 @@ A local desktop video player with device synchronization for funscript playback.
 - Search and download community funscripts from within the app
 - Login with 2FA support (authenticator app), persistent session
 - Thumbnails and metadata in search results
-- One-click download — scripts auto-renamed, auto-associated, and paired with the current video
+- One-click download — scripts auto-renamed, auto-associated, and paired with the current video; axis files keep their axis suffix, and an existing script is never replaced without asking (Replace / Keep both as a variant / Cancel)
 - Auto-match on video load — if no script is found locally, silently searches EroScripts and notifies
 
 ### Funscript Support
