@@ -110,46 +110,6 @@ describe('EroScripts API data handling', () => {
     });
   });
 
-  describe('Attachment parsing', () => {
-    it('extracts funscript attachments from HTML', () => {
-      const html = `
-        <p>Here is the script:</p>
-        <a class="attachment" href="/uploads/default/original/script.funscript">script.funscript</a>
-        <a class="attachment" href="/uploads/default/original/archive.zip">archive.zip</a>
-        <a href="/uploads/default/original/readme.txt">readme.txt</a>
-      `;
-
-      const attachments = [];
-      const regex = /<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-      let match;
-      while ((match = regex.exec(html)) !== null) {
-        const name = match[2].trim();
-        if (name.endsWith('.funscript') || name.endsWith('.zip')) {
-          attachments.push({ name, url: match[1] });
-        }
-      }
-
-      expect(attachments).toHaveLength(2);
-      expect(attachments[0].name).toBe('script.funscript');
-      expect(attachments[1].name).toBe('archive.zip');
-    });
-
-    it('skips non-funscript/zip attachments', () => {
-      const html = `<a class="attachment" href="/img.jpg">img.jpg</a>`;
-      const regex = /<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-      const match = regex.exec(html);
-      const name = match ? match[2].trim() : '';
-      const isFunscript = name.endsWith('.funscript') || name.endsWith('.zip');
-      expect(isFunscript).toBe(false);
-    });
-
-    it('handles no attachments gracefully', () => {
-      const html = '<p>No attachments here</p>';
-      const regex = /<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-      expect(regex.exec(html)).toBeNull();
-    });
-  });
-
   describe('Session management', () => {
     it('cookie merge keeps latest values', () => {
       const existing = '_t=abc123; _forum_session=old';

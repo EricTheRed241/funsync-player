@@ -46,6 +46,8 @@ const CATEGORIES = {
   category_list: { categories: [{ id: 5, slug: 'scripts', subcategory_list: [{ id: 14, slug: 'free-scripts' }, { id: 15, slug: 'paid-scripts' }] }] },
 };
 
+const FORUM = 'https://discuss.eroscripts.com';
+
 describe('parsePostLinks', () => {
   it('finds attachments, pixeldrain links and named external hosts', () => {
     const html = [
@@ -57,9 +59,63 @@ describe('parsePostLinks', () => {
       '<a href="https://www.patreon.com/c/someone">patreon</a>',
     ].join('');
     const r = parsePostLinks(html);
-    expect(r.attachments).toEqual([{ name: 'Luna & Sue.funscript', href: '/uploads/short-url/a.funscript' }]);
+    expect(r.attachments).toEqual([{ name: 'Luna & Sue.funscript', url: `${FORUM}/uploads/short-url/a.funscript` }]);
     expect(r.pixeldrain).toEqual([{ kind: 'l', id: 'AbC123' }, { kind: 'u', id: 'Zz9' }]);
     expect(r.external.map((e) => e.host)).toEqual(['pixeldrain', 'pixeldrain', 'MEGA']);
+  });
+
+  // Topic 311478 (multi-axis Fap Hero - Fantasy Play) lists its five axis
+  // files as plain links, without class="attachment".
+  it('finds plain upload links without class="attachment"', () => {
+    const axes = { pitch: '4BMs0Gd7BivjFAhi4Ji3mfctSNy', roll: 'eXg3NUeBUjJm6nRHLCf43MCpZsI', surge: 'btZXaiWVKdaWk6WshWj9MvcoIoR', sway: '1N7h7Wu2rRqjQl7pIrwdcSrVJxK', twist: 'pa3WxdeRSzmtBLUli6tununqOXT' };
+    const html = '<p><a href="https://discuss.eroscripts.com/t/fap-hero-fantasy-play-both-versions-4k-60fps-1080p-links/125133">Original Script by quantoz</a><br>\n'
+      + Object.entries(axes).map(([axis, id]) => `<a href="/uploads/short-url/${id}.funscript">Fap Hero - Fantasy Play - HARD MODE_ADV.${axis}.funscript</a>`).join('<br>\n')
+      + '</p>';
+    expect(parsePostLinks(html).attachments).toEqual(Object.entries(axes).map(([axis, id]) => ({
+      name: `Fap Hero - Fantasy Play - HARD MODE_ADV.${axis}.funscript`,
+      url: `${FORUM}/uploads/short-url/${id}.funscript`,
+    })));
+  });
+
+  it('reads href wherever it sits among the attributes, and keeps class="attachment" links', () => {
+    const html = [
+      '<a class="attachment" href="/uploads/short-url/a.funscript">A.funscript</a>',
+      '<a href="/uploads/short-url/b.funscript" class="attachment">B.funscript</a>',
+      '<a target="_blank" rel="noopener" href=\'https://discuss.eroscripts.com/uploads/short-url/c.zip\'>C pack.zip</a>',
+      '<a href="/uploads/short-url/d.funscript"><span>download</span></a>',
+    ].join(' ');
+    expect(parsePostLinks(html).attachments).toEqual([
+      { name: 'A.funscript', url: `${FORUM}/uploads/short-url/a.funscript` },
+      { name: 'B.funscript', url: `${FORUM}/uploads/short-url/b.funscript` },
+      { name: 'C pack.zip', url: `${FORUM}/uploads/short-url/c.zip` },
+      { name: 'd.funscript', url: `${FORUM}/uploads/short-url/d.funscript` },
+    ]);
+  });
+
+  it('ignores images, image downloads and links that are not forum uploads', () => {
+    const html = [
+      '<a class="lightbox" data-download-href="/uploads/short-url/pTknwAaVpxrMatszfnF6jZSYeMQ.png?dl=1" '
+        + 'href="https://eroscripts-discourse.eroscripts.com/original/4X/b/5/7/b577779a56cb1a37d362b21ee7b58e66997fb0ac.png" title="image">'
+        + '<div class="lightbox-wrapper"><img src="x.png" alt="image"><span class="filename">image.png</span></div></a>',
+      '<a href="/uploads/short-url/pTknwAaVpxrMatszfnF6jZSYeMQ.png?dl=1">Scene.funscript</a>',
+      '<a href="https://discuss.eroscripts.com/t/scene/125133">Scene.funscript</a>',
+      '<a href="https://evil.example/uploads/short-url/x.funscript">Scene.funscript</a>',
+      '<a class="mention" href="/u/someone">@someone</a>',
+    ].join('');
+    expect(parsePostLinks(html).attachments).toEqual([]);
+  });
+
+  it('collapses the same file linked twice, including via the upload CDN', () => {
+    const cdn = 'https://eroscripts-discourse.eroscripts.com/original/4X/b/5/7/b577779a56cb1a37d362b21ee7b58e66997fb0ac.funscript';
+    const html = [
+      '<a href="/uploads/short-url/pTknwAaVpxrMatszfnF6jZSYeMQ.funscript">Scene.funscript</a>',
+      '<a class="attachment" href="/uploads/short-url/pTknwAaVpxrMatszfnF6jZSYeMQ.funscript?dl=1">Scene.funscript</a>',
+      `<a href="${cdn}">Scene (mirror).funscript</a>`,
+      '<a href="upload://pTknwAaVpxrMatszfnF6jZSYeMQ.funscript">Scene.funscript</a>',
+    ].join('');
+    expect(parsePostLinks(html).attachments).toEqual([
+      { name: 'Scene.funscript', url: `${FORUM}/uploads/short-url/pTknwAaVpxrMatszfnF6jZSYeMQ.funscript` },
+    ]);
   });
 });
 
@@ -71,13 +127,13 @@ describe('getTopicAttachments', () => {
         post_stream: {
           stream: [1, 2, 3],
           posts: [
-            { id: 1, post_number: 1, username: 'author', cooked: att('/u/main.funscript', 'Scene.funscript') },
-            { id: 2, post_number: 2, username: 'fan', cooked: att('/u/fan.funscript', 'Scene SR6.funscript') },
+            { id: 1, post_number: 1, username: 'author', cooked: att('/uploads/short-url/main.funscript', 'Scene.funscript') },
+            { id: 2, post_number: 2, username: 'fan', cooked: att('/uploads/short-url/fan.funscript', 'Scene SR6.funscript') },
           ],
         },
       },
       '/t/7/posts.json?post_ids[]=3': {
-        post_stream: { posts: [{ id: 3, post_number: 3, username: 'author', cooked: att('/u/v2.funscript', 'Scene v2.funscript') }] },
+        post_stream: { posts: [{ id: 3, post_number: 3, username: 'author', cooked: att('/uploads/short-url/v2.funscript', 'Scene v2.funscript') }] },
       },
       '/categories.json': CATEGORIES,
     });
@@ -87,7 +143,7 @@ describe('getTopicAttachments', () => {
       ['Scene v2.funscript', 'author', 3, true],
       ['Scene SR6.funscript', 'fan', 2, false],
     ]);
-    expect(r.attachments[0].url).toBe('https://discuss.eroscripts.com/u/main.funscript');
+    expect(r.attachments[0].url).toBe('https://discuss.eroscripts.com/uploads/short-url/main.funscript');
     expect(r.paid).toBe(false);
     expect(calls.some((c) => c.url.includes('/t/7/posts.json'))).toBe(true);
   });
