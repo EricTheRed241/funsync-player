@@ -1,4 +1,4 @@
-"""Untagged VR masters must be in the headset's "VR Videos" section from the
+"""Untagged VR masters must be in the headset's "VR" section from the
 first library load, and stay there across backend restarts.
 
 INCIDENT: Cuddle Mocap files (`CM 045 - Date Night Sex With Joni_6k.mp4`,
@@ -113,13 +113,13 @@ def _video(path, **extra):
 
 async def _heresphere_vr(client):
     lib = (await client.get("/heresphere")).json()["library"]
-    vr = next((g["list"] for g in lib if "VR Videos" in g["name"]), [])
+    vr = next((g["list"] for g in lib if g["name"] == "VR"), [])
     return {url.rsplit("/", 1)[1] for url in vr}
 
 
 async def _deovr_vr(client):
     scenes = (await client.get("/deovr")).json()["scenes"]
-    vr = next((g["list"] for g in scenes if g["name"] == "VR Videos"), [])
+    vr = next((g["list"] for g in scenes if g["name"] == "VR"), [])
     return {item["video_url"].rsplit("/", 1)[1] for item in vr}
 
 

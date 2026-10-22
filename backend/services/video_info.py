@@ -1,7 +1,7 @@
 """Resolution/codec cache behind VR auto-detect and the VR scene endpoints.
 
 An untagged VR master (no 180/SBS/studio token in its filename) is only put
-in HereSphere's / DeoVR's "VR Videos" section when its dimensions are known
+in HereSphere's / DeoVR's "VR" section when its dimensions are known
 (`routes.vr_api._dims_suggest_vr`). The library listings never probe, so
 the dimensions have to be known before a headset asks for the library:
 

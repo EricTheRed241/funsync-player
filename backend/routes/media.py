@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from services.funscript import has_handmade_axes
+from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
 
 router = APIRouter()
 log = logging.getLogger("funsync.media")
@@ -87,8 +87,10 @@ def register_videos(videos: list[dict]):
     duration=0. The web remote (and VR content server) would otherwise
     show "0" runtime on grouping rows and no duration badge on cards.
 
-    Also marks each entry's `handmadeAxes` (see `_annotate_handmade_axes`)
-    before the new registry goes live.
+    Also marks each entry's hand-made companion axes before the new
+    registry goes live (`_annotate_handmade_companions`) and starts the
+    background scan for axes embedded in the scripts
+    (`_queue_embedded_axes_scan`).
     """
     # Build off to the side and swap in one rebind.
     #
@@ -107,28 +109,30 @@ def register_videos(videos: list[dict]):
     for v in videos:
         vid_id = _path_to_id(v.get("path", ""))
         new_registry[vid_id] = v
-    _annotate_handmade_axes(new_registry.values())
+    _annotate_handmade_companions(new_registry.values())
     _video_registry = new_registry
     _speed_probed.clear()  # new library scan → re-compute speed stats
 
     _queue_duration_probes()
     _queue_speed_probes()
+    _queue_embedded_axes_scan(new_registry)
 
 
-def _annotate_handmade_axes(videos):
-    """Set `handmadeAxes` on every entry: True when its main script has a
-    companion axis file a scripter made (not `*.generated.<axis>.funscript`).
+def _annotate_handmade_companions(videos):
+    """Set `handmadeCompanions` on every entry: True when its main script
+    has a companion axis file a scripter made (not
+    `*.generated.<axis>.funscript`).
 
-    Feeds the headsets' "Hand-made Multi-Axis" section and tag, whose
-    listings must not touch the filesystem — so it is decided here, with
-    one directory listing per script folder. An unreadable folder counts
-    as no companions.
+    Feeds the headsets' "Hand-made" section and tag, whose listings must
+    not touch the filesystem — so it is decided here, with one directory
+    listing per script folder. An unreadable folder counts as no
+    companions.
     """
     listings: dict[str, list[str]] = {}
     for v in videos:
         script = v.get("funscriptPath")
         if not script:
-            v["handmadeAxes"] = False
+            v["handmadeCompanions"] = False
             continue
         folder = os.path.dirname(script)
         names = listings.get(folder)
@@ -138,7 +142,62 @@ def _annotate_handmade_axes(videos):
             except OSError:
                 names = []
             listings[folder] = names
-        v["handmadeAxes"] = has_handmade_axes(script, names)
+        v["handmadeCompanions"] = has_handmade_companions(script, names)
+
+
+# --- Background embedded multi-axis scan ---------------------------------
+# Some scripts carry their extra axes inside the main .funscript instead of
+# companion files (`services.funscript.embedded_axes`). Finding them means
+# reading every main script, which on a big library is far too slow to do
+# before the new registry goes live, so one background thread does it
+# right after registration and stores `embeddedAxes` (sorted suffixes) on
+# each entry. Most scripts are ruled out by a byte search without parsing.
+
+def _queue_embedded_axes_scan(registry: dict):
+    """Start the scan for `registry`. Entries without a script get `[]`
+    straight away; the rest get theirs as the thread reaches them."""
+    pending = []
+    for v in registry.values():
+        script = v.get("funscriptPath")
+        if script:
+            pending.append((v, script))
+        else:
+            v["embeddedAxes"] = []
+    if pending:
+        threading.Thread(
+            target=_embedded_axes_worker, args=(registry, pending),
+            name="embedded-axes", daemon=True,
+        ).start()
+
+
+def _embedded_axes_worker(registry: dict, pending: list):
+    """Sequential, and yields the GIL every 25 scripts like
+    `_speed_probe_worker` so `/health` keeps answering. Stops early once a
+    newer registration has replaced `registry`."""
+    import time as _time
+    for i, (entry, script) in enumerate(pending):
+        if _video_registry is not registry:
+            return
+        if i % 25 == 24:
+            _time.sleep(0.001)
+        entry["embeddedAxes"] = _read_embedded_axes(script)
+
+
+def _read_embedded_axes(script: str) -> list[str]:
+    """Axis suffixes embedded in the script at `script`; `[]` when it has
+    none or can't be read or parsed."""
+    try:
+        with open(script, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return []
+    if not may_have_embedded_axes(raw):
+        return []
+    try:
+        parsed = _json.loads(raw.decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
+        return []
+    return embedded_axes(parsed)
 
 
 # --- Background duration probe ------------------------------------------
@@ -712,7 +771,7 @@ def _apply_registration(data: dict):
         _queue_thumb_warmup()
 
     # Same for resolutions: an untagged VR master only lands in the headset's
-    # "VR Videos" section once its dimensions are known, and the listings
+    # "VR" section once its dimensions are known, and the listings
     # never probe. Deferred import: vr_api imports this module.
     if "videos" in data:
         from routes.vr_api import queue_dims_warmup
