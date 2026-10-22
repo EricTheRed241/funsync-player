@@ -1,6 +1,7 @@
 """Funscript parsing, CSV conversion, and multi-axis companion naming."""
 
 import json
+import math
 from typing import Any
 
 
@@ -104,7 +105,7 @@ def _split_axis_name(filename: str):
     return base, suffix.lower(), generated
 
 
-def has_handmade_axes(script_path: str, filenames) -> bool:
+def has_handmade_companions(script_path: str, filenames) -> bool:
     """True when `filenames` (one folder's listing) holds at least one
     companion axis file of the main script `script_path` that is NOT a
     `*.generated.<axis>.funscript`. macOS `._` AppleDouble files are ignored.
@@ -123,3 +124,144 @@ def has_handmade_axes(script_path: str, filenames) -> bool:
         if axis and not generated and base.lower() == main_base:
             return True
     return False
+
+
+# --- Embedded multi-axis data ---------------------------------------------
+# Mirrors renderer/js/embedded-multi-axis.js (`extractEmbeddedAxes`): extra
+# axes stored INSIDE the main .funscript rather than in companion files.
+#   A  `additional_axes`: [{axis: <name>, actions}]
+#   B  `raw`: {<name>: {actions}}
+#   E  `axes`: [{id: <TCode>, actions}]
+#   C  top-level sibling keys: <name>: [actions] | {actions}
+#   D  inline TCode keys on the main actions: {at, pos, R0: 80, ...}
+# plus one shape the renderer doesn't read yet:
+#   F  `channels`: {<name or TCode>: [actions] | {actions}}
+# Only the axis set matters here (Hand-made section and tag), so precedence
+# between formats is irrelevant. An axis counts only with >= 2 actions.
+
+# TCode id → axis suffix; L0 is the main stroke, never an extra axis.
+_EMBEDDED_TCODE_AXES = {
+    'L0': None, 'L1': 'surge', 'L2': 'sway',
+    'R0': 'twist', 'R1': 'roll', 'R2': 'pitch',
+    'V0': 'vib', 'V1': 'lube', 'V2': 'suction', 'A0': 'valve',
+}
+# Axis name (case-insensitive) → suffix.
+_EMBEDDED_NAME_AXES = {
+    'surge': 'surge', 'sway': 'sway',
+    'twist': 'twist', 'rotate': 'twist',
+    'roll': 'roll', 'pitch': 'pitch',
+    'vib': 'vib', 'vibrate': 'vib', 'vibration': 'vib',
+    'lube': 'lube', 'pump': 'pump',
+    'suction': 'suction', 'suck': 'suction',
+    'valve': 'valve',
+}
+# Top-level keys format C never treats as axes.
+_EMBEDDED_SKIP_KEYS = frozenset({
+    'actions', 'version', 'inverted', 'range', 'metadata', 'raw',
+    'additional_axes', 'tcode', 'axes', 'channels',
+    'cachedAt', '_sourcePath', 'csvHash',
+})
+_MIN_AXIS_ACTIONS = 2
+
+# Lowercased JSON keys whose presence makes embedded axes possible. A
+# script with none of them is skipped without parsing it.
+_EMBEDDED_MARKERS = tuple(
+    f'"{key}"'.encode()
+    for key in (
+        'additional_axes', 'raw', 'axes', 'channels',
+        *_EMBEDDED_NAME_AXES,
+        *(tcode.lower() for tcode, axis in _EMBEDDED_TCODE_AXES.items() if axis),
+    )
+)
+
+
+def _is_time(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _axis_actions(value):
+    """The actions list when `value` is `[actions]` or `{actions: [...]}`
+    holding at least `_MIN_AXIS_ACTIONS` actions that all have a numeric
+    `at` (the renderer's `isValidActionArray`), else None."""
+    if isinstance(value, dict):
+        value = value.get('actions')
+    if (
+        isinstance(value, list)
+        and len(value) >= _MIN_AXIS_ACTIONS
+        and all(isinstance(a, dict) and _is_time(a.get('at')) for a in value)
+    ):
+        return value
+    return None
+
+
+def _axis_from_name(name):
+    return _EMBEDDED_NAME_AXES.get(name.strip().lower()) if isinstance(name, str) else None
+
+
+def _axis_from_tcode(tcode):
+    return _EMBEDDED_TCODE_AXES.get(tcode.strip().upper()) if isinstance(tcode, str) else None
+
+
+def may_have_embedded_axes(raw: bytes) -> bool:
+    """Cheap pre-check on a script's raw bytes: False means
+    `embedded_axes` would find nothing, so the parse can be skipped."""
+    lowered = raw.lower()
+    return any(marker in lowered for marker in _EMBEDDED_MARKERS)
+
+
+def _list_field(parsed: dict, key: str) -> list:
+    value = parsed.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _dict_field(parsed: dict, key: str) -> dict:
+    value = parsed.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def embedded_axes(parsed) -> list[str]:
+    """Sorted axis suffixes with non-empty (>= 2 actions) data embedded in
+    a parsed funscript."""
+    if not isinstance(parsed, dict):
+        return []
+    found = set()
+
+    # A: additional_axes [{axis, actions}]
+    for entry in _list_field(parsed, 'additional_axes'):
+        if isinstance(entry, dict) and _axis_actions(entry.get('actions')):
+            found.add(_axis_from_name(entry.get('axis')))
+
+    # B: raw {name: {actions}}
+    for key, value in _dict_field(parsed, 'raw').items():
+        if isinstance(value, dict) and _axis_actions(value):
+            found.add(_axis_from_name(key))
+
+    # F: channels {name or TCode: [actions] | {actions}}
+    for key, value in _dict_field(parsed, 'channels').items():
+        if _axis_actions(value):
+            found.add(_axis_from_name(key) or _axis_from_tcode(key))
+
+    # E: axes [{id: TCode, actions}]
+    for entry in _list_field(parsed, 'axes'):
+        if isinstance(entry, dict) and _axis_actions(entry.get('actions')):
+            found.add(_axis_from_tcode(entry.get('id')))
+
+    # C: sibling keys {name: [actions] | {actions}}
+    for key, value in parsed.items():
+        axis = None if key in _EMBEDDED_SKIP_KEYS else _axis_from_name(key)
+        if axis and _axis_actions(value):
+            found.add(axis)
+
+    # D: inline TCode values on the main actions
+    inline_counts: dict[str, int] = {}
+    for action in _list_field(parsed, 'actions'):
+        if not isinstance(action, dict) or not _is_time(action.get('at')):
+            continue
+        for key, value in action.items():
+            axis = _EMBEDDED_TCODE_AXES.get(key)
+            if axis and isinstance(value, (int, float)) and not isinstance(value, bool):
+                inline_counts[axis] = inline_counts.get(axis, 0) + 1
+    found.update(axis for axis, n in inline_counts.items() if n >= _MIN_AXIS_ACTIONS)
+
+    found.discard(None)
+    return sorted(found)

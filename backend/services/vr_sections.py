@@ -8,9 +8,9 @@ agree.
 Section names are plain text: HereSphere renders emoji as empty boxes.
 
 Everything here works on fields already on the registry entry
-(`avgSpeed`, `duration`, `dateAdded`, `handmadeAxes`), so a listing never
-touches the filesystem. A video missing a field is simply left out of the
-sections that depend on it.
+(`avgSpeed`, `duration`, `dateAdded`, `handmadeCompanions`, `embeddedAxes`), so
+a listing never touches the filesystem. A video missing a field is simply
+left out of the sections that depend on it.
 """
 
 import time
@@ -27,44 +27,29 @@ LONG_ABOVE_SECONDS = 15 * 60   # 5 min <= duration <= 15 min → Medium, > 15 mi
 RECENT_DAYS = 14
 _RECENT_WINDOW_MS = RECENT_DAYS * 24 * 60 * 60 * 1000
 
+# Bucket labels double as the section names and the `Speed:` / `Length:`
+# tag values, so the headset's sections and tag filters read the same.
 SPEED_SLOW, SPEED_MEDIUM, SPEED_FAST = 'Slow', 'Medium', 'Fast'
-LENGTH_SHORT, LENGTH_MEDIUM, LENGTH_LONG = 'Short', 'Medium', 'Long'
+LENGTH_SHORT, LENGTH_MEDIUM, LENGTH_LONG = 'Short (<5m)', 'Medium (5-15m)', 'Long (15m+)'
 
-SECTION_VR = 'VR Videos'
-SECTION_FLAT = 'Flat Videos'
-SECTION_SLOW = 'Slow'
-SECTION_MEDIUM_SPEED = 'Medium Speed'
-SECTION_FAST = 'Fast'
-SECTION_SHORT = 'Short'
-SECTION_MEDIUM_LENGTH = 'Medium Length'
-SECTION_LONG = 'Long'
-SECTION_HANDMADE_AXES = 'Hand-made Multi-Axis'
+SECTION_VR = 'VR'
+SECTION_FLAT = 'Flat'
+SECTION_HANDMADE_AXES = 'Hand-made'
 SECTION_RECENT = 'Recently Added'
 
 # Display order; empty sections are dropped.
 SECTION_ORDER = (
     SECTION_VR,
     SECTION_FLAT,
-    SECTION_SLOW,
-    SECTION_MEDIUM_SPEED,
-    SECTION_FAST,
-    SECTION_SHORT,
-    SECTION_MEDIUM_LENGTH,
-    SECTION_LONG,
+    SPEED_SLOW,
+    SPEED_MEDIUM,
+    SPEED_FAST,
+    LENGTH_SHORT,
+    LENGTH_MEDIUM,
+    LENGTH_LONG,
     SECTION_HANDMADE_AXES,
     SECTION_RECENT,
 )
-
-_SPEED_SECTION = {
-    SPEED_SLOW: SECTION_SLOW,
-    SPEED_MEDIUM: SECTION_MEDIUM_SPEED,
-    SPEED_FAST: SECTION_FAST,
-}
-_LENGTH_SECTION = {
-    LENGTH_SHORT: SECTION_SHORT,
-    LENGTH_MEDIUM: SECTION_MEDIUM_LENGTH,
-    LENGTH_LONG: SECTION_LONG,
-}
 
 TAG_HANDMADE_AXES = 'Feature:Hand-made multi-axis'
 
@@ -78,7 +63,8 @@ def _positive_number(value):
 
 
 def speed_bucket(video):
-    """'Slow' / 'Medium' / 'Fast' from `avgSpeed`, or None without stats."""
+    """SPEED_SLOW / SPEED_MEDIUM / SPEED_FAST from `avgSpeed`, or None
+    without stats."""
     avg = _positive_number((video or {}).get('avgSpeed'))
     if avg is None:
         return None
@@ -90,7 +76,8 @@ def speed_bucket(video):
 
 
 def length_bucket(video):
-    """'Short' / 'Medium' / 'Long' from `duration`, or None when unknown."""
+    """LENGTH_SHORT / LENGTH_MEDIUM / LENGTH_LONG from `duration`, or None
+    when unknown."""
     duration = _positive_number((video or {}).get('duration'))
     if duration is None:
         return None
@@ -107,16 +94,25 @@ def is_recent(video, now_ms):
     return added is not None and now_ms - added <= _RECENT_WINDOW_MS
 
 
+def is_handmade_multi_axis(video):
+    """True when the main script has extra axes a scripter made: a
+    hand-made companion file (`handmadeCompanions`, set at registration) or
+    non-empty axes embedded in the script itself (`embeddedAxes`, filled
+    by the background pass registration starts)."""
+    video = video or {}
+    return bool(video.get('handmadeCompanions') or video.get('embeddedAxes'))
+
+
 def video_sections(video, is_3d, now_ms):
     """Every section this video belongs to, in SECTION_ORDER."""
     names = [SECTION_VR if is_3d else SECTION_FLAT]
     speed = speed_bucket(video)
     if speed:
-        names.append(_SPEED_SECTION[speed])
+        names.append(speed)
     length = length_bucket(video)
     if length:
-        names.append(_LENGTH_SECTION[length])
-    if (video or {}).get('handmadeAxes'):
+        names.append(length)
+    if is_handmade_multi_axis(video):
         names.append(SECTION_HANDMADE_AXES)
     if is_recent(video, now_ms):
         names.append(SECTION_RECENT)
@@ -148,6 +144,6 @@ def filter_tags(video, is_3d):
     length = length_bucket(video)
     if length:
         tags.append(f'Length:{length}')
-    if (video or {}).get('handmadeAxes'):
+    if is_handmade_multi_axis(video):
         tags.append(TAG_HANDMADE_AXES)
     return tags
