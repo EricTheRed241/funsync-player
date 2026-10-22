@@ -30,7 +30,9 @@ A local desktop video player with device synchronization for funscript playback.
 
 ### Remote access
 - **Web Remote** — control FunSync from your phone on the same WiFi. Library, playback, device sync. Installable as a PWA from the phone's home screen.
-- **VR content server** — Quest standalone support via HereSphere. Your library appears in the headset; PC-connected devices sync automatically.
+- **VR content server** — Quest standalone support via HereSphere (DeoVR works too). Your library appears in the headset; PC-connected devices sync automatically.
+  - Library sections: VR Videos, Flat Videos, Slow / Medium Speed / Fast (script average speed below 250, 250–349, 350 and up), Short / Medium Length / Long (under 5 min, 5–15 min, over 15 min), Hand-made Multi-Axis (the main script has a companion axis file such as `Title.twist.funscript` that isn't a `.generated.` one), and Recently Added (last 14 days). Empty sections are hidden; videos whose speed or duration isn't known yet are left out of those sections.
+  - Scene tags for filtering in the headset: `Format:VR` / `Format:Flat`, `Speed:Slow|Medium|Fast`, `Length:Short|Medium|Long`, `Feature:Hand-made multi-axis`, plus `Studio:<source folder>`, `Feature:Is scripted` and 5-minute chapter markers.
 - **PCVR companion bridge** — HereSphere on PC (SteamVR, Virtual Desktop) driven via its timestamp API; all devices follow.
 - **Session status card** docks bottom-right when an external source is driving playback, with a 50-entry history viewer and a VR ↔ Web Remote last-wins mutex.
 

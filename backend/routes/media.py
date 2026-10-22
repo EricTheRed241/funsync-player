@@ -21,6 +21,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from services.funscript import has_handmade_axes
+
 router = APIRouter()
 log = logging.getLogger("funsync.media")
 
@@ -84,6 +86,9 @@ def register_videos(videos: list[dict]):
     scroll, so videos the user hasn't scrolled past yet arrive here with
     duration=0. The web remote (and VR content server) would otherwise
     show "0" runtime on grouping rows and no duration badge on cards.
+
+    Also marks each entry's `handmadeAxes` (see `_annotate_handmade_axes`)
+    before the new registry goes live.
     """
     # Build off to the side and swap in one rebind.
     #
@@ -102,11 +107,38 @@ def register_videos(videos: list[dict]):
     for v in videos:
         vid_id = _path_to_id(v.get("path", ""))
         new_registry[vid_id] = v
+    _annotate_handmade_axes(new_registry.values())
     _video_registry = new_registry
     _speed_probed.clear()  # new library scan → re-compute speed stats
 
     _queue_duration_probes()
     _queue_speed_probes()
+
+
+def _annotate_handmade_axes(videos):
+    """Set `handmadeAxes` on every entry: True when its main script has a
+    companion axis file a scripter made (not `*.generated.<axis>.funscript`).
+
+    Feeds the headsets' "Hand-made Multi-Axis" section and tag, whose
+    listings must not touch the filesystem — so it is decided here, with
+    one directory listing per script folder. An unreadable folder counts
+    as no companions.
+    """
+    listings: dict[str, list[str]] = {}
+    for v in videos:
+        script = v.get("funscriptPath")
+        if not script:
+            v["handmadeAxes"] = False
+            continue
+        folder = os.path.dirname(script)
+        names = listings.get(folder)
+        if names is None:
+            try:
+                names = os.listdir(folder)
+            except OSError:
+                names = []
+            listings[folder] = names
+        v["handmadeAxes"] = has_handmade_axes(script, names)
 
 
 # --- Background duration probe ------------------------------------------

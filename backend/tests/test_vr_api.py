@@ -524,12 +524,14 @@ async def test_deovr_flat_video(client):
 
 
 @pytest.mark.anyio
-async def test_deovr_groups_by_directory(client):
+async def test_deovr_groups_are_sections_not_directories(client):
     response = await client.get("/deovr")
     data = response.json()
     group_names = [g["name"] for g in data["scenes"]]
-    assert "Videos" in group_names
-    assert "Other" in group_names
+    # 300 s and 900 s are both inside the 5-15 min "Medium Length" bucket.
+    assert group_names == ["VR Videos", "Flat Videos", "Medium Length"]
+    assert "Videos" not in group_names
+    assert "Other" not in group_names
 
 
 # --- HereSphere API ---

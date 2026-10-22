@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from routes.media import get_video_registry, _path_to_id, record_vr_activity
-from services import video_info
+from services import video_info, vr_sections
 from services.network import get_local_ip
 
 router = APIRouter()
@@ -374,11 +374,42 @@ def _dims_for_detection(video_id, video):
     return None
 
 
+def _filtered_videos(registry, vr_filter):
+    """Yield `(vid_id, video, is_3d)` for the library listings, applying the
+    `?filter=vr|flat|scripted` query param. Never probes or stats a file."""
+    for vid_id, video in registry.items():
+        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
+        if vr_filter == 'vr' and not is_3d:
+            continue
+        if vr_filter == 'flat' and is_3d:
+            continue
+        if vr_filter == 'scripted' and not video.get('funscriptPath'):
+            continue
+        yield vid_id, video, is_3d
+
+
+def _scene_tag_names(video, is_3d):
+    """Scene-detail tags: `Studio:<source>`, `Feature:Is scripted`, then the
+    filter tags (`Format:`, `Speed:`, `Length:`, hand-made multi-axis)."""
+    tags = []
+    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(video.get('path', '')))
+    if source_name:
+        tags.append(f'Studio:{source_name}')
+    if video.get('hasFunscript'):
+        tags.append('Feature:Is scripted')
+    tags.extend(vr_sections.filter_tags(video, is_3d))
+    return tags
+
+
 # === DeoVR API ===
 
 @router.api_route("/deovr", methods=["GET", "POST"])
 async def deovr_library(request: Request):
     """DeoVR library listing — groups of scenes.
+
+    Groups are the shared headset sections (`services.vr_sections`): VR /
+    Flat, speed, length, hand-made multi-axis, recently added. Empty ones
+    are left out.
 
     DeoVR sends both GET and POST to this endpoint.
     Query params:
@@ -388,69 +419,18 @@ async def deovr_library(request: Request):
     """
     registry = get_video_registry()
     base_url = _get_base_url(request)
-    vr_filter = request.query_params.get('filter', '')
-
-    # Group videos: VR and Scripted groups first, then by directory
-    groups = {}
-    vr_group = []
-    scripted_group = []
-
-    for vid_id, video in registry.items():
-        name = video.get('name', '')
-        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
-        has_script = bool(video.get('funscriptPath'))
-
-        # Apply filter
-        if vr_filter == 'vr' and not is_3d:
-            continue
-        if vr_filter == 'flat' and is_3d:
-            continue
-        if vr_filter == 'scripted' and not has_script:
-            continue
-
+    entries = []
+    for vid_id, video, is_3d in _filtered_videos(registry, request.query_params.get('filter', '')):
         item = {
-            'title': os.path.splitext(name)[0],
+            'title': os.path.splitext(video.get('name', ''))[0],
             'videoLength': _get_duration(video),
             'thumbnailUrl': f'{base_url}/api/media/thumb/{vid_id}',
             'video_url': f'{base_url}/deovr/{vid_id}',
         }
+        entries.append((item, video, is_3d))
+    entries.sort(key=lambda e: e[0]['title'].lower())
 
-        # Add to VR group
-        if is_3d:
-            vr_group.append(item)
-
-        # Add to scripted group
-        if has_script:
-            scripted_group.append(item)
-
-        # Add to source group (uses source name from settings, falls back to parent folder)
-        group_name = video.get('sourceName') or os.path.basename(os.path.dirname(video.get('path', ''))) or 'Library'
-        if group_name not in groups:
-            groups[group_name] = []
-        groups[group_name].append(item)
-
-    scenes = []
-
-    # VR group first (if any VR videos exist)
-    if vr_group and vr_filter != 'flat':
-        scenes.append({
-            'name': 'VR Videos',
-            'list': sorted(vr_group, key=lambda x: x['title'].lower()),
-        })
-
-    # Scripted group (if any)
-    if scripted_group and vr_filter != 'vr':
-        scenes.append({
-            'name': 'With Funscript',
-            'list': sorted(scripted_group, key=lambda x: x['title'].lower()),
-        })
-
-    # Directory groups
-    for group_name, items in sorted(groups.items()):
-        scenes.append({
-            'name': group_name,
-            'list': sorted(items, key=lambda x: x['title'].lower()),
-        })
+    scenes = [{'name': name, 'list': items} for name, items in vr_sections.build_sections(entries)]
 
     # DeoVR requires Content-Length (chunked encoding breaks its JSON parser)
     body = json.dumps({'scenes': scenes, 'authorized': '0'}, ensure_ascii=False)
@@ -542,6 +522,10 @@ async def deovr_scene(video_id: str, request: Request):
         'fleshlight': fleshlight,
         'timeStamps': timestamps,
         'isScripted': bool(fs_path),
+        'categories': [
+            {'tag': {'id': i, 'name': name}}
+            for i, name in enumerate(_scene_tag_names(video, is_3d), start=1)
+        ],
         'isFavorite': False,
         'fullVideoReady': True,
         'fullAccess': True,
@@ -564,6 +548,9 @@ async def deovr_scene(video_id: str, request: Request):
 async def heresphere_library(request: Request):
     """HereSphere library listing.
 
+    Sections are the shared headset sections (`services.vr_sections`), in
+    plain text — HereSphere can't render emoji. Empty ones are left out.
+
     Query params:
       ?filter=vr    — only VR videos
       ?filter=flat  — only flat (non-VR) videos
@@ -571,47 +558,13 @@ async def heresphere_library(request: Request):
     """
     registry = get_video_registry()
     base_url = _get_base_url(request)
-    vr_filter = request.query_params.get('filter', '')
+    entries = [
+        (f'{base_url}/heresphere/{vid_id}', video, is_3d)
+        for vid_id, video, is_3d in _filtered_videos(registry, request.query_params.get('filter', ''))
+    ]
+    entries.sort(key=lambda e: os.path.splitext(e[1].get('name', ''))[0].lower())
 
-    groups = {}
-    vr_urls = []
-    scripted_urls = []
-
-    for vid_id, video in registry.items():
-        name = video.get('name', '')
-        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
-        has_script = bool(video.get('funscriptPath'))
-
-        if vr_filter == 'vr' and not is_3d:
-            continue
-        if vr_filter == 'flat' and is_3d:
-            continue
-        if vr_filter == 'scripted' and not has_script:
-            continue
-
-        url = f'{base_url}/heresphere/{vid_id}'
-
-        if is_3d:
-            vr_urls.append(url)
-        if has_script:
-            scripted_urls.append(url)
-
-        path = video.get('path', '')
-        group_name = video.get('sourceName') or os.path.basename(os.path.dirname(path)) or 'Library'
-        if group_name not in groups:
-            groups[group_name] = []
-        groups[group_name].append(url)
-
-    library = []
-
-    if vr_urls and vr_filter != 'flat':
-        library.append({'name': '🥽 VR Videos', 'list': sorted(vr_urls)})
-
-    if scripted_urls and vr_filter != 'vr':
-        library.append({'name': '🎮 With Funscript', 'list': sorted(scripted_urls)})
-
-    for group_name, urls in sorted(groups.items()):
-        library.append({'name': group_name, 'list': sorted(urls)})
+    library = [{'name': name, 'list': urls} for name, urls in vr_sections.build_sections(entries)]
 
     return JSONResponse(
         content={'access': 1, 'library': library},
@@ -695,13 +648,8 @@ async def heresphere_scene(video_id: str, request: Request):
             'url': f'{base_url}/api/media/script/{video_id}',
         })
 
-    # Tags
-    tags = []
-    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
-    if source_name:
-        tags.append({'name': f'Studio:{source_name}'})
-    if video.get('hasFunscript'):
-        tags.append({'name': 'Feature:Is scripted'})
+    # Tags: studio, scripted, and the filter tags; chapters follow
+    tags = [{'name': name} for name in _scene_tag_names(video, is_3d)]
 
     # Auto-generate chapter tags for navigation (every 5 min)
     if duration > 300:
