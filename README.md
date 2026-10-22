@@ -60,7 +60,7 @@ A local desktop video player with device synchronization for funscript playback.
 ### Device Integration
 - **The Handy** — HSSP cloud sync with automatic script upload, drift detection, 10-second cloud health check (catches BT-mode switches)
 - **Buttplug.io** — Connect to 700+ devices via Intiface Central (strokers, vibrators, rotators, e-stim)
-- **TCode serial (OSR2 / SR6)** — USB serial with per-axis enable + min/max controls for all 10 axes (experimental)
+- **TCode (OSR2 / SR6 / MiraBot)** — USB serial, UDP (Wi-Fi) or WebSocket, with per-axis enable + min/max controls for all 10 axes (experimental). MiraBot's Wi-Fi firmware speaks UDP; its Bluetooth LE firmware is not supported
 - **Autoblow Ultra / VacuGlide 2** — Cloud API (experimental)
 - **Auto-connect on startup** — Handy and Buttplug.io connect automatically if previously configured
 - Per-device offset controls + unified Sync tab showing total effective offset (VR + device stacking)
@@ -82,8 +82,11 @@ A local desktop video player with device synchronization for funscript playback.
 - Autosave toggle (off by default, shows save timestamp when enabled)
 
 ### Multi-Axis Support (Experimental)
+- **Target setup: 4 axes on a MiraBot Lite** — stroke (L0), twist (R0), roll (R1), pitch (R2). Every script in the library should drive all four.
 - TCode convention detection (10 standard axes)
-- Companion file detection by filename suffix
+- Companion file detection by filename suffix, including generated `<name>.generated.<axis>.funscript` files
+- `npm run upgrade:axes -- <folder>` fills the gap for stroke-only scripts: it writes twist, roll and pitch companions (never overwrites; `--dry-run` to preview). Surge / sway / valve only with `--surge` / `--sway` / `--valve`
+- Switching a script variant switches to that variant's own axis files
 - Axis-to-device feature mapping
 - Searchable dropdowns for axis assignment with fuzzy matching
 
