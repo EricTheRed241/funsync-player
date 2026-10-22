@@ -13,6 +13,8 @@ import { Modal } from './modal.js';
 import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
 import { joinPath, dirOfPath } from '../js/path-utils.js';
+import { planTargets } from '../js/eroscripts-save.js';
+import { askSaveConflict } from './eroscripts-conflict.js';
 import { groupAttachments, axisLabels, buildMultiAssociation } from '../js/eroscripts-groups.js';
 import { createResultThumb } from './result-thumb.js';
 
@@ -36,35 +38,41 @@ export function targetFileName(videoPath, axisSuffix) {
 
 /**
  * Download one group and return an association payload for the modal.
- * Returns null if the main failed — a multi set with no main is unusable.
+ * Returns null if the main failed — a multi set with no main is unusable —
+ * and `{cancelled: true}` if the user declined to replace existing files.
  */
 async function downloadGroup(group, videoPath, { mainOnly = false } = {}) {
   const dir = dirOfPath(videoPath);
-  const saved = new Map(); // attachment name → on-disk path
+  const multi = !mainOnly && group.canAssociateMulti;
+  const files = [
+    { attachment: group.main, suffix: null },
+    ...(multi ? group.axes.map((entry) => ({ attachment: entry, suffix: entry.axis.suffix })) : []),
+  ];
 
-  const fetchOne = async (attachment, suffix) => {
-    const name = targetFileName(videoPath, suffix);
-    const savePath = joinPath(dir, name);
-    const { success, error } = await window.funsync.eroscriptsDownload(attachment.url, savePath);
+  // One decision for the whole set, so "keep both" gives the main and its
+  // axes the same new name and they still pair with each other.
+  const plan = await planTargets(files.map((f) => joinPath(dir, targetFileName(videoPath, f.suffix))), askSaveConflict);
+  if (!plan) return { cancelled: true };
+
+  const saved = new Map(); // attachment name → on-disk path
+  // Sequential rather than parallel: a courtesy to the forum, and a handful
+  // of small files either way. Main first; a set without it is unusable.
+  for (let i = 0; i < files.length; i++) {
+    const { attachment } = files[i];
+    const savePath = plan.paths[i];
+    const { success, error } = await window.funsync.eroscriptsDownload(attachment.url, savePath, { overwrite: plan.overwrite });
     if (success) saved.set(attachment.name, savePath);
     else if (error) console.warn('[EroInline] download failed:', attachment.name, error);
-    return success ? savePath : '';
-  };
-
-  const mainPath = group.main ? await fetchOne(group.main, null) : '';
-  if (!mainPath) return null;
-
-  if (mainOnly || !group.canAssociateMulti) {
-    return { mode: 'single', path: mainPath, name: targetFileName(videoPath, null) };
+    if (i === 0 && !success) return null;
   }
 
-  // Axes are fetched sequentially rather than in parallel: this is a
-  // courtesy to the forum, and a handful of small files either way.
-  for (const entry of group.axes) await fetchOne(entry, entry.axis.suffix);
+  const mainPath = plan.paths[0];
+  const mainName = mainPath.split(/[\\/]/).pop();
+  if (!multi) return { mode: 'single', path: mainPath, name: mainName };
 
-  const multi = buildMultiAssociation(group, (name) => saved.get(name) || '');
-  if (!multi) return { mode: 'single', path: mainPath, name: targetFileName(videoPath, null) };
-  return { mode: 'multi', main: multi.main, axes: multi.axes, buttplugVib: false };
+  const association = buildMultiAssociation(group, (name) => saved.get(name) || '');
+  if (!association) return { mode: 'single', path: mainPath, name: mainName };
+  return { mode: 'multi', main: association.main, axes: association.axes, buttplugVib: false };
 }
 
 /**
@@ -156,7 +164,10 @@ export function showEroScriptsSearchModal(video) {
               for (const b of actions.querySelectorAll('button')) b.disabled = true;
               btn.textContent = t('eroscripts.inline.downloading');
               const payload = await downloadGroup(group, video.path, opts);
-              if (payload) {
+              if (payload?.cancelled) {
+                for (const b of actions.querySelectorAll('button')) b.disabled = false;
+                btn.textContent = original;
+              } else if (payload) {
                 // The topic rides along so the caller can record its tags
                 // next to where it applies the association — this modal has
                 // no business touching the store.

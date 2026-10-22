@@ -193,7 +193,7 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsSearch: (query, page) => ipcRenderer.invoke('eroscripts-search', query, page),
   eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
-  eroscriptsDownload: (url, savePath) => ipcRenderer.invoke('eroscripts-download', url, savePath),
+  eroscriptsDownload: (url, savePath, opts) => ipcRenderer.invoke('eroscripts-download', url, savePath, opts),
 
   // Editor pop-out window
   editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),

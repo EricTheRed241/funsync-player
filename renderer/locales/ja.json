@@ -1276,6 +1276,11 @@
     "downloadFailed": "ダウンロードに失敗しました",
     "savedToast": "スクリプトを保存しました: {name}",
     "sessionExpired": "EroScripts セッションの有効期限が切れました — EroScripts パネルから再度ログインしてください",
+    "conflictTitle": "スクリプトは既に存在します",
+    "conflictMessage": "{name} はこのフォルダーに既にあります。置き換えますか？それとも両方残して新しい方をバリアントとして保存しますか？",
+    "conflictReplace": "置き換える",
+    "conflictKeepBoth": "両方残す",
+    "zipUnsupported": "{name} は ZIP アーカイブです — FunSync はまだ ZIP ダウンロードを開けません",
     "inline": {
       "title": "EroScripts でスクリプトを探す",
       "axesLine": "メイン + {count} 軸 ({list})",

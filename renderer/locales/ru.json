@@ -1276,6 +1276,11 @@
     "downloadFailed": "Не удалось скачать",
     "savedToast": "Скрипт сохранён: {name}",
     "sessionExpired": "Сессия EroScripts истекла — войдите снова через панель EroScripts",
+    "conflictTitle": "Скрипт уже существует",
+    "conflictMessage": "{name} уже есть в этой папке. Заменить его или сохранить оба, а новый — как вариант?",
+    "conflictReplace": "Заменить",
+    "conflictKeepBoth": "Сохранить оба",
+    "zipUnsupported": "{name} — ZIP-архив. FunSync пока не умеет открывать ZIP-загрузки",
     "inline": {
       "title": "Найти скрипт на EroScripts",
       "axesLine": "Основной + {count} осей ({list})",

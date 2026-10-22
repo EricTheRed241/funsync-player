@@ -1202,7 +1202,16 @@ class App {
     this.eroscriptsPanel.onLoginStatusChanged = (loggedIn) => {
       if (this.navBar) this.navBar.setEroScriptsStatus(loggedIn);
     };
-    this.eroscriptsPanel.onScriptDownloaded = (fsPath, fsName) => {
+    this.eroscriptsPanel.onScriptDownloaded = (fsPath, fsName, { axis = null } = {}) => {
+      // An axis companion is not a main script: don't load it as the stroke
+      // or associate it as one. Registering it lets companion detection and
+      // the Associate dialog's axis pickers see it straight away; the next
+      // scan pairs it with the video's main script.
+      if (axis) {
+        this.library?.registerFunscripts([{ path: fsPath, name: fsName }]);
+        if (this.library) this.library._lastScanKey = null;
+        return;
+      }
       // If a video is currently playing, load the downloaded script
       if (this._currentVideoName && this.funscriptEngine) {
         window.funsync.readFunscript(fsPath).then((content) => {

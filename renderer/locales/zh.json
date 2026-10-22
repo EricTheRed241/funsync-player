@@ -1276,6 +1276,11 @@
     "downloadFailed": "下载失败",
     "savedToast": "脚本已保存:{name}",
     "sessionExpired": "EroScripts 会话已过期 — 请在 EroScripts 面板中重新登录",
+    "conflictTitle": "脚本已存在",
+    "conflictMessage": "{name} 已在此文件夹中。替换它，还是两者都保留并将新文件另存为变体？",
+    "conflictReplace": "替换",
+    "conflictKeepBoth": "两者都保留",
+    "zipUnsupported": "{name} 是 ZIP 压缩包 — FunSync 暂时无法打开 ZIP 下载",
     "inline": {
       "title": "在 EroScripts 上查找脚本",
       "axesLine": "主脚本 + {count} 个轴 ({list})",

@@ -1400,6 +1400,11 @@
     "downloadFailed": "Download failed",
     "savedToast": "Script saved: {name}",
     "sessionExpired": "EroScripts session expired — log in again via the EroScripts panel",
+    "conflictTitle": "Script already exists",
+    "conflictMessage": "{name} is already in this folder. Replace it, or keep both and save the new one as a variant?",
+    "conflictReplace": "Replace",
+    "conflictKeepBoth": "Keep both",
+    "zipUnsupported": "{name} is a zip archive — FunSync can't open zip downloads yet",
     "inline": {
       "title": "Find a script on EroScripts",
       "axesLine": "Main + {count} axes ({list})",

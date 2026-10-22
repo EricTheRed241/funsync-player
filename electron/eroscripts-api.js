@@ -404,8 +404,12 @@ class EroScriptsAPI {
 
   /**
    * Download a file from a URL.
+   *
+   * Refuses to replace an existing file unless `overwrite` is set, and
+   * reports that as `{exists: true}` so the caller can ask the user. The
+   * check is the open itself (`wx`), so nothing can slip in between.
    */
-  async downloadFile(url, savePath) {
+  async downloadFile(url, savePath, { overwrite = false } = {}) {
     const fs = require('fs');
     try {
       const resp = await fetch(url, { headers: this._headers() });
@@ -414,10 +418,11 @@ class EroScriptsAPI {
       }
 
       const buffer = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(savePath, buffer);
+      fs.writeFileSync(savePath, buffer, { flag: overwrite ? 'w' : 'wx' });
       log.info(`[EroScripts] Downloaded: ${savePath}`);
       return { success: true };
     } catch (err) {
+      if (err.code === 'EEXIST') return { success: false, exists: true };
       log.error('[EroScripts] Download error:', err.message);
       return { success: false, error: err.message };
     }

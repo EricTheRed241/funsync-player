@@ -2675,6 +2675,6 @@ ipcMain.handle('eroscripts-topic-image', async (_event, topicId) => {
   return eroScripts.getTopicImage(topicId);
 });
 
-ipcMain.handle('eroscripts-download', async (_event, url, savePath) => {
-  return eroScripts.downloadFile(url, savePath);
+ipcMain.handle('eroscripts-download', async (_event, url, savePath, opts) => {
+  return eroScripts.downloadFile(url, savePath, { overwrite: opts?.overwrite === true });
 });
