@@ -21,11 +21,18 @@ const POST_BATCH = 20;
 const MAX_PIXELDRAIN_LOOKUPS = 10;
 
 // Downloads go only to the forum itself, over https: the session cookie
-// rides on every download request.
-const DOWNLOAD_HOSTS = new Set([new URL(BASE_URL).hostname]);
+// rides on every download request. Upload links on the S3 CDN are rewritten
+// to the forum's short URL (which redirects there), so the CDN needs no entry.
+const FORUM_HOST = new URL(BASE_URL).hostname;
+const DOWNLOAD_HOSTS = new Set([FORUM_HOST]);
+const UPLOAD_CDN_HOST = 'eroscripts-discourse.eroscripts.com';
 
 const SCRIPT_FILE_RE = /\.(funscript|zip)$/i;
 const PIXELDRAIN_RE = /https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/(u|l)\/([A-Za-z0-9]+)/gi;
+// Discourse stores an original upload under its SHA-1 (`…/original/4X/b/5/7/<sha1>.ext`);
+// its short URL is that SHA-1 in base 62.
+const ORIGINAL_UPLOAD_RE = /\/original\/\d+X\/(?:[0-9a-f]\/)*([0-9a-f]{40})(\.[a-z0-9]+)$/i;
+const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 // Off-forum file hosts FunSync cannot fetch from. Named in the UI so a post
 // whose scripts live there reads as "hosted on MEGA", not "no scripts".
@@ -108,21 +115,69 @@ function pickThumbnail(thumbnails) {
   return (big[0] || usable[0]).url;
 }
 
+function base62Sha1(sha1) {
+  let n = BigInt(`0x${sha1}`);
+  let out = '';
+  while (n > 0n) {
+    out = BASE62[Number(n % 62n)] + out;
+    n /= 62n;
+  }
+  return out || '0';
+}
+
 /**
- * Script-relevant links in one post's `cooked` HTML: forum attachments
- * (`.funscript` / `.zip`), `upload://` short links, pixeldrain file and
- * list links, and links to hosts FunSync can't fetch from.
+ * Canonical https forum URL for a link to a forum upload, or null if the
+ * link points anywhere else. Accepts `upload://` short links, relative and
+ * absolute `/uploads/…` paths on the forum, and originals on the upload CDN
+ * (rewritten to their forum short URL). Query and fragment (`?dl=1`) are
+ * dropped so the same file always maps to the same URL.
+ */
+function forumUploadUrl(href) {
+  if (/^upload:\/\//i.test(href)) return `${BASE_URL}/uploads/short-url/${href.slice('upload://'.length)}`;
+  let url;
+  try { url = new URL(href, BASE_URL); } catch { return null; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const onForum = url.hostname === FORUM_HOST;
+  if (!onForum && url.hostname !== UPLOAD_CDN_HOST) return null;
+  if (onForum && !url.pathname.startsWith('/uploads/')) return null;
+  const original = url.pathname.match(ORIGINAL_UPLOAD_RE);
+  if (original) return `${BASE_URL}/uploads/short-url/${base62Sha1(original[1].toLowerCase())}${original[2]}`;
+  return onForum ? `${BASE_URL}${url.pathname}` : null;
+}
+
+function urlFileName(url) {
+  const last = new URL(url).pathname.split('/').pop();
+  try { return decodeURIComponent(last); } catch { return last; }
+}
+
+/**
+ * Script-relevant links in one post's `cooked` HTML: forum uploads
+ * (`.funscript` / `.zip`) as `{name, url}`, pixeldrain file and list links,
+ * and links to hosts FunSync can't fetch from.
+ *
+ * An upload is any `<a>` pointing at a forum upload, whatever its other
+ * attributes: Discourse marks some with `class="attachment"`, but posts
+ * also carry plain `<a href="/uploads/short-url/….funscript">` links. The
+ * name is the link text when that names a script file, else the URL's.
  */
 function parsePostLinks(html) {
   const attachments = [];
-  const shortUrls = [];
+  const seen = new Set();
   const pixeldrain = [];
   const external = [];
-  for (const m of html.matchAll(/<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi)) {
-    const name = decodeEntities(m[2].trim());
-    if (SCRIPT_FILE_RE.test(name)) attachments.push({ name, href: decodeEntities(m[1]) });
+  for (const m of html.matchAll(/<a\s([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const href = m[1].match(/(?:^|\s)href\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    const url = href && forumUploadUrl(decodeEntities(href[1] ?? href[2]));
+    if (!url || seen.has(url)) continue;
+    const urlName = urlFileName(url);
+    // A link to an image or other file is not a script, whatever its text says.
+    if (!SCRIPT_FILE_RE.test(urlName) && /\.[a-z0-9]+$/i.test(urlName)) continue;
+    const text = decodeEntities(m[2].replace(/<[^>]*>/g, '')).trim();
+    const name = SCRIPT_FILE_RE.test(text) ? text : urlName;
+    if (!SCRIPT_FILE_RE.test(name)) continue;
+    seen.add(url);
+    attachments.push({ name, url });
   }
-  for (const m of html.matchAll(/href="(upload:\/\/[^"]+)"/gi)) shortUrls.push(m[1]);
   for (const m of html.matchAll(PIXELDRAIN_RE)) pixeldrain.push({ kind: m[1].toLowerCase(), id: m[2] });
   for (const m of html.matchAll(/href="(https?:\/\/[^"]+)"/gi)) {
     const url = decodeEntities(m[1]);
@@ -131,7 +186,7 @@ function parsePostLinks(html) {
     const known = EXTERNAL_HOSTS.find(([h]) => host === h || host.endsWith(`.${h}`));
     if (known) external.push({ host: known[1], url });
   }
-  return { attachments, shortUrls, pixeldrain, external };
+  return { attachments, pixeldrain, external };
 }
 
 class EroScriptsAPI {
@@ -402,12 +457,6 @@ class EroScriptsAPI {
       const author = posts[0].username;
       const attachments = [];
       const seenUrls = new Set();
-      const add = (a) => {
-        if (!a.url || seenUrls.has(a.url)) return;
-        seenUrls.add(a.url);
-        attachments.push(a);
-      };
-      const shortUrls = [];
       const pixeldrain = [];
       const external = new Map();
 
@@ -415,14 +464,14 @@ class EroScriptsAPI {
         const from = { postNumber: post.post_number, username: post.username, byAuthor: post.username === author };
         const links = parsePostLinks(post.cooked || '');
         for (const a of links.attachments) {
-          add({ name: a.name, url: a.href.startsWith('http') ? a.href : `${BASE_URL}${a.href}`, host: 'eroscripts', ...from });
+          if (seenUrls.has(a.url)) continue;
+          seenUrls.add(a.url);
+          attachments.push({ ...a, host: 'eroscripts', ...from });
         }
-        for (const short of links.shortUrls) shortUrls.push({ short, from });
         for (const p of links.pixeldrain) pixeldrain.push({ ...p, from });
         for (const e of links.external) if (!external.has(e.url)) external.set(e.url, e);
       }
 
-      await this._resolveShortUrls(shortUrls, add);
       const linked = await this._resolvePixeldrain(pixeldrain);
 
       // Stable sort: the author's files first, each side in post order.
@@ -457,29 +506,6 @@ class EroScriptsAPI {
       } catch { /* a missing batch only hides replies */ }
     }
     return posts.sort((a, b) => a.post_number - b.post_number);
-  }
-
-  async _resolveShortUrls(shortUrls, add) {
-    if (shortUrls.length === 0) return;
-    try {
-      const resp = await fetch(`${BASE_URL}/uploads/lookup-urls`, {
-        method: 'POST',
-        headers: { ...this._headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ short_urls: shortUrls.map((s) => s.short) }),
-      });
-      if (!resp.ok) return;
-      const resolved = await resp.json();
-      for (const item of resolved) {
-        if (!item.url || !SCRIPT_FILE_RE.test(item.url)) continue;
-        const from = shortUrls.find((s) => s.short === item.short_url)?.from || {};
-        add({
-          name: item.url.split('/').pop(),
-          url: item.url.startsWith('http') ? item.url : `${BASE_URL}${item.url}`,
-          host: 'eroscripts',
-          ...from,
-        });
-      }
-    } catch { /* ignore */ }
   }
 
   /**
