@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from routes.media import get_video_registry, _path_to_id, record_vr_activity
+from services import video_info
 from services.network import get_local_ip
 
 router = APIRouter()
@@ -321,80 +322,53 @@ def _get_duration(video):
     return 0
 
 
-def _probe_video_info(path):
-    """Run ffprobe to get resolution and codec. Blocking — call from background thread."""
-    try:
-        from services.ffmpeg import _find_binary, run_silent
-        ffprobe = _find_binary('ffprobe')
-        result = run_silent(
-            [ffprobe, '-v', 'quiet', '-print_format', 'json',
-             '-show_streams', '-select_streams', 'v:0', path],
-            capture_output=True, text=True,
-            # Windows reader-thread crashes with UnicodeDecodeError when it
-            # falls back to cp1252 — pin to utf-8 with replacement so
-            # unmappable codec/path bytes don't kill the probe.
-            encoding='utf-8', errors='replace',
-            timeout=10,
-        )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            streams = data.get('streams', [])
-            if streams:
-                w = int(streams[0].get('width', 1920))
-                h = int(streams[0].get('height', 1080))
-                codec = streams[0].get('codec_name', 'h264')
-                if codec in ('hevc', 'h265'):
-                    codec = 'h265'
-                elif codec in ('h264', 'avc', 'avc1'):
-                    codec = 'h264'
-                return w, h, codec
-    except Exception:
-        pass
-    return None
+# Served when a file's resolution can't be read (ffprobe missing / failed).
+_DEFAULT_VIDEO_INFO = (1920, 1080, 'h264')
 
 
-# Cache video info per video_id — populated lazily in background
-_video_info_cache = {}
-_probe_pending = set()  # video_ids currently being probed
+async def _scene_video_info(video_id, path):
+    """`(width, height, codec)` for a scene-detail request. Probes THIS
+    video only (off the event loop) when nothing valid is cached, so VR
+    auto-detect and the media block see real dimensions on first open —
+    and never waits behind the registration warm-up."""
+    info = video_info.cached_video_info(video_id)
+    if info is None and path:
+        info = await asyncio.to_thread(video_info.get_video_info, video_id, path)
+    return info or _DEFAULT_VIDEO_INFO
 
 
-def _get_cached_video_info(video_id, video):
-    """Return cached info immediately, or defaults while probing in background."""
-    if video_id in _video_info_cache:
-        return _video_info_cache[video_id]
-
-    # Not cached — return defaults now, probe in background
-    path = video.get('path', '')
-    if path and os.path.isfile(path) and video_id not in _probe_pending:
-        _probe_pending.add(video_id)
-        import threading
-        def _bg_probe():
-            result = _probe_video_info(path)
-            if result:
-                _video_info_cache[video_id] = result
-            else:
-                _video_info_cache[video_id] = (1920, 1080, 'h264')
-            _probe_pending.discard(video_id)
-        threading.Thread(target=_bg_probe, daemon=True).start()
-
-    return _video_info_cache.get(video_id, (1920, 1080, 'h264'))
+def queue_dims_warmup(registry) -> int:
+    """Make every registered video's dimensions known without anyone opening
+    it (called at registration). Videos whose VR status hinges on their
+    dimensions — no filename VR tag, no manual override — are probed first;
+    the rest only feed the scene-detail media block. Returns the number of
+    videos queued for probing."""
+    first, later = [], []
+    for vid_id, video in registry.items():
+        if video.get('width') and video.get('height'):
+            continue
+        path = video.get('path')
+        if not path:
+            continue
+        _, _, tagged = detect_vr_format_for_video(video)
+        (later if tagged or video.get('manualVRType') else first).append((vid_id, path))
+    return video_info.queue_warmup(first + later)
 
 
 def _dims_for_detection(video_id, video):
     """Best-effort `(width, height)` for VR auto-detect WITHOUT probing.
 
-    Prefers dimensions the scan already attached to the video dict, then a
-    previously-probed cache entry. Returns None when neither is available —
-    deliberately: the library-listing loops call this per video and must
-    not kick off an ffprobe storm on large libraries. A file migrates into
-    the VR group once its dimensions are known (e.g. after it's opened once
-    in HereSphere, which primes the cache).
+    Prefers dimensions the scan already attached to the video dict, then
+    the resolution cache — filled at registration from the persisted cache
+    file and the background warm-up, and by scene-detail probes. Returns
+    None when neither is available: the library-listing loops call this per
+    video and must never probe (or even stat) a file.
     """
     w = (video or {}).get('width')
     h = (video or {}).get('height')
     if w and h:
         return int(w), int(h)
-    cached = _video_info_cache.get(video_id)
+    cached = video_info.cached_video_info(video_id)
     if cached:
         return cached[0], cached[1]
     return None
@@ -509,14 +483,7 @@ async def deovr_scene(video_id: str, request: Request):
     duration = _get_duration(video)
     path = video.get('path', '')
 
-    # Prime the resolution cache for THIS scene (off the event loop) so VR
-    # auto-detect sees real dimensions on first open. Only this one video
-    # is probed per request — no library-wide probe storm.
-    if video_id not in _video_info_cache and path and os.path.isfile(path):
-        info = await asyncio.to_thread(_probe_video_info, path)
-        if info:
-            _video_info_cache[video_id] = info
-    width, height, codec = _get_cached_video_info(video_id, video)
+    width, height, codec = await _scene_video_info(video_id, path)
 
     screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video, dims=(width, height))
 
@@ -674,15 +641,7 @@ async def heresphere_scene(video_id: str, request: Request):
     duration = _get_duration(video)
     path = video.get('path', '')
 
-    # Prime the resolution cache for THIS scene (off the event loop) so VR
-    # auto-detect + the media block below see real dimensions on first
-    # open. Only this one video is probed per request — no library-wide
-    # probe storm.
-    if video_id not in _video_info_cache and path and os.path.isfile(path):
-        info = await asyncio.to_thread(_probe_video_info, path)
-        if info:
-            _video_info_cache[video_id] = info
-    width, height, codec = _get_cached_video_info(video_id, video)
+    width, height, codec = await _scene_video_info(video_id, path)
 
     screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video, dims=(width, height))
 
