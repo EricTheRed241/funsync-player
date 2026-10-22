@@ -1405,6 +1405,12 @@
     "conflictReplace": "Replace",
     "conflictKeepBoth": "Keep both",
     "zipUnsupported": "{name} is a zip archive — FunSync can't open zip downloads yet",
+    "paidBadge": "Paid",
+    "paidNoFiles": "Paid script — get it from the creator's link in the post (View)",
+    "externalOnly": "This post's scripts are hosted on {hosts} — open the post (View) to download them",
+    "externalAlso": "Also linked on {hosts} — open the post to get those",
+    "postNumber": "post {n}",
+    "opensInBrowser": "opens in your browser",
     "inline": {
       "title": "Find a script on EroScripts",
       "axesLine": "Main + {count} axes ({list})",

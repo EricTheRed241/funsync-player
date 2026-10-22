@@ -391,6 +391,15 @@
   color: var(--text-secondary);
 }
 
+/* Paid Scripts category: the post links to a store, nothing to download. */
+.eroscripts-panel__tag--paid,
+.eroscripts-inline__badge--paid {
+  /* Same orange as the player's --state-warning, which is not global. */
+  background: #ff9800;
+  color: #000;
+  font-weight: 600;
+}
+
 .eroscripts-panel__result-actions {
   display: flex;
   gap: 6px;
@@ -430,6 +439,21 @@
 
 .eroscripts-panel__attachment-item:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* "@user · post 12 · pixeldrain" under a picker entry that isn't the
+   author's own forum attachment. */
+.eroscripts-panel__attachment-source {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.eroscripts-panel__attachment-note {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: normal;
 }
 
 /* Scrollbar */

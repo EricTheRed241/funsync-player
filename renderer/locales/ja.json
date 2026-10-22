@@ -1281,6 +1281,12 @@
     "conflictReplace": "置き換える",
     "conflictKeepBoth": "両方残す",
     "zipUnsupported": "{name} は ZIP アーカイブです — FunSync はまだ ZIP ダウンロードを開けません",
+    "paidBadge": "有料",
+    "paidNoFiles": "有料スクリプトです — 投稿内の作者のリンクから入手してください（表示）",
+    "externalOnly": "この投稿のスクリプトは {hosts} にあります — 投稿を開いて（表示）ダウンロードしてください",
+    "externalAlso": "{hosts} にもリンクがあります — 投稿を開いて入手してください",
+    "postNumber": "投稿 {n}",
+    "opensInBrowser": "ブラウザーで開きます",
     "inline": {
       "title": "EroScripts でスクリプトを探す",
       "axesLine": "メイン + {count} 軸 ({list})",

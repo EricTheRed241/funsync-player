@@ -15,7 +15,8 @@ import { t } from '../js/i18n.js';
 import { joinPath, dirOfPath } from '../js/path-utils.js';
 import { planTargets } from '../js/eroscripts-save.js';
 import { askSaveConflict } from './eroscripts-conflict.js';
-import { groupAttachments, axisLabels, buildMultiAssociation } from '../js/eroscripts-groups.js';
+import { groupAttachments, axisLabels, buildMultiAssociation, externalHostNames } from '../js/eroscripts-groups.js';
+import { noFilesMessage, attachmentSource } from '../js/eroscripts-text.js';
 import { createResultThumb } from './result-thumb.js';
 
 /** `D:/v/Some Video.mp4` → `Some Video` */
@@ -118,13 +119,13 @@ export function showEroScriptsSearchModal(video) {
       };
 
       /** Render the groups for one topic, under its row. */
-      const renderGroups = (host, topic, groups, unsupported) => {
+      const renderGroups = (host, topic, groups, unsupported, { paid = false, external = [] } = {}) => {
         host.innerHTML = '';
 
         if (groups.length === 0) {
           const none = document.createElement('div');
           none.className = 'eroscripts-inline__note';
-          none.textContent = t('eroscripts.inline.noAttachments');
+          none.textContent = unsupported.length > 0 ? t('eroscripts.inline.noAttachments') : noFilesMessage({ paid, external });
           host.appendChild(none);
         }
 
@@ -137,6 +138,15 @@ export function showEroScriptsSearchModal(video) {
           label.textContent = group.base;
           label.title = group.main?.name || group.base;
           row.appendChild(label);
+
+          // Files from a reply or another host say where they came from.
+          const source = attachmentSource(group.main || group.axes[0]);
+          if (source) {
+            const from = document.createElement('div');
+            from.className = 'eroscripts-inline__group-axes';
+            from.textContent = source;
+            row.appendChild(from);
+          }
 
           if (group.isMultiAxis) {
             const axes = document.createElement('div');
@@ -213,6 +223,14 @@ export function showEroScriptsSearchModal(video) {
           zip.textContent = t('eroscripts.inline.zipNote', { count: unsupported.length });
           host.appendChild(zip);
         }
+
+        const hosts = externalHostNames(external);
+        if (groups.length > 0 && hosts.length > 0) {
+          const ext = document.createElement('div');
+          ext.className = 'eroscripts-inline__note';
+          ext.textContent = t('eroscripts.externalAlso', { hosts: hosts.join(', ') });
+          host.appendChild(ext);
+        }
       };
 
       const openTopic = async (topic, host, toggleBtn) => {
@@ -224,7 +242,7 @@ export function showEroScriptsSearchModal(video) {
         host.textContent = t('eroscripts.inline.loadingPost');
         toggleBtn.disabled = true;
 
-        const { attachments = [], error, authExpired } =
+        const { attachments = [], error, authExpired, paid = false, external = [] } =
           await window.funsync.eroscriptsTopic(topic.id);
         toggleBtn.disabled = false;
 
@@ -239,7 +257,7 @@ export function showEroScriptsSearchModal(video) {
 
         const { groups, unsupported } = groupAttachments(attachments);
         host.dataset.loaded = '1';
-        renderGroups(host, topic, groups, unsupported);
+        renderGroups(host, topic, groups, unsupported, { paid, external });
       };
 
       const renderResults = (list) => {
@@ -279,11 +297,18 @@ export function showEroScriptsSearchModal(video) {
           info.appendChild(meta);
 
           // The multi-axis tag is worth surfacing before the post is opened
-          // — it's the single most useful thing about a result here.
+          // — it's the single most useful thing about a result here. So is
+          // "paid": there will be nothing to download.
           if ((topic.tags || []).includes('multi-axis')) {
             const badge = document.createElement('span');
             badge.className = 'eroscripts-inline__badge';
             badge.textContent = t('eroscripts.inline.multiBadge');
+            info.appendChild(badge);
+          }
+          if (topic.paid) {
+            const badge = document.createElement('span');
+            badge.className = 'eroscripts-inline__badge eroscripts-inline__badge--paid';
+            badge.textContent = t('eroscripts.paidBadge');
             info.appendChild(badge);
           }
           head.appendChild(info);

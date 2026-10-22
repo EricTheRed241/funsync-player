@@ -36,12 +36,14 @@ function serve(body) {
   globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode(body).buffer }));
 }
 
+const FORUM_FILE = 'https://discuss.eroscripts.com/uploads/short-url/a.funscript';
+
 describe('EroScriptsAPI.downloadFile', () => {
   it('reports an existing file instead of replacing it', async () => {
     const target = path.join(dir, 'keep.funscript');
     fs.writeFileSync(target, 'mine');
     serve('theirs');
-    expect(await new EroScriptsAPI().downloadFile('https://x/a', target)).toEqual({ success: false, exists: true });
+    expect(await new EroScriptsAPI().downloadFile(FORUM_FILE, target)).toEqual({ success: false, exists: true });
     expect(fs.readFileSync(target, 'utf8')).toBe('mine');
   });
 
@@ -49,7 +51,7 @@ describe('EroScriptsAPI.downloadFile', () => {
     const target = path.join(dir, 'replace.funscript');
     fs.writeFileSync(target, 'mine');
     serve('theirs');
-    expect(await new EroScriptsAPI().downloadFile('https://x/a', target, { overwrite: true })).toEqual({ success: true });
+    expect(await new EroScriptsAPI().downloadFile(FORUM_FILE, target, { overwrite: true })).toEqual({ success: true });
     expect(fs.readFileSync(target, 'utf8')).toBe('theirs');
   });
 });

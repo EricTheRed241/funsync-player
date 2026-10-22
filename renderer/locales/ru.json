@@ -1281,6 +1281,12 @@
     "conflictReplace": "Заменить",
     "conflictKeepBoth": "Сохранить оба",
     "zipUnsupported": "{name} — ZIP-архив. FunSync пока не умеет открывать ZIP-загрузки",
+    "paidBadge": "Платный",
+    "paidNoFiles": "Платный скрипт — получите его по ссылке автора в посте (Просмотреть)",
+    "externalOnly": "Скрипты этого поста размещены на {hosts} — откройте пост (Просмотреть), чтобы скачать их",
+    "externalAlso": "Также есть ссылки на {hosts} — откройте пост, чтобы получить их",
+    "postNumber": "пост {n}",
+    "opensInBrowser": "откроется в браузере",
     "inline": {
       "title": "Найти скрипт на EroScripts",
       "axesLine": "Основной + {count} осей ({list})",
