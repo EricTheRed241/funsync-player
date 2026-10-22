@@ -10,6 +10,8 @@ import { parseAxisSuffix } from '../js/multi-axis.js';
 import { planTargets } from '../js/eroscripts-save.js';
 import { targetFileName } from './eroscripts-inline-search.js';
 import { askSaveConflict } from './eroscripts-conflict.js';
+import { externalHostNames } from '../js/eroscripts-groups.js';
+import { noFilesMessage, attachmentSource } from '../js/eroscripts-text.js';
 
 export class EroScriptsPanel {
   constructor({ settings }) {
@@ -291,6 +293,12 @@ export class EroScriptsPanel {
 
       const tags = document.createElement('div');
       tags.className = 'eroscripts-panel__result-tags';
+      if (topic.paid) {
+        const paid = document.createElement('span');
+        paid.className = 'eroscripts-panel__tag eroscripts-panel__tag--paid';
+        paid.textContent = t('eroscripts.paidBadge');
+        tags.appendChild(paid);
+      }
       for (const tag of (topic.tags || []).slice(0, 5)) {
         const badge = document.createElement('span');
         badge.className = 'eroscripts-panel__tag';
@@ -318,7 +326,7 @@ export class EroScriptsPanel {
 
       content.appendChild(title);
       content.appendChild(meta);
-      if (topic.tags && topic.tags.length > 0) content.appendChild(tags);
+      if (tags.childElementCount > 0) content.appendChild(tags);
       content.appendChild(actions);
       card.appendChild(content);
       container.appendChild(card);
@@ -329,46 +337,70 @@ export class EroScriptsPanel {
     btn.disabled = true;
     btn.textContent = t('eroscripts.fetching');
 
-    const { attachments, error, authExpired } = await window.funsync.eroscriptsTopic(topic.id);
+    const { attachments, error, authExpired, linked = [], external = [], paid = false } =
+      await window.funsync.eroscriptsTopic(topic.id);
 
     // Same self-correction as search: a dead session shouldn't survive
     // until the next app restart.
     if (authExpired) await this.handleSessionExpired();
 
-    if (error || attachments.length === 0) {
+    if (error || attachments.length + linked.length === 0) {
       btn.disabled = false;
       btn.textContent = t('eroscripts.getScript');
-      showToast(error || t('eroscripts.noAttachments'), error ? 'error' : 'warn');
+      showToast(error || noFilesMessage({ paid, external }), error ? 'error' : 'warn', 6000);
       return;
     }
 
-    if (attachments.length === 1) {
+    // Hosts other than the pixeldrain files listed by name below.
+    const hosts = externalHostNames(external).filter((h) => !(h === 'pixeldrain' && linked.length > 0));
+    if (attachments.length === 1 && linked.length === 0 && hosts.length === 0) {
       await this._downloadAttachment(attachments[0], btn, topic);
       return;
     }
 
-    // Multiple attachments — show picker
+    // Several files, or links we can't download — show the picker so those
+    // are visible too.
     btn.disabled = false;
     btn.textContent = t('eroscripts.getScript');
-    this._showAttachmentPicker(attachments, btn.parentElement, topic);
+    this._showAttachmentPicker(attachments, btn.parentElement, topic, { linked, hosts });
   }
 
-  _showAttachmentPicker(attachments, parentEl, topic) {
+  _showAttachmentPicker(attachments, parentEl, topic, { linked = [], hosts = [] } = {}) {
     parentEl.querySelector('.eroscripts-panel__attachment-list')?.remove();
 
     const list = document.createElement('div');
     list.className = 'eroscripts-panel__attachment-list';
 
-    for (const att of attachments) {
+    const addItem = (att, onClick, extra = '') => {
       const item = document.createElement('button');
       item.className = 'eroscripts-panel__attachment-item';
       item.textContent = att.name;
-      item.addEventListener('click', async () => {
-        list.remove();
-        const btn = parentEl.querySelector('.eroscripts-panel__btn');
-        await this._downloadAttachment(att, btn, topic);
-      });
+      item.title = att.name;
+      const source = [attachmentSource(att), extra].filter(Boolean).join(' · ');
+      if (source) {
+        const sub = document.createElement('span');
+        sub.className = 'eroscripts-panel__attachment-source';
+        sub.textContent = source;
+        item.appendChild(sub);
+      }
+      item.addEventListener('click', () => { list.remove(); onClick(); });
       list.appendChild(item);
+    };
+
+    for (const att of attachments) {
+      addItem(att, () => this._downloadAttachment(att, parentEl.querySelector('.eroscripts-panel__btn'), topic));
+    }
+    // pixeldrain won't serve files to apps on a free account, so these open
+    // the file's page; the user downloads there.
+    for (const att of linked) {
+      addItem(att, () => window.funsync.openExternal(att.url), t('eroscripts.opensInBrowser'));
+    }
+
+    if (hosts.length > 0) {
+      const note = document.createElement('div');
+      note.className = 'eroscripts-panel__attachment-note';
+      note.textContent = t('eroscripts.externalAlso', { hosts: hosts.join(', ') });
+      list.appendChild(note);
     }
 
     parentEl.appendChild(list);

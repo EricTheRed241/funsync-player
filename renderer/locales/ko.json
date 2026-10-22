@@ -1281,6 +1281,12 @@
     "conflictReplace": "교체",
     "conflictKeepBoth": "둘 다 유지",
     "zipUnsupported": "{name}은(는) ZIP 압축 파일입니다 — FunSync는 아직 ZIP 다운로드를 열 수 없습니다",
+    "paidBadge": "유료",
+    "paidNoFiles": "유료 스크립트입니다 — 게시물의 제작자 링크에서 받으세요 (보기)",
+    "externalOnly": "이 게시물의 스크립트는 {hosts}에 있습니다 — 게시물을 열어 (보기) 다운로드하세요",
+    "externalAlso": "{hosts}에도 링크가 있습니다 — 게시물을 열어 받으세요",
+    "postNumber": "게시물 {n}",
+    "opensInBrowser": "브라우저에서 열립니다",
     "inline": {
       "title": "EroScripts에서 스크립트 찾기",
       "axesLine": "메인 + {count}개 축 ({list})",

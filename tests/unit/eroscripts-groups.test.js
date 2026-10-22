@@ -180,3 +180,14 @@ describe('buildMultiAssociation', () => {
     expect(buildMultiAssociation(groups[0], () => '')).toBeNull();
   });
 });
+
+describe('groupAttachments across replies', () => {
+  it("keeps another poster's same-named script as its own set, with its provenance", () => {
+    const { groups } = groupAttachments([
+      { name: 'Scene.funscript', url: 'a', username: 'author', postNumber: 1, byAuthor: true },
+      { name: 'Scene.roll.funscript', url: 'b', username: 'author', postNumber: 4, byAuthor: true },
+      { name: 'Scene.funscript', url: 'c', username: 'fan', postNumber: 9, byAuthor: false },
+    ]);
+    expect(groups.map((g) => [g.main.url, g.main.username, g.axes.length])).toEqual([['a', 'author', 1], ['c', 'fan', 0]]);
+  });
+});

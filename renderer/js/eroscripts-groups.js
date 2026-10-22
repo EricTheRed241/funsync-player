@@ -63,7 +63,9 @@ export function groupAttachments(attachments) {
     const base = getBaseName(name);
     // Case-insensitive key so `Video.funscript` and `Video.Roll.funscript`
     // land together, while the displayed base keeps its original casing.
-    const key = base.toLowerCase();
+    // Keyed per poster too: another user's `Video.funscript` in a reply is
+    // their own script, not a duplicate of the author's.
+    const key = `${base.toLowerCase()}\0${att.username || ''}`;
 
     let group = byBase.get(key);
     if (!group) {
@@ -72,16 +74,17 @@ export function groupAttachments(attachments) {
     }
 
     const axis = parseAxisSuffix(name);
+    // Spread so provenance (post, author, host) rides along to the UI.
     if (axis) {
-      group.axes.push({ axis, name, url: att.url });
+      group.axes.push({ ...att, axis, name });
     } else if (!group.main) {
-      group.main = { name, url: att.url };
+      group.main = { ...att, name };
       // The main file is the authority on how the base is spelled.
       group.base = base;
     } else {
       // A second suffix-less file for the same base. Shouldn't normally
       // happen, but dropping it silently would lose a script — surface it.
-      group.extras.push({ name, url: att.url });
+      group.extras.push({ ...att, name });
     }
   }
 
@@ -110,6 +113,14 @@ export function groupAttachments(attachments) {
  */
 export function axisLabels(group) {
   return (group?.axes || []).map((a) => a.axis.label);
+}
+
+/**
+ * Unique names of the off-forum hosts a post links to but FunSync can't
+ * download from (`getTopicAttachments().external`), e.g. `['MEGA']`.
+ */
+export function externalHostNames(external) {
+  return [...new Set((external || []).map((e) => e?.host).filter(Boolean))];
 }
 
 /**

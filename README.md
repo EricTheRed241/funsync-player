@@ -37,7 +37,8 @@ A local desktop video player with device synchronization for funscript playback.
 ### EroScripts Integration
 - Search and download community funscripts from within the app
 - Login with 2FA support (authenticator app), persistent session
-- Thumbnails and metadata in search results
+- Thumbnails and metadata in search results; Paid Scripts posts are badged
+- Finds scripts across the whole post: the author's replies (updated versions) and other users' versions, labelled by poster; funscripts on pixeldrain are listed and open in the browser, and posts hosted on MEGA, Google Drive, Gofile and similar say so instead of "no scripts"
 - One-click download — scripts auto-renamed, auto-associated, and paired with the current video; axis files keep their axis suffix, and an existing script is never replaced without asking (Replace / Keep both as a variant / Cancel)
 - Auto-match on video load — if no script is found locally, silently searches EroScripts and notifies
 

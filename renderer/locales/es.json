@@ -1281,6 +1281,12 @@
     "conflictReplace": "Reemplazar",
     "conflictKeepBoth": "Conservar ambos",
     "zipUnsupported": "{name} es un archivo ZIP — FunSync aún no puede abrir descargas ZIP",
+    "paidBadge": "De pago",
+    "paidNoFiles": "Script de pago — consíguelo con el enlace del creador en la publicación (Ver)",
+    "externalOnly": "Los scripts de esta publicación están alojados en {hosts} — abre la publicación (Ver) para descargarlos",
+    "externalAlso": "También enlazado en {hosts} — abre la publicación para obtenerlos",
+    "postNumber": "publicación {n}",
+    "opensInBrowser": "se abre en el navegador",
     "inline": {
       "title": "Buscar un script en EroScripts",
       "axesLine": "Principal + {count} ejes ({list})",

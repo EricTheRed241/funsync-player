@@ -6,6 +6,37 @@ const log = require('./logger');
 const BASE_URL = 'https://discuss.eroscripts.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// Subcategory slugs under Scripts. Paid posts link out to the creator's
+// store and carry no attachments; saying so beats "no scripts found".
+const PAID_SLUG = 'paid-scripts';
+
+// Replies are scanned too (updated versions, other users' variants), but a
+// 1000-reply thread is not worth 50 requests. The topic endpoint returns the
+// first 20; the rest come in batches of 20.
+const MAX_POSTS = 100;
+const POST_BATCH = 20;
+// pixeldrain's API lists files freely but refuses programmatic downloads
+// for free accounts ("hotlinking … requires a paid subscription", captcha),
+// so its scripts are listed by name and opened in the browser instead.
+const MAX_PIXELDRAIN_LOOKUPS = 10;
+
+// Downloads go only to the forum itself, over https: the session cookie
+// rides on every download request.
+const DOWNLOAD_HOSTS = new Set([new URL(BASE_URL).hostname]);
+
+const SCRIPT_FILE_RE = /\.(funscript|zip)$/i;
+const PIXELDRAIN_RE = /https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/(u|l)\/([A-Za-z0-9]+)/gi;
+
+// Off-forum file hosts FunSync cannot fetch from. Named in the UI so a post
+// whose scripts live there reads as "hosted on MEGA", not "no scripts".
+const EXTERNAL_HOSTS = [
+  ['mega.nz', 'MEGA'], ['mega.io', 'MEGA'], ['drive.google.com', 'Google Drive'],
+  ['mediafire.com', 'MediaFire'], ['gofile.io', 'Gofile'], ['dropbox.com', 'Dropbox'],
+  ['files.fm', 'Files.fm'], ['workupload.com', 'Workupload'], ['1drv.ms', 'OneDrive'],
+  ['onedrive.live.com', 'OneDrive'], ['terabox.com', 'TeraBox'],
+  ['pixeldrain.com', 'pixeldrain'], ['pixeldrain.net', 'pixeldrain'],
+];
+
 // Diagnostic logging — routes through electron-log so entries land in the
 // rotating main log under %APPDATA%/funsync-player/logs/ (5MB cap) instead
 // of a hand-rolled file in the install dir that silently fails to write on
@@ -75,6 +106,32 @@ function pickThumbnail(thumbnails) {
     .filter(x => Number(x.width) >= MIN_THUMB_WIDTH)
     .sort((a, b) => Number(a.width) - Number(b.width));
   return (big[0] || usable[0]).url;
+}
+
+/**
+ * Script-relevant links in one post's `cooked` HTML: forum attachments
+ * (`.funscript` / `.zip`), `upload://` short links, pixeldrain file and
+ * list links, and links to hosts FunSync can't fetch from.
+ */
+function parsePostLinks(html) {
+  const attachments = [];
+  const shortUrls = [];
+  const pixeldrain = [];
+  const external = [];
+  for (const m of html.matchAll(/<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi)) {
+    const name = decodeEntities(m[2].trim());
+    if (SCRIPT_FILE_RE.test(name)) attachments.push({ name, href: decodeEntities(m[1]) });
+  }
+  for (const m of html.matchAll(/href="(upload:\/\/[^"]+)"/gi)) shortUrls.push(m[1]);
+  for (const m of html.matchAll(PIXELDRAIN_RE)) pixeldrain.push({ kind: m[1].toLowerCase(), id: m[2] });
+  for (const m of html.matchAll(/href="(https?:\/\/[^"]+)"/gi)) {
+    const url = decodeEntities(m[1]);
+    let host;
+    try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { continue; }
+    const known = EXTERNAL_HOSTS.find(([h]) => host === h || host.endsWith(`.${h}`));
+    if (known) external.push({ host: known[1], url });
+  }
+  return { attachments, shortUrls, pixeldrain, external };
 }
 
 class EroScriptsAPI {
@@ -230,6 +287,7 @@ class EroScriptsAPI {
 
           return {
             id: t.id, title: t.title, slug: t.slug,
+            categoryId: t.category_id ?? null,
             createdAt: t.created_at,
             // Like count lives on the POST in a search response, not the
             // topic — `t.like_count` doesn't exist there, so this read 0 for
@@ -280,6 +338,7 @@ class EroScriptsAPI {
 
           topics.push({
             id: post.topic_id,
+            categoryId: rawTopic?.category_id ?? null,
             title: rawTopic?.title || post.name || post.topic?.title || `Topic ${post.topic_id}`,
             slug: rawTopic?.slug || null,
             createdAt: post.created_at,
@@ -294,6 +353,11 @@ class EroScriptsAPI {
         }
       }
 
+      const slugs = await this._categorySlugs();
+      for (const topic of topics) {
+        topic.category = slugs.get(topic.categoryId) || null;
+        topic.paid = topic.category === PAID_SLUG;
+      }
       return { results: topics };
     } catch (err) {
       log.error('[EroScripts] Search error:', err.message);
@@ -302,7 +366,15 @@ class EroScriptsAPI {
   }
 
   /**
-   * Get attachments from a topic's first post.
+   * Script files in a topic: attachments on every post (the author's
+   * first, in post order, then other users'). Funscripts the posts link on
+   * pixeldrain come back in `linked` (name + page URL, opened in the
+   * browser: pixeldrain refuses programmatic downloads). Links to other
+   * hosts FunSync can't fetch from come back in `external` so the UI can
+   * name them; `paid` marks the Paid Scripts category, whose posts link to
+   * a store instead of attaching files.
+   *
+   * Each attachment / linked entry: {name, url, host, postNumber, username, byAuthor}.
    */
   async getTopicAttachments(topicId) {
     try {
@@ -322,59 +394,136 @@ class EroScriptsAPI {
         return { attachments: [], error: `Failed to load topic (${resp.status})` };
       }
 
-      const firstPost = data.post_stream?.posts?.[0];
-      if (!firstPost) {
+      const posts = await this._allPosts(topicId, data.post_stream);
+      if (posts.length === 0) {
         return { attachments: [], error: 'No posts found' };
       }
 
+      const author = posts[0].username;
       const attachments = [];
-      const html = firstPost.cooked || '';
-
-      // Match Discourse attachment links
-      const attachRegex = /<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-      let match;
-      while ((match = attachRegex.exec(html)) !== null) {
-        const href = match[1];
-        const name = decodeEntities(match[2].trim());
-        if (name.endsWith('.funscript') || name.endsWith('.zip')) {
-          const url = href.startsWith('http') ? href : `${BASE_URL}${href}`;
-          attachments.push({ name, url });
-        }
-      }
-
-      // Also check for upload:// short URLs
-      const shortUrlRegex = /href="(upload:\/\/[^"]+)"/gi;
+      const seenUrls = new Set();
+      const add = (a) => {
+        if (!a.url || seenUrls.has(a.url)) return;
+        seenUrls.add(a.url);
+        attachments.push(a);
+      };
       const shortUrls = [];
-      while ((match = shortUrlRegex.exec(html)) !== null) {
-        shortUrls.push(match[1]);
+      const pixeldrain = [];
+      const external = new Map();
+
+      for (const post of posts) {
+        const from = { postNumber: post.post_number, username: post.username, byAuthor: post.username === author };
+        const links = parsePostLinks(post.cooked || '');
+        for (const a of links.attachments) {
+          add({ name: a.name, url: a.href.startsWith('http') ? a.href : `${BASE_URL}${a.href}`, host: 'eroscripts', ...from });
+        }
+        for (const short of links.shortUrls) shortUrls.push({ short, from });
+        for (const p of links.pixeldrain) pixeldrain.push({ ...p, from });
+        for (const e of links.external) if (!external.has(e.url)) external.set(e.url, e);
       }
 
-      if (shortUrls.length > 0) {
-        try {
-          const lookupResp = await fetch(`${BASE_URL}/uploads/lookup-urls`, {
-            method: 'POST',
-            headers: { ...this._headers(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ short_urls: shortUrls }),
-          });
-          if (lookupResp.ok) {
-            const resolved = await lookupResp.json();
-            for (const item of resolved) {
-              if (item.url && (item.url.endsWith('.funscript') || item.url.endsWith('.zip'))) {
-                attachments.push({
-                  name: item.url.split('/').pop(),
-                  url: item.url.startsWith('http') ? item.url : `${BASE_URL}${item.url}`,
-                });
-              }
-            }
-          }
-        } catch { /* ignore */ }
-      }
+      await this._resolveShortUrls(shortUrls, add);
+      const linked = await this._resolvePixeldrain(pixeldrain);
 
-      return { attachments };
+      // Stable sort: the author's files first, each side in post order.
+      const authorFirst = (a, b) => (Number(b.byAuthor) - Number(a.byAuthor)) || (a.postNumber - b.postNumber);
+      attachments.sort(authorFirst);
+      linked.sort(authorFirst);
+
+      const slugs = await this._categorySlugs();
+      return {
+        attachments,
+        linked,
+        external: [...external.values()],
+        paid: slugs.get(data.category_id) === PAID_SLUG,
+      };
     } catch (err) {
       log.error('[EroScripts] Topic error:', err.message);
       return { attachments: [], error: err.message };
     }
+  }
+
+  /** First page from the topic payload, then up to MAX_POSTS in batches. */
+  async _allPosts(topicId, stream) {
+    const posts = [...(stream?.posts || [])];
+    const have = new Set(posts.map((p) => p.id));
+    const missing = (stream?.stream || []).filter((id) => !have.has(id)).slice(0, Math.max(0, MAX_POSTS - posts.length));
+    for (let i = 0; i < missing.length; i += POST_BATCH) {
+      const ids = missing.slice(i, i + POST_BATCH).map((id) => `post_ids[]=${id}`).join('&');
+      try {
+        const resp = await fetch(`${BASE_URL}/t/${topicId}/posts.json?${ids}`, { headers: this._headers() });
+        const page = resp.ok ? await this._safeJson(resp) : null;
+        posts.push(...(page?.post_stream?.posts || []));
+      } catch { /* a missing batch only hides replies */ }
+    }
+    return posts.sort((a, b) => a.post_number - b.post_number);
+  }
+
+  async _resolveShortUrls(shortUrls, add) {
+    if (shortUrls.length === 0) return;
+    try {
+      const resp = await fetch(`${BASE_URL}/uploads/lookup-urls`, {
+        method: 'POST',
+        headers: { ...this._headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ short_urls: shortUrls.map((s) => s.short) }),
+      });
+      if (!resp.ok) return;
+      const resolved = await resp.json();
+      for (const item of resolved) {
+        if (!item.url || !SCRIPT_FILE_RE.test(item.url)) continue;
+        const from = shortUrls.find((s) => s.short === item.short_url)?.from || {};
+        add({
+          name: item.url.split('/').pop(),
+          url: item.url.startsWith('http') ? item.url : `${BASE_URL}${item.url}`,
+          host: 'eroscripts',
+          ...from,
+        });
+      }
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Funscripts behind pixeldrain file (`/u/`) and list (`/l/`) links, via
+   * pixeldrain's public listing API, as `{name, url}` where `url` is the
+   * file's pixeldrain page. No forum cookie goes to pixeldrain.
+   */
+  async _resolvePixeldrain(links) {
+    const found = [];
+    const seen = new Set();
+    const unique = links.filter((l) => !seen.has(`${l.kind}:${l.id}`) && seen.add(`${l.kind}:${l.id}`));
+    for (const link of unique.slice(0, MAX_PIXELDRAIN_LOOKUPS)) {
+      try {
+        const api = link.kind === 'l'
+          ? `https://pixeldrain.com/api/list/${link.id}`
+          : `https://pixeldrain.com/api/file/${link.id}/info`;
+        const resp = await fetch(api, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) continue;
+        const info = await resp.json();
+        const files = link.kind === 'l' ? (info.files || []) : [info];
+        for (const f of files) {
+          if (!f?.id || typeof f.name !== 'string' || !/\.funscript$/i.test(f.name)) continue;
+          if (found.some((x) => x.id === f.id)) continue;
+          found.push({ id: f.id, name: f.name, url: `https://pixeldrain.com/u/${f.id}`, host: 'pixeldrain', ...link.from });
+        }
+      } catch { /* host down or link dead — the post's other files still show */ }
+    }
+    return found.map(({ id, ...rest }) => rest);
+  }
+
+  /** Category id → slug, fetched once per session. Empty map on failure. */
+  async _categorySlugs() {
+    if (this._categories) return this._categories;
+    const map = new Map();
+    try {
+      const resp = await fetch(`${BASE_URL}/categories.json?include_subcategories=true`, { headers: this._headers() });
+      const data = resp.ok ? await this._safeJson(resp) : null;
+      for (const c of data?.category_list?.categories || []) {
+        map.set(c.id, c.slug);
+        for (const sub of c.subcategory_list || []) map.set(sub.id, sub.slug);
+      }
+      if (map.size > 0) this._categories = map;
+    } catch { /* retried on the next call */ }
+    return map;
   }
 
   /**
@@ -405,12 +554,22 @@ class EroScriptsAPI {
   /**
    * Download a file from a URL.
    *
-   * Refuses to replace an existing file unless `overwrite` is set, and
-   * reports that as `{exists: true}` so the caller can ask the user. The
-   * check is the open itself (`wx`), so nothing can slip in between.
+   * Only https links on the forum itself are fetched, since the session
+   * cookie rides along. Refuses to replace an existing file unless
+   * `overwrite` is set, and reports that as `{exists: true}` so the caller
+   * can ask the user. The check is the open itself (`wx`), so nothing can
+   * slip in between.
    */
   async downloadFile(url, savePath, { overwrite = false } = {}) {
     const fs = require('fs');
+    let host;
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'https:') host = u.hostname;
+    } catch { /* rejected below */ }
+    if (!host || !DOWNLOAD_HOSTS.has(host)) {
+      return { success: false, error: 'Unsupported download link' };
+    }
     try {
       const resp = await fetch(url, { headers: this._headers() });
       if (!resp.ok) {
@@ -459,4 +618,4 @@ class EroScriptsAPI {
 
 }
 
-module.exports = { EroScriptsAPI };
+module.exports = { EroScriptsAPI, parsePostLinks };

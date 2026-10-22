@@ -1281,6 +1281,12 @@
     "conflictReplace": "替换",
     "conflictKeepBoth": "两者都保留",
     "zipUnsupported": "{name} 是 ZIP 压缩包 — FunSync 暂时无法打开 ZIP 下载",
+    "paidBadge": "付费",
+    "paidNoFiles": "付费脚本 — 请通过帖子中作者的链接获取（查看）",
+    "externalOnly": "此帖子的脚本托管在 {hosts} — 打开帖子（查看）下载",
+    "externalAlso": "也链接到了 {hosts} — 打开帖子获取",
+    "postNumber": "第 {n} 楼",
+    "opensInBrowser": "在浏览器中打开",
     "inline": {
       "title": "在 EroScripts 上查找脚本",
       "axesLine": "主脚本 + {count} 个轴 ({list})",
