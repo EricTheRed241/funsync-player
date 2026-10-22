@@ -1,4 +1,4 @@
-"""Funscript parsing and CSV conversion service."""
+"""Funscript parsing, CSV conversion, and multi-axis companion naming."""
 
 import json
 from typing import Any
@@ -63,3 +63,63 @@ def funscript_to_csv(actions: list[dict]) -> str:
         pos = max(0, min(100, int(action["pos"])))
         lines.append(f"{at},{pos}")
     return "\n".join(lines)
+
+
+# --- Multi-axis companion naming ----------------------------------------
+# Mirrors renderer/js/multi-axis.js (AXIS_DEFINITIONS, parseAxisSuffix,
+# getBaseName): `Title.twist.funscript` is a companion axis of
+# `Title.funscript`; `Title.generated.twist.funscript` is one the app
+# generated rather than one a scripter made. Suffixes are case-insensitive
+# and include each axis's aliases.
+
+AXIS_SUFFIXES = frozenset({
+    'surge', 'forward', 'l1',
+    'sway', 'left', 'l2',
+    'twist', 'yaw', 'r0',
+    'roll', 'r1',
+    'pitch', 'r2',
+    'vib', 'vibrate', 'v0',
+    'pump', 'v1',
+    'valve', 'a0',
+    'suck', 'suction', 'a1',
+    'lube', 'a2',
+})
+
+_FUNSCRIPT_EXT = '.funscript'
+_GENERATED_MARK = '.generated'
+
+
+def _split_axis_name(filename: str):
+    """`(base, axis, generated)` for a funscript filename, else None.
+    `axis` is the lowercase suffix, or None for a main (single-axis) script."""
+    if not filename.lower().endswith(_FUNSCRIPT_EXT):
+        return None
+    stem = filename[:-len(_FUNSCRIPT_EXT)]
+    base, dot, suffix = stem.rpartition('.')
+    if not dot or suffix.lower() not in AXIS_SUFFIXES:
+        return stem, None, False
+    generated = base.lower().endswith(_GENERATED_MARK)
+    if generated:
+        base = base[:-len(_GENERATED_MARK)]
+    return base, suffix.lower(), generated
+
+
+def has_handmade_axes(script_path: str, filenames) -> bool:
+    """True when `filenames` (one folder's listing) holds at least one
+    companion axis file of the main script `script_path` that is NOT a
+    `*.generated.<axis>.funscript`. macOS `._` AppleDouble files are ignored.
+    """
+    main = _split_axis_name(script_path.replace('\\', '/').rsplit('/', 1)[-1])
+    if main is None:
+        return False
+    main_base = main[0].lower()
+    for name in filenames:
+        if name.startswith('._'):
+            continue
+        parts = _split_axis_name(name)
+        if parts is None:
+            continue
+        base, axis, generated = parts
+        if axis and not generated and base.lower() == main_base:
+            return True
+    return False
