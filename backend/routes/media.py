@@ -4,12 +4,17 @@ Supports HTTP Range requests for seeking in large VR video files (5-20GB).
 Also serves funscript files and generates/caches thumbnails.
 """
 
+import asyncio
+import collections
+import concurrent.futures
 import hashlib
+import logging
 import mimetypes
 import os
 import secrets
 import stat
 import subprocess
+import threading
 from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -17,6 +22,7 @@ from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
+log = logging.getLogger("funsync.media")
 
 # Video ID → file path mapping (populated by scan)
 _video_registry: dict[str, dict] = {}
@@ -104,8 +110,8 @@ def register_videos(videos: list[dict]):
 
 
 # --- Background duration probe ------------------------------------------
-# Same concurrency-limited pattern as the thumbnail generator further
-# down this file. We don't want 900 simultaneous ffprobe processes on a
+# Fixed worker pool, like the thumbnail warm-up further down this file.
+# We don't want 900 simultaneous ffprobe processes on a
 # big library, but leaving durations at 0 until the desktop gets around
 # to scrolling every card is too slow for the phone.
 
@@ -666,6 +672,13 @@ def _apply_registration(data: dict):
     if data.get("customThumbsDir"):
         _custom_thumbs_dir = str(data["customThumbsDir"])
 
+    # Last, once the cache dir and custom-thumb map are in place: make sure
+    # every registered video gets its thumbnail without anyone browsing to
+    # it first. Only when something that decides the target file changed —
+    # grouping-only pushes leave the warm-up alone.
+    if "videos" in data or thumb_dir or "customThumbnails" in data:
+        _queue_thumb_warmup()
+
 
 # --- Video Streaming ---
 
@@ -905,13 +918,43 @@ def _custom_thumb_for(filepath: str):
     return entry if isinstance(entry, dict) else None
 
 
+def _thumb_target(video_id: str, filepath: str):
+    """Decide what `/thumb/{video_id}` serves for this video.
+
+    Returns `(image_path, None, None)` for a valid uploaded poster, else
+    `(None, thumb_path, pin_pct)` for the generated JPEG — `<id>.jpg` for the
+    auto thumb, `<id>_p####.jpg` for a pinned frame (pin-keyed so a re-pin
+    regenerates and busts the client's cached tile)."""
+    custom = _custom_thumb_for(filepath)
+
+    if custom and custom.get("type") == "image" and custom.get("imagePath") and _custom_thumbs_dir:
+        img = os.path.abspath(str(custom["imagePath"]))
+        root = os.path.abspath(_custom_thumbs_dir)
+        # Untrusted path from a pushed payload — only serve from inside
+        # the registered custom-thumbs dir; anything else falls through
+        # to the normal auto-thumb path.
+        if img.startswith(root + os.sep) and os.path.isfile(img):
+            return img, None, None
+
+    pin_pct = None
+    if custom and isinstance(custom.get("seekPct"), (int, float)):
+        pin_pct = min(0.999, max(0.0, float(custom["seekPct"])))
+
+    thumb_name = f"{video_id}.jpg" if pin_pct is None else f"{video_id}_p{int(pin_pct * 1000):04d}.jpg"
+    return None, os.path.join(_thumb_cache_dir, thumb_name), pin_pct
+
+
 @router.get("/thumb/{video_id}")
 async def get_thumbnail(video_id: str):
     """Serve a thumbnail for a video (generated via ffmpeg, cached).
 
-    Returns cached thumbnail immediately if available. If not cached,
-    kicks off background generation and returns a 1x1 transparent placeholder
-    so the request doesn't block (VR players will re-request on next load).
+    A cached thumbnail is served immediately. On a cache miss the request
+    starts (or joins an in-flight) generation and waits for the real JPEG.
+    It never answers with a placeholder: HereSphere / DeoVR cache whatever
+    image they get and never re-request, so a stand-in image is a tile that
+    stays blank for good. If generation fails or overruns `THUMB_WAIT_SEC`
+    the answer is a 503 with `Cache-Control: no-store`, so the client keeps
+    nothing and asks again next time.
 
     Custom thumbnails (F7): an uploaded poster image is served directly
     (path-validated inside the desktop's custom-thumbs dir); a pinned frame
@@ -929,93 +972,212 @@ async def get_thumbnail(video_id: str):
     if not _thumb_cache_dir:
         raise HTTPException(status_code=500, detail="Thumbnail cache not configured")
 
-    custom = _custom_thumb_for(filepath)
+    image_path, thumb_path, pin_pct = _thumb_target(video_id, filepath)
 
     # Uploaded poster image — serve the cached file itself.
-    if custom and custom.get("type") == "image" and custom.get("imagePath") and _custom_thumbs_dir:
-        img = os.path.abspath(str(custom["imagePath"]))
-        root = os.path.abspath(_custom_thumbs_dir)
-        # Untrusted path from a pushed payload — only serve from inside
-        # the registered custom-thumbs dir; anything else falls through
-        # to the normal auto-thumb path.
-        if img.startswith(root + os.sep) and os.path.isfile(img):
-            mime = _IMAGE_MIME.get(os.path.splitext(img)[1].lower(), "image/jpeg")
-            return FileResponse(img, media_type=mime,
-                                headers={"Access-Control-Allow-Origin": "*",
-                                         "Cache-Control": "public, max-age=3600"})
-
-    # Pinned frame — pin-keyed cache name so a re-pin regenerates.
-    pin_pct = None
-    if custom and isinstance(custom.get("seekPct"), (int, float)):
-        pin_pct = min(0.999, max(0.0, float(custom["seekPct"])))
-
-    thumb_name = f"{video_id}.jpg" if pin_pct is None else f"{video_id}_p{int(pin_pct * 1000):04d}.jpg"
-    thumb_path = os.path.join(_thumb_cache_dir, thumb_name)
-
-    # Return cached thumbnail if exists
-    if os.path.isfile(thumb_path):
-        return FileResponse(thumb_path, media_type="image/jpeg",
+    if image_path:
+        mime = _IMAGE_MIME.get(os.path.splitext(image_path)[1].lower(), "image/jpeg")
+        return FileResponse(image_path, media_type=mime,
                             headers={"Access-Control-Allow-Origin": "*",
-                                     "Cache-Control": "public, max-age=86400"})
+                                     "Cache-Control": "public, max-age=3600"})
 
-    # Not cached — generate in background, return placeholder now
-    _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=pin_pct)
-
-    # 1x1 transparent PNG placeholder (67 bytes)
-    import base64
-    PLACEHOLDER = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAB"
-        "Nl7BcQAAAABJRU5ErkJggg=="
-    )
-    from starlette.responses import Response
-    return Response(content=PLACEHOLDER, media_type="image/png",
-                    headers={"Access-Control-Allow-Origin": "*",
-                             "Cache-Control": "no-cache"})
-
-
-# Background thumbnail generation — limits concurrency to avoid thrashing I/O
-_thumb_generating = set()
-_thumb_semaphore = None
-
-
-def _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=None):
-    """Generate thumbnail in background thread (max 2 concurrent).
-    `seek_pct` set = a user-pinned frame (F7) → frame-accurate `exact`
-    generation at that timestamp; None = the default auto-thumb path."""
-    global _thumb_semaphore
-    if video_id in _thumb_generating:
-        return
-    if _thumb_semaphore is None:
-        import threading
-        _thumb_semaphore = threading.Semaphore(2)
-
-    _thumb_generating.add(video_id)
-
-    import threading
-    def _generate():
-        _thumb_semaphore.acquire()
+    if not os.path.isfile(thumb_path):
+        # Not cached — generate now (or join the in-flight job) and wait.
+        # `shield` keeps a timed-out waiter from cancelling the shared job:
+        # it finishes in the background and the next request is a cache hit.
+        future = _request_thumb(video_id, filepath, thumb_path, pin_pct)
         try:
-            # Reuse the desktop library's thumbnail generator instead of a
-            # bespoke ffmpeg command. It seeks past studio-ident / fade-in
-            # windows (max(10s, 10%)), uses the fast `-skip_frame nokey`
-            # decode, and caches on disk by content hash. The old inline
-            # command here used `-ss 25%` (ffmpeg can't parse a percentage
-            # for -ss) with a `-ss 5` fallback that landed squarely in the
-            # black intro of most videos → black thumbnails on the phone.
-            from services.ffmpeg import generate_single_thumbnail
-            import shutil
-            result = (
-                generate_single_thumbnail(filepath, seek_pct=seek_pct, width=320, exact=True)
-                if seek_pct is not None
-                else generate_single_thumbnail(filepath, seek_pct=0.1, width=320)
-            )
-            src = result.get("path") if result else None
-            if src and os.path.isfile(src) and os.path.abspath(src) != os.path.abspath(thumb_path):
-                shutil.copyfile(src, thumb_path)
+            await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), THUMB_WAIT_SEC)
+        except asyncio.TimeoutError:
+            log.warning("thumbnail not ready after %.0fs: %s", THUMB_WAIT_SEC, filepath)
+            _thumb_unavailable("Thumbnail generation timed out")
         except Exception:
-            pass
-        finally:
-            _thumb_generating.discard(video_id)
-            _thumb_semaphore.release()
+            # Already logged with the path + error by the worker.
+            _thumb_unavailable("Thumbnail generation failed")
+        if not os.path.isfile(thumb_path):
+            _thumb_unavailable("Thumbnail generation failed")
 
-    threading.Thread(target=_generate, daemon=True).start()
+    return FileResponse(thumb_path, media_type="image/jpeg",
+                        headers={"Access-Control-Allow-Origin": "*",
+                                 "Cache-Control": "public, max-age=86400"})
+
+
+def _thumb_unavailable(detail: str):
+    """Non-200 + no-store: the client must not keep a blank tile."""
+    raise HTTPException(
+        status_code=503,
+        detail=detail,
+        headers={"Access-Control-Allow-Origin": "*",
+                 "Cache-Control": "no-store",
+                 "Retry-After": "5"},
+    )
+
+
+# --- Thumbnail generation jobs -------------------------------------------
+#
+# One job per target file (`thumb_path`), de-duplicated across on-demand
+# requests and the registration warm-up: whoever asks second joins the
+# first job's future instead of starting another ffmpeg.
+#
+# Two separate lanes so a browsing client never queues behind a library-
+# wide warm-up:
+#   * on-demand — `THUMB_ON_DEMAND_WORKERS` pool threads, fed by /thumb
+#     requests. A request for a job still waiting in the warm-up queue
+#     claims it and runs it here right away.
+#   * warm-up — one background thread draining a FIFO of every registered
+#     video without a cached thumb. One worker keeps the external drive's
+#     I/O (and the CPU) mostly free for playback.
+# A job runs exactly once: `_run_thumb_job` claims it under the lock, so
+# the losing lane's call is a no-op.
+
+THUMB_ON_DEMAND_WORKERS = 3
+# How long a /thumb request waits for generation. Covers ffmpeg's own
+# 25 s budget (services.ffmpeg.THUMBNAIL_TIMEOUT_SEC) plus the ffprobe and
+# a spun-down external drive.
+THUMB_WAIT_SEC = 30.0
+
+
+class _ThumbJob:
+    __slots__ = ("video_id", "filepath", "thumb_path", "seek_pct", "future", "claimed")
+
+    def __init__(self, video_id, filepath, thumb_path, seek_pct):
+        self.video_id = video_id
+        self.filepath = filepath
+        self.thumb_path = thumb_path
+        self.seek_pct = seek_pct
+        self.future: concurrent.futures.Future = concurrent.futures.Future()
+        self.claimed = False
+
+
+_thumb_jobs: dict[str, _ThumbJob] = {}   # thumb_path → queued or running job
+_thumb_jobs_lock = threading.Lock()
+_thumb_executor: concurrent.futures.ThreadPoolExecutor | None = None
+_warmup_queue: collections.deque = collections.deque()
+_warmup_running = False
+
+
+def _get_or_create_job(video_id, filepath, thumb_path, seek_pct):
+    """Return `(job, created)`. Caller must hold `_thumb_jobs_lock`."""
+    job = _thumb_jobs.get(thumb_path)
+    if job is not None:
+        return job, False
+    job = _ThumbJob(video_id, filepath, thumb_path, seek_pct)
+    _thumb_jobs[thumb_path] = job
+    return job, True
+
+
+def _request_thumb(video_id, filepath, thumb_path, seek_pct=None) -> concurrent.futures.Future:
+    """On-demand lane: start or join the job for `thumb_path`; returns its
+    future (result = thumb_path, or the generation exception)."""
+    global _thumb_executor
+    with _thumb_jobs_lock:
+        job, _ = _get_or_create_job(video_id, filepath, thumb_path, seek_pct)
+        if not job.claimed:
+            # New, or still waiting in the warm-up queue — run it now on
+            # the on-demand lane rather than behind the warm-up backlog.
+            if _thumb_executor is None:
+                _thumb_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=THUMB_ON_DEMAND_WORKERS, thread_name_prefix="thumb")
+            _thumb_executor.submit(_run_thumb_job, job)
+        return job.future
+
+
+def _run_thumb_job(job: _ThumbJob):
+    """Generate one thumbnail. Runs at most once per job; resolves its future."""
+    with _thumb_jobs_lock:
+        if job.claimed:
+            return
+        job.claimed = True
+    try:
+        _generate_thumb(job.filepath, job.thumb_path, job.seek_pct)
+    except Exception as e:
+        log.warning("thumbnail generation failed for %s: %s", job.filepath, e)
+        job.future.set_exception(e)
+    else:
+        job.future.set_result(job.thumb_path)
+    finally:
+        with _thumb_jobs_lock:
+            if _thumb_jobs.get(job.thumb_path) is job:
+                del _thumb_jobs[job.thumb_path]
+
+
+def _generate_thumb(filepath: str, thumb_path: str, seek_pct):
+    """Produce `thumb_path` for `filepath`, or raise.
+
+    Reuses the desktop library's thumbnail generator instead of a bespoke
+    ffmpeg command. It seeks past studio-ident / fade-in windows
+    (max(10s, 10%)), uses the fast `-skip_frame nokey` decode, and caches on
+    disk by content hash. `seek_pct` set = a user-pinned frame (F7) →
+    frame-accurate `exact` generation at that timestamp.
+
+    The copy lands under a temp name and is renamed into place, so a
+    concurrent cache-hit request never serves a half-written JPEG."""
+    from services.ffmpeg import generate_single_thumbnail
+    import shutil
+
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"Video not found: {filepath}")
+    result = (
+        generate_single_thumbnail(filepath, seek_pct=seek_pct, width=320, exact=True)
+        if seek_pct is not None
+        else generate_single_thumbnail(filepath, seek_pct=0.1, width=320)
+    )
+    src = result.get("path") if result else None
+    if not src or not os.path.isfile(src) or os.path.getsize(src) == 0:
+        raise RuntimeError(f"generator produced no image ({src!r})")
+    if os.path.abspath(src) == os.path.abspath(thumb_path):
+        return
+    tmp = f"{thumb_path}.{threading.get_ident()}.tmp"
+    try:
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, thumb_path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def _queue_thumb_warmup() -> int:
+    """Warm-up lane: queue generation for every registered video whose
+    served thumbnail file is missing. Uploaded posters need nothing; pinned
+    frames warm their pin-keyed file. Videos already queued or running are
+    skipped. Returns the number of jobs newly queued."""
+    global _warmup_running
+    if not _thumb_cache_dir:
+        return 0
+    registry = _video_registry   # one snapshot; registration rebinds atomically
+    targets = []
+    for vid_id, v in registry.items():
+        filepath = v.get("path")
+        if not filepath:
+            continue
+        image_path, thumb_path, pin_pct = _thumb_target(vid_id, filepath)
+        if image_path or os.path.isfile(thumb_path):
+            continue
+        targets.append((vid_id, filepath, thumb_path, pin_pct))
+
+    queued = 0
+    with _thumb_jobs_lock:
+        for vid_id, filepath, thumb_path, pin_pct in targets:
+            job, created = _get_or_create_job(vid_id, filepath, thumb_path, pin_pct)
+            if created:
+                _warmup_queue.append(job)
+                queued += 1
+        if _warmup_queue and not _warmup_running:
+            _warmup_running = True
+            threading.Thread(target=_warmup_worker, name="thumb-warmup", daemon=True).start()
+    if queued:
+        log.info("thumbnail warm-up queued %d video(s)", queued)
+    return queued
+
+
+def _warmup_worker():
+    """Drain the warm-up FIFO; exits when it is empty (restarted on the
+    next queue). Jobs an on-demand request already claimed are no-ops."""
+    global _warmup_running
+    while True:
+        with _thumb_jobs_lock:
+            if not _warmup_queue:
+                _warmup_running = False
+                return
+            job = _warmup_queue.popleft()
+        _run_thumb_job(job)
