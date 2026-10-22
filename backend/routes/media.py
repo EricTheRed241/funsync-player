@@ -679,6 +679,13 @@ def _apply_registration(data: dict):
     if "videos" in data or thumb_dir or "customThumbnails" in data:
         _queue_thumb_warmup()
 
+    # Same for resolutions: an untagged VR master only lands in the headset's
+    # "VR Videos" section once its dimensions are known, and the listings
+    # never probe. Deferred import: vr_api imports this module.
+    if "videos" in data:
+        from routes.vr_api import queue_dims_warmup
+        queue_dims_warmup(_video_registry)
+
 
 # --- Video Streaming ---
 

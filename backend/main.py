@@ -16,6 +16,7 @@ from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
 from routes.locale import router as locale_router, set_user_data_dir
+from services import video_info
 
 app = FastAPI(title="FunSync Backend", version="0.1.0")
 
@@ -108,11 +109,13 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0")
     # Path to electron-conf's userData dir (contains config.json). Used
     # by the web-remote locale endpoint to mirror the desktop's chosen
-    # language. Optional — endpoint falls back to 'en' if not provided.
+    # language, and to persist the VR resolution cache. Optional — without
+    # it the locale falls back to 'en' and the cache is memory-only.
     parser.add_argument("--user-data-dir", type=str, default=None)
     args = parser.parse_args()
 
     if args.user_data_dir:
         set_user_data_dir(args.user_data_dir)
+        video_info.set_cache_dir(args.user_data_dir)
 
     uvicorn.run(app, host=args.host, port=args.port)
