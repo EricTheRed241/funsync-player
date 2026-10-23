@@ -34,6 +34,9 @@ const CANDIDATES_PER_QUERY = 5;
 // A further result must share this much of the query to be checked as a
 // repost once the video is already confirmed.
 const RELATED_MIN_OVERLAP = 0.6;
+// A search result is inspected only when its title has at least half of
+// the query's significant words.
+const CANDIDATE_MIN_OVERLAP = 0.5;
 const MAX_TOPICS_PER_VIDEO = 8;
 const MAX_MAIN_DOWNLOADS_PER_TOPIC = 6;
 const MAX_AXIS_DOWNLOADS_PER_TOPIC = 3;
@@ -161,8 +164,10 @@ export function normalisedBase(fileName, creator = null) {
 }
 
 const STOPWORDS = new Set(['the', 'and', 'with', 'for', 'from', 'pmv', 'hmv', 'part', 'multi', 'axis', 'script', 'scripts', 'funscript', 'version', 'versions']);
+// Significant words: 3+ characters, or 2 with a digit ("2B", "P2").
 function tokens(s) {
-  return new Set(String(s || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3 && !STOPWORDS.has(t)));
+  return new Set(String(s || '').toLowerCase().split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => (t.length >= 3 || (t.length === 2 && /\d/.test(t))) && !STOPWORDS.has(t)));
 }
 
 /** Share of the query's significant words found in a topic title, 0..1. */
@@ -540,7 +545,7 @@ export async function matchVideo(forum, local, { knownTopicIds = [], now = Date.
   for (const id of knownTopicIds) await consider({ id, title: null, url: null }, '(saved link)');
   for (const query of queries) {
     const results = await forum.search(query);
-    const relevant = results.filter((t) => titleOverlap(query, t.title) > 0).slice(0, CANDIDATES_PER_QUERY);
+    const relevant = results.filter((t) => titleOverlap(query, t.title) >= CANDIDATE_MIN_OVERLAP).slice(0, CANDIDATES_PER_QUERY);
     for (const t of relevant) {
       if (primary && titleOverlap(query, t.title) < RELATED_MIN_OVERLAP) continue;
       await consider(t, query);

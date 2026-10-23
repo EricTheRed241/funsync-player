@@ -4,11 +4,10 @@
  * "Test environments" before changing this or adding DOM here.
  */
 // Pins the funscript variant-classification logic in
-// electron/main.js::scan-directory. The classifier is currently inline
-// in main.js (CJS + Electron deps make direct import hostile); this
-// file mirrors the algorithm 1:1 so behavioural regressions surface
-// here. If you change the classifier in main.js, mirror the change
-// here AND verify the assertions still hold.
+// electron/library-scan.js (the scan-directory pairing). This file mirrors
+// the classifier 1:1 so behavioural regressions surface here, and
+// library-scan.test.js runs the real thing on a folder tree. If you change
+// the classifier, mirror the change here AND verify the assertions still hold.
 //
 // Specific regression this pins: dotted filenames like S01.E03.funscript
 // or Title.2024.funscript were being misclassified as variants of a
