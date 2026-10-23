@@ -22,7 +22,8 @@
     "specs:update": "node scripts/device-spec-check.mjs --update",
     "specs:coverage": "node scripts/buttplug-coverage.mjs",
     "vault:check": "node scripts/vault-freshness.mjs",
-    "vault:stamp": "node scripts/vault-freshness.mjs --stamp"
+    "vault:stamp": "node scripts/vault-freshness.mjs --stamp",
+    "eroscripts:preview-check": "node scripts/eroscripts-preview-check.mjs"
   },
   "keywords": [
     "video-player",
