@@ -59,6 +59,7 @@ const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = req
 const { EroScriptsAPI } = require('./eroscripts-api');
 const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames } = require('./custom-thumbs');
 const { createPreviewValidator } = require('./preview-validator');
+const { MATCH_THRESHOLD } = require('./preview-match');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
@@ -1254,7 +1255,7 @@ async function scoreTopicPreviews(videoPath, topicId, extraUrls) {
   if (!found) return { status: 'failed', error: 'Topic unavailable' };
   if (found.candidates.length === 0) return { status: 'no-image', excluded: found.excluded };
   const { scored, best } = await previewValidator().scoreCandidates(videoPath, found.candidates, downloadPreviewCached);
-  return { status: 'ok', scored, excluded: found.excluded, best };
+  return { status: 'ok', scored, excluded: found.excluded, best, threshold: MATCH_THRESHOLD };
 }
 
 // Every candidate with its score, for the user to pick from ("Use

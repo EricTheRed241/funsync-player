@@ -142,6 +142,48 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* "Use EroScripts preview" picker: the post's images with their match
+   distance to the video; matching ones get an accent border. */
+.library__es-candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.library__es-candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  background: var(--surface-overlay);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary, #a0a0a0);
+  cursor: pointer;
+  text-align: left;
+}
+.library__es-candidate img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #000;
+}
+.library__es-candidate--match {
+  border-color: var(--accent);
+  color: var(--text-primary, #e0e0e0);
+}
+.library__es-candidate:hover,
+.library__es-candidate:focus-visible {
+  border-color: var(--text-primary, #e0e0e0);
+  outline: none;
+}
+.library__es-candidate-label {
+  font-size: 12px;
+}
 @media (prefers-reduced-motion: no-preference) {
   .library__refresh-btn--spinning svg {
     animation: library-refresh-spin 800ms linear infinite;

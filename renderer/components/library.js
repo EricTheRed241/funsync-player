@@ -16,7 +16,10 @@ import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-
 import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable, Shuffle, Columns2, ImageDown } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
-import { importPostPreview, fetchPreviewsBatch, planPreviewBatch, PREVIEW_EVENT } from '../js/eroscripts-preview.js';
+import {
+  importPostPreview, fetchPreviewsBatch, planPreviewBatch, usePreviewCandidate, isRevalidatable,
+  PREVIEW_EVENT, CUSTOM_THUMBS_KEY,
+} from '../js/eroscripts-preview.js';
 import { getScriptTags, recordScriptTags } from '../js/script-tags.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
 import { fuzzySearch, sortVideos, computeSpeedStats, compareNames, dedupeByName } from '../js/library-search.js';
@@ -3188,10 +3191,12 @@ export class Library {
   }
 
   /**
-   * Kebab "Use EroScripts preview": the preview of the post this video's
+   * Kebab "Use EroScripts preview": the images of the post this video's
    * script came from when FunSync knows it, else of a post the user picks
-   * in the EroScripts search. Replaces whatever thumbnail is set, since
-   * the user asked; Reset brings back the generated frame.
+   * in the EroScripts search, each with how well it matches the video.
+   * The one the user picks replaces whatever thumbnail is set, even when it
+   * doesn't match, since the user asked; Reset brings back the generated
+   * frame.
    */
   async _useEroScriptsPreview(video) {
     const { showToast } = await import('../js/toast.js');
@@ -3204,26 +3209,78 @@ export class Library {
     const known = getScriptTags(this._settings, video.path);
     if (known?.topicId != null) {
       topic = { id: known.topicId };
+      if (typeof known.previewUrl === 'string' && known.previewUrl) topic.previewUrl = known.previewUrl;
     } else {
       const { showEroScriptsSearchModal } = await import('./eroscripts-inline-search.js');
       topic = await showEroScriptsSearchModal(video, { pickPost: true });
       if (!topic) return;
     }
     const busy = showToast(t('library.esPreviewFetching'), 'info', 0);
-    const { status } = await importPostPreview({
-      settings: this._settings, api: window.funsync, videoPath: video.path, topic, force: true,
-    });
+    const extra = [topic.preview, topic.previewUrl].filter((u) => typeof u === 'string' && u);
+    const res = await window.funsync.eroscriptsPreviewCandidates(video.path, topic.id, extra).catch(() => null);
     busy?.dismiss();
+    if (res?.status === 'no-image') {
+      showToast(t('library.esPreviewNoImage'), 'warn', 5000);
+      return;
+    }
+    if (res?.status !== 'ok' || !res.scored?.length) {
+      showToast(t('library.esPreviewFailed'), 'error');
+      return;
+    }
+    const candidate = await this._pickPreviewCandidate(res.scored, res.threshold);
+    if (!candidate) return;
+    const { status } = await usePreviewCandidate({
+      settings: this._settings, api: window.funsync, videoPath: video.path, topicId: topic.id, candidate,
+    });
     if (status === 'imported') showToast(t('library.esPreviewSet'), 'success');
-    else if (status === 'no-image') showToast(t('library.esPreviewNoImage'), 'warn', 5000);
     else showToast(t('library.esPreviewFailed'), 'error');
   }
 
   /**
-   * Library header "Fetch EroScripts previews": every video whose script
-   * came from a known post and that has no custom thumbnail gets that
-   * post's preview. One post at a time, spaced out for the forum. Videos
-   * without a known post are left alone (no guessing by name).
+   * The candidate picker: every image of the post with its match distance,
+   * best first, matching ones marked. Resolves the picked candidate or null.
+   */
+  _pickPreviewCandidate(scored, threshold) {
+    const sorted = [...scored].sort((a, b) => (a.distance ?? 99) - (b.distance ?? 99));
+    return Modal.open({
+      title: t('library.esPreviewPickTitle'),
+      onRender: (body, close) => {
+        const hint = document.createElement('div');
+        hint.className = 'modal-message modal-message--muted';
+        hint.textContent = t('library.esPreviewPickHint', { threshold });
+        body.appendChild(hint);
+        const list = document.createElement('div');
+        list.className = 'library__es-candidates';
+        for (const c of sorted) {
+          const row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'library__es-candidate';
+          if (c.accepted) row.classList.add('library__es-candidate--match');
+          const img = document.createElement('img');
+          img.src = c.url;
+          img.alt = '';
+          img.loading = 'lazy';
+          const label = document.createElement('span');
+          label.className = 'library__es-candidate-label';
+          label.textContent = c.distance == null
+            ? t('library.esPreviewUnscored', { reason: c.reason || '' })
+            : t(c.accepted ? 'library.esPreviewMatches' : 'library.esPreviewNoMatchScore', { distance: c.distance });
+          row.append(img, label);
+          row.addEventListener('click', () => close(c));
+          list.appendChild(row);
+        }
+        body.appendChild(list);
+      },
+    });
+  }
+
+  /**
+   * Library header "Fetch EroScripts previews": first every EroScripts
+   * poster FunSync set by itself is checked against its video, and removed
+   * when it doesn't show it. Then every video whose script came from a known
+   * post and that has no custom thumbnail gets the post image that matches
+   * the video, if one does. One post at a time, spaced out for the forum.
+   * Videos without a known post are left alone (no guessing by name).
    */
   async _fetchEroScriptsPreviews() {
     const { showToast } = await import('../js/toast.js');
@@ -3233,11 +3290,13 @@ export class Library {
     }
     const videos = this._videos || [];
     const { known, pending } = planPreviewBatch(this._settings, videos);
-    if (known === 0) {
+    const custom = this._settings.get(CUSTOM_THUMBS_KEY) || {};
+    const toCheck = videos.filter((v) => isRevalidatable(custom[v.path])).length;
+    if (known === 0 && toCheck === 0) {
       showToast(t('library.esPreviewsNoneKnown', { total: videos.length }), 'info', 6000);
       return;
     }
-    if (pending.length === 0) {
+    if (pending.length === 0 && toCheck === 0) {
       showToast(t('library.esPreviewsAllSet', { known }), 'info', 6000);
       return;
     }
@@ -3248,20 +3307,24 @@ export class Library {
     }
 
     this._previewBatchRunning = true;
-    const progress = showToast(t('library.esPreviewsProgress', { done: 0, total: pending.length }), 'info', 0);
+    const progress = showToast(t('library.esPreviewsChecking', { done: 0, total: toCheck }), 'info', 0);
     const body = progress?.el?.querySelector('.toast__body');
     try {
       const summary = await fetchPreviewsBatch({
         settings: this._settings,
         api: window.funsync,
         videos,
-        onProgress: (done, total) => {
-          if (body) body.textContent = t('library.esPreviewsProgress', { done, total });
+        onProgress: (phase, done, total) => {
+          if (!body) return;
+          body.textContent = phase === 'revalidate'
+            ? t('library.esPreviewsChecking', { done, total })
+            : t('library.esPreviewsProgress', { done, total });
         },
       });
       progress?.dismiss();
-      showToast(t('library.esPreviewsSummary', { ...summary, videos: videos.length }),
-        summary.failed > 0 ? 'warn' : 'success', 8000);
+      const removed = summary.revalidated?.removed || 0;
+      showToast(t('library.esPreviewsSummary', { ...summary, removed, videos: videos.length }),
+        summary.failed > 0 ? 'warn' : 'success', 10000);
     } finally {
       progress?.dismiss();
       this._previewBatchRunning = false;
