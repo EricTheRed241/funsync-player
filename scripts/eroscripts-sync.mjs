@@ -39,6 +39,7 @@ const require = createRequire(import.meta.url);
 const USAGE = `Usage: npm run eroscripts:sync -- [options]
   --dry-run              search and report; write no links file, install nothing
   --refresh              re-check every video, confirmed ones included
+  --retry                re-check every video without a confirmed link now
   --limit N              check at most N videos this run
   --stale-days N         re-check unconfirmed results older than N days (default ${lib.DEFAULT_STALE_DAYS})
   --install-axes         download missing hand-made axes into scene folders
@@ -51,7 +52,7 @@ const USAGE = `Usage: npm run eroscripts:sync -- [options]
   --uninstall-schedule   remove the launchd schedule`;
 
 function parseArgs(argv) {
-  const opts = { dryRun: false, refresh: false, limit: Infinity, staleDays: lib.DEFAULT_STALE_DAYS, installAxes: false };
+  const opts = { dryRun: false, refresh: false, retry: false, limit: Infinity, staleDays: lib.DEFAULT_STALE_DAYS, installAxes: false };
   const value = (i, flag) => {
     if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
     return argv[i + 1];
@@ -61,6 +62,7 @@ function parseArgs(argv) {
     switch (a) {
       case '--dry-run': opts.dryRun = true; break;
       case '--refresh': opts.refresh = true; break;
+      case '--retry': opts.retry = true; break;
       case '--install-axes': opts.installAxes = true; break;
       case '--uninstall-schedule': opts.uninstallSchedule = true; break;
       case '--limit': opts.limit = Number(value(i, a)); i++; break;
@@ -184,7 +186,7 @@ async function main() {
   try {
     summary = await lib.runSync({
       videos, forum, state, persist, knownTopics,
-      refresh: opts.refresh, limit: opts.limit, staleDays: opts.staleDays,
+      refresh: opts.refresh, retry: opts.retry, limit: opts.limit, staleDays: opts.staleDays,
       onVideo: (video, outcome, detail) => {
         const what = detail?.topicId ? ` → ${detail.topicId} ${detail.title || ''} (${detail.basis})` : outcome === 'error' ? ` ${detail}` : '';
         console.log(`  ${marks[outcome] || ' '} ${path.basename(video.path)}${what}`);

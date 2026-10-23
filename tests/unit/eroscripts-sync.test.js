@@ -13,7 +13,7 @@ import path from 'node:path';
 import {
   cleanVideoName, queryVariants, normalisedBase, actionsHash, scriptLengthMs,
   classifyScript, createPacer, createForum, loadLocalScene, matchVideo, runSync,
-  isStale, planVideo, availableAxes, installAxes, installSuffix, renderReport,
+  isStale, planVideo, availableAxes, installAxes, installSuffix, renderReport, isRelevant,
   creatorOf, parseInterval, launchdPlist, LAUNCHD_LABEL, SEARCH_INTERVAL_MS,
   RateLimitedError, SessionExpiredError,
 } from '../../scripts/eroscripts-sync-lib.mjs';
@@ -96,6 +96,14 @@ describe('name cleaning', () => {
     expect(normalisedBase('Title.generated.twist.funscript')).toBe('title');
     expect(normalisedBase('Fap Hero - Title.funscript', 'Fap Hero')).toBe(normalisedBase('Title.funscript', 'Fap Hero'));
     expect(normalisedBase('The Pull - AlpacaLaps.funscript', 'AlpacaLaps')).toBe('the pull');
+  });
+
+  it('inspects results sharing half the query, or naming the creator the query names', () => {
+    expect(isRelevant('Fantasy Play', 'Fap Hero Fantasy Play (both versions)', 'Fap Hero')).toBe(true);
+    expect(isRelevant('2B City', 'Getting Cozy in Park City', 'Shayuki')).toBe(true); // half: weak, but cheap to check
+    expect(isRelevant('Chun Li Special', '[Agapilord] HMV/PMV Hexa-Bundle! (6 HMV Scripts)', 'Agapilord')).toBe(false);
+    expect(isRelevant('Agapilord Chun Li Special', '[Agapilord] HMV/PMV Hexa-Bundle! (6 HMV Scripts)', 'Agapilord')).toBe(true);
+    expect(isRelevant('Unknown Scene Title', 'Unknown artist bundle', 'Unknown')).toBe(false);
   });
 
   it('reads the creator from <Source>/<Creator>/<Scene>/file', () => {
@@ -183,7 +191,7 @@ describe('matching a video', () => {
   it('puts paid posts and near misses on the review list, never linked', async () => {
     const dir = scene('Studio', 'Scene', { 'Scene.funscript': script(300_000) });
     const api = fakeApi({
-      search: () => [topicResult(10, 'Studio Scene', { paid: true, category: 'paid-scripts' }), topicResult(11, 'Scene remake')],
+      search: () => [topicResult(10, 'Studio Scene', { paid: true, category: 'paid-scripts' }), topicResult(11, 'Scene remake'), topicResult(12, 'Studio Other Thing')],
       topics: {
         10: { attachments: [], linked: [], external: [], paid: true },
         11: { attachments: [att('Scene.funscript', 'x')], linked: [], external: [], paid: false },
@@ -196,6 +204,9 @@ describe('matching a video', () => {
     const reasons = Object.fromEntries(r.review.candidates.map((c) => [c.topicId, c.reasons.join(' ')]));
     expect(reasons[10]).toMatch(/paid/);
     expect(reasons[11]).toMatch(/length differs/);
+    // Inspected (half the query) but no near miss: not worth a reviewer's time.
+    expect(api.getTopicAttachments).toHaveBeenCalledWith(12);
+    expect(reasons[12]).toBeUndefined();
   });
 
   it('reports none when the search finds nothing related', async () => {
@@ -235,6 +246,7 @@ describe('staleness', () => {
     const plan = (p, o = {}) => planVideo(state, p, { now: NOW, staleDays: 7, ...o });
     expect(['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((p) => plan(p))).toEqual(['skip', 'refresh-topic', 'skip', 'match', 'skip', 'match', 'match']);
     expect(plan('a', { refresh: true })).toBe('match');
+    expect(['a', 'b', 'c', 'd', 'e', 'f'].map((p) => plan(p, { retry: true }))).toEqual(['skip', 'refresh-topic', 'match', 'match', 'match', 'match']);
   });
 });
 

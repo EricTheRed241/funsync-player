@@ -40,6 +40,9 @@ const RELATED_MIN_OVERLAP = 0.6;
 // A search result is inspected only when its title has at least half of
 // the query's significant words.
 const CANDIDATE_MIN_OVERLAP = 0.5;
+// A review candidate without a name or length near miss must carry this
+// much of a query in its title.
+const REVIEW_MIN_OVERLAP = 0.75;
 const MAX_TOPICS_PER_VIDEO = 8;
 const MAX_MAIN_DOWNLOADS_PER_TOPIC = 6;
 const MAX_AXIS_DOWNLOADS_PER_TOPIC = 3;
@@ -181,6 +184,22 @@ export function titleOverlap(query, title) {
   let hit = 0;
   for (const w of q) if (t.has(w)) hit++;
   return hit / q.size;
+}
+
+/**
+ * Is a search result worth inspecting? Half the query's words in its
+ * title, or, for a query naming the creator, a title naming the creator
+ * too: bundles ("[Agapilord] HMV Hexa-Bundle! (6 scripts)") carry the
+ * creator but not every video's title.
+ */
+export function isRelevant(query, title, creator) {
+  const overlap = titleOverlap(query, title);
+  if (overlap >= CANDIDATE_MIN_OVERLAP) return true;
+  if (overlap === 0 || creatorForms(creator).length === 0) return false;
+  const c = tokens(creator);
+  const q = tokens(query);
+  const t = tokens(title);
+  return c.size > 0 && [...c].every((w) => q.has(w) && t.has(w));
 }
 
 // ── Scripts ─────────────────────────────────────────────────────────────
@@ -560,7 +579,7 @@ export async function matchVideo(forum, local, { knownTopicIds = [], now = Date.
   for (const id of knownTopicIds) await consider({ id, title: null, url: null }, '(saved link)');
   for (const query of queries) {
     const results = await forum.search(query);
-    const relevant = results.filter((t) => titleOverlap(query, t.title) >= CANDIDATE_MIN_OVERLAP).slice(0, CANDIDATES_PER_QUERY);
+    const relevant = results.filter((t) => isRelevant(query, t.title, video.creator)).slice(0, CANDIDATES_PER_QUERY);
     for (const t of relevant) {
       if (primary && titleOverlap(query, t.title) < RELATED_MIN_OVERLAP) continue;
       await consider(t, query);
@@ -582,6 +601,9 @@ export async function matchVideo(forum, local, { knownTopicIds = [], now = Date.
   }
   if (probable) return { outcome: 'probable', link: linkRecord(probable, local, now) };
 
+  // The review list is for near misses, not every search hit: a candidate
+  // stays when its title carries most of the query, or a script in it
+  // matched by name or by length.
   const candidates = evaluated
     .map((ev) => ({
       topicId: ev.candidate.id,
@@ -589,11 +611,14 @@ export async function matchVideo(forum, local, { knownTopicIds = [], now = Date.
       url: ev.candidate.url,
       creator: ev.candidate.creator || null,
       paid: ev.paid,
-      overlap: Math.round(titleOverlap(queries[0] || '', ev.candidate.title || '') * 100) / 100,
+      overlap: Math.round(Math.max(0, ...queries.map((q) => titleOverlap(q, ev.candidate.title || ''))) * 100) / 100,
+      nearMiss: ev.reasons.some((r) => /^(name|length) matches/.test(r)),
       reasons: [...new Set(ev.reasons)].slice(0, 3),
     }))
-    .sort((a, b) => b.overlap - a.overlap)
-    .slice(0, MAX_REVIEW_CANDIDATES);
+    .filter((c) => c.nearMiss || c.overlap >= REVIEW_MIN_OVERLAP)
+    .sort((a, b) => Number(b.nearMiss) - Number(a.nearMiss) || b.overlap - a.overlap)
+    .slice(0, MAX_REVIEW_CANDIDATES)
+    .map(({ nearMiss, ...c }) => c);
   if (candidates.length === 0) return { outcome: 'none', queries };
   return { outcome: 'review', review: { checkedAt: new Date(now).toISOString(), queries, candidates } };
 }
@@ -611,8 +636,9 @@ export function isStale(iso, now, days = DEFAULT_STALE_DAYS) {
  *
  * @returns {'skip'|'match'|'refresh-topic'}
  */
-export function planVideo(state, videoPath, { now, refresh = false, staleDays = DEFAULT_STALE_DAYS }) {
+export function planVideo(state, videoPath, { now, refresh = false, retry = false, staleDays = DEFAULT_STALE_DAYS }) {
   if (refresh) return 'match';
+  if (retry && state.links[videoPath]?.confidence !== 'confirmed') return 'match';
   const link = state.links[videoPath];
   if (link?.confidence === 'confirmed') return isStale(link.checkedAt, now, staleDays) ? 'refresh-topic' : 'skip';
   const last = state.checked?.[videoPath]?.checkedAt || link?.checkedAt;
@@ -633,7 +659,7 @@ export function planVideo(state, videoPath, { now, refresh = false, staleDays = 
  */
 export async function runSync({
   videos, forum, state, persist = () => {}, knownTopics = {},
-  now = () => Date.now(), refresh = false, limit = Infinity, staleDays = DEFAULT_STALE_DAYS,
+  now = () => Date.now(), refresh = false, retry = false, limit = Infinity, staleDays = DEFAULT_STALE_DAYS,
   onVideo = () => {},
 }) {
   state.links ||= {};
@@ -643,7 +669,7 @@ export async function runSync({
 
   for (const video of videos) {
     if (!video.funscriptPath) { summary.noScript++; continue; }
-    const plan = planVideo(state, video.path, { now: now(), refresh, staleDays });
+    const plan = planVideo(state, video.path, { now: now(), refresh, retry, staleDays });
     if (plan === 'skip') { summary.skipped++; continue; }
     if (summary.checked >= limit) break;
     summary.checked++;
