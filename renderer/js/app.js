@@ -34,6 +34,7 @@ import { AutoblowManager } from './autoblow-manager.js';
 import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
+import { LibraryEditApplier } from './library-edits.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
 import { SessionCard } from '../components/session-card.js';
@@ -2380,6 +2381,42 @@ class App {
     this.remoteBridge.onPhoneSetOffset = (device, ms) => {
       this._applyRemoteOffset(device, ms);
     };
+
+    // Ratings / favourites / playlist edits made on the phone or in
+    // HereSphere (see library-edits.js).
+    this._libraryEdits = new LibraryEditApplier({
+      data: this.settings,
+      publish: () => this._publishTriageState(),
+      ack: (seq, error) => this.remoteBridge.ackLibraryEdit(seq, error),
+    });
+    this.remoteBridge.onLibraryEdit = (edit) => { this._libraryEdits.apply(edit); };
+
+    // Desktop-side changes reach the headset sections and the phone too.
+    let timer = null;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { this._publishTriageState().catch(() => {}); }, 300);
+    };
+    eventBus.on('rating:changed', schedule);
+    eventBus.on('playlist:changed', schedule);
+  }
+
+  /**
+   * Push ratings + playlists to the backend (`/api/media/register` treats
+   * each key independently, so the video registry is left alone). Keeps the
+   * headset sections, the HereSphere scene state and the phone current.
+   */
+  async _publishTriageState() {
+    const port = this.backendPort || this.settings.get('backend.port') || 5123;
+    const res = await fetch(`http://127.0.0.1:${port}/api/media/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ratings: this.settings.get('library.ratings') || {},
+        playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
+      }),
+    });
+    if (!res.ok) throw new Error(`register ${res.status}`);
   }
 
   /**
