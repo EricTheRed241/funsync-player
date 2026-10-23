@@ -212,11 +212,15 @@ export function computeSpeedStats(actions) {
  * Sort videos by a given criterion.
  *
  * @param {VideoEntry[]} videos — list to sort (not mutated)
- * @param {'name'|'duration'|'avgSpeed'|'maxSpeed'|'hasFunscript'} sortBy — sort criterion
+ * @param {'name'|'duration'|'avgSpeed'|'maxSpeed'|'hasFunscript'|'rating'} sortBy — sort criterion
  * @param {'asc'|'desc'} [order='asc'] — sort direction
+ * @param {object} [opts]
+ * @param {(path: string) => number} [opts.ratingOf] — rating lookup for
+ *   `'rating'` (0 = unrated). Unrated videos sort LAST in both directions:
+ *   they are the ones without a value, not the lowest-rated ones.
  * @returns {VideoEntry[]} sorted copy
  */
-export function sortVideos(videos, sortBy, order = 'asc') {
+export function sortVideos(videos, sortBy, order = 'asc', opts = {}) {
   if (!videos || videos.length === 0) return [];
 
   const sorted = [...videos];
@@ -249,6 +253,16 @@ export function sortVideos(videos, sortBy, order = 'asc') {
       // (stat failed) default to 0 → sort to the "oldest" end.
       sorted.sort((a, b) => dir * ((a.dateAdded || 0) - (b.dateAdded || 0)));
       break;
+
+    case 'rating': {
+      const ratingOf = typeof opts.ratingOf === 'function' ? opts.ratingOf : () => 0;
+      const keyed = sorted.map((v) => ({ v, r: ratingOf(v.path) || 0 }));
+      keyed.sort((a, b) => {
+        if ((a.r === 0) !== (b.r === 0)) return a.r === 0 ? 1 : -1;
+        return dir * (a.r - b.r) || compareNames(a.v.name, b.v.name);
+      });
+      return keyed.map((k) => k.v);
+    }
 
     case 'hasFunscript':
       // Funscript videos first

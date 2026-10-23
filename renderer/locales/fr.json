@@ -791,7 +791,9 @@
       "avgSpeedDesc": "Vitesse moy. rapide-lente",
       "maxSpeedAsc": "Vitesse max. lente-rapide",
       "maxSpeedDesc": "Vitesse max. rapide-lente",
-      "switchTo": "Passer à {order}"
+      "switchTo": "Passer à {order}",
+      "ratingDesc": "Note décroissante",
+      "ratingAsc": "Note croissante"
     },
     "badge": {
       "script": "Script",
@@ -863,6 +865,31 @@
       "max": "Max",
       "speedUnit": "u/s",
       "speedTooltip": "Moy {avg} u/s • Max {max} u/s"
+    },
+    "triage": {
+      "stars": "{n} étoiles",
+      "unrated": "Non noté",
+      "favorite": "Ajouter aux favoris",
+      "unfavorite": "Retirer des favoris",
+      "setStars": "Noter {n} étoiles",
+      "addToPlaylist": "Ajouter à une playlist…",
+      "close": "Fermer",
+      "newPlaylistPlaceholder": "Nom de la nouvelle playlist",
+      "create": "Créer",
+      "noPlaylists": "Aucune playlist : saisissez un nom ci-dessous.",
+      "alreadyIn": "{name} (déjà dedans)",
+      "added": "Ajouté à {name}",
+      "removed": "Retiré de {name}",
+      "removeFromPlaylist": "Retirer de {name}",
+      "queued": "Enregistré : appliqué dès que l’app de bureau se reconnecte",
+      "failed": "Échec de l’enregistrement : {reason}",
+      "filter": {
+        "header": "Note",
+        "all": "Tous",
+        "favorites": "Favoris",
+        "top": "Les mieux notés (4+)",
+        "unrated": "Non notés"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "Objets",
       "travel": "Voyages et lieux"
     }
+  },
+  "rating": {
+    "stars": "{n} étoiles",
+    "unrated": "Non noté",
+    "setStars": "Noter {n} étoiles",
+    "favorite": "Ajouter aux favoris",
+    "unfavorite": "Retirer des favoris",
+    "filterTitle": "Note",
+    "filterFavorites": "Favoris",
+    "filterTopRated": "Les mieux notés (4+)",
+    "filterUnrated": "Non notés",
+    "sortDesc": "Note décroissante",
+    "sortAsc": "Note croissante"
   }
 }

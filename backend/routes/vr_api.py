@@ -2,11 +2,24 @@
 
 Serves FunSync's library in the JSON format that VR headset players expect.
 DeoVR: GET /deovr (library), GET /deovr/{id} (scene detail)
-HereSphere: GET /heresphere (library), GET /heresphere/{id} (scene detail)
+HereSphere: GET /heresphere (library), GET|POST /heresphere/{id} (scene detail)
+
+HereSphere is two-way for ratings, favourites and playlists: the scene sets
+`writeRating` / `writeFavorite` / `writeTags`, and the edits HereSphere POSTs
+back become library edits for the desktop (`services.library_edits`). The
+request fields are the ones XBVR (`pkg/api/heresphere.go`,
+`HereSphereAuthRequest`) and stash-vr (`internal/api/heresphere/http.go`,
+`videoDataRequestDto`) read: `rating` (number, 0-5 in 0.5 steps),
+`isFavorite` (bool) and `tags` (`[{"name", "start", "end", "track"}]`, the
+full list). Only `Playlist:<name>` tags are acted on; every other tag edit
+is ignored (the generated `Studio:` / `Format:` / ... tags simply come back
+on the next load). `hsp` and `deleteFile` are ignored too (`writeHSP` stays
+false; nothing is ever deleted from the headset).
 """
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -15,11 +28,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_video_registry, _path_to_id, record_vr_activity
-from services import video_info, vr_sections
+from routes.media import get_playlists, get_ratings, get_video_registry, _path_to_id, record_vr_activity
+from routes.remote_sync import submit_library_edit
+from services import library_edits, video_info, vr_sections
 from services.network import get_local_ip
 
 router = APIRouter()
+log = logging.getLogger("funsync.vr")
 
 # --- VR Format Detection ---
 #
@@ -401,6 +416,81 @@ def _scene_tag_names(video, is_3d):
     return tags
 
 
+def parse_heresphere_update(body, path, ratings, playlists):
+    """Library edits for one HereSphere scene POST body.
+
+    HereSphere POSTs the scene URL both to load it (body: credentials only)
+    and to save edits. A field counts only when present AND different from
+    the current state, so a plain load, or a save that re-sends unchanged
+    values, produces nothing:
+
+      - `rating` / `isFavorite` → one `rating` edit with the changed fields.
+        An invalid rating (off the 0.5 grid / out of range) is ignored.
+      - `tags` (the full list) → `playlist-add` per `Playlist:<name>` tag
+        not matching a playlist the video is in (case-insensitive; a new
+        name creates the playlist), `playlist-remove` per playlist the video
+        is in that has no tag. Any other tag is ignored.
+    """
+    if not isinstance(body, dict) or not path:
+        return []
+    edits = []
+    current_rating, current_favorite = library_edits.rating_entry(ratings, path)
+
+    rating = None
+    if 'rating' in body and body['rating'] is not None:
+        rating = library_edits.normalize_rating(body['rating'])
+        if rating is None:
+            log.warning('[heresphere] Ignoring invalid rating %r', body['rating'])
+        elif rating == current_rating:
+            rating = None
+    favorite = body.get('isFavorite')
+    if not isinstance(favorite, bool) or favorite == current_favorite:
+        favorite = None
+    if rating is not None or favorite is not None:
+        edits.append(library_edits.make_rating_edit(path, rating=rating, favorite=favorite, source='heresphere'))
+
+    tags = body.get('tags')
+    if isinstance(tags, list):
+        wanted = vr_sections.playlist_names_from_tags(tags)
+        wanted_keys = {n.casefold() for n in wanted}
+        member_of = [p for p in playlists or [] if path in (p.get('videoPaths') or [])]
+        member_keys = {(p.get('name') or '').strip().casefold() for p in member_of}
+        for name in wanted:
+            if name.casefold() in member_keys:
+                continue
+            existing = library_edits.find_playlist(playlists or [], name=name)
+            edits.append(library_edits.make_playlist_edit(
+                library_edits.KIND_PLAYLIST_ADD, path,
+                playlist_id=existing.get('id') if existing else None,
+                name=existing.get('name') if existing else name,
+                source='heresphere',
+            ))
+        for p in member_of:
+            name = (p.get('name') or '').strip()
+            if name and name.casefold() not in wanted_keys:
+                edits.append(library_edits.make_playlist_edit(
+                    library_edits.KIND_PLAYLIST_REMOVE, path,
+                    playlist_id=p.get('id'), name=name, source='heresphere',
+                ))
+    return edits
+
+
+async def _apply_heresphere_update(request: Request, path):
+    """Turn a scene POST into library edits for the desktop. A body that
+    isn't JSON, or a full edit queue, never fails the scene load."""
+    try:
+        body = await request.json()
+    except Exception:
+        return
+    for edit in parse_heresphere_update(body, path, get_ratings(), get_playlists()):
+        try:
+            await submit_library_edit(edit)
+        except library_edits.QueueFull as e:
+            log.warning('[heresphere] Edit dropped: %s', e)
+            return
+
+
+
 # === DeoVR API ===
 
 @router.api_route("/deovr", methods=["GET", "POST"])
@@ -430,7 +520,8 @@ async def deovr_library(request: Request):
         entries.append((item, video, is_3d))
     entries.sort(key=lambda e: e[0]['title'].lower())
 
-    scenes = [{'name': name, 'list': items} for name, items in vr_sections.build_sections(entries)]
+    sections = vr_sections.build_sections(entries, ratings=get_ratings(), playlists=get_playlists())
+    scenes = [{'name': name, 'list': items} for name, items in sections]
 
     # DeoVR requires Content-Length (chunked encoding breaks its JSON parser)
     body = json.dumps({'scenes': scenes, 'authorized': '0'}, ensure_ascii=False)
@@ -526,7 +617,7 @@ async def deovr_scene(video_id: str, request: Request):
             {'tag': {'id': i, 'name': name}}
             for i, name in enumerate(_scene_tag_names(video, is_3d), start=1)
         ],
-        'isFavorite': False,
+        'isFavorite': library_edits.rating_entry(get_ratings(), path)[1],
         'fullVideoReady': True,
         'fullAccess': True,
     }
@@ -564,7 +655,10 @@ async def heresphere_library(request: Request):
     ]
     entries.sort(key=lambda e: os.path.splitext(e[1].get('name', ''))[0].lower())
 
-    library = [{'name': name, 'list': urls} for name, urls in vr_sections.build_sections(entries)]
+    library = [
+        {'name': name, 'list': urls}
+        for name, urls in vr_sections.build_sections(entries, ratings=get_ratings(), playlists=get_playlists())
+    ]
 
     return JSONResponse(
         content={'access': 1, 'library': library},
@@ -593,6 +687,12 @@ async def heresphere_scene(video_id: str, request: Request):
     title = os.path.splitext(name)[0]
     duration = _get_duration(video)
     path = video.get('path', '')
+
+    # Ratings, favourites and playlist tags edited in the headset.
+    if request.method == 'POST':
+        await _apply_heresphere_update(request, path)
+    rating, favorite = library_edits.rating_entry(get_ratings(), path)
+    playlists = get_playlists()
 
     width, height, codec = await _scene_video_info(video_id, path)
 
@@ -650,6 +750,9 @@ async def heresphere_scene(video_id: str, request: Request):
 
     # Tags: studio, scripted, and the filter tags; chapters follow
     tags = [{'name': name} for name in _scene_tag_names(video, is_3d)]
+    # Playlist tags: removing one in the headset takes the video out of
+    # that playlist, adding `Playlist:<name>` puts it in (creating it).
+    tags.extend({'name': name} for name in vr_sections.playlist_tags(path, playlists))
 
     # Auto-generate chapter tags for navigation (every 5 min)
     if duration > 300:
@@ -687,8 +790,8 @@ async def heresphere_scene(video_id: str, request: Request):
         'dateReleased': '',
         'dateAdded': '',
         'duration': duration * 1000,  # HereSphere uses milliseconds
-        'rating': 0,
-        'isFavorite': False,
+        'rating': rating,
+        'isFavorite': favorite,
         'projection': projection,
         'stereo': stereo_hs,
         'fov': fov,
@@ -697,9 +800,9 @@ async def heresphere_scene(video_id: str, request: Request):
         'subtitles': subtitles,
         'tags': tags,
         'media': media,
-        'writeFavorite': False,
-        'writeRating': False,
-        'writeTags': False,
+        'writeFavorite': True,
+        'writeRating': True,
+        'writeTags': True,
         'writeHSP': False,
     }
 

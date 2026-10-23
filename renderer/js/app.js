@@ -34,6 +34,8 @@ import { AutoblowManager } from './autoblow-manager.js';
 import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
+import { LibraryEditApplier } from './library-edits.js';
+import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
 import { SessionCard } from '../components/session-card.js';
@@ -2380,6 +2382,78 @@ class App {
     this.remoteBridge.onPhoneSetOffset = (device, ms) => {
       this._applyRemoteOffset(device, ms);
     };
+
+    // Ratings / favourites / playlist edits made on the phone or in
+    // HereSphere (see library-edits.js).
+    this._libraryEdits = new LibraryEditApplier({
+      data: this.settings,
+      publish: () => this._publishTriageState(),
+      ack: (seq, error) => this.remoteBridge.ackLibraryEdit(seq, error),
+    });
+    this.remoteBridge.onLibraryEdit = (edit) => { this._libraryEdits.apply(edit); };
+
+    // Desktop-side changes reach the headset sections and the phone too.
+    let timer = null;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { this._publishTriageState().catch(() => {}); }, 300);
+    };
+    eventBus.on('rating:changed', schedule);
+    eventBus.on('playlist:changed', schedule);
+
+    // The player's stars follow edits made anywhere (card, phone, headset).
+    eventBus.on('rating:changed', ({ path } = {}) => {
+      if (path && path === this._currentVideoPath) this._renderPlayerRating();
+    });
+  }
+
+  /**
+   * Stars + heart in the player's top bar for the current video. Hidden for
+   * a remote stream (no library path to rate).
+   */
+  _renderPlayerRating() {
+    const slot = document.getElementById('player-rating');
+    if (!slot) return;
+    const path = this._currentVideoPath;
+    if (!path || !this.settings.getRating) {
+      slot.hidden = true;
+      slot.replaceChildren();
+      return;
+    }
+    const entry = this.settings.getRating(path);
+    const value = { rating: entry?.rating || 0, favorite: !!entry?.favorite };
+    const existing = slot.querySelector('.rating-control');
+    if (existing && slot.dataset.path === path) {
+      updateRatingControl(existing, value);
+    } else {
+      slot.dataset.path = path;
+      slot.replaceChildren(createRatingControl({
+        ...value,
+        size: 18,
+        className: 'player__rating-control',
+        onRate: (rating) => this.settings.setRating(path, { rating }),
+        onFavorite: (favorite) => this.settings.setRating(path, { favorite }),
+      }));
+    }
+    slot.hidden = false;
+  }
+
+  /**
+   * Push ratings + playlists to the backend (`/api/media/register` treats
+   * each key independently, so the video registry is left alone). Keeps the
+   * headset sections, the HereSphere scene state and the phone current.
+   */
+  async _publishTriageState() {
+    const port = this.backendPort || this.settings.get('backend.port') || 5123;
+    const res = await fetch(`http://127.0.0.1:${port}/api/media/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ratings: this.settings.get('library.ratings') || {},
+        playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
+      }),
+    });
+    if (!res.ok) throw new Error(`register ${res.status}`);
   }
 
   /**
@@ -3562,6 +3636,7 @@ class App {
       playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
       categories: this.settings.getCategories ? this.settings.getCategories() : [],
       videoCategories: (this.settings._cache && this.settings._cache.videoCategories) || {},
+      ratings: this.settings.get('library.ratings') || {},
     };
     try {
       fetch(`http://127.0.0.1:${this.backendPort}/api/media/register`, {
@@ -4753,6 +4828,7 @@ class App {
     // Set title
     const titleEl = document.getElementById('video-title');
     titleEl.textContent = file.name.replace(/\.[^/.]+$/, '');
+    this._renderPlayerRating();
 
     // Track recent file (local only — a localhost proxy URL isn't re-openable).
     if (file.path && !file._remote) {

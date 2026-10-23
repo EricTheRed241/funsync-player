@@ -37,6 +37,7 @@ export class RemoteBridge {
     this.onPhoneSwitchVariant = null;  // (label, ip) => {} — phone tapped a variant in the player view
     this.onPhoneOrgasmHold = null;     // (active, ip) => {} — phone orgasm button press/release (F2)
     this.onPhoneSetOffset = null;      // (device, ms, ip) => {} — phone offset slider (F4)
+    this.onLibraryEdit = null;         // (edit) => {} — rating / playlist edit from phone or headset
     this.onBridgeOpen = null;          // () => {}
     this.onBridgeClose = null;         // () => {}
   }
@@ -69,6 +70,15 @@ export class RemoteBridge {
     try {
       this._ws.send(JSON.stringify(payload));
     } catch { /* ignore */ }
+  }
+
+  /**
+   * Confirm a `library-edit` was applied (or, with `error`, couldn't be).
+   * Consumed by the backend, not forwarded to the phone. Unsent while
+   * disconnected — the backend replays unacked edits on reconnect.
+   */
+  ackLibraryEdit(seq, error) {
+    this.sendToPhone(error ? { type: 'library-edit-ack', seq, error } : { type: 'library-edit-ack', seq });
   }
 
   /** True when the observer socket is open. */
@@ -188,6 +198,13 @@ export class RemoteBridge {
         // the videoId so downstream can resolve the script.
         if (this.onPhoneConnected && msg.videoId && this._dedupConnect(ip, msg.videoId)) {
           this.onPhoneConnected(ip, msg.videoId, msg.videoPath);
+        }
+        break;
+      case 'library-edit':
+        // Rating / favourite / playlist change from the phone or HereSphere,
+        // queued by the backend until the desktop applies it.
+        if (this.onLibraryEdit && msg.edit && typeof msg.edit === 'object') {
+          this.onLibraryEdit(msg.edit);
         }
         break;
       default:

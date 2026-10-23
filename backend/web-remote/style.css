@@ -2192,3 +2192,183 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
 .sheet__option--selected .sheet__option-arrow {
   color: var(--accent);
 }
+
+/* ============================================================
+   Triage — rating, favourite, playlists (triage.js).
+   ============================================================ */
+.player__triage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 4px 16px 8px;
+}
+
+.triage-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.triage-rating__stars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.triage-rating__star,
+.triage-rating__heart {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: var(--tap-min, 44px);
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  line-height: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.triage-rating__star {
+  min-width: 34px;
+}
+
+.triage-rating__fill {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 0;
+  height: 28px;
+  transform: translateY(-50%);
+  overflow: hidden;
+  color: #f5b301;
+  pointer-events: none;
+}
+
+.triage-rating__fill svg {
+  fill: currentColor;
+}
+
+.triage-rating__star[data-fill="full"] .triage-rating__fill { width: 28px; }
+.triage-rating__star[data-fill="half"] .triage-rating__fill { width: 14px; }
+
+.triage-rating--favorite .triage-rating__heart {
+  color: var(--accent);
+}
+
+.triage-rating--favorite .triage-rating__heart svg {
+  fill: currentColor;
+}
+
+.player__triage-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap-min, 44px);
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.list__badge--favorite { color: var(--accent); }
+.list__badge--rating { color: #f5b301; }
+
+.triage-removable {
+  position: relative;
+}
+
+.triage-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+
+.list__row.triage-removable .triage-remove {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.triage-remove:disabled { opacity: 0.5; }
+
+.sheet__empty {
+  padding: 12px;
+  color: var(--text-dim);
+}
+
+#playlistSheetList .sheet__option {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  text-align: left;
+  color: var(--text-primary);
+}
+
+#playlistSheetList .sheet__option:disabled {
+  color: var(--text-dim);
+}
+
+.playlist-sheet__new {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.playlist-sheet__input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap-min, 44px);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.playlist-sheet__create {
+  min-height: var(--tap-min, 44px);
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+}
+
+.triage-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(80px + var(--safe-bottom, 0px));
+  z-index: 40;
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  transform: translateX(-50%);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.triage-toast[hidden] { display: none; }
+.triage-toast[data-kind="error"] { border-color: var(--accent); }

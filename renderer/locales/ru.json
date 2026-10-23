@@ -791,7 +791,9 @@
       "avgSpeedDesc": "Ср. скорость быстр.-медл.",
       "maxSpeedAsc": "Макс. скорость медл.-быстр.",
       "maxSpeedDesc": "Макс. скорость быстр.-медл.",
-      "switchTo": "Переключить на {order}"
+      "switchTo": "Переключить на {order}",
+      "ratingDesc": "Оценка по убыванию",
+      "ratingAsc": "Оценка по возрастанию"
     },
     "badge": {
       "script": "Скрипт",
@@ -863,6 +865,31 @@
       "max": "Макс.",
       "speedUnit": "ед/с",
       "speedTooltip": "Ср. {avg} ед/с • Макс. {max} ед/с"
+    },
+    "triage": {
+      "stars": "Звёзд: {n}",
+      "unrated": "Без оценки",
+      "favorite": "Добавить в избранное",
+      "unfavorite": "Убрать из избранного",
+      "setStars": "Оценить на {n}",
+      "addToPlaylist": "Добавить в плейлист…",
+      "close": "Закрыть",
+      "newPlaylistPlaceholder": "Название нового плейлиста",
+      "create": "Создать",
+      "noPlaylists": "Плейлистов пока нет — введите название ниже.",
+      "alreadyIn": "{name} (уже добавлено)",
+      "added": "Добавлено в {name}",
+      "removed": "Удалено из {name}",
+      "removeFromPlaylist": "Удалить из {name}",
+      "queued": "Сохранено — применится, когда приложение на компьютере снова подключится",
+      "failed": "Не удалось сохранить: {reason}",
+      "filter": {
+        "header": "Оценка",
+        "all": "Все",
+        "favorites": "Избранное",
+        "top": "Высокая оценка (4+)",
+        "unrated": "Без оценки"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "Предметы",
       "travel": "Путешествия и места"
     }
+  },
+  "rating": {
+    "stars": "Звёзд: {n}",
+    "unrated": "Без оценки",
+    "setStars": "Оценить на {n}",
+    "favorite": "Добавить в избранное",
+    "unfavorite": "Убрать из избранного",
+    "filterTitle": "Оценка",
+    "filterFavorites": "Избранное",
+    "filterTopRated": "Высокая оценка (4+)",
+    "filterUnrated": "Без оценки",
+    "sortDesc": "Оценка по убыванию",
+    "sortAsc": "Оценка по возрастанию"
   }
 }

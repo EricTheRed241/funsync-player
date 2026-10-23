@@ -142,6 +142,15 @@
               <label class="sheet__option"><input type="radio" name="vr" value="flat"><span data-i18n="webRemote.filterSheet.vrFlat">Non-VR</span></label>
             </div>
           </section>
+          <section class="sheet__group">
+            <h3 class="sheet__group-title" data-i18n="webRemote.triage.filter.header">Rating</h3>
+            <div class="sheet__options" role="radiogroup" aria-label="Rating filter" data-i18n-aria-label="webRemote.triage.filter.header" data-filter="rating">
+              <label class="sheet__option"><input type="radio" name="rating" value="all"><span data-i18n="webRemote.triage.filter.all">All</span></label>
+              <label class="sheet__option"><input type="radio" name="rating" value="favorites"><span data-i18n="webRemote.triage.filter.favorites">Favorites</span></label>
+              <label class="sheet__option"><input type="radio" name="rating" value="top"><span data-i18n="webRemote.triage.filter.top">Top rated (4+)</span></label>
+              <label class="sheet__option"><input type="radio" name="rating" value="unrated"><span data-i18n="webRemote.triage.filter.unrated">Unrated</span></label>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -159,7 +168,7 @@
         </header>
         <div class="sheet__body">
           <div class="sheet__options sheet__options--single" role="radiogroup" aria-label="Sort" data-i18n-aria-label="webRemote.sortSheet.aria" data-filter="sort">
-            <!-- Five FIELDS; direction lives on each row and flips when the
+            <!-- Six FIELDS; direction lives on each row and flips when the
                  already-selected row is tapped again. Labels are filled by
                  app.js (they change with direction), so no data-i18n here.
                  Matches the desktop picker. -->
@@ -168,7 +177,31 @@
             <label class="sheet__option sheet__option--sort"><input type="radio" name="sort" value="duration"><span class="sheet__option-label"></span><span class="sheet__option-arrow" aria-hidden="true"></span></label>
             <label class="sheet__option sheet__option--sort"><input type="radio" name="sort" value="avgSpeed"><span class="sheet__option-label"></span><span class="sheet__option-arrow" aria-hidden="true"></span></label>
             <label class="sheet__option sheet__option--sort"><input type="radio" name="sort" value="maxSpeed"><span class="sheet__option-label"></span><span class="sheet__option-arrow" aria-hidden="true"></span></label>
+            <label class="sheet__option sheet__option--sort"><input type="radio" name="sort" value="rating"><span class="sheet__option-label"></span><span class="sheet__option-arrow" aria-hidden="true"></span></label>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- "Add to playlist…" sheet (player view). Existing playlists are
+         filled in by app.js; the form adds to a playlist by name, creating
+         it when it doesn't exist. -->
+    <div class="sheet" id="playlistSheet" role="dialog" aria-modal="true" aria-labelledby="playlistSheetTitle" hidden>
+      <div class="sheet__backdrop" data-close-sheet></div>
+      <div class="sheet__panel" role="document">
+        <div class="sheet__handle" aria-hidden="true"></div>
+        <header class="sheet__header">
+          <h2 class="sheet__title" id="playlistSheetTitle" data-i18n="webRemote.triage.addToPlaylist">Add to playlist…</h2>
+          <button class="sheet__close icon-btn" data-close-sheet aria-label="Close" data-i18n-aria-label="webRemote.triage.close"></button>
+        </header>
+        <div class="sheet__body">
+          <div class="sheet__options sheet__options--single" id="playlistSheetList"></div>
+          <form class="playlist-sheet__new" id="playlistSheetForm">
+            <input type="text" id="playlistSheetInput" class="playlist-sheet__input" maxlength="120" autocomplete="off"
+                   placeholder="New playlist name" data-i18n-placeholder="webRemote.triage.newPlaylistPlaceholder"
+                   aria-label="New playlist name" data-i18n-aria-label="webRemote.triage.newPlaylistPlaceholder">
+            <button type="submit" class="playlist-sheet__create" data-i18n="webRemote.triage.create">Create</button>
+          </form>
         </div>
       </div>
     </div>

@@ -2248,3 +2248,94 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 72px;
 }
+
+/* Rating stars + favourite heart (renderer/js/rating-stars.js). Shared by
+   cards, list rows and the player's top bar. Half stars: the filled copy is
+   clipped to the left half by `data-fill="half"`. */
+.rating-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.rating-control__stars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.rating-control__star,
+.rating-control__heart {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.rating-control__star:focus-visible,
+.rating-control__heart:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+.rating-control__fill {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 0;
+  overflow: hidden;
+  color: #f5b301;
+  pointer-events: none;
+}
+
+.rating-control__fill svg {
+  fill: currentColor;
+}
+
+.rating-control__star[data-fill="full"] .rating-control__fill {
+  width: calc(100% - 2px);
+}
+
+.rating-control__star[data-fill="half"] .rating-control__fill {
+  width: calc(50% - 1px);
+}
+
+.rating-control__heart:hover,
+.rating-control__star:hover {
+  color: var(--text-primary);
+}
+
+.rating-control--favorite .rating-control__heart {
+  color: #ff4d6d;
+}
+
+.rating-control--favorite .rating-control__heart svg {
+  fill: currentColor;
+}
+
+/* Cards and rows: untriaged videos show the control on hover / focus only,
+   so an unrated library doesn't turn into a wall of empty stars. */
+.library__card-rating:not(.rating-control--rated):not(.rating-control--favorite),
+.library__list-rating:not(.rating-control--rated):not(.rating-control--favorite) {
+  display: none;
+}
+
+.library__card:hover .library__card-rating,
+.library__card:focus-within .library__card-rating,
+.library__list-item:hover .library__list-rating,
+.library__list-item:focus-within .library__list-rating {
+  display: inline-flex;
+}
+
+/* Unrated but favourite: only the heart until hovered. */
+.library__card:not(:hover):not(:focus-within) .library__card-rating:not(.rating-control--rated) .rating-control__stars,
+.library__list-item:not(:hover):not(:focus-within) .library__list-rating:not(.rating-control--rated) .rating-control__stars {
+  display: none;
+}

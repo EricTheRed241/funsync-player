@@ -35,6 +35,8 @@ import {
   hasConfigForMode,
 } from '../js/association-shape.js';
 import { planAssociationRehome } from '../js/association-rehome.js';
+import { matchesRatingFilter, ratingOf, rehomeRatings } from '../js/ratings.js';
+import { createRatingControl, updateRatingControl } from '../js/rating-stars.js';
 import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks } from '../js/eroscripts-links.js';
 
@@ -331,6 +333,24 @@ export class Library {
         }, 1500);
       });
       this._previewListenerAttached = true;
+    }
+
+    // A rating / favourite changed — from a card, the player, the phone or
+    // the headset. Repaint just that video's controls; re-filter only when
+    // a rating filter or the rating sort could move it.
+    if (!this._ratingListenerAttached) {
+      eventBus.on('rating:changed', ({ path, entry } = {}) => {
+        if (!path || !this._container) return;
+        const value = { rating: entry?.rating || 0, favorite: !!entry?.favorite };
+        for (const el of this._container.querySelectorAll(`[data-video-path="${CSS.escape(path)}"] .rating-control`)) {
+          updateRatingControl(el, value);
+        }
+        const [sortField] = this._sortParts();
+        if ((this._ratingFilter && this._ratingFilter !== 'all') || sortField === 'rating') {
+          if (!this._scanning) this._applyFilters();
+        }
+      });
+      this._ratingListenerAttached = true;
     }
 
     // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives).
@@ -891,6 +911,17 @@ export class Library {
       delete associations[from];
       assocMigrated = true;
       console.log(`[Associations] Re-homed moved video: ${from} → ${to}`);
+    }
+
+    // Ratings + favourites follow a moved video under the same rules.
+    const ratings = this._settings.get('library.ratings') || {};
+    const rated = rehomeRatings(ratings, this._videos.map((v) => v.path),
+      (p) => this._isUnderUnavailableSource(p));
+    if (rated.moves.length > 0) {
+      this._settings.set('library.ratings', rated.map);
+      for (const { from, to } of rated.moves) {
+        console.log(`[Ratings] Re-homed moved video: ${from} → ${to}`);
+      }
     }
 
     for (const video of this._videos) {
@@ -1799,6 +1830,8 @@ export class Library {
     { value: 'duration',  defaultDir: 'asc' },
     { value: 'avgSpeed',  defaultDir: 'desc', isSpeed: true },
     { value: 'maxSpeed',  defaultDir: 'desc', isSpeed: true },
+    // Highest first; unrated always last (library-search.js sortVideos).
+    { value: 'rating',    defaultDir: 'desc' },
   ];
 
   // `field:dir` -> the existing directional string. Reused for the trigger
@@ -1816,6 +1849,8 @@ export class Library {
     'avgSpeed:desc': 'library.sortAvgSpeedDesc',
     'maxSpeed:asc': 'library.sortMaxSpeedAsc',
     'maxSpeed:desc': 'library.sortMaxSpeedDesc',
+    'rating:desc': 'rating.sortDesc',
+    'rating:asc': 'rating.sortAsc',
   };
 
   /**
@@ -2027,6 +2062,18 @@ export class Library {
     });
     pop.appendChild(vrSection);
 
+    const ratingLabels = this._ratingFilterLabels();
+    const ratingSection = this._buildPickerSection(t('rating.filterTitle'), 'rating', [
+      { value: 'all', label: t('library.filterAll') },
+      ...['favorites', 'top', 'unrated'].map((value) => ({ value, label: ratingLabels[value] })),
+    ], () => this._ratingFilter || 'all', (val) => {
+      this._ratingFilter = val;
+      this._renderFilterChips();
+      this._updateFiltersBadge();
+      if (!this._scanning) this._applyFilters();
+    });
+    pop.appendChild(ratingSection);
+
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._togglePicker(pop, btn);
@@ -2034,6 +2081,21 @@ export class Library {
     this._wirePickerDismissal(pop, btn);
 
     this._updateFiltersBadge();
+  }
+
+  /** Chip / picker wording for the rating filter values. */
+  _ratingFilterLabels() {
+    return {
+      favorites: t('rating.filterFavorites'),
+      top: t('rating.filterTopRated'),
+      unrated: t('rating.filterUnrated'),
+    };
+  }
+
+  /** Extra inputs `sortVideos` needs (the rating lookup for 'rating'). */
+  _sortOpts() {
+    const ratings = this._settings.getRatings ? this._settings.getRatings() : {};
+    return { ratingOf: (p) => ratingOf(ratings, p) };
   }
 
   /**
@@ -2091,21 +2153,23 @@ export class Library {
     if (!container) return;
     renderFilterChips({
       container,
-      state: { tab: this._activeTab, vr: this._vrFilter || 'all' },
-      defaults: { tab: 'all', vr: 'all' },
+      state: { tab: this._activeTab, vr: this._vrFilter || 'all', rating: this._ratingFilter || 'all' },
+      defaults: { tab: 'all', vr: 'all', rating: 'all' },
       labels: {
         tab: { matched: t('library.filterMatched'), unmatched: t('library.filterUnmatched') },
         vr:  { vr: t('library.filterVROnly'), flat: t('library.filterNonVR') },
+        rating: this._ratingFilterLabels(),
       },
       iconFactory: (_name, size) => icon(X, { width: size, height: size }),
       onRemove: (key) => {
         if (key === 'tab') {
           this._switchTab('all');
-        } else if (key === 'vr') {
-          this._vrFilter = 'all';
+        } else if (key === 'vr' || key === 'rating') {
+          if (key === 'vr') this._vrFilter = 'all';
+          else this._ratingFilter = 'all';
           // Update the picker radio so reopening shows the new state.
           const pop = this._container.querySelector('#library-filters-pop');
-          const radio = pop?.querySelector('input[name="library-filter-vr"][value="all"]');
+          const radio = pop?.querySelector(`input[name="library-filter-${key}"][value="all"]`);
           if (radio) radio.checked = true;
         }
         this._renderFilterChips();
@@ -2120,8 +2184,8 @@ export class Library {
     const badge = this._container?.querySelector('#library-filters-badge');
     if (!badge) return;
     const n = countActiveFilters(
-      { tab: this._activeTab, vr: this._vrFilter || 'all' },
-      { tab: 'all', vr: 'all' },
+      { tab: this._activeTab, vr: this._vrFilter || 'all', rating: this._ratingFilter || 'all' },
+      { tab: 'all', vr: 'all', rating: 'all' },
     );
     if (n > 0) { badge.textContent = String(n); badge.hidden = false; }
     else { badge.hidden = true; }
@@ -2414,6 +2478,7 @@ export class Library {
     }
 
     row.appendChild(badges);
+    row.appendChild(this._createRatingControl(video.path, 'library__list-rating'));
 
     // Duration
     if (video.duration > 0) {
@@ -2660,6 +2725,22 @@ export class Library {
     showToast(t('library.pinned', { name, count: paths.length }), 'info');
   }
 
+  /**
+   * Stars + heart for one video (cards, list rows). Writes through the data
+   * service; the `rating:changed` listener repaints every copy on screen.
+   */
+  _createRatingControl(videoPath, className = 'library__card-rating') {
+    const entry = this._settings.getRating ? this._settings.getRating(videoPath) : null;
+    return createRatingControl({
+      rating: entry?.rating || 0,
+      favorite: !!entry?.favorite,
+      className,
+      size: 13,
+      onRate: (rating) => this._settings.setRating(videoPath, { rating }),
+      onFavorite: (favorite) => this._settings.setRating(videoPath, { favorite }),
+    });
+  }
+
   _createCard(video) {
     const card = document.createElement('div');
     card.className = 'library__card';
@@ -2805,6 +2886,9 @@ export class Library {
     // light up here too, giving visual confirmation that the auto-promote did
     // what the user expected.
     this._addPlaybackModeBadge(info, video);
+
+    // Rating + favourite. Shown when set, otherwise on hover (CSS).
+    info.appendChild(this._createRatingControl(video.path));
 
     card.appendChild(info);
 
@@ -5802,6 +5886,7 @@ export class Library {
     this._searchQuery = '';
     this._activeTab = 'all';
     this._vrFilter = 'all';
+    this._ratingFilter = 'all';
     this._searchGlobalOverride = false;
     // Sync the search input + clear button if the panel is rendered
     const searchInput = this._container?.querySelector('.library__search-input');
@@ -5885,6 +5970,10 @@ export class Library {
       else if (this._activeTab === 'unmatched') out = out.filter(v => !v.hasFunscript);
       if (this._vrFilter === 'vr') out = out.filter(v => isVRVideo(v));
       else if (this._vrFilter === 'flat') out = out.filter(v => !isVRVideo(v));
+      if (this._ratingFilter && this._ratingFilter !== 'all') {
+        const ratings = this._settings.getRatings();
+        out = out.filter((v) => matchesRatingFilter(ratings, v.path, this._ratingFilter));
+      }
       if (this._searchQuery) {
         out = fuzzySearch(out, this._searchQuery, {
           searchPaths: true,
@@ -5939,7 +6028,7 @@ export class Library {
       // that ranking away and the exact-title match could sink below
       // alphabetically-earlier partial matches.
       if (!this._searchQuery) {
-        filtered = sortVideos(filtered, sortField, sortDir || 'asc');
+        filtered = sortVideos(filtered, sortField, sortDir || 'asc', this._sortOpts());
       }
       // Denominator for the search-count display reflects the scoped pool,
       // not the global library — otherwise "5 / 800" is misleading when the
@@ -5997,7 +6086,7 @@ export class Library {
         const filteredDirect = runFilters(node.videos);
         const directVideos = this._searchQuery
           ? filteredDirect
-          : sortVideos(filteredDirect, sortField, sortDir || 'asc');
+          : sortVideos(filteredDirect, sortField, sortDir || 'asc', this._sortOpts());
 
         items.push(...folderEntries);
         items.push(...directVideos);
@@ -6550,6 +6639,8 @@ export class Library {
       playlists: this._settings.getPlaylists ? this._settings.getPlaylists() : [],
       categories: this._settings.getCategories ? this._settings.getCategories() : [],
       videoCategories: (this._settings._cache && this._settings._cache.videoCategories) || {},
+      // Ratings + favourites for the headset sections and the web remote.
+      ratings: this._settings.get('library.ratings') || {},
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can

@@ -140,6 +140,16 @@ export function sortVideos(videos, sortBy, order = 'asc') {
       // 0 (sort to the oldest end).
       sorted.sort((a, b) => dir * ((a.dateAdded || 0) - (b.dateAdded || 0)));
       break;
+    case 'rating':
+      // `rating` from /api/remote/videos (0 = unrated). Unrated always
+      // last, in either direction; ties by name. Same rule as the desktop.
+      sorted.sort((a, b) => {
+        const ra = a.rating || 0;
+        const rb = b.rating || 0;
+        if ((ra === 0) !== (rb === 0)) return ra === 0 ? 1 : -1;
+        return dir * (ra - rb) || (a.name || '').localeCompare(b.name || '');
+      });
+      break;
     default:
       break;
   }

@@ -2,6 +2,7 @@
 // Cache-first pattern: reads are synchronous from in-memory cache,
 // writes update cache immediately + fire-and-forget IPC to main process.
 
+import { applyRatingChange, getRatingEntry } from './ratings.js';
 import { eventBus } from './event-bus.js';
 
 const SETTINGS_DEFAULTS = {
@@ -219,6 +220,29 @@ class DataService {
     }
     window.funsync.removeVideoFromPlaylist(id, videoPath);
     eventBus.emit('playlist:changed', { action: 'removeVideo', id, videoPath });
+  }
+
+  // --- Ratings + favourites (`library.ratings`, see ratings.js) ---
+
+  getRatings() {
+    return this.get('library.ratings') || {};
+  }
+
+  /** Normalised entry for `videoPath`, or null when unrated and not a favourite. */
+  getRating(videoPath) {
+    return getRatingEntry(this.getRatings(), videoPath);
+  }
+
+  /**
+   * Set the rating and/or favourite flag of one video. Absent fields keep
+   * their value. Throws on an invalid rating (0–5 in 0.5 steps). Emits
+   * `rating:changed` with the resulting entry (null = cleared).
+   */
+  setRating(videoPath, change) {
+    const { map, entry } = applyRatingChange(this.getRatings(), videoPath, change);
+    this.set('library.ratings', map);
+    eventBus.emit('rating:changed', { path: videoPath, entry });
+    return entry;
   }
 
   // --- Categories ---

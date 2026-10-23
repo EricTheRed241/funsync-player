@@ -791,7 +791,9 @@
       "avgSpeedDesc": "평균 속도 빠른-느린",
       "maxSpeedAsc": "최대 속도 느린-빠른",
       "maxSpeedDesc": "최대 속도 빠른-느린",
-      "switchTo": "{order}(으)로 전환"
+      "switchTo": "{order}(으)로 전환",
+      "ratingDesc": "평점 높은 순",
+      "ratingAsc": "평점 낮은 순"
     },
     "badge": {
       "script": "스크립트",
@@ -863,6 +865,31 @@
       "max": "최대",
       "speedUnit": "유닛/초",
       "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초"
+    },
+    "triage": {
+      "stars": "별 {n}개",
+      "unrated": "평가 안 함",
+      "favorite": "즐겨찾기에 추가",
+      "unfavorite": "즐겨찾기에서 제거",
+      "setStars": "별 {n}개로 평가",
+      "addToPlaylist": "재생목록에 추가…",
+      "close": "닫기",
+      "newPlaylistPlaceholder": "새 재생목록 이름",
+      "create": "만들기",
+      "noPlaylists": "재생목록이 없습니다. 아래에 이름을 입력하세요.",
+      "alreadyIn": "{name} (이미 포함됨)",
+      "added": "{name}에 추가했습니다",
+      "removed": "{name}에서 제거했습니다",
+      "removeFromPlaylist": "{name}에서 제거",
+      "queued": "저장됨 — 데스크톱 앱이 다시 연결되면 적용됩니다",
+      "failed": "저장하지 못했습니다: {reason}",
+      "filter": {
+        "header": "평점",
+        "all": "전체",
+        "favorites": "즐겨찾기",
+        "top": "높은 평점 (4+)",
+        "unrated": "평가 안 함"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "사물",
       "travel": "여행과 장소"
     }
+  },
+  "rating": {
+    "stars": "별 {n}개",
+    "unrated": "평가 안 함",
+    "setStars": "별 {n}개로 평가",
+    "favorite": "즐겨찾기에 추가",
+    "unfavorite": "즐겨찾기에서 제거",
+    "filterTitle": "평점",
+    "filterFavorites": "즐겨찾기",
+    "filterTopRated": "높은 평점 (4+)",
+    "filterUnrated": "평가 안 함",
+    "sortDesc": "평점 높은 순",
+    "sortAsc": "평점 낮은 순"
   }
 }

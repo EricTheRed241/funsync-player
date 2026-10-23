@@ -118,6 +118,10 @@ export { default as Bell } from '../../node_modules/lucide/dist/esm/icons/bell.j
 export { default as Users } from '../../node_modules/lucide/dist/esm/icons/users.js';
 export { default as TriangleAlert } from '../../node_modules/lucide/dist/esm/icons/triangle-alert.js';
 
+// Ratings + favourites (rating-stars.js).
+export { default as Star } from '../../node_modules/lucide/dist/esm/icons/star.js';
+export { default as Heart } from '../../node_modules/lucide/dist/esm/icons/heart.js';
+
 /**
  * Create an SVG element from a Lucide icon node.
  * @param {Array} iconNode — icon definition array (e.g. Play, Pause)

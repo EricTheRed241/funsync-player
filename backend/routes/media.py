@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from services import library_edits
 from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
 
 router = APIRouter()
@@ -32,7 +33,9 @@ _video_registry: dict[str, dict] = {}
 # Collections / playlists / categories — populated alongside the video
 # registry when the renderer registers its library. Kept as lists of dicts
 # (the Electron renderer's native shape) so the remote routes can project
-# them without mutating. "View only" on the phone — no create/edit/delete.
+# them without mutating. Edits from the phone / headset never write these
+# directly: they go to the desktop through `services.library_edits` and
+# come back in the next registration.
 _collections: list[dict] = []
 _playlists: list[dict] = []
 _categories: list[dict] = []
@@ -42,6 +45,8 @@ _video_categories: dict[str, list[str]] = {}
 # Web remote's folder-browse tree needs these so it knows where to stop
 # walking parent directories (a source root has no parent in the tree).
 _sources: list[dict] = []
+# library.ratings — videoPath → {rating, favorite, updatedAt}.
+_ratings: dict[str, dict] = {}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -395,6 +400,24 @@ def register_playlists(playlists: list[dict]):
     _playlists.extend(playlists or [])
 
 
+def register_ratings(ratings: dict):
+    """Register library.ratings (videoPath → {rating, favorite, updatedAt})."""
+    _ratings.clear()
+    if isinstance(ratings, dict):
+        _ratings.update(ratings)
+
+
+def apply_acked_edit(edit: dict):
+    """The desktop applied `edit`: fold it into the registered state so it
+    stays visible after it leaves the pending queue, even if the desktop's
+    re-registration is slow. Idempotent — the registration that follows
+    replaces this with the desktop's own state anyway."""
+    if edit.get("kind") == library_edits.KIND_RATING:
+        library_edits.apply_to_ratings(_ratings, edit)
+    else:
+        library_edits.apply_to_playlists(_playlists, edit)
+
+
 def register_categories(categories: list[dict], video_categories: dict):
     """Register user categories + the videoPath→[categoryId] map."""
     _categories.clear()
@@ -423,7 +446,14 @@ def get_collections() -> list[dict]:
 
 
 def get_playlists() -> list[dict]:
-    return list(_playlists)
+    """Registered playlists in the desktop's order, with edits still waiting
+    for the desktop applied on top."""
+    return library_edits.effective_playlists(_playlists, library_edits.queue.pending())
+
+
+def get_ratings() -> dict:
+    """Registered ratings with edits still waiting for the desktop applied."""
+    return library_edits.effective_ratings(_ratings, library_edits.queue.pending())
 
 
 def get_categories() -> list[dict]:
@@ -746,6 +776,8 @@ def _apply_registration(data: dict):
         )
     if "sources" in data:
         register_sources(data.get("sources") or [])
+    if "ratings" in data:
+        register_ratings(data.get("ratings") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

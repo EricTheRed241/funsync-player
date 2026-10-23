@@ -659,7 +659,9 @@
       "avgSpeedDesc": "Ø Geschw. schnell-langsam",
       "maxSpeedAsc": "Max. Geschw. langsam-schnell",
       "maxSpeedDesc": "Max. Geschw. schnell-langsam",
-      "switchTo": "Wechseln zu {order}"
+      "switchTo": "Wechseln zu {order}",
+      "ratingDesc": "Bewertung hoch-niedrig",
+      "ratingAsc": "Bewertung niedrig-hoch"
     },
     "badge": {
       "script": "Skript",
@@ -731,6 +733,31 @@
       "max": "Max",
       "speedUnit": "Einheiten/s",
       "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s"
+    },
+    "triage": {
+      "stars": "{n} Sterne",
+      "unrated": "Nicht bewertet",
+      "favorite": "Zu Favoriten hinzufügen",
+      "unfavorite": "Aus Favoriten entfernen",
+      "setStars": "Mit {n} Sternen bewerten",
+      "addToPlaylist": "Zur Playlist hinzufügen…",
+      "close": "Schließen",
+      "newPlaylistPlaceholder": "Name der neuen Playlist",
+      "create": "Erstellen",
+      "noPlaylists": "Noch keine Playlists – unten einen Namen eingeben.",
+      "alreadyIn": "{name} (bereits enthalten)",
+      "added": "Zu {name} hinzugefügt",
+      "removed": "Aus {name} entfernt",
+      "removeFromPlaylist": "Aus {name} entfernen",
+      "queued": "Gespeichert – wird übernommen, sobald die Desktop-App wieder verbunden ist",
+      "failed": "Speichern fehlgeschlagen: {reason}",
+      "filter": {
+        "header": "Bewertung",
+        "all": "Alle",
+        "favorites": "Favoriten",
+        "top": "Top bewertet (4+)",
+        "unrated": "Nicht bewertet"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "Objekte",
       "travel": "Reisen & Orte"
     }
+  },
+  "rating": {
+    "stars": "{n} Sterne",
+    "unrated": "Nicht bewertet",
+    "setStars": "Mit {n} Sternen bewerten",
+    "favorite": "Zu Favoriten hinzufügen",
+    "unfavorite": "Aus Favoriten entfernen",
+    "filterTitle": "Bewertung",
+    "filterFavorites": "Favoriten",
+    "filterTopRated": "Top bewertet (4+)",
+    "filterUnrated": "Nicht bewertet",
+    "sortDesc": "Bewertung hoch-niedrig",
+    "sortAsc": "Bewertung niedrig-hoch"
   }
 }

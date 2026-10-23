@@ -118,6 +118,12 @@ const DEFAULTS = {
       // from resumePositions because that map is keyed by video path and
       // one video can sit in several playlists.
       playlistProgress: {},
+      // Per-path rating + favourite, keyed by VIDEO PATH like resumePositions.
+      // Shape: `{ rating: 0..5 in 0.5 steps, favorite: bool, updatedAt: epochMs }`.
+      // Written from the desktop, and from HereSphere / the web remote via the
+      // backend's library-edit channel (renderer/js/library-edits.js). An entry
+      // with rating 0 and no favourite is deleted rather than stored.
+      ratings: {},
       // Show the resume progress bar on cards / list rows. On by default —
       // the feature is pointless invisible — but it IS a visible watch
       // record, so it stays switchable.

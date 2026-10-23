@@ -302,3 +302,29 @@ describe('RemoteBridge — reconnect', () => {
     expect(FakeWebSocket.instances.length).toBe(4);
   });
 });
+
+describe('RemoteBridge — library edits', () => {
+  it('routes library-edit to onLibraryEdit and ignores a malformed one', () => {
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onLibraryEdit = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'library-edit', edit: { seq: 3, kind: 'rating', path: '/a.mp4', rating: 4 } });
+    latest().simulateMessage({ type: 'library-edit', edit: 'nope' });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0].seq).toBe(3);
+  });
+
+  it('acks over the observer socket, with an optional error', () => {
+    const b = new RemoteBridge();
+    b.connect();
+    latest().simulateOpen();
+    b.ackLibraryEdit(3);
+    b.ackLibraryEdit(4, 'video gone');
+    expect(latest().sent.map((s) => JSON.parse(s))).toEqual([
+      { type: 'library-edit-ack', seq: 3 },
+      { type: 'library-edit-ack', seq: 4, error: 'video gone' },
+    ]);
+  });
+});

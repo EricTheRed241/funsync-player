@@ -528,8 +528,8 @@ async def test_deovr_groups_are_sections_not_directories(client):
     response = await client.get("/deovr")
     data = response.json()
     group_names = [g["name"] for g in data["scenes"]]
-    # 300 s and 900 s are both inside the 5-15 min bucket.
-    assert group_names == ["VR", "Flat", "Medium (5-15m)"]
+    # 300 s and 900 s are both inside the 5-15 min bucket; nothing is rated.
+    assert group_names == ["VR", "Flat", "Medium (5-15m)", "Unrated"]
     assert "Videos" not in group_names
     assert "Other" not in group_names
 

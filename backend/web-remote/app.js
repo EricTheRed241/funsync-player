@@ -13,6 +13,10 @@ import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
 import { t, initWebRemoteI18n, translatePage } from './i18n.js';
 import { shuffle as shuffleList, balancedShuffle } from './shuffle.js';
+import {
+  createRatingControl, updateRatingControl, filterByRating,
+  setRating, addToPlaylist, removeFromPlaylist, reportResult,
+} from './triage.js';
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
@@ -172,6 +176,7 @@ const SORT_FIELDS = [
   { field: 'duration',  defaultDir: 'asc' },
   { field: 'avgSpeed',  defaultDir: 'desc' },
   { field: 'maxSpeed',  defaultDir: 'desc' },
+  { field: 'rating',    defaultDir: 'desc' },
 ];
 
 // `field:dir` -> the existing directional string. Reused so a row still
@@ -187,6 +192,8 @@ const SORT_LABELS = {
   'avgSpeed:desc': 'webRemote.sortSheet.avgSpeedDesc',
   'maxSpeed:asc': 'webRemote.sortSheet.maxSpeedAsc',
   'maxSpeed:desc': 'webRemote.sortSheet.maxSpeedDesc',
+  'rating:desc': 'webRemote.sortSheet.ratingDesc',
+  'rating:asc': 'webRemote.sortSheet.ratingAsc',
 };
 
 const DEFAULT_SORT_DIRS = Object.fromEntries(SORT_FIELDS.map((o) => [o.field, o.defaultDir]));
@@ -199,6 +206,7 @@ let uiState = {
   // Name is still Z-A.
   sortDirs: { ...DEFAULT_SORT_DIRS, ...(storedState.sortDirs || {}) },
   vr: storedState.vr || 'all',             // all | vr | flat
+  rating: storedState.rating || 'all',     // all | favorites | top | unrated
   view: storedState.view || 'grid',        // grid | list
 };
 
@@ -630,6 +638,7 @@ function applyMatchedVrFilters(videos) {
   else if (uiState.tab === 'unmatched') out = out.filter(v => !v.hasFunscript);
   if (uiState.vr === 'vr') out = out.filter(v => isVRVideo(v.name));
   else if (uiState.vr === 'flat') out = out.filter(v => !isVRVideo(v.name));
+  out = filterByRating(out, uiState.rating);
   return out;
 }
 
@@ -1109,9 +1118,126 @@ async function renderGroupingDetail(kind, id) {
     mainEl.appendChild(bar);
   }
 
-  if (uiState.view === 'grid') mainEl.appendChild(renderGrid(filtered));
-  else mainEl.appendChild(renderRows(filtered));
+  const listEl = uiState.view === 'grid' ? renderGrid(filtered) : renderRows(filtered);
+  if (kind === 'playlists') addPlaylistRemoveButtons(listEl, filtered, item);
+  mainEl.appendChild(listEl);
 }
+
+/**
+ * Playlist detail: a remove button on every video. The list is the
+ * playlist's own; removing goes to the desktop like every triage write.
+ */
+function addPlaylistRemoveButtons(listEl, videos, playlistItem) {
+  [...listEl.children].forEach((el, i) => {
+    const video = videos[i];
+    if (!video) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'triage-remove';
+    btn.appendChild(svgIcon('x', 16));
+    btn.setAttribute('aria-label', t('webRemote.triage.removeFromPlaylist', { name: playlistItem.name || '' }));
+    btn.title = btn.getAttribute('aria-label');
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      const result = await removeFromPlaylist(video.id, { playlistId: playlistItem.id, name: playlistItem.name });
+      reportResult(result, t('webRemote.triage.removed', { name: playlistItem.name || '' }));
+      if (!result.ok) { btn.disabled = false; return; }
+      el.remove();
+      playlists = null; // refetch: counts and membership changed
+      countEl.textContent = listEl.children.length ? `${listEl.children.length}` : '';
+    });
+    el.classList.add('triage-removable');
+    el.appendChild(btn);
+  });
+}
+
+// --- Triage (player view) ---------------------------------------------------
+
+/** Rating + favourite + "Add to playlist…" for the player view. */
+function buildTriageRow(video) {
+  const row = document.createElement('div');
+  row.className = 'player__triage';
+
+  const apply = (rating, favorite) => {
+    video.rating = rating;
+    video.favorite = favorite;
+    updateRatingControl(control, { rating, favorite });
+  };
+  const send = async (change) => {
+    const before = { rating: video.rating || 0, favorite: !!video.favorite };
+    apply(change.rating ?? before.rating, change.favorite ?? before.favorite);
+    const result = await setRating(video.id, change);
+    reportResult(result);
+    if (!result.ok) apply(before.rating, before.favorite);
+    else apply(result.data.rating, result.data.favorite);
+  };
+  const control = createRatingControl({
+    rating: video.rating || 0,
+    favorite: !!video.favorite,
+    onRate: (rating) => send({ rating }),
+    onFavorite: (favorite) => send({ favorite }),
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'player__triage-add';
+  addBtn.append(svgIcon('listPlus', 18), document.createTextNode(t('webRemote.triage.addToPlaylist')));
+  addBtn.addEventListener('click', () => openPlaylistSheet(video));
+
+  row.append(control, addBtn);
+  return row;
+}
+
+const playlistSheetEl = document.getElementById('playlistSheet');
+const playlistSheetListEl = document.getElementById('playlistSheetList');
+const playlistSheetForm = document.getElementById('playlistSheetForm');
+const playlistSheetInput = document.getElementById('playlistSheetInput');
+let playlistSheetVideo = null;
+
+/** "Add to playlist…": pick an existing playlist or name a new one. */
+async function openPlaylistSheet(video) {
+  playlistSheetVideo = video;
+  playlistSheetInput.value = '';
+  playlistSheetListEl.replaceChildren();
+  openSheet(playlistSheetEl);
+  let lists = [];
+  try {
+    playlists = null;
+    lists = await loadGrouping('playlists');
+  } catch { /* offline: creating by name still works */ }
+  if (lists.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sheet__empty';
+    empty.textContent = t('webRemote.triage.noPlaylists');
+    playlistSheetListEl.appendChild(empty);
+  }
+  for (const pl of lists) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sheet__option';
+    const inIt = (pl.videoIds || []).includes(video.id);
+    btn.disabled = inIt;
+    btn.textContent = inIt ? t('webRemote.triage.alreadyIn', { name: pl.name }) : pl.name;
+    btn.addEventListener('click', () => addVideoToPlaylist({ playlistId: pl.id, name: pl.name }));
+    playlistSheetListEl.appendChild(btn);
+  }
+}
+
+async function addVideoToPlaylist(target) {
+  const video = playlistSheetVideo;
+  if (!video) return;
+  closeSheet(playlistSheetEl);
+  const result = await addToPlaylist(video.id, target);
+  reportResult(result, t('webRemote.triage.added', { name: target.name || '' }));
+  if (result.ok) playlists = null; // refetch next time: membership changed
+}
+
+playlistSheetForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = playlistSheetInput.value.trim();
+  if (name) addVideoToPlaylist({ name });
+});
 
 /**
  * Build a clickable "In folder: X" bar for views that have a well-defined
@@ -1318,6 +1444,20 @@ function createRow(v) {
     const b = document.createElement('span');
     b.className = 'list__badge';
     b.textContent = t('webRemote.badge.vr');
+    sub.appendChild(b);
+  }
+  if (v.favorite) {
+    const b = document.createElement('span');
+    b.className = 'list__badge list__badge--favorite';
+    b.textContent = '♥';
+    b.setAttribute('aria-label', t('webRemote.triage.favorite'));
+    sub.appendChild(b);
+  }
+  if (v.rating > 0) {
+    const b = document.createElement('span');
+    b.className = 'list__badge list__badge--rating';
+    b.textContent = `★ ${v.rating}`;
+    b.setAttribute('aria-label', t('webRemote.triage.stars', { n: v.rating }));
     sub.appendChild(b);
   }
   info.appendChild(sub);
@@ -1705,14 +1845,20 @@ const FILTER_LABELS = {
   tab: { matched: 'Matched', unmatched: 'Unmatched' },
   vr:  { vr: 'VR only', flat: 'Non-VR' },
 };
-const FILTER_DEFAULTS = { tab: 'all', vr: 'all' };
+const FILTER_DEFAULTS = { tab: 'all', vr: 'all', rating: 'all' };
+const FILTER_KEYS = ['tab', 'vr', 'rating'];
+
+function filterLabel(key, value) {
+  if (key === 'rating') return t(`webRemote.triage.filter.${value}`);
+  return FILTER_LABELS[key]?.[value] || value;
+}
 
 function renderFilterChips() {
   const chips = [];
-  for (const key of ['tab', 'vr']) {
+  for (const key of FILTER_KEYS) {
     const value = uiState[key];
     if (value && value !== FILTER_DEFAULTS[key]) {
-      const label = FILTER_LABELS[key]?.[value] || value;
+      const label = filterLabel(key, value);
       chips.push({ key, label });
     }
   }
@@ -1742,7 +1888,7 @@ function renderFilterChips() {
 
 function updateFiltersBadge() {
   let active = 0;
-  for (const key of ['tab', 'vr']) {
+  for (const key of FILTER_KEYS) {
     if (uiState[key] && uiState[key] !== FILTER_DEFAULTS[key]) active++;
   }
   if (active > 0) {
@@ -1917,6 +2063,7 @@ function saveFilterState() {
       sort: uiState.sort,
       sortDirs: uiState.sortDirs,
       vr: uiState.vr,
+      rating: uiState.rating,
       view: uiState.view,
     }));
   } catch { /* ignore quota */ }
@@ -2619,6 +2766,9 @@ async function renderPlayer(id) {
     meta.appendChild(dur);
   }
   wrap.appendChild(meta);
+
+  // Triage: rating, favourite, add to playlist (triage.js).
+  wrap.appendChild(buildTriageRow(video));
 
   // Speed stats row — only rendered when the backend has probed this
   // video's funscript. Shows avg + max in units/s, colour-coded by the
