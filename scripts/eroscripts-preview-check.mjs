@@ -137,9 +137,9 @@ function decodeWithFfmpeg(tmpDir) {
 function contactSheet(items, outFile, tmpDir) {
   if (items.length === 0) return null;
   const dir = fs.mkdtempSync(path.join(tmpDir, 'sheet-'));
-  // Same-size tiles first: the tile filter restarts when the input size changes.
+  // Same-size, same-format tiles first: the tile filter restarts when its input changes.
   items.forEach((it, i) => spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', it.file, '-frames:v', '1',
-    '-vf', 'scale=316:178:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2,setsar=1',
+    '-vf', 'scale=316:178:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuvj420p',
     path.join(dir, `${String(i).padStart(3, '0')}.jpg`)]));
   const cols = 6;
   const rows = Math.ceil(items.length / cols);
