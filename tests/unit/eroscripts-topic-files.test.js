@@ -181,7 +181,7 @@ describe('getTopicAttachments', () => {
       '/categories.json': CATEGORIES,
     });
     const r = await new EroScriptsAPI().getTopicAttachments(9);
-    expect(r).toEqual({ attachments: [], linked: [], external: [{ host: 'MEGA', url: 'https://mega.nz/file/q' }], paid: true });
+    expect(r).toEqual({ attachments: [], linked: [], external: [{ host: 'MEGA', url: 'https://mega.nz/file/q' }], paid: true, preview: null });
   });
 });
 
