@@ -6,6 +6,7 @@ import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
 import { getAxisBySuffix, variantAxes } from './multi-axis.js';
+import { preferHandmadeAxes, filesBeside } from './handmade-axes.js';
 import { sourcesToProbe } from './source-state.js';
 import { BackendBannerState } from './backend-banner-state.js';
 
@@ -1210,6 +1211,10 @@ class App {
       if (axis) {
         this.library?.registerFunscripts([{ path: fsPath, name: fsName }]);
         if (this.library) this.library._lastScanKey = null;
+        // Hand-made axis scripts always win: the video's generated ones go.
+        this.library?.replaceGeneratedAfterDownload(this._currentVideoPath || null, [fsPath]).catch((err) => {
+          console.warn('[HandmadeWins] replace after download failed:', err?.message);
+        });
         return;
       }
       // If a video is currently playing, load the downloaded script
@@ -1231,6 +1236,10 @@ class App {
       if (this._currentVideoPath && this.library) {
         this.library.associateDownloadedScript(this._currentVideoPath, fsPath);
       }
+      // A main script with axes embedded in it is hand-made multi-axis too.
+      this.library?.replaceGeneratedAfterDownload(this._currentVideoPath || null, [fsPath]).catch((err) => {
+        console.warn('[HandmadeWins] replace after download failed:', err?.message);
+      });
     };
 
     // Initialize script editor (after all dependencies are set up)
@@ -6630,7 +6639,7 @@ class App {
       }
       // Load multi-axis vibration script for Buttplug.io (works with or without main script)
       if (funscriptData._multiAxis) {
-        this._loadMultiAxisScripts(funscriptData._multiAxis);
+        this._loadMultiAxisScripts(this._withHandmadeAxes(funscriptData._multiAxis, funscriptData.textContent, videoData?.path));
       }
     }
     if (subtitleData) {
@@ -6651,6 +6660,30 @@ class App {
     // of a session (because the loadVideo refresh fired before
     // `_playFromLibrary` finished setting `_currentPlayContext`).
     this._updateQueuePanelState();
+  }
+
+  /**
+   * Hand-made axes always win: when the main script embeds axes, or a
+   * hand-made companion sits beside it, a saved multi-axis config's
+   * generated companions are not played (embedded axes are fed from the
+   * main script by `_feedEmbeddedMultiAxis`). Returns `multi` itself when
+   * nothing changes, so `_loadMultiAxisScripts` can still record recovered
+   * paths on it.
+   */
+  _withHandmadeAxes(multi, mainContent, videoPath) {
+    if (!multi?.axes) return multi;
+    let parsed = null;
+    if (typeof mainContent === 'string') {
+      try { parsed = JSON.parse(stripBOM(mainContent)); } catch { /* not JSON: companions only */ }
+    }
+    const primaryPath = multi.main || videoPath;
+    const allFiles = filesBeside(
+      (this.library?.getAllFunscripts() || []).map((f) => f.path),
+      multi.main,
+      videoPath,
+    );
+    const axes = preferHandmadeAxes(multi.axes, { primaryPath, allFiles, parsed });
+    return axes === multi.axes ? multi : { ...multi, axes };
   }
 
   async _loadMultiAxisScripts(config) {

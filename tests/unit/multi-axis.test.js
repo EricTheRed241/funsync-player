@@ -8,6 +8,7 @@ import {
   AXIS_DEFINITIONS, parseAxisSuffix, getBaseName, detectCompanionFiles,
   buildCompanionPath, getAxisBadges, tcodeToFeature,
   getAxisBySuffix, axisSuffixVariants, variantAxes,
+  isGeneratedCompanion, listCompanionFiles,
 } from '../../renderer/js/multi-axis.js';
 
 describe('multi-axis', () => {
@@ -219,6 +220,44 @@ describe('multi-axis', () => {
       const companions = detectCompanionFiles('C:\\videos\\video.funscript', filesWithPaths);
       expect(companions.length).toBe(2);
     });
+
+    describe('hand-made companions win over generated ones', () => {
+      const handmade = 'Title.twist.funscript';
+      const generated = ['Title.generated.twist.funscript', 'Title.generated.roll.funscript'];
+
+      it('drops every generated companion once any hand-made one exists, in any order', () => {
+        for (const files of [
+          ['Title.funscript', handmade, ...generated],
+          ['Title.funscript', ...generated, handmade],
+          [generated[1], handmade, generated[0], 'Title.funscript'],
+        ]) {
+          expect(detectCompanionFiles('Title.funscript', files).map((c) => c.path)).toEqual([handmade]);
+        }
+      });
+
+      it('still plays generated companions when nothing is hand-made', () => {
+        expect(detectCompanionFiles('Title.funscript', ['Title.funscript', ...generated]).map((c) => c.path))
+          .toEqual(generated);
+      });
+
+      it('ignores macOS AppleDouble files', () => {
+        expect(detectCompanionFiles('Title.funscript', ['._Title.twist.funscript', ...generated]).map((c) => c.path))
+          .toEqual(generated);
+      });
+
+      it('isGeneratedCompanion tells the two apart', () => {
+        expect(isGeneratedCompanion('/lib/Title.generated.twist.funscript')).toBe(true);
+        expect(isGeneratedCompanion('Title.GENERATED.R1.funscript')).toBe(true);
+        expect(isGeneratedCompanion('Title.twist.funscript')).toBe(false);
+        expect(isGeneratedCompanion('Title.generated.funscript')).toBe(false);
+        expect(isGeneratedCompanion('Title.funscript')).toBe(false);
+      });
+
+      it('listCompanionFiles keeps both, flagged', () => {
+        expect(listCompanionFiles('Title.funscript', [handmade, generated[0]]).map((c) => c.generated))
+          .toEqual([false, true]);
+      });
+    });
   });
 
   describe('buildCompanionPath', () => {
@@ -321,6 +360,18 @@ describe('multi-axis', () => {
       const copy = { ...base };
       variantAxes(base, '/lib/T/Title_x.funscript', ['/lib/T/Title_x.pitch.funscript']);
       expect(base).toEqual(copy);
+    });
+
+    it("never replaces the video's hand-made axis with the variant's generated one", () => {
+      const own = { twist: '/lib/T/Title.twist.funscript', roll: '/lib/T/Title.generated.roll.funscript' };
+      const all = [
+        '/lib/T/Title_hardcore.generated.twist.funscript',
+        '/lib/T/Title_hardcore.generated.roll.funscript',
+      ];
+      expect(variantAxes(own, '/lib/T/Title_hardcore.funscript', all)).toEqual({
+        twist: '/lib/T/Title.twist.funscript',
+        roll: '/lib/T/Title_hardcore.generated.roll.funscript',
+      });
     });
   });
 });

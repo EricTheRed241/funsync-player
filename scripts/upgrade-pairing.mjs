@@ -75,3 +75,23 @@ export function pairUpgradeJobs(videos, scripts, explicit = new Set()) {
   }
   return { jobs, unmatchedVideos, orphanScripts };
 }
+
+/**
+ * The video a stroke script in the same folder belongs to, by the library
+ * scan's rules: same name (`Title.funscript`), a parenthesised variant
+ * (`Title (Soft).funscript`) or an underscore variant
+ * (`Title_hardcore.funscript`) of `Title.mp4`.
+ *
+ * @param {string} scriptStem — script filename without `.funscript`
+ * @param {string[]} videoStems — stems of the videos in that folder
+ * @returns {string|null} the video stem, or null for a script of no video
+ */
+export function sceneVideoStem(scriptStem, videoStems) {
+  const want = normStem(scriptStem);
+  const exact = videoStems.find((s) => normStem(s) === want);
+  if (exact !== undefined) return exact;
+  const paren = scriptStem.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+  const parent = paren && videoStems.find((s) => normStem(s) === normStem(paren[1]));
+  if (parent) return parent;
+  return underscoreVariant(scriptStem, videoStems)?.stem ?? null;
+}

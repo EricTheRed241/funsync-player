@@ -1288,6 +1288,7 @@
     "noAttachments": "Keine Funscript-Anhänge in diesem Thema gefunden",
     "downloadFailed": "Download fehlgeschlagen",
     "savedToast": "Skript gespeichert: {name}",
+    "replacedGenerated": "{count, plural, one {# generierte Achsendatei} other {# generierte Achsendateien}} durch handgemachte ersetzt",
     "sessionExpired": "EroScripts-Sitzung abgelaufen — bitte erneut über das EroScripts-Panel anmelden",
     "conflictTitle": "Skript existiert bereits",
     "conflictMessage": "{name} liegt bereits in diesem Ordner. Ersetzen oder beide behalten und das neue als Variante speichern?",

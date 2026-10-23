@@ -136,38 +136,61 @@ export function getBaseName(filepath) {
 }
 
 /**
- * Detect companion axis files from a list of filenames in the same directory.
- * Given a primary funscript (e.g. 'video.funscript'), finds all companion axes.
+ * True for a generated companion, `<stem>.generated.<axis>.funscript`, as
+ * written by `npm run upgrade:axes`. Every other companion is hand-made.
+ *
+ * @param {string} file — filename or path
+ * @returns {boolean}
+ */
+export function isGeneratedCompanion(file) {
+  const filename = String(file || '').split(/[\\/]/).pop() || '';
+  if (!parseAxisSuffix(filename)) return false;
+  const stem = filename.slice(0, -'.funscript'.length);
+  return stem.slice(0, stem.lastIndexOf('.')).toLowerCase().endsWith('.generated');
+}
+
+/**
+ * Every companion axis file of a primary funscript, hand-made and generated
+ * alike, in `allFiles` order. macOS `._` AppleDouble files are skipped.
  *
  * @param {string} primaryPath — path to the primary .funscript file
- * @param {string[]} allFiles — all filenames in the same directory
- * @returns {Array<{path: string, axis: AxisInfo}>} detected companion files
+ * @param {string[]} allFiles — filenames or paths
+ * @returns {Array<{path: string, axis: AxisInfo, generated: boolean}>}
  */
-export function detectCompanionFiles(primaryPath, allFiles) {
+export function listCompanionFiles(primaryPath, allFiles) {
   if (!primaryPath || !allFiles || allFiles.length === 0) return [];
 
   const primaryBase = getBaseName(primaryPath).toLowerCase();
   if (!primaryBase) return [];
 
   const companions = [];
-
   for (const file of allFiles) {
-    const lower = file.toLowerCase();
-    if (!lower.endsWith('.funscript')) continue;
-
-    // Skip the primary file itself
+    if (!file.toLowerCase().endsWith('.funscript')) continue;
     const filename = file.split(/[\\/]/).pop() || '';
-    const fileBase = getBaseName(filename).toLowerCase();
-
-    if (fileBase !== primaryBase) continue;
-
+    if (filename.startsWith('._')) continue;
+    if (getBaseName(filename).toLowerCase() !== primaryBase) continue;
     const axis = parseAxisSuffix(filename);
-    if (axis) {
-      companions.push({ path: file, axis });
-    }
+    if (axis) companions.push({ path: file, axis, generated: isGeneratedCompanion(filename) });
   }
-
   return companions;
+}
+
+/**
+ * Detect companion axis files from a list of filenames in the same directory.
+ * Given a primary funscript (e.g. 'video.funscript'), finds all companion axes.
+ *
+ * Hand-made axis scripts always win: once the primary has any hand-made
+ * companion, its generated companions (`video.generated.twist.funscript`)
+ * are left out entirely, whatever order `allFiles` is in.
+ *
+ * @param {string} primaryPath — path to the primary .funscript file
+ * @param {string[]} allFiles — all filenames in the same directory
+ * @returns {Array<{path: string, axis: AxisInfo}>} detected companion files
+ */
+export function detectCompanionFiles(primaryPath, allFiles) {
+  const all = listCompanionFiles(primaryPath, allFiles);
+  const handmade = all.filter((c) => !c.generated);
+  return (handmade.length > 0 ? handmade : all).map(({ path, axis }) => ({ path, axis }));
 }
 
 /**
@@ -175,9 +198,10 @@ export function detectCompanionFiles(primaryPath, allFiles) {
  *
  * A variant's own companions (`Title_hardcore.generated.twist.funscript`
  * for `Title_hardcore.funscript`) replace the video's for those axes; any
- * axis the variant lacks keeps the video's file. Only companions in the
- * variant's own folder count, so a same-named script elsewhere in the
- * library cannot leak in.
+ * axis the variant lacks keeps the video's file. A generated variant
+ * companion never replaces a hand-made one of the video. Only companions
+ * in the variant's own folder count, so a same-named script elsewhere in
+ * the library cannot leak in.
  *
  * @param {Object<string,string>} baseAxes — the video's axes, suffix → path
  * @param {string} variantPath — the variant's stroke funscript
@@ -192,6 +216,8 @@ export function variantAxes(baseAxes, variantPath, allFiles) {
   const own = new Set();
   for (const c of detectCompanionFiles(variantPath, allFiles)) {
     if (dirOf(c.path) !== dir || own.has(c.axis.suffix)) continue;
+    const current = axes[c.axis.suffix];
+    if (current && !isGeneratedCompanion(current) && isGeneratedCompanion(c.path)) continue;
     own.add(c.axis.suffix);
     axes[c.axis.suffix] = c.path;
   }

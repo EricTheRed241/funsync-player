@@ -21,6 +21,7 @@ import { getScriptTags, recordScriptTags } from '../js/script-tags.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
 import { fuzzySearch, sortVideos, computeSpeedStats, compareNames, dedupeByName } from '../js/library-search.js';
 import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/multi-axis.js';
+import { preferHandmadeAxes, filesBeside } from '../js/handmade-axes.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
@@ -918,7 +919,16 @@ export class Library {
           video._customRouting = routes;
         }
       } else if (resolved.kind === 'multi') {
-        const multi = resolved.config;
+        let multi = resolved.config;
+        // Hand-made axes always win, also over generated companions saved
+        // by an earlier auto-promotion.
+        const axes = this._preferHandmadeAxes(multi, video.path);
+        if (axes !== multi.axes) {
+          multi = { ...multi, axes };
+          entry.multi = multi;
+          associations[video.path] = buildAssociationEntry(entry.active, entry.single, multi, entry.custom);
+          assocMigrated = true;
+        }
         const hasAnyScript = !!multi.main || Object.values(multi.axes || {}).some(Boolean);
         if (hasAnyScript) {
           video.hasFunscript = true;
@@ -5304,19 +5314,17 @@ export class Library {
       const picked = await showEroScriptsSearchModal(video);
       // The files were written after the last library scan, so the modal's
       // dropdowns would have no option matching them and would reopen blank.
-      if (picked) {
-        const fresh = picked.mode === 'multi'
-          ? [picked.main, ...Object.values(picked.axes || {})]
-          : [picked.path];
-        this.registerFunscripts(
-          fresh.filter(Boolean).map((path) => ({ path, name: path.split(/[\\/]/).pop() })),
-        );
-      }
+      const fresh = !picked ? [] : (picked.mode === 'multi'
+        ? [picked.main, ...Object.values(picked.axes || {})]
+        : [picked.path]).filter(Boolean);
+      this.registerFunscripts(fresh.map((path) => ({ path, name: path.split(/[\\/]/).pop() })));
       if (picked?.mode === 'single') {
         this._applyAssociation(video, cardEl, picked.path, picked.name);
       } else if (picked?.mode === 'multi') {
         this._applyMultiAxisAssociation(video, cardEl, picked);
       }
+      // Hand-made axis files arrived: the video's generated ones go.
+      if (fresh.length > 0) await this.replaceGeneratedAfterDownload(video.path, fresh);
       if (picked?.topic) {
         recordScriptTags(this._settings, video.path, picked.topic);
         // The post's preview becomes the thumbnail unless one is set.
@@ -6138,6 +6146,71 @@ export class Library {
         path: entry.path,
       });
     }
+  }
+
+  /**
+   * A saved multi-axis map with hand-made axes winning (see
+   * `preferHandmadeAxes`). Only files beside the main script or the video
+   * count. Returns `multi.axes` itself when nothing changes.
+   */
+  _preferHandmadeAxes(multi, videoPath) {
+    const primaryPath = multi?.main || String(videoPath || '').replace(/\.[^/.\\]+$/, '.funscript');
+    const allFiles = filesBeside(this.getAllFunscripts().map((f) => f.path), multi?.main, videoPath);
+    return preferHandmadeAxes(multi?.axes, { primaryPath, allFiles });
+  }
+
+  /**
+   * Re-pair a video after its generated companions were moved to the trash
+   * because hand-made axis files arrived: forget the trashed files, point
+   * its saved multi-axis association at the hand-made files, and mark the
+   * scan stale so the next library view rescans.
+   *
+   * @param {string} videoPath
+   * @param {string[]} trashedPaths
+   */
+  forgetGeneratedCompanions(videoPath, trashedPaths) {
+    const gone = new Set(trashedPaths || []);
+    if (Array.isArray(this._allFunscripts)) {
+      this._allFunscripts = this._allFunscripts.filter((f) => !gone.has(f.path));
+    }
+    this._lastScanKey = null;
+    if (!videoPath) return;
+
+    const associations = this._settings.get('library.associations') || {};
+    const entry = normalizeAssociation(associations[videoPath]);
+    if (entry.multi?.axes) {
+      const kept = Object.fromEntries(Object.entries(entry.multi.axes).filter(([, p]) => !gone.has(p)));
+      const multi = { ...entry.multi, axes: kept };
+      multi.axes = this._preferHandmadeAxes(multi, videoPath);
+      associations[videoPath] = buildAssociationEntry(entry.active, entry.single, multi, entry.custom);
+      this._settings.set('library.associations', associations);
+      const video = this.getVideoByPath(videoPath);
+      if (video && entry.active === 'multi') this._syncVideoStateForActive(video, 'multi', multi);
+    }
+    this._applyFilters();
+  }
+
+  /**
+   * Hand-made axis scripts always win: after an EroScripts download, move
+   * the generated companions the saved files replace to the OS trash (see
+   * handmade-downloads.js), say so, and re-pair the video.
+   *
+   * @param {string|null} videoPath — the video the download was for
+   * @param {string[]} savedPaths — files the download wrote
+   * @returns {Promise<number>} how many files went to the trash
+   */
+  async replaceGeneratedAfterDownload(videoPath, savedPaths) {
+    if (!window.funsync?.trashGeneratedCompanions) return 0;
+    const { trashReplacedGenerated } = await import('../js/handmade-downloads.js');
+    const trashed = await trashReplacedGenerated(savedPaths, {
+      readScript: (p) => window.funsync.readFunscript(p),
+      trash: (p) => window.funsync.trashGeneratedCompanions(p),
+    });
+    if (trashed.length === 0) return 0;
+    const { showToast } = await import('../js/toast.js');
+    showToast(t('eroscripts.replacedGenerated', { count: trashed.length }), 'info', 5000);
+    this.forgetGeneratedCompanions(videoPath, trashed);
+    return trashed.length;
   }
 
   /** Absolute paths of every funscript the last scan found. Used to recover

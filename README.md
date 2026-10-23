@@ -90,8 +90,13 @@ A local desktop video player with device synchronization for funscript playback.
 - **Target setup: 4 axes on a MiraBot Lite** — stroke (L0), twist (R0), roll (R1), pitch (R2). Every script in the library should drive all four.
 - TCode convention detection (10 standard axes)
 - Companion file detection by filename suffix, including generated `<name>.generated.<axis>.funscript` files
-- `npm run upgrade:axes -- <folder>` fills the gap for stroke-only scripts: it writes twist, roll and pitch companions (never overwrites; `--dry-run` to preview). Surge / sway / valve only with `--surge` / `--sway` / `--valve`
-- Switching a script variant switches to that variant's own axis files
+- Axes embedded in the main script are played too: `additional_axes`, `raw`, `axes` (TCode ids), `channels` (axis names or TCode ids), sibling axis keys and inline TCode values. An embedded axis needs at least 2 actions
+- **Hand-made axis scripts always win.** A scene (a video and its stroke scripts, variants included) has hand-made axes when any of its scripts has a companion that isn't `.generated.` or axes embedded in it:
+  - playback: once a script has any hand-made axes (companion or embedded), its generated companions are not played, whatever order the files are listed in, including ones saved in an older multi-axis association
+  - `npm run upgrade:axes -- <folder>` fills the gap for stroke-only scripts: it writes twist, roll and pitch companions (never overwrites; `--dry-run` to preview). Surge / sway / valve only with `--surge` / `--sway` / `--valve`. It skips a scene with hand-made axes entirely and says so
+  - `npm run prune:generated -- [--dry-run] --archive <dir> <library folder>...` cleans up a library: for each scene with hand-made axes it writes embedded axes out as `<stem>.<axis>.funscript` companions (never replacing a file; the main script is left alone) and moves every `<stem>.generated.<axis>.funscript` into `<dir>/<path relative to the library folder's parent>`, listing each move as `original<TAB>archived` in `<dir>/MANIFEST.txt`. Nothing is deleted; `--dry-run` only prints the plan. macOS `._` files are ignored
+  - after an EroScripts download (panel or the Associate dialog) saves a hand-made axis file, or a main script with embedded axes, that script's same-stem `.generated.` companions are moved to the system trash and the video is re-paired
+- Switching a script variant switches to that variant's own axis files; a generated variant file never replaces the video's hand-made one
 - Axis-to-device feature mapping
 - Searchable dropdowns for axis assignment with fuzzy matching
 
