@@ -14,7 +14,7 @@ import {
   cleanVideoName, queryVariants, normalisedBase, actionsHash, scriptLengthMs,
   classifyScript, createPacer, createForum, loadLocalScene, matchVideo, runSync,
   isStale, planVideo, availableAxes, installAxes, installSuffix, renderReport,
-  creatorOf, parseInterval, launchdPlist, LAUNCHD_LABEL,
+  creatorOf, parseInterval, launchdPlist, LAUNCHD_LABEL, SEARCH_INTERVAL_MS,
   RateLimitedError, SessionExpiredError,
 } from '../../scripts/eroscripts-sync-lib.mjs';
 
@@ -60,7 +60,8 @@ function fakeApi({ search = () => [], topics = {}, files = {} } = {}) {
   };
 }
 
-const forumFor = (api, cache = {}) => createForum(api, { pacer: createPacer({ intervalMs: 0 }), cache, now: () => NOW });
+const instant = () => createPacer({ intervalMs: 0 });
+const forumFor = (api, cache = {}) => createForum(api, { pacer: instant(), searchPacer: instant(), cache, now: () => NOW });
 
 describe('name cleaning', () => {
   it.each([
@@ -260,11 +261,14 @@ describe('polite pacing', () => {
   it('runs every forum call through the pacer', async () => {
     const waits = vi.fn(async () => {});
     const api = fakeApi({ search: () => [topicResult(1, 'Scene')], topics: { 1: { attachments: [att('Scene.funscript', 's')], linked: [], external: [], paid: false } }, files: { [upload('s')]: script(1000) } });
-    const forum = createForum(api, { pacer: { wait: waits, count: 0 }, now: () => NOW });
+    const searchWaits = vi.fn(async () => {});
+    const forum = createForum(api, { pacer: { wait: waits, count: 0 }, searchPacer: { wait: searchWaits }, now: () => NOW });
     await forum.search('scene');
     await forum.topic(1);
     await forum.entries(upload('s'), 'Scene.funscript');
     expect(waits).toHaveBeenCalledTimes(3);
+    expect(searchWaits).toHaveBeenCalledTimes(1);
+    expect(SEARCH_INTERVAL_MS).toBeGreaterThanOrEqual(3000);
   });
 });
 

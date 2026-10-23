@@ -27,6 +27,9 @@ const { AXIS_SUFFIXES } = require('../electron/library-scan.js');
 const JSZip = require('jszip');
 
 export const FORUM_INTERVAL_MS = 700;
+// Discourse's per-user search limit is per minute; a full-library run hit
+// it at ~25 searches a minute. 3 s keeps searches to 20 a minute.
+export const SEARCH_INTERVAL_MS = 3000;
 export const LENGTH_TOLERANCE_MS = 2000;
 export const DEFAULT_STALE_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -271,9 +274,16 @@ function checkForumResult(r) {
  * Paced, read-only forum access with per-run memo of topics and files and a
  * persistent search cache (`cache.search`, kept for `staleDays`).
  *
+ * Every request waits on `pacer`; searches also wait on `searchPacer`, as
+ * Discourse limits searches per user per minute well below other requests.
+ *
  * @param {object} api EroScriptsAPI (search, getTopicAttachments, fetchScript)
  */
-export function createForum(api, { pacer = createPacer(), cache = {}, now = () => Date.now(), staleDays = DEFAULT_STALE_DAYS } = {}) {
+export function createForum(api, {
+  pacer = createPacer(),
+  searchPacer = createPacer({ intervalMs: SEARCH_INTERVAL_MS }),
+  cache = {}, now = () => Date.now(), staleDays = DEFAULT_STALE_DAYS,
+} = {}) {
   cache.search ||= {};
   // Expired searches would only be re-run: drop them so the file stays small.
   for (const [q, hit] of Object.entries(cache.search)) {
@@ -286,6 +296,7 @@ export function createForum(api, { pacer = createPacer(), cache = {}, now = () =
     async search(query) {
       const hit = cache.search[query];
       if (hit && now() - Date.parse(hit.at) < staleDays * DAY_MS) return hit.results;
+      await searchPacer.wait();
       await pacer.wait();
       const r = await api.search(query);
       checkForumResult(r);
