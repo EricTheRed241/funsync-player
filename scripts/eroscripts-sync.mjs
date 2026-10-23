@@ -46,6 +46,7 @@ const USAGE = `Usage: npm run eroscripts:sync -- [options]
                          (default <library parent>/Archive/_pruned-<date>)
   --report <file>        report path (.md or .json; default <userData>/eroscripts-sync-report.md)
   --user-data <dir>      app data folder (default: the desktop app's)
+  --only <text>          check only videos whose path contains <text> (case-insensitive)
   --install-schedule 3d  run every 3 days via launchd (macOS); also 12h, 90m
   --uninstall-schedule   remove the launchd schedule`;
 
@@ -67,6 +68,7 @@ function parseArgs(argv) {
       case '--archive': opts.archive = path.resolve(value(i, a)); i++; break;
       case '--report': opts.report = path.resolve(value(i, a)); i++; break;
       case '--user-data': opts.userData = path.resolve(value(i, a)); i++; break;
+      case '--only': opts.only = value(i, a).toLowerCase(); i++; break;
       case '--install-schedule': opts.installSchedule = value(i, a); i++; break;
       case '-h': case '--help': opts.help = true; break;
       default: throw new Error(`Unknown option: ${a}`);
@@ -159,7 +161,9 @@ async function main() {
   const available = roots.filter((r) => fs.existsSync(r));
   for (const r of roots) if (!available.includes(r)) console.warn(`Source unavailable, skipped: ${r}`);
   const scan = await scanLibrary(available);
-  const videos = scan.videos.map((v) => ({ path: v.path, funscriptPath: v.funscriptPath, creator: lib.creatorOf(v.path, available) }));
+  const videos = scan.videos
+    .filter((v) => !opts.only || v.path.toLowerCase().includes(opts.only))
+    .map((v) => ({ path: v.path, funscriptPath: v.funscriptPath, creator: lib.creatorOf(v.path, available) }));
   console.log(`Library: ${videos.length} videos (${videos.filter((v) => v.funscriptPath).length} with a script) in ${available.length} source(s)`);
 
   const state = readLinksFile(userData);
@@ -199,7 +203,7 @@ async function main() {
     if (!link || !video.funscriptPath || !fs.existsSync(video.funscriptPath)) continue;
     const local = lib.loadLocalScene(video);
     const plan = lib.availableAxes(link, local);
-    if (!plan.missing.length && !plan.ambiguous) continue;
+    if (!plan.missing.length && !plan.ambiguous.length) continue;
     const entry = { video: video.path, link, plan };
     if (opts.installAxes && plan.missing.some((m) => m.installable) && exitCode === 0) {
       const root = available.find((r) => video.path.startsWith(`${r}/`));

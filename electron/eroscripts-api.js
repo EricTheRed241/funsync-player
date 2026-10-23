@@ -526,6 +526,7 @@ class EroScriptsAPI {
    * a store instead of attaching files.
    *
    * Each attachment / linked entry: {name, url, host, postNumber, username, byAuthor}.
+   * `preview` is the topic's poster image URL (see topicPreviewUrl), or null.
    */
   async getTopicAttachments(topicId) {
     try {
@@ -581,6 +582,8 @@ class EroScriptsAPI {
         linked,
         external: [...external.values()],
         paid: slugs.get(data.category_id) === PAID_SLUG,
+        // The topic's poster-size image, as getTopicImage picks it.
+        preview: topicPreviewUrl(data),
       };
     } catch (err) {
       log.error('[EroScripts] Topic error:', err.message);
@@ -790,8 +793,8 @@ class EroScriptsAPI {
         }
         if (!resp.ok) return { success: false, error: `Download failed (${resp.status})`, status: resp.status };
         if (Number(resp.headers.get('content-length')) > maxBytes) return { success: false, error: 'File too large' };
-        const bytes = Buffer.from(await resp.arrayBuffer());
-        if (bytes.length > maxBytes) return { success: false, error: 'File too large' };
+        const bytes = await readCapped(resp, maxBytes);
+        if (!bytes) return { success: false, error: 'File too large' };
         return { success: true, bytes };
       }
       return { success: false, error: 'Too many redirects' };

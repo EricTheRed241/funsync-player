@@ -31,6 +31,9 @@ export const LENGTH_TOLERANCE_MS = 2000;
 export const DEFAULT_STALE_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CANDIDATES_PER_QUERY = 5;
+// A further result must share this much of the query to be checked as a
+// repost once the video is already confirmed.
+const RELATED_MIN_OVERLAP = 0.6;
 const MAX_TOPICS_PER_VIDEO = 8;
 const MAX_MAIN_DOWNLOADS_PER_TOPIC = 6;
 const MAX_AXIS_DOWNLOADS_PER_TOPIC = 3;
@@ -133,8 +136,11 @@ export function queryVariants(videoName, creator = null) {
     const text = queryText(q || '');
     if (text.length >= 3 && !out.some((x) => x.toLowerCase() === text.toLowerCase())) out.push(text);
   };
+  // A one-word title ("Bad", "365") finds little on its own: lead with the creator.
+  const withCreator = creatorForms(creator).length ? `${creator} ${title}` : null;
+  if (withCreator && tokens(title).size < 2) add(withCreator);
   add(title);
-  if (creatorForms(creator).length) add(`${creator} ${title}`);
+  if (withCreator) add(withCreator);
   const stem = stripExt(path.basename(String(videoName || '')));
   const underscore = stem.lastIndexOf('_');
   if (underscore > 0) add(cleanVideoName(stem.slice(0, underscore), creator));
@@ -149,8 +155,8 @@ export function normalisedBase(fileName, creator = null) {
   let s = getBaseName(path.basename(String(fileName || '')));
   s = stripExt(s).replace(/\.generated$/i, '');
   s = stripFormatTags(s.replace(BRACKETS_RE, ' '));
-  s = collapse(s.replace(/[_.\-–]+/g, ' '));
-  s = stripCreator(s, creator);
+  s = stripCreator(collapse(s.replace(/_/g, ' ')), creator);
+  s = collapse(s.replace(/[.\-–]+/g, ' '));
   return collapse(s.toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, ' '));
 }
 
@@ -289,7 +295,7 @@ export function createForum(api, { pacer = createPacer(), cache = {}, now = () =
       const r = await api.getTopicAttachments(topicId);
       checkForumResult(r);
       // "No posts found" and similar are an empty topic, not a failure.
-      const out = { attachments: r.attachments || [], linked: r.linked || [], external: r.external || [], paid: !!r.paid, error: r.error || null };
+      const out = { attachments: r.attachments || [], linked: r.linked || [], external: r.external || [], paid: !!r.paid, preview: r.preview || null, error: r.error || null };
       topics.set(topicId, out);
       return out;
     },
@@ -389,6 +395,7 @@ export async function evaluateTopic(forum, local, candidate) {
     mains: [],
     axes: [],
     external: [...new Set((topic.external || []).map((e) => e.host))],
+    preview: topic.preview || null,
   };
 
   const describe = (a, extra = {}) => ({
@@ -482,12 +489,21 @@ function linkRecord(evaluation, local, now) {
     mains: evaluation.mains.map(({ name, base, lengthMs, byAuthor, username, postNumber }) => ({ name, base, lengthMs, byAuthor, username, postNumber })),
     axes: evaluation.axes,
   };
-  if (c.preview) record.previewUrl = c.preview;
+  // Search results carry a poster-size `preview` only when the topic's image
+  // is big enough; the topic endpoint may know a better one.
+  const preview = c.preview || evaluation.preview;
+  if (preview) record.previewUrl = preview;
   return record;
 }
 
 /**
  * Find the post for one video.
+ *
+ * The first confirmed post becomes the link. Reposts are common (a
+ * "[Multi-Axis Initiative]" thread re-uploading the original with axes), so
+ * the remaining close-titled results of the same search are checked too;
+ * those that also carry the scene's script are kept as `related`, and their
+ * axis files count towards the hand-made axes report.
  *
  * @returns {Promise<{outcome: 'confirmed'|'probable'|'review'|'none',
  *   link?: object, review?: object}>}
@@ -498,29 +514,51 @@ export async function matchVideo(forum, local, { knownTopicIds = [], now = Date.
   const seen = new Set();
   const evaluated = [];
   let probable = null;
+  let primary = null;
+  const related = [];
 
   const consider = async (candidate, query) => {
-    if (seen.has(candidate.id) || evaluated.length >= MAX_TOPICS_PER_VIDEO) return null;
+    if (seen.has(candidate.id)) {
+      // A saved link checked by id alone: take its title etc. from the search.
+      const ev = evaluated.find((e) => e.candidate.id === candidate.id);
+      if (ev && !ev.candidate.title && candidate.title) ev.candidate = { ...candidate, ...Object.fromEntries(Object.entries(ev.candidate).filter(([, v]) => v != null)) };
+      return;
+    }
+    if (evaluated.length >= MAX_TOPICS_PER_VIDEO) return;
     seen.add(candidate.id);
     const ev = await evaluateTopic(forum, local, candidate);
     ev.query = query;
     evaluated.push(ev);
-    if (ev.confidence === 'confirmed') return ev;
-    if (ev.confidence === 'probable' && !probable) probable = ev;
-    return null;
+    if (ev.confidence === 'confirmed') {
+      if (!primary) primary = ev;
+      else related.push(ev);
+    } else if (ev.confidence === 'probable' && !probable) {
+      probable = ev;
+    }
   };
 
-  for (const id of knownTopicIds) {
-    const hit = await consider({ id, title: null, url: null }, '(saved link)');
-    if (hit) return { outcome: 'confirmed', link: linkRecord(hit, local, now) };
-  }
+  for (const id of knownTopicIds) await consider({ id, title: null, url: null }, '(saved link)');
   for (const query of queries) {
     const results = await forum.search(query);
     const relevant = results.filter((t) => titleOverlap(query, t.title) > 0).slice(0, CANDIDATES_PER_QUERY);
     for (const t of relevant) {
-      const hit = await consider(t, query);
-      if (hit) return { outcome: 'confirmed', link: linkRecord(hit, local, now) };
+      if (primary && titleOverlap(query, t.title) < RELATED_MIN_OVERLAP) continue;
+      await consider(t, query);
     }
+    if (primary) break;
+  }
+  if (primary) {
+    const link = linkRecord(primary, local, now);
+    if (related.length) {
+      link.related = related.map((ev) => {
+        const r = linkRecord(ev, local, now);
+        return {
+          topicId: r.topicId, topicUrl: r.topicUrl, title: r.title, creator: r.creator,
+          confidence: r.confidence, basis: r.basis, matchedFile: r.matchedFile, mains: r.mains, axes: r.axes,
+        };
+      });
+    }
+    return { outcome: 'confirmed', link };
   }
   if (probable) return { outcome: 'probable', link: linkRecord(probable, local, now) };
 
@@ -596,7 +634,9 @@ export async function runSync({
         const ev = await evaluateTopic(forum, local, { id: link.topicId, title: link.title, url: link.topicUrl, creator: link.creator, tags: link.tags, category: link.category, preview: link.previewUrl });
         const t = new Date(now()).toISOString();
         if (ev.confidence === 'confirmed') {
-          state.links[video.path] = { ...link, axes: ev.axes, mains: linkRecord(ev, local, now()).mains, checkedAt: t, localLengthMs: local.lengthMs };
+          const fresh = linkRecord(ev, local, now());
+          state.links[video.path] = { ...link, axes: fresh.axes, mains: fresh.mains, checkedAt: t, localLengthMs: local.lengthMs };
+          if (!link.previewUrl && fresh.previewUrl) state.links[video.path].previewUrl = fresh.previewUrl;
           summary.outcomes.confirmed++;
           onVideo(video, 'confirmed', state.links[video.path]);
           persist(state);
@@ -638,57 +678,77 @@ export function installSuffix(axis) {
 }
 
 /**
- * Axis files a linked post offers that the scene lacks as hand-made.
+ * The axis set of one post that belongs to the local scene.
  *
- * Posts can carry axes for several versions (soft / hard); the group used is
- * the one named like the matched main script, else the only group, else the
- * one named like the local script. Otherwise the scene is `ambiguous` and
- * nothing is installable.
- *
- * @param {object} link stored link
- * @param {object} local from loadLocalScene
+ * Posts can carry axes for several versions (soft / hard); the set used is
+ * the one named like the post's matched script, else the only set, else
+ * the one named like the local script. Otherwise the post is ambiguous.
  */
-export function availableAxes(link, local) {
+function postAxisSet(post, local) {
   const creator = local.video.creator;
   const groups = new Map();
-  for (const x of link.axes || []) {
+  for (const x of post.axes || []) {
     const key = normalisedBase(x.base || x.name, creator);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(x);
   }
-  if (groups.size === 0) return { group: null, reason: null, missing: [], ambiguous: false };
-
+  if (groups.size === 0) return null;
   let key = null;
   let reason = null;
-  const matchedKey = link.matchedFile ? normalisedBase(link.matchedFile, creator) : null;
+  const matchedKey = post.matchedFile ? normalisedBase(post.matchedFile, creator) : null;
   if (matchedKey && groups.has(matchedKey)) { key = matchedKey; reason = 'named like the matched script'; }
   else if (groups.size === 1) { key = [...groups.keys()][0]; reason = 'only axis set in the post'; }
   else if (groups.has(local.base)) { key = local.base; reason = 'named like the local script'; }
-  if (key == null) {
-    return { group: null, reason: 'several axis sets in the post; none matches', missing: [], ambiguous: true, groups: [...groups.keys()] };
-  }
-
-  const have = new Set(local.handmade);
-  const byAxis = new Map();
-  for (const x of groups.get(key)) {
-    if (have.has(x.axis)) continue;
-    if (!byAxis.has(x.axis)) byAxis.set(x.axis, []);
-    byAxis.get(x.axis).push(x);
-  }
+  if (key == null) return { ambiguous: true, groups: [...groups.values()].map((g) => g[0].base) };
 
   // Install guard: the post's main script is the local one (confirmed), or
-  // the group's own main script has the local script's length.
-  const groupMain = (link.mains || []).find((m) => normalisedBase(m.base || m.name, creator) === key);
-  const lengthOk = !!groupMain && Math.abs((groupMain.lengthMs || 0) - local.lengthMs) <= LENGTH_TOLERANCE_MS;
-  const guard = link.confidence === 'confirmed' ? 'confirmed' : lengthOk ? 'length' : null;
+  // the set's own main script has the local script's length.
+  const setMain = (post.mains || []).find((m) => normalisedBase(m.base || m.name, creator) === key);
+  const lengthOk = !!setMain && Math.abs((setMain.lengthMs || 0) - local.lengthMs) <= LENGTH_TOLERANCE_MS;
+  const guard = post.confidence === 'confirmed' ? 'confirmed' : lengthOk ? 'length' : null;
+  return { ambiguous: false, base: groups.get(key)[0].base, reason, guard, files: groups.get(key) };
+}
 
-  const missing = [...byAxis.entries()].map(([axis, files]) => ({
-    axis,
-    file: files[0],
-    alternatives: files.slice(1),
-    installable: !!guard && files[0].host === 'eroscripts',
-  }));
-  return { group: groups.get(key)[0].base, reason, missing, ambiguous: false, guard };
+/**
+ * Axis files the linked posts (the link and its `related` reposts) offer
+ * that the scene lacks as hand-made. Per axis the first file wins (link
+ * before reposts, author before replies); the rest are alternatives.
+ *
+ * @param {object} link stored link
+ * @param {object} local from loadLocalScene
+ * @returns {{missing: Array<{axis: string, file: object, alternatives: object[],
+ *   installable: boolean, guard: string|null}>, sets: object[], ambiguous: object[]}}
+ */
+export function availableAxes(link, local) {
+  const have = new Set(local.handmade);
+  const byAxis = new Map();
+  const sets = [];
+  const ambiguous = [];
+  for (const post of [link, ...(link.related || [])]) {
+    const set = postAxisSet(post, local);
+    if (!set) continue;
+    const where = { topicId: post.topicId, topicUrl: post.topicUrl, title: post.title };
+    if (set.ambiguous) { ambiguous.push({ ...where, groups: set.groups }); continue; }
+    sets.push({ ...where, base: set.base, reason: set.reason, guard: set.guard });
+    for (const x of set.files) {
+      if (have.has(x.axis)) continue;
+      const file = { ...x, ...where, guard: set.guard };
+      if (!byAxis.has(x.axis)) byAxis.set(x.axis, []);
+      byAxis.get(x.axis).push(file);
+    }
+  }
+  const installableFile = (f) => !!f.guard && f.host === 'eroscripts';
+  const missing = [...byAxis.entries()].map(([axis, files]) => {
+    const file = files.find(installableFile) || files[0];
+    return {
+      axis,
+      file,
+      alternatives: files.filter((f) => f !== file),
+      guard: file.guard,
+      installable: installableFile(file),
+    };
+  });
+  return { missing, sets, ambiguous };
 }
 
 /**
@@ -702,7 +762,7 @@ export async function installAxes({ forum, local, plan, archiveDir, relativeTo, 
   const installed = [];
   const skipped = [];
   for (const m of plan.missing) {
-    if (!m.installable) { skipped.push({ axis: m.axis, reason: plan.guard ? `hosted on ${m.file.host}` : 'post script not confirmed and length unverified' }); continue; }
+    if (!m.installable) { skipped.push({ axis: m.axis, reason: m.guard ? `hosted on ${m.file.host}` : 'post script not confirmed and length unverified' }); continue; }
     const target = path.join(local.dir, `${local.stem}.${installSuffix(m.axis)}.funscript`);
     if (fs.existsSync(target)) { skipped.push({ axis: m.axis, reason: 'file exists' }); continue; }
     const entries = await forum.entries(m.file.url, m.file.zip || m.file.name);
@@ -759,7 +819,10 @@ export function renderReport({ state, summary, axes = [], previews, roots = [], 
   if (installedCount) out.push(`- Hand-made axes installed: ${installedCount}`);
   out.push('');
 
-  const linkLine = ([p, l]) => `- \`${rel(p, roots)}\` → [${l.title || l.topicId}](${l.topicUrl}) by ${l.creator || '?'} — ${l.basis}${l.matchedFile ? ` (\`${l.matchedFile}\`)` : ''}`;
+  const linkLine = ([p, l]) => {
+    const also = (l.related || []).map((r) => `[${r.topicId}](${r.topicUrl})`).join(', ');
+    return `- \`${rel(p, roots)}\` → [${l.title || l.topicId}](${l.topicUrl}) by ${l.creator || '?'} — ${l.basis}${l.matchedFile ? ` (\`${l.matchedFile}\`)` : ''}${also ? `; also in ${also}` : ''}`;
+  };
   if (confirmed.length) out.push('## Confirmed', '', ...confirmed.map(linkLine), '');
   if (probable.length) out.push('## Probable', '', ...probable.map(linkLine), '');
   if (review.length) {
@@ -770,18 +833,19 @@ export function renderReport({ state, summary, axes = [], previews, roots = [], 
     }
     out.push('');
   }
-  if (axisScenes.length || axes.some((a) => a.plan.ambiguous)) {
+  if (axisScenes.length || axes.some((a) => a.plan.ambiguous.length)) {
     out.push('## Hand-made axes in linked posts', '');
     for (const a of axes) {
-      if (a.plan.ambiguous) { out.push(`- \`${rel(a.video, roots)}\`: ${a.plan.reason} (${a.plan.groups.join(' / ')})`); continue; }
-      if (!a.plan.missing.length) continue;
-      out.push(`- \`${rel(a.video, roots)}\` ([post](${a.link.topicUrl}); set \`${a.plan.group}\`, ${a.plan.reason}${a.plan.guard ? `; installable: ${a.plan.guard}` : '; not installable: unverified'})`);
+      if (!a.plan.missing.length && !a.plan.ambiguous.length) continue;
+      out.push(`- \`${rel(a.video, roots)}\``);
       for (const m of a.plan.missing) {
         const from = m.file.byAuthor ? 'author' : `reply #${m.file.postNumber} by ${m.file.username}`;
-        const alt = m.alternatives.length ? `; also ${m.alternatives.map((x) => `\`${x.name}\``).join(', ')}` : '';
+        const alt = m.alternatives.length ? `; also ${m.alternatives.map((x) => `\`${x.name}\` (${x.topicId})`).join(', ')}` : '';
         const res = a.result?.installed.some((f) => f.endsWith(`.${installSuffix(m.axis)}.funscript`)) ? ' — **installed**' : '';
-        out.push(`  - ${m.axis}: \`${m.file.name}\`${m.file.zip ? ` in \`${m.file.zip}\`` : ''} (${from}, ${m.file.host})${alt}${res}`);
+        const how = m.installable ? `installable: ${m.guard}` : m.guard ? `not installable: ${m.file.host}` : 'not installable: unverified';
+        out.push(`  - ${m.axis}: \`${m.file.name}\`${m.file.zip ? ` in \`${m.file.zip}\`` : ''} — [${m.file.topicId}](${m.file.topicUrl}), ${from}, ${how}${alt}${res}`);
       }
+      for (const amb of a.plan.ambiguous) out.push(`  - [${amb.topicId}](${amb.topicUrl}): several axis sets, none matches this scene (${amb.groups.map((g) => `\`${g}\``).join(' / ')})`);
       for (const s of a.result?.skipped || []) out.push(`  - ${s.axis}: not installed — ${s.reason}`);
       for (const x of a.result?.archived || []) out.push(`  - archived \`${path.basename(x.from)}\``);
     }
