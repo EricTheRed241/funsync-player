@@ -13,10 +13,10 @@ function makeLib(sortKey = 'name:asc') {
 }
 
 describe('sort options', () => {
-  it('lists five fields, not ten combinations', () => {
-    expect(Library._SORT_OPTIONS).toHaveLength(5);
+  it('lists six fields, not twelve combinations', () => {
+    expect(Library._SORT_OPTIONS).toHaveLength(6);
     expect(Library._SORT_OPTIONS.map((o) => o.value))
-      .toEqual(['name', 'dateAdded', 'duration', 'avgSpeed', 'maxSpeed']);
+      .toEqual(['name', 'dateAdded', 'duration', 'avgSpeed', 'maxSpeed', 'rating']);
   });
 
   it('gives every field a sensible default direction', () => {
@@ -24,7 +24,7 @@ describe('sort options', () => {
     // Newest first for dates and fastest first for speed are what people
     // actually want; A-Z and shortest-first for the rest.
     expect(dirs).toEqual({
-      name: 'asc', dateAdded: 'desc', duration: 'asc', avgSpeed: 'desc', maxSpeed: 'desc',
+      name: 'asc', dateAdded: 'desc', duration: 'asc', avgSpeed: 'desc', maxSpeed: 'desc', rating: 'desc',
     });
   });
 
@@ -41,7 +41,7 @@ describe('sort options', () => {
         expect(Library._SORT_LABELS[`${opt.value}:${dir}`]).toBeTruthy();
       }
     }
-    expect(Object.keys(Library._SORT_LABELS)).toHaveLength(10);
+    expect(Object.keys(Library._SORT_LABELS)).toHaveLength(12);
   });
 });
 
@@ -103,10 +103,10 @@ describe('sort picker interaction', () => {
   const rowFor = (container, field) =>
     container.querySelector(`.library__picker-item[data-value="${field}"]`);
 
-  it('renders five rows with directional wording and an arrow each', () => {
+  it('renders six rows with directional wording and an arrow each', () => {
     const { container } = mountPicker();
     const rows = container.querySelectorAll('.library__picker-item');
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6);
     expect(rowFor(container, 'name').querySelector('.library__picker-item-label').textContent)
       .toBe('Name A-Z');
     expect(rowFor(container, 'name').querySelector('.library__sort-arrow').textContent).toBe('↑');

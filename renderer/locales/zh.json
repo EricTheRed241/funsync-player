@@ -791,7 +791,9 @@
       "avgSpeedDesc": "平均速度 快-慢",
       "maxSpeedAsc": "最大速度 慢-快",
       "maxSpeedDesc": "最大速度 快-慢",
-      "switchTo": "切换为 {order}"
+      "switchTo": "切换为 {order}",
+      "ratingDesc": "评分 从高到低",
+      "ratingAsc": "评分 从低到高"
     },
     "badge": {
       "script": "脚本",
@@ -863,6 +865,31 @@
       "max": "最大",
       "speedUnit": "单位/秒",
       "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒"
+    },
+    "triage": {
+      "stars": "{n} 星",
+      "unrated": "未评分",
+      "favorite": "加入收藏",
+      "unfavorite": "取消收藏",
+      "setStars": "评为 {n} 星",
+      "addToPlaylist": "添加到播放列表…",
+      "close": "关闭",
+      "newPlaylistPlaceholder": "新播放列表名称",
+      "create": "创建",
+      "noPlaylists": "还没有播放列表——在下方输入名称新建。",
+      "alreadyIn": "{name}（已在其中）",
+      "added": "已添加到 {name}",
+      "removed": "已从 {name} 移除",
+      "removeFromPlaylist": "从 {name} 移除",
+      "queued": "已保存——桌面应用重新连接后生效",
+      "failed": "保存失败：{reason}",
+      "filter": {
+        "header": "评分",
+        "all": "全部",
+        "favorites": "收藏",
+        "top": "高分（4 星以上）",
+        "unrated": "未评分"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "物品",
       "travel": "旅行与地点"
     }
+  },
+  "rating": {
+    "stars": "{n} 星",
+    "unrated": "未评分",
+    "setStars": "评为 {n} 星",
+    "favorite": "加入收藏",
+    "unfavorite": "取消收藏",
+    "filterTitle": "评分",
+    "filterFavorites": "收藏",
+    "filterTopRated": "高分（4 星以上）",
+    "filterUnrated": "未评分",
+    "sortDesc": "评分 从高到低",
+    "sortAsc": "评分 从低到高"
   }
 }

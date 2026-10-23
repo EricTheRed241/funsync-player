@@ -35,6 +35,7 @@ import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
+import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
 import { SessionCard } from '../components/session-card.js';
@@ -2399,6 +2400,42 @@ class App {
     };
     eventBus.on('rating:changed', schedule);
     eventBus.on('playlist:changed', schedule);
+
+    // The player's stars follow edits made anywhere (card, phone, headset).
+    eventBus.on('rating:changed', ({ path } = {}) => {
+      if (path && path === this._currentVideoPath) this._renderPlayerRating();
+    });
+  }
+
+  /**
+   * Stars + heart in the player's top bar for the current video. Hidden for
+   * a remote stream (no library path to rate).
+   */
+  _renderPlayerRating() {
+    const slot = document.getElementById('player-rating');
+    if (!slot) return;
+    const path = this._currentVideoPath;
+    if (!path || !this.settings.getRating) {
+      slot.hidden = true;
+      slot.replaceChildren();
+      return;
+    }
+    const entry = this.settings.getRating(path);
+    const value = { rating: entry?.rating || 0, favorite: !!entry?.favorite };
+    const existing = slot.querySelector('.rating-control');
+    if (existing && slot.dataset.path === path) {
+      updateRatingControl(existing, value);
+    } else {
+      slot.dataset.path = path;
+      slot.replaceChildren(createRatingControl({
+        ...value,
+        size: 18,
+        className: 'player__rating-control',
+        onRate: (rating) => this.settings.setRating(path, { rating }),
+        onFavorite: (favorite) => this.settings.setRating(path, { favorite }),
+      }));
+    }
+    slot.hidden = false;
   }
 
   /**
@@ -4791,6 +4828,7 @@ class App {
     // Set title
     const titleEl = document.getElementById('video-title');
     titleEl.textContent = file.name.replace(/\.[^/.]+$/, '');
+    this._renderPlayerRating();
 
     // Track recent file (local only — a localhost proxy URL isn't re-openable).
     if (file.path && !file._remote) {

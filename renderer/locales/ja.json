@@ -791,7 +791,9 @@
       "avgSpeedDesc": "平均速度 速→遅",
       "maxSpeedAsc": "最大速度 遅→速",
       "maxSpeedDesc": "最大速度 速→遅",
-      "switchTo": "{order} に切り替え"
+      "switchTo": "{order} に切り替え",
+      "ratingDesc": "評価 高い順",
+      "ratingAsc": "評価 低い順"
     },
     "badge": {
       "script": "スクリプト",
@@ -863,6 +865,31 @@
       "max": "最大",
       "speedUnit": "ユニット/秒",
       "speedTooltip": "平均 {avg} ユニット/秒 • 最大 {max} ユニット/秒"
+    },
+    "triage": {
+      "stars": "星{n}",
+      "unrated": "未評価",
+      "favorite": "お気に入りに追加",
+      "unfavorite": "お気に入りから削除",
+      "setStars": "星{n}で評価",
+      "addToPlaylist": "プレイリストに追加…",
+      "close": "閉じる",
+      "newPlaylistPlaceholder": "新しいプレイリスト名",
+      "create": "作成",
+      "noPlaylists": "プレイリストはまだありません。下に名前を入力してください。",
+      "alreadyIn": "{name}（追加済み）",
+      "added": "{name} に追加しました",
+      "removed": "{name} から削除しました",
+      "removeFromPlaylist": "{name} から削除",
+      "queued": "保存しました。デスクトップアプリが再接続すると反映されます",
+      "failed": "保存できませんでした: {reason}",
+      "filter": {
+        "header": "評価",
+        "all": "すべて",
+        "favorites": "お気に入り",
+        "top": "高評価（4以上）",
+        "unrated": "未評価"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "物",
       "travel": "旅行と場所"
     }
+  },
+  "rating": {
+    "stars": "星{n}",
+    "unrated": "未評価",
+    "setStars": "星{n}で評価",
+    "favorite": "お気に入りに追加",
+    "unfavorite": "お気に入りから削除",
+    "filterTitle": "評価",
+    "filterFavorites": "お気に入り",
+    "filterTopRated": "高評価（4以上）",
+    "filterUnrated": "未評価",
+    "sortDesc": "評価 高い順",
+    "sortAsc": "評価 低い順"
   }
 }

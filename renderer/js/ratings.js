@@ -69,6 +69,23 @@ export function isFavorite(map, path) {
   return getRatingEntry(map, path)?.favorite === true;
 }
 
+/** Library rating-filter values; 'all' = no filter. */
+export const RATING_FILTERS = ['all', 'favorites', 'top', 'unrated'];
+
+/**
+ * Does `path` pass the library rating filter? `favorites` = favourites,
+ * `top` = rated >= TOP_RATED_MIN (same rule as the headset's Top Rated),
+ * `unrated` = no rating (the triage queue). Anything else passes.
+ */
+export function matchesRatingFilter(map, path, filter) {
+  switch (filter) {
+    case 'favorites': return isFavorite(map, path);
+    case 'top': return ratingOf(map, path) >= TOP_RATED_MIN;
+    case 'unrated': return ratingOf(map, path) === 0;
+    default: return true;
+  }
+}
+
 /**
  * Apply a partial change to one video's entry and return the NEW map
  * (the input is not mutated) plus the resulting entry.

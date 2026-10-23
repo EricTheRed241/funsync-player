@@ -791,7 +791,9 @@
       "avgSpeedDesc": "Vel. media rápida-lenta",
       "maxSpeedAsc": "Vel. máx. lenta-rápida",
       "maxSpeedDesc": "Vel. máx. rápida-lenta",
-      "switchTo": "Cambiar a {order}"
+      "switchTo": "Cambiar a {order}",
+      "ratingDesc": "Valoración mayor-menor",
+      "ratingAsc": "Valoración menor-mayor"
     },
     "badge": {
       "script": "Script",
@@ -863,6 +865,31 @@
       "max": "Máx",
       "speedUnit": "u/s",
       "speedTooltip": "Med {avg} u/s • Máx {max} u/s"
+    },
+    "triage": {
+      "stars": "{n} estrellas",
+      "unrated": "Sin valorar",
+      "favorite": "Añadir a favoritos",
+      "unfavorite": "Quitar de favoritos",
+      "setStars": "Valorar con {n} estrellas",
+      "addToPlaylist": "Añadir a lista…",
+      "close": "Cerrar",
+      "newPlaylistPlaceholder": "Nombre de la nueva lista",
+      "create": "Crear",
+      "noPlaylists": "Aún no hay listas: escribe un nombre abajo.",
+      "alreadyIn": "{name} (ya está)",
+      "added": "Añadido a {name}",
+      "removed": "Quitado de {name}",
+      "removeFromPlaylist": "Quitar de {name}",
+      "queued": "Guardado: se aplicará cuando la app de escritorio se vuelva a conectar",
+      "failed": "No se pudo guardar: {reason}",
+      "filter": {
+        "header": "Valoración",
+        "all": "Todos",
+        "favorites": "Favoritos",
+        "top": "Mejor valorados (4+)",
+        "unrated": "Sin valorar"
+      }
     }
   },
   "hevc": {
@@ -1961,5 +1988,18 @@
       "objects": "Objetos",
       "travel": "Viajes y lugares"
     }
+  },
+  "rating": {
+    "stars": "{n} estrellas",
+    "unrated": "Sin valorar",
+    "setStars": "Valorar con {n} estrellas",
+    "favorite": "Añadir a favoritos",
+    "unfavorite": "Quitar de favoritos",
+    "filterTitle": "Valoración",
+    "filterFavorites": "Favoritos",
+    "filterTopRated": "Mejor valorados (4+)",
+    "filterUnrated": "Sin valorar",
+    "sortDesc": "Valoración mayor-menor",
+    "sortAsc": "Valoración menor-mayor"
   }
 }

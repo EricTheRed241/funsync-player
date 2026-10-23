@@ -3644,3 +3644,21 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   border-radius: 0;
   background: none;
 }
+
+/* Rating stars + favourite for the playing video (shared .rating-control
+   styles live in library.css). */
+.player__rating {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.player__rating[hidden] {
+  display: none;
+}
+
+.player__rating .rating-control__star,
+.player__rating .rating-control__heart {
+  color: rgba(255, 255, 255, 0.75);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}

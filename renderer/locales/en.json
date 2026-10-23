@@ -1314,7 +1314,9 @@
       "avgSpeedDesc": "Avg Speed Fast-Slow",
       "maxSpeedAsc": "Max Speed Slow-Fast",
       "maxSpeedDesc": "Max Speed Fast-Slow",
-      "switchTo": "Switch to {order}"
+      "switchTo": "Switch to {order}",
+      "ratingDesc": "Rating High-Low",
+      "ratingAsc": "Rating Low-High"
     },
     "badge": {
       "script": "Script",
@@ -1386,6 +1388,31 @@
       "max": "Max",
       "speedUnit": "units/s",
       "speedTooltip": "Avg {avg} units/s • Max {max} units/s"
+    },
+    "triage": {
+      "stars": "{n, plural, one {# star} other {# stars}}",
+      "unrated": "Not rated",
+      "favorite": "Add to favorites",
+      "unfavorite": "Remove from favorites",
+      "setStars": "Rate {n, plural, one {# star} other {# stars}}",
+      "addToPlaylist": "Add to playlist…",
+      "close": "Close",
+      "newPlaylistPlaceholder": "New playlist name",
+      "create": "Create",
+      "noPlaylists": "No playlists yet — name a new one below.",
+      "alreadyIn": "{name} (already in it)",
+      "added": "Added to {name}",
+      "removed": "Removed from {name}",
+      "removeFromPlaylist": "Remove from {name}",
+      "queued": "Saved — applies when the desktop app reconnects",
+      "failed": "Couldn't save: {reason}",
+      "filter": {
+        "header": "Rating",
+        "all": "All",
+        "favorites": "Favorites",
+        "top": "Top rated (4+)",
+        "unrated": "Unrated"
+      }
     }
   },
   "eroscripts": {
@@ -1961,5 +1988,18 @@
       "objects": "Objects",
       "travel": "Travel & Places"
     }
+  },
+  "rating": {
+    "stars": "{n, plural, one {# star} other {# stars}}",
+    "unrated": "Not rated",
+    "setStars": "Rate {n, plural, one {# star} other {# stars}}",
+    "favorite": "Add to favorites",
+    "unfavorite": "Remove from favorites",
+    "filterTitle": "Rating",
+    "filterFavorites": "Favorites",
+    "filterTopRated": "Top rated (4+)",
+    "filterUnrated": "Unrated",
+    "sortDesc": "Rating High-Low",
+    "sortAsc": "Rating Low-High"
   }
 }
