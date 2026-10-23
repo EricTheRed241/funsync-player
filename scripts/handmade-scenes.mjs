@@ -3,10 +3,14 @@
 // `Title_hardcore.funscript`), all in one folder. A stroke script that
 // belongs to no video is a scene of its own.
 //
-// Hand-made axis scripts always win, per scene: when any script of the
-// scene has hand-made axes (renderer/js/handmade-axes.js), none of the
-// scene's scripts gets or keeps generated companions.
+// Hand-made axis scripts always win, per folder: when any script in a
+// folder has hand-made axes (renderer/js/handmade-axes.js), none of the
+// folder's scripts gets or keeps generated companions. Sibling videos (other
+// versions of the scene: `_4k`, `_hard`, VR / flat) get a copy of the
+// hand-made axes only when their stroke script's timing matches
+// (`timingMatch`).
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseAxisSuffix } from '../renderer/js/multi-axis.js';
@@ -81,4 +85,68 @@ export async function sceneHandmadeAxes(scripts, names, parse) {
     for (const s of found) all.add(s);
   }
   return { handmade: [...all].sort(), byScript };
+}
+
+/**
+ * The stroke scripts of a folder listing, every scene's.
+ * @param {string[]} names
+ */
+export function folderStrokeScripts(names) {
+  return groupScenes(names).flatMap((s) => s.scripts);
+}
+
+// ── Timing ──────────────────────────────────────────────────────────────
+
+/** A sibling's script must end within this much of the source's. */
+export const SIBLING_END_TOLERANCE_MS = 1000;
+/** An action counts as matched by one at most this far away. */
+export const SIBLING_ACTION_WINDOW_MS = 50;
+/** Share of the source's actions that need a match. */
+export const SIBLING_MATCH_SHARE = 0.95;
+
+/** `[at, pos]` pairs, rounded and sorted; metadata and key order don't count. */
+export function normalisedActions(script) {
+  const acts = Array.isArray(script?.actions) ? script.actions : [];
+  return acts
+    .filter((a) => Number.isFinite(Number(a?.at)) && Number.isFinite(Number(a?.pos)))
+    .map((a) => [Math.round(Number(a.at)), Math.round(Number(a.pos))])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+
+/**
+ * Hash of the normalised actions (rounded, sorted). Metadata, key order and
+ * whitespace don't count. null for a script with fewer than 2 actions:
+ * nothing to tell apart.
+ */
+export function actionsHash(script) {
+  const acts = normalisedActions(script);
+  if (acts.length < 2) return null;
+  return crypto.createHash('sha1').update(JSON.stringify(acts)).digest('hex');
+}
+
+/**
+ * Does a sibling's stroke script provably share the source script's timing,
+ * so the source's axis scripts fit the sibling video too? No frames needed.
+ *
+ * @param {object|null} source — parsed stroke script that has the hand-made axes
+ * @param {object|null} sibling — parsed stroke script of the sibling video
+ * @returns {'identical'|'near'|null} `identical`: same normalised actions;
+ *   `near`: both end within 1 s of each other and ≥ 95 % of the source's
+ *   action times have one in the sibling within ±50 ms; null otherwise
+ */
+export function timingMatch(source, sibling) {
+  const a = actionsHash(source);
+  if (!a) return null;
+  if (a === actionsHash(sibling)) return 'identical';
+  const src = normalisedActions(source).map((x) => x[0]);
+  const sib = normalisedActions(sibling).map((x) => x[0]);
+  if (sib.length < 2) return null;
+  if (Math.abs(src[src.length - 1] - sib[sib.length - 1]) > SIBLING_END_TOLERANCE_MS) return null;
+  let matched = 0;
+  let j = 0;
+  for (const at of src) {
+    while (j < sib.length && sib[j] < at - SIBLING_ACTION_WINDOW_MS) j++;
+    if (j < sib.length && sib[j] <= at + SIBLING_ACTION_WINDOW_MS) matched++;
+  }
+  return matched >= SIBLING_MATCH_SHARE * src.length ? 'near' : null;
 }

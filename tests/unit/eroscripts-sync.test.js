@@ -11,12 +11,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  cleanVideoName, queryVariants, normalisedBase, actionsHash, scriptLengthMs,
+  cleanVideoName, queryVariants, normalisedBase, scriptLengthMs,
   classifyScript, createPacer, createForum, loadLocalScene, matchVideo, runSync,
-  isStale, planVideo, availableAxes, installAxes, installSuffix, renderReport, isRelevant,
+  isStale, planVideo, availableAxes, installAxes, pruneInstalledFolders, installSuffix, renderReport, isRelevant,
   creatorOf, parseInterval, launchdPlist, LAUNCHD_LABEL, SEARCH_INTERVAL_MS,
   RateLimitedError, SessionExpiredError,
 } from '../../scripts/eroscripts-sync-lib.mjs';
+import { actionsHash } from '../../scripts/handmade-scenes.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.parse('2026-10-22T12:00:00Z');
@@ -416,6 +417,28 @@ describe('--install-axes guard', () => {
     const plan = availableAxes(link, local);
     expect(plan.missing).toEqual([]);
     expect(plan.ambiguous[0].groups).toEqual(['Other A', 'Other B']);
+  });
+
+  it("then copies them to timing-compatible sibling videos and archives the folder's generated files", async () => {
+    const { dir, local, link, forum, archiveDir } = await setup({ existing: {
+      'Scene_4k.mp4': '',
+      'Scene_4k.funscript': script(100_000),
+      'Scene_4k.generated.roll.funscript': script(100_000, 5),
+      'Scene_VR.mp4': '',
+      'Scene_VR.funscript': script(130_000),
+      'Scene_VR.generated.twist.funscript': script(130_000, 4),
+    } });
+    await installAxes({ forum, local, plan: availableAxes(link, local), archiveDir, relativeTo: tmp });
+    const siblings = await pruneInstalledFolders([{ dir, archiveDir, relativeTo: tmp }]);
+    expect(siblings).toHaveLength(1);
+    const [f] = siblings;
+    expect(f.copied.map((p) => path.basename(p)).sort()).toEqual(['Scene_4k.surge.funscript', 'Scene_4k.twist.funscript']);
+    expect(fs.readFileSync(path.join(dir, 'Scene_4k.twist.funscript'), 'utf8')).toBe(fs.readFileSync(path.join(dir, 'Scene.twist.funscript'), 'utf8'));
+    expect(f.refused).toEqual([path.join(dir, 'Scene_VR.mp4')]);
+    expect(f.archived.map((x) => path.basename(x.from)).sort()).toEqual(['Scene_4k.generated.roll.funscript', 'Scene_VR.generated.twist.funscript']);
+    expect(fs.readdirSync(dir).filter((n) => n.includes('.generated.'))).toEqual([]);
+    const md = renderReport({ state: {}, summary: { checked: 0, skipped: 0, noScript: 0, errors: [], stopped: null }, siblings, roots: [tmp], now: NOW });
+    expect(md).toContain('`Scene_VR.mp4`: sibling not timing-compatible, nothing copied');
   });
 });
 

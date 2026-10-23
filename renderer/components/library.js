@@ -6168,12 +6168,14 @@ export class Library {
   }
 
   /**
-   * Re-pair a video after its generated companions were moved to the trash
+   * Re-pair videos after generated companions were moved to the trash
    * because hand-made axis files arrived: forget the trashed files, point
-   * its saved multi-axis association at the hand-made files, and mark the
-   * scan stale so the next library view rescans.
+   * the downloaded-for video's saved multi-axis association at the
+   * hand-made files, drop the trashed files from every other association
+   * (sibling videos in the folder), and mark the scan stale so the next
+   * library view rescans.
    *
-   * @param {string} videoPath
+   * @param {string|null} videoPath
    * @param {string[]} trashedPaths
    */
   forgetGeneratedCompanions(videoPath, trashedPaths) {
@@ -6182,26 +6184,31 @@ export class Library {
       this._allFunscripts = this._allFunscripts.filter((f) => !gone.has(f.path));
     }
     this._lastScanKey = null;
-    if (!videoPath) return;
 
     const associations = this._settings.get('library.associations') || {};
-    const entry = normalizeAssociation(associations[videoPath]);
-    if (entry.multi?.axes) {
+    let changed = false;
+    for (const [path, raw] of Object.entries(associations)) {
+      const entry = normalizeAssociation(raw);
+      if (!entry.multi?.axes) continue;
+      const touched = Object.values(entry.multi.axes).some((p) => gone.has(p));
+      if (!touched && path !== videoPath) continue;
       const kept = Object.fromEntries(Object.entries(entry.multi.axes).filter(([, p]) => !gone.has(p)));
       const multi = { ...entry.multi, axes: kept };
-      multi.axes = this._preferHandmadeAxes(multi, videoPath);
-      associations[videoPath] = buildAssociationEntry(entry.active, entry.single, multi, entry.custom);
-      this._settings.set('library.associations', associations);
-      const video = this.getVideoByPath(videoPath);
+      multi.axes = this._preferHandmadeAxes(multi, path);
+      associations[path] = buildAssociationEntry(entry.active, entry.single, multi, entry.custom);
+      changed = true;
+      const video = this.getVideoByPath(path);
       if (video && entry.active === 'multi') this._syncVideoStateForActive(video, 'multi', multi);
     }
+    if (changed) this._settings.set('library.associations', associations);
     this._applyFilters();
   }
 
   /**
-   * Hand-made axis scripts always win: after an EroScripts download, move
-   * the generated companions the saved files replace to the OS trash (see
-   * handmade-downloads.js), say so, and re-pair the video.
+   * Hand-made axis scripts always win, per folder: after an EroScripts
+   * download, move every generated companion in the saved files' folders to
+   * the OS trash — sibling videos' included, with nothing copied to them
+   * (see handmade-downloads.js) — say so, and re-pair the videos.
    *
    * @param {string|null} videoPath — the video the download was for
    * @param {string[]} savedPaths — files the download wrote
@@ -6210,13 +6217,16 @@ export class Library {
   async replaceGeneratedAfterDownload(videoPath, savedPaths) {
     if (!window.funsync?.trashGeneratedCompanions) return 0;
     const { trashReplacedGenerated } = await import('../js/handmade-downloads.js');
-    const trashed = await trashReplacedGenerated(savedPaths, {
+    const { trashed, siblings } = await trashReplacedGenerated(savedPaths, {
       readScript: (p) => window.funsync.readFunscript(p),
       trash: (p) => window.funsync.trashGeneratedCompanions(p),
     });
     if (trashed.length === 0) return 0;
     const { showToast } = await import('../js/toast.js');
-    showToast(t('eroscripts.replacedGenerated', { count: trashed.length }), 'info', 5000);
+    const message = siblings.length > 0
+      ? t('eroscripts.replacedGeneratedSiblings', { count: trashed.length, siblings: siblings.length })
+      : t('eroscripts.replacedGenerated', { count: trashed.length });
+    showToast(message, 'info', siblings.length > 0 ? 8000 : 5000);
     this.forgetGeneratedCompanions(videoPath, trashed);
     return trashed.length;
   }

@@ -3,9 +3,10 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Hand-made axis scripts always win: `npm run upgrade:axes` never writes for
-// a scene with hand-made axes, and `npm run prune:generated` extracts
-// embedded axes and archives the generated companions of such scenes.
+// Hand-made axis scripts always win, per folder: `npm run upgrade:axes`
+// never writes into a folder with hand-made axes, and `npm run
+// prune:generated` extracts embedded axes, copies hand-made axes to sibling
+// videos whose timing matches and archives the folder's generated files.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,9 +14,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planUpgrade } from '../../renderer/js/upgrade-multi-axis.js';
-import { groupScenes } from '../../scripts/handmade-scenes.mjs';
+import { groupScenes, timingMatch } from '../../scripts/handmade-scenes.mjs';
 import { sceneVideoStem } from '../../scripts/upgrade-pairing.mjs';
-import { planPrune, archiveFiles } from '../../scripts/prune-generated-lib.mjs';
+import { planPrune, applyPrune, archiveFiles } from '../../scripts/prune-generated-lib.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const STROKE = Array.from({ length: 40 }, (_, i) => ({ at: i * 250, pos: i % 2 ? 90 : 10 }));
@@ -148,7 +149,8 @@ describe('prune:generated', () => {
     expect(r.out).toContain(`→  ${path.join(archive(), 'Lib/Studio/Hand/Hand.generated.roll.funscript')}`);
     expect(r.out).not.toContain('Plain');
     expect(r.out).not.toContain('Apple');
-    expect(r.out).toContain('2 scenes with hand-made axes (2 with changes), 2 embedded axes to extract, 4 generated files to archive (dry run');
+    expect(r.out).toContain('2 folders with hand-made axes (2 with changes), 2 scenes with hand-made axes, 2 embedded axes to extract, '
+      + '0 hand-made axes to copy to 0 siblings, 0 siblings not timing-compatible, 4 generated files to archive (dry run');
     expect(fs.readdirSync(p('Lib'), { recursive: true }).sort()).toEqual(before);
     expect(exists('Archive')).toBe(false);
   });
@@ -158,7 +160,7 @@ describe('prune:generated', () => {
     put('Lib/Emb/Emb.suck.funscript', 'pre-existing');
     const r = run('prune-generated.mjs', ['--archive', archive(), p('Lib')]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain('1 embedded axes extracted, 4 generated files archived');
+    expect(r.out).toContain('1 embedded axes extracted, 0 hand-made axes copied to siblings, 0 siblings not timing-compatible, 4 generated files archived');
 
     // Extracted with canonical suffix; existing files and aliases kept as they were.
     expect(JSON.parse(read('Lib/Emb/Emb.twist.funscript')).actions).toEqual(two);
@@ -190,7 +192,7 @@ describe('prune:generated', () => {
 
     // A second run has nothing left to do and keeps the manifest.
     const again = run('prune-generated.mjs', ['--archive', archive(), p('Lib')]);
-    expect(again.out).toContain('0 embedded axes extracted, 0 generated files archived');
+    expect(again.out).toContain('0 embedded axes extracted, 0 hand-made axes copied to siblings, 0 siblings not timing-compatible, 0 generated files archived');
     expect(read('Archive/MANIFEST.txt').trim().split('\n')).toHaveLength(5);
   });
 
@@ -215,5 +217,104 @@ describe('prune:generated', () => {
   it('needs --archive and a folder', () => {
     expect(run('prune-generated.mjs', ['--dry-run', p('Lib')]).code).toBe(1);
     expect(run('prune-generated.mjs', ['--archive', archive()]).code).toBe(1);
+  });
+});
+
+describe('sibling videos: hand-made axes win per folder', () => {
+  const archive = () => p('Archive');
+  const shifted = (ms, drop = 0) => STROKE.slice(0, STROKE.length - drop).map((a) => ({ at: a.at + ms, pos: a.pos }));
+  // FP_hard has hand-made axes; FP (another version of the scene) only generated ones.
+  function folder(siblingActions, { embedded = false } = {}) {
+    put('Lib/FP/FP_hard.mp4');
+    if (embedded) {
+      put('Lib/FP/FP_hard.funscript', stroke({ channels: { twist: { actions: two } } }));
+    } else {
+      put('Lib/FP/FP_hard.funscript', stroke());
+      put('Lib/FP/FP_hard.twist.funscript', JSON.stringify({ actions: two, metadata: { creator: 'scripter' } }, null, 1));
+      put('Lib/FP/FP_hard.R1.funscript', { actions: two });
+    }
+    put('Lib/FP/FP.mp4');
+    put('Lib/FP/FP.funscript', { metadata: { title: 'FP' }, actions: siblingActions });
+    put('Lib/FP/FP.generated.twist.funscript', { actions: two });
+    put('Lib/FP/FP.generated.pitch.funscript', { actions: two });
+    // Another folder keeps its generated files.
+    put('Lib/Other/Other.mp4');
+    put('Lib/Other/Other.funscript', stroke());
+    put('Lib/Other/Other.generated.twist.funscript', { actions: two });
+  }
+  const generatedLeft = () => fs.readdirSync(p('Lib/FP')).filter((n) => n.includes('.generated.'));
+
+  it('timingMatch: identical, near (±50 ms, 95 %, ends within 1 s) or nothing', () => {
+    const src = stroke();
+    expect(timingMatch(src, { actions: STROKE.map(({ at, pos }) => ({ pos, at })) })).toBe('identical');
+    expect(timingMatch(src, { actions: shifted(20, 1) })).toBe('near');
+    expect(timingMatch(src, { actions: shifted(125) })).toBe(null);
+    expect(timingMatch(src, { actions: shifted(20, 3) })).toBe(null); // 37 of 40 < 95 %
+    expect(timingMatch(src, { actions: [...STROKE, { at: 11_000, pos: 0 }] })).toBe(null); // ends 1.25 s later
+    expect(timingMatch(src, null)).toBe(null);
+  });
+
+  it('identical actions: the hand-made set is copied to the sibling and its generated files are archived', () => {
+    folder(STROKE.map(({ at, pos }) => ({ pos, at })));
+    const r = run('prune-generated.mjs', ['--archive', archive(), p('Lib')]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`sibling  ${p('Lib/FP/FP.mp4')}\n         from FP_hard.funscript (identical actions)`);
+    expect(r.out).toContain('2 hand-made axes copied to siblings, 0 siblings not timing-compatible, 2 generated files archived');
+    expect(read('Lib/FP/FP.twist.funscript')).toBe(read('Lib/FP/FP_hard.twist.funscript'));
+    expect(read('Lib/FP/FP.R1.funscript')).toBe(read('Lib/FP/FP_hard.R1.funscript'));
+    expect(generatedLeft()).toEqual([]);
+    expect(exists('Archive/Lib/FP/FP.generated.pitch.funscript')).toBe(true);
+    expect(exists('Lib/Other/Other.generated.twist.funscript')).toBe(true);
+    const again = run('prune-generated.mjs', ['--archive', archive(), p('Lib')]);
+    expect(again.out).toContain('1 folders with hand-made axes (0 with changes), 2 scenes with hand-made axes');
+  });
+
+  it('a near match is accepted', async () => {
+    folder(shifted(20, 1));
+    const [plan] = await planPrune([p('Lib')], archive());
+    expect(plan.siblings).toHaveLength(1);
+    expect(plan.siblings[0]).toMatchObject({ video: p('Lib/FP/FP.mp4'), source: p('Lib/FP/FP_hard.funscript'), match: 'near' });
+    expect(plan.siblings[0].copy.map((c) => path.basename(c.path)).sort()).toEqual(['FP.R1.funscript', 'FP.twist.funscript']);
+  });
+
+  it('a mismatch copies nothing and says so, but the generated files still go', () => {
+    folder(shifted(125));
+    const r = run('prune-generated.mjs', ['--archive', archive(), p('Lib')]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`sibling  ${p('Lib/FP/FP.mp4')}\n         sibling not timing-compatible, nothing copied`);
+    expect(r.out).toContain('0 hand-made axes copied to siblings, 1 siblings not timing-compatible, 2 generated files archived');
+    expect(fs.readdirSync(p('Lib/FP')).filter((n) => n.startsWith('FP.')).sort()).toEqual(['FP.funscript', 'FP.mp4']);
+    expect(generatedLeft()).toEqual([]);
+  });
+
+  it('never overwrites a file that appears before the copy', async () => {
+    folder(STROKE);
+    const plans = await planPrune([p('Lib')], archive());
+    put('Lib/FP/FP.twist.funscript', 'MINE');
+    const res = await applyPrune(plans, archive());
+    expect(read('Lib/FP/FP.twist.funscript')).toBe('MINE');
+    expect(res.copied).toEqual([p('Lib/FP/FP.R1.funscript')]);
+    expect(res.errors).toEqual([expect.stringMatching(/^copy .*FP\.twist\.funscript: .*EEXIST/)]);
+  });
+
+  it('an embedded-only source is extracted and its axes copied', () => {
+    folder(STROKE, { embedded: true });
+    const dry = run('prune-generated.mjs', ['--dry-run', '--archive', archive(), p('Lib')]);
+    expect(dry.out).toContain(`extract  ${p('Lib/FP/FP_hard.twist.funscript')}`);
+    expect(dry.out).toContain(`copy     ${p('Lib/FP/FP.twist.funscript')}`);
+    expect(exists('Lib/FP/FP.twist.funscript')).toBe(false);
+    run('prune-generated.mjs', ['--archive', archive(), p('Lib')]);
+    expect(JSON.parse(read('Lib/FP/FP.twist.funscript')).actions).toEqual(two);
+    expect(JSON.parse(read('Lib/FP/FP_hard.twist.funscript')).actions).toEqual(two);
+  });
+
+  it('upgrade:axes skips the whole folder', () => {
+    folder(shifted(125));
+    for (const n of generatedLeft()) fs.rmSync(p('Lib/FP', n));
+    const r = run('upgrade-multi-axis.mjs', [p('Lib')]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`skip ${p('Lib/FP/FP.funscript')}: hand-made axes in its folder (FP_hard.funscript: roll, twist), nothing generated`);
+    expect(generatedLeft()).toEqual([]);
+    expect(fs.readdirSync(p('Lib/Other')).filter((n) => n.includes('.generated.')).length).toBeGreaterThan(1);
   });
 });

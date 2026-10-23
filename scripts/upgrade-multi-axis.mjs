@@ -7,11 +7,13 @@
 // A 0% rest sits at centre and cannot last more than 10 seconds.
 //
 // The stroke file is never overwritten. An existing companion for an axis is
-// skipped. A scene with any hand-made axes (a companion that isn't
-// `.generated.`, or axes embedded in the stroke script) is skipped entirely:
-// hand-made axis scripts always win. Companions are named
-// `<stem>.generated.<axis>.funscript` and written next to the video when one
-// is known, otherwise next to the funscript.
+// skipped. A folder where any stroke script has hand-made axes (a companion
+// that isn't `.generated.`, or axes embedded in the stroke script) is
+// skipped entirely, sibling videos included: hand-made axis scripts always
+// win (`npm run prune:generated` copies them to siblings whose timing
+// matches). Companions are named `<stem>.generated.<axis>.funscript` and
+// written next to the video when one is known, otherwise next to the
+// funscript.
 //
 //   node scripts/upgrade-multi-axis.mjs ./clip.mp4 ./clip.funscript
 //   node scripts/upgrade-multi-axis.mjs ./library-folder
@@ -42,7 +44,7 @@ const {
   companionPathForScript,
 } = await import('../renderer/js/upgrade-multi-axis.js');
 const { pairUpgradeJobs } = await import('./upgrade-pairing.mjs');
-const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes } = await import('./handmade-scenes.mjs');
+const { VIDEO_EXTS, groupScenes, folderStrokeScripts, readStrokeScript, sceneHandmadeAxes } = await import('./handmade-scenes.mjs');
 
 const MODE_LABEL = {
   link: 'stroke, quieter early',
@@ -158,23 +160,37 @@ async function existingSuffixes(anchor) {
   return suffixes;
 }
 
-/** Hand-made axes of the job's scene: every stroke script of the same
- *  video in the script's folder (variants included), their companions and
- *  embedded axes, plus companions of the output anchor. */
+/** Hand-made axes that keep a job from generating anything.
+ *  `own`: its scene's (every stroke script of the same video in the script's
+ *  folder, variants included, plus companions of the output anchor).
+ *  `elsewhere`: other stroke scripts with hand-made axes in the script's or
+ *  the anchor's folder (sibling videos), script path → axes. */
 async function jobHandmadeAxes(anchor, script, parsed) {
-  const dir = path.dirname(script);
-  const names = await listDir(dir);
+  const scriptDir = path.dirname(script);
   const own = path.basename(script);
-  const scene = groupScenes(names).find((s) => s.scripts.includes(own));
-  const parse = (name) => (name === own ? parsed : readStrokeScript(path.join(dir, name)));
-  const { handmade } = await sceneHandmadeAxes(scene ? scene.scripts : [own], names, parse);
-  const found = new Set(handmade);
-  if (path.dirname(anchor) !== dir || getBaseName(anchor) !== getBaseName(script)) {
-    for (const s of handmadeAxisSuffixes({ primaryPath: anchor, allFiles: await listDir(path.dirname(anchor)) })) {
-      found.add(s);
+  const ownAxes = new Set();
+  const elsewhere = new Map();
+  for (const dir of new Set([scriptDir, path.dirname(anchor)])) {
+    const names = await listDir(dir);
+    const here = dir === scriptDir;
+    const scene = here ? groupScenes(names).find((s) => s.scripts.includes(own)) : null;
+    const sceneScripts = new Set(here ? (scene ? scene.scripts : [own]) : []);
+    const parse = (name) => (here && name === own ? parsed : readStrokeScript(path.join(dir, name)));
+    const scripts = [...new Set([...sceneScripts, ...folderStrokeScripts(names)])];
+    const { byScript } = await sceneHandmadeAxes(scripts, names, parse);
+    for (const [name, axes] of byScript) {
+      if (sceneScripts.has(name)) axes.forEach((s) => ownAxes.add(s));
+      else elsewhere.set(path.join(dir, name), axes);
     }
   }
-  return [...found].sort();
+  if (path.dirname(anchor) !== scriptDir || getBaseName(anchor) !== getBaseName(script)) {
+    for (const s of handmadeAxisSuffixes({ primaryPath: anchor, allFiles: await listDir(path.dirname(anchor)) })) {
+      ownAxes.add(s);
+    }
+  }
+  const all = new Set(ownAxes);
+  for (const axes of elsewhere.values()) axes.forEach((s) => all.add(s));
+  return { own: [...ownAxes].sort(), elsewhere, all: [...all].sort() };
 }
 
 async function main() {
@@ -184,7 +200,7 @@ async function main() {
 Twist is a fraction of the stroke, quieter early. Roll and pitch are quieter late.
 A 0% rest sits at centre and cannot last more than 10 seconds.
 Does not overwrite the stroke file. Skips an axis whose companion already exists.
-Skips a scene with any hand-made axes (companion files or axes embedded in the script).`);
+Skips a folder where any script has hand-made axes (companion files or axes embedded in the script).`);
     process.exit(paths.length === 0 ? 1 : 0);
   }
   if (!Number.isFinite(seed)) {
@@ -229,12 +245,17 @@ Skips a scene with any hand-made axes (companion files or axes embedded in the s
       primaryPath: anchor,
       strokeActions: parsed.actions,
       existingSuffixes: existing,
-      handmadeAxes: handmade,
+      handmadeAxes: handmade.all,
       enabledTcodes: enabled,
       noise,
     });
     if (plan.error === 'handmade-axes') {
-      console.log(`skip ${job.script}: has hand-made axes (${handmade.join(', ')}), nothing generated`);
+      if (handmade.own.length > 0) {
+        console.log(`skip ${job.script}: has hand-made axes (${handmade.own.join(', ')}), nothing generated`);
+      } else {
+        const where = [...handmade.elsewhere].map(([p, axes]) => `${path.basename(p)}: ${axes.join(', ')}`).join('; ');
+        console.log(`skip ${job.script}: hand-made axes in its folder (${where}), nothing generated`);
+      }
       handmadeSkips++;
       continue;
     }

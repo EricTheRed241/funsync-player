@@ -1708,10 +1708,11 @@ ipcMain.handle('show-in-folder', (_event, filePath) => {
   if (filePath) shell.showItemInFolder(filePath);
 });
 
-// Hand-made axis scripts always win: after an EroScripts download saves a
-// hand-made axis file, the renderer asks for the script's generated
-// companions (`<stem>.generated.<axis>.funscript` beside it) to go to the
-// OS trash. Nothing else is ever trashed; see generated-companions.js.
+// Hand-made axis scripts always win, per folder: after an EroScripts download
+// saves a hand-made axis file, the renderer asks for every generated
+// companion in the script's folder (`<stem>.generated.<axis>.funscript`,
+// sibling videos' included) to go to the OS trash. Nothing else is ever
+// trashed; see generated-companions.js.
 ipcMain.handle('trash-generated-companions', async (_event, scriptPath) => {
   const { shell } = require('electron');
   const { trashGeneratedCompanions } = require('./generated-companions');

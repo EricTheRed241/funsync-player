@@ -1289,6 +1289,7 @@
     "downloadFailed": "Download fehlgeschlagen",
     "savedToast": "Skript gespeichert: {name}",
     "replacedGenerated": "{count, plural, one {# generierte Achsendatei} other {# generierte Achsendateien}} durch handgemachte ersetzt",
+    "replacedGeneratedSiblings": "{count, plural, one {# generierte Achsendatei} other {# generierte Achsendateien}} durch handgemachte ersetzt; {siblings} davon gehörten zu anderen Versionen in diesem Ordner, die keine Kopie der handgemachten Achsen bekommen",
     "sessionExpired": "EroScripts-Sitzung abgelaufen — bitte erneut über das EroScripts-Panel anmelden",
     "conflictTitle": "Skript existiert bereits",
     "conflictMessage": "{name} liegt bereits in diesem Ordner. Ersetzen oder beide behalten und das neue als Variante speichern?",

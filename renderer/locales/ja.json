@@ -1289,6 +1289,7 @@
     "downloadFailed": "ダウンロードに失敗しました",
     "savedToast": "スクリプトを保存しました: {name}",
     "replacedGenerated": "生成された軸ファイル {count} 件を手作りのものに置き換えました",
+    "replacedGeneratedSiblings": "生成された軸ファイル {count} 件を手作りのものに置き換えました。うち {siblings} 件はこのフォルダー内の別バージョンのもので、手作りの軸はコピーされません",
     "sessionExpired": "EroScripts セッションの有効期限が切れました — EroScripts パネルから再度ログインしてください",
     "conflictTitle": "スクリプトは既に存在します",
     "conflictMessage": "{name} はこのフォルダーに既にあります。置き換えますか？それとも両方残して新しい方をバリアントとして保存しますか？",

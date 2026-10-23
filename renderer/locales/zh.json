@@ -1289,6 +1289,7 @@
     "downloadFailed": "下载失败",
     "savedToast": "脚本已保存:{name}",
     "replacedGenerated": "已将 {count} 个生成的轴文件替换为手工制作的文件",
+    "replacedGeneratedSiblings": "已将 {count} 个生成的轴文件替换为手工制作的文件；其中 {siblings} 个属于此文件夹中的其他版本，不会为它们复制手工制作的轴",
     "sessionExpired": "EroScripts 会话已过期 — 请在 EroScripts 面板中重新登录",
     "conflictTitle": "脚本已存在",
     "conflictMessage": "{name} 已在此文件夹中。替换它，还是两者都保留并将新文件另存为变体？",

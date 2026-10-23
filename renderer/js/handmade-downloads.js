@@ -1,7 +1,9 @@
-// Hand-made axis scripts always win, also for EroScripts downloads: once a
-// download saves a hand-made axis file for a script (a companion such as
-// `Title.twist.funscript`, or a main script with axes embedded in it), that
-// script's `Title.generated.<axis>.funscript` files go to the OS trash.
+// Hand-made axis scripts always win, per folder, also for EroScripts
+// downloads: once a download saves a hand-made axis file for a script (a
+// companion such as `Title.twist.funscript`, or a main script with axes
+// embedded in it), every `<stem>.generated.<axis>.funscript` in that
+// script's folder goes to the OS trash — sibling videos' (`Title_4k`,
+// `Title_hard` …) included. Nothing is copied to the siblings here.
 // Used by the EroScripts panel and the Associate dialog's EroScripts search.
 
 import { getBaseName, parseAxisSuffix, isGeneratedCompanion } from './multi-axis.js';
@@ -37,17 +39,20 @@ export async function scriptsReplacedBy(savedPaths, readScript) {
 }
 
 /**
- * Trash the generated companions replaced by freshly saved files.
+ * Trash the generated companions in the folders of freshly saved files.
  *
  * @param {string[]} savedPaths
  * @param {object} deps
  * @param {(path: string) => Promise<string|null>} deps.readScript
  * @param {(scriptPath: string) => Promise<{trashed: string[], failed: string[]}>} deps.trash
- * @returns {Promise<string[]>} the trashed paths
+ * @returns {Promise<{trashed: string[], siblings: string[]}>} every trashed
+ *   path, and those of them that belonged to another script than the ones
+ *   the saved files replace (sibling videos in the same folder)
  */
 export async function trashReplacedGenerated(savedPaths, { readScript, trash }) {
   const trashed = [];
-  for (const script of await scriptsReplacedBy(savedPaths, readScript)) {
+  const scripts = await scriptsReplacedBy(savedPaths, readScript);
+  for (const script of scripts) {
     try {
       const result = await trash(script);
       trashed.push(...(result?.trashed || []));
@@ -55,5 +60,7 @@ export async function trashReplacedGenerated(savedPaths, { readScript, trash }) 
       console.warn('[HandmadeWins] trashing generated companions failed for', script, err?.message);
     }
   }
-  return trashed;
+  const own = new Set(scripts.map((s) => `${dirOf(s)}/${getBaseName(s).toLowerCase()}`));
+  const siblings = trashed.filter((p) => !own.has(`${dirOf(p)}/${getBaseName(p).toLowerCase()}`));
+  return { trashed, siblings };
 }
