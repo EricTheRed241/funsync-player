@@ -32,6 +32,9 @@ function isAppleDoubleSidecar(name) {
  */
 const yieldTick = () => new Promise((resolve) => setImmediate(resolve));
 
+// Axis suffixes the scan pairs as companions (`Title.twist.funscript`).
+const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
+
 const SILENT_LOG = { info() {}, warn() {} };
 
 /**
@@ -50,7 +53,6 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
   const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
   const FUNSCRIPT_EXT = '.funscript';
   const SUBTITLE_EXTS = ['.srt', '.vtt'];
-  const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 
   // Canonicalise a path for cross-source dedup: forward slashes, lowercased
   // drive letter. Matches renderer/js/path-utils.js::canonicalPath so the
@@ -481,4 +483,4 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
   return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts, failedPaths };
 }
 
-module.exports = { scanLibrary, isAppleDoubleSidecar };
+module.exports = { scanLibrary, isAppleDoubleSidecar, AXIS_SUFFIXES };

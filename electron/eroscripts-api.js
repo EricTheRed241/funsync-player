@@ -369,7 +369,7 @@ class EroScriptsAPI {
       }
 
       if (resp.status === 429) {
-        return { results: [], error: 'Rate limited — try again in a moment' };
+        return { results: [], error: 'Rate limited — try again in a moment', rateLimited: true };
       }
       if (resp.status === 403 || resp.status === 401) {
         // `authExpired` is the machine-readable half of this. The message
@@ -534,7 +534,7 @@ class EroScriptsAPI {
       });
 
       if (resp.status === 429) {
-        return { attachments: [], error: 'Rate limited' };
+        return { attachments: [], error: 'Rate limited', rateLimited: true };
       }
       if (resp.status === 403 || resp.status === 401) {
         return { attachments: [], error: 'Access denied — try logging in again', authExpired: true };
@@ -750,6 +750,52 @@ class EroScriptsAPI {
     } catch (err) {
       if (err.code === 'EEXIST') return { success: false, exists: true };
       log.error('[EroScripts] Download error:', err.message);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Fetch a script file (`.funscript` / `.zip`) into memory, to compare it
+   * with a local one. Same host rule as `downloadFile`: https forum links
+   * only. The forum redirects uploads to its CDN; redirects are followed by
+   * hand so the session cookie goes to the forum alone.
+   *
+   * @param {string} url
+   * @param {{maxBytes?: number}} [opts]
+   * @returns {Promise<{success: true, bytes: Buffer} | {success: false,
+   *   error: string, status?: number, rateLimited?: boolean, authExpired?: boolean}>}
+   */
+  async fetchScript(url, { maxBytes = 25 * 1024 * 1024 } = {}) {
+    let current = url;
+    try {
+      for (let hop = 0; hop <= 3; hop++) {
+        let u;
+        try { u = new URL(current); } catch { return { success: false, error: 'Unsupported download link' }; }
+        const onForum = u.hostname === FORUM_HOST;
+        // The first hop must be the forum; only its redirects may reach the CDN.
+        if (u.protocol !== 'https:' || !(onForum || (hop > 0 && u.hostname === UPLOAD_CDN_HOST))) {
+          return { success: false, error: 'Unsupported download link' };
+        }
+        const headers = onForum ? this._headers() : { 'User-Agent': USER_AGENT };
+        const resp = await fetch(u.href, { headers, redirect: 'manual', signal: AbortSignal.timeout(60_000) });
+        if (resp.status >= 300 && resp.status < 400) {
+          const location = resp.headers.get('location');
+          if (!location) return { success: false, error: `Download failed (${resp.status})`, status: resp.status };
+          current = new URL(location, u).href;
+          continue;
+        }
+        if (resp.status === 429) return { success: false, error: 'Rate limited', status: 429, rateLimited: true };
+        if (onForum && (resp.status === 401 || resp.status === 403)) {
+          return { success: false, error: 'Access denied — try logging in again', status: resp.status, authExpired: true };
+        }
+        if (!resp.ok) return { success: false, error: `Download failed (${resp.status})`, status: resp.status };
+        if (Number(resp.headers.get('content-length')) > maxBytes) return { success: false, error: 'File too large' };
+        const bytes = Buffer.from(await resp.arrayBuffer());
+        if (bytes.length > maxBytes) return { success: false, error: 'File too large' };
+        return { success: true, bytes };
+      }
+      return { success: false, error: 'Too many redirects' };
+    } catch (err) {
       return { success: false, error: err.message };
     }
   }
