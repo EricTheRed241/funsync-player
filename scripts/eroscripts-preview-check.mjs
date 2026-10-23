@@ -149,6 +149,8 @@ function contactSheet(items, outFile, tmpDir) {
   return r.status === 0 ? outFile : null;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) { console.log(USAGE); return 0; }
