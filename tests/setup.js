@@ -97,6 +97,10 @@ globalThis.funsync = {
   eroscriptsTopicImage: vi.fn().mockResolvedValue(null),
   eroscriptsDownload: vi.fn().mockResolvedValue({ success: true }),
   eroscriptsImportPreview: vi.fn().mockResolvedValue(null),
+  eroscriptsPreviewCandidates: vi.fn().mockResolvedValue({ status: 'no-image' }),
+  eroscriptsMatchPreview: vi.fn().mockResolvedValue({ status: 'no-image' }),
+  eroscriptsValidatePoster: vi.fn().mockResolvedValue({ error: 'unavailable' }),
+  deleteEroScriptsThumbnail: vi.fn().mockResolvedValue(true),
 
   // Auto-updater
   updaterCheck: vi.fn().mockResolvedValue(undefined),

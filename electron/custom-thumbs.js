@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { toGray } = require('./preview-match');
 
 const MAX_WIDTH = 640;
 const JPEG_QUALITY = 82;
@@ -118,9 +119,117 @@ async function decodeWithChromium(bytes) {
   }
 }
 
+// ---- Grayscale frames for preview matching (electron/preview-match.js) ----
+
+/** Width images are decoded at for hashing (the hash input is 32×32). */
+const MATCH_WIDTH = 128;
+/** Frames hashed from an animated preview, spread over the animation. */
+const MATCH_MAX_FRAMES = 6;
+
+// GIF and WebP may be animated: those go to Chromium's ImageDecoder, which
+// can read every frame. nativeImage reads only the first.
+function maybeAnimated(bytes) {
+  if (bytes.length < 12) return false;
+  if (bytes.toString('latin1', 0, 4) === 'GIF8') return true;
+  return bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP';
+}
+
+/**
+ * Decode an image into grayscale frames for hashing: one for a still,
+ * up to MATCH_MAX_FRAMES spread over an animation.
+ *
+ * @param {Buffer} bytes
+ * @param {{nativeImage: object, chromium?: (bytes: Buffer) => Promise<Array<object>|null>}} deps
+ * @returns {Promise<Array<{gray: Uint8Array, width: number, height: number,
+ *   srcWidth: number, srcHeight: number}>>} [] when undecodable
+ */
+async function decodeGrayFrames(bytes, { nativeImage, chromium = decodeGrayFramesWithChromium }) {
+  if (!maybeAnimated(bytes)) {
+    let img = nativeImage.createFromBuffer(bytes);
+    if (!img.isEmpty()) {
+      const { width: srcWidth, height: srcHeight } = img.getSize();
+      if (srcWidth > MATCH_WIDTH) img = img.resize({ width: MATCH_WIDTH, quality: 'good' });
+      const { width, height } = img.getSize();
+      // toBitmap() is BGRA on every platform Electron ships.
+      return [{ gray: toGray(img.toBitmap(), width, height, 'bgra'), width, height, srcWidth, srcHeight }];
+    }
+  }
+  return (await chromium(bytes)) || [];
+}
+
+/**
+ * Chromium half of decodeGrayFrames: ImageDecoder for every frame of an
+ * animation (createImageBitmap, first frame only, where it's missing).
+ * Same hidden sandboxed window as decodeWithChromium.
+ *
+ * @param {Buffer} bytes
+ * @returns {Promise<Array<object>|null>}
+ */
+async function decodeGrayFramesWithChromium(bytes) {
+  const { BrowserWindow } = require('electron');
+  const win = new BrowserWindow({
+    show: false,
+    width: 64,
+    height: 64,
+    paintWhenInitiallyHidden: false,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  let timer;
+  try {
+    await win.loadURL('about:blank');
+    const script = `(async () => {
+      const raw = Uint8Array.from(atob(${JSON.stringify(bytes.toString('base64'))}), (c) => c.charCodeAt(0));
+      const sources = [];
+      let srcWidth = 0, srcHeight = 0;
+      const type = (raw[0] === 0x47 ? 'image/gif' : raw[8] === 0x57 ? 'image/webp' : '');
+      if (type && typeof ImageDecoder === 'function' && await ImageDecoder.isTypeSupported(type)) {
+        const dec = new ImageDecoder({ data: raw, type });
+        await dec.tracks.ready;
+        const count = Math.max(1, dec.tracks.selectedTrack?.frameCount || 1);
+        const n = Math.min(${MATCH_MAX_FRAMES}, count);
+        for (let i = 0; i < n; i++) {
+          const { image } = await dec.decode({ frameIndex: Math.floor(i * count / n) });
+          srcWidth = image.displayWidth; srcHeight = image.displayHeight;
+          sources.push(image);
+        }
+      } else {
+        const bmp = await createImageBitmap(new Blob([raw]));
+        srcWidth = bmp.width; srcHeight = bmp.height;
+        sources.push(bmp);
+      }
+      const scale = Math.min(1, ${MATCH_WIDTH} / srcWidth);
+      const w = Math.max(1, Math.round(srcWidth * scale));
+      const h = Math.max(1, Math.round(srcHeight * scale));
+      const canvas = new OffscreenCanvas(w, h);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      return sources.map((src) => {
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(src, 0, 0, w, h);
+        src.close?.();
+        const px = ctx.getImageData(0, 0, w, h).data;
+        let s = '';
+        for (let i = 0; i < px.length; i += 4) {
+          s += String.fromCharCode((px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000);
+        }
+        return { gray: btoa(s), width: w, height: h, srcWidth, srcHeight };
+      });
+    })()`;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), CHROMIUM_DECODE_TIMEOUT_MS); });
+    const frames = await Promise.race([win.webContents.executeJavaScript(script), timeout]);
+    if (!Array.isArray(frames) || frames.length === 0) return null;
+    return frames.map((f) => ({ ...f, gray: new Uint8Array(Buffer.from(f.gray, 'base64')) }));
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
 module.exports = {
   MAX_WIDTH,
   thumbStem,
   importThumbnail,
   decodeWithChromium,
+  decodeGrayFrames,
 };
