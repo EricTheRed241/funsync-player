@@ -13,7 +13,7 @@ const pm = require('./preview-match');
 
 /** Frames sampled per video, across the middle 90% of its duration. */
 const SAMPLE_COUNT = 12;
-/** Width of the sampled grayscale frames. 9×8 hashes need little. */
+/** Width of the sampled grayscale frames. A 32×32 hash input needs little. */
 const SAMPLE_WIDTH = 128;
 const SAMPLE_CONCURRENCY = 2;
 // Bumped when the sampling or hashing changes, so old cache entries die.

@@ -11,7 +11,7 @@
 //    or aspect).
 // 2. Each remaining image is compared with frames sampled across the video
 //    (backend/services/ffmpeg.py sample_gray_frames) by perceptual hash:
-//    a 64-bit difference hash (dHash) per frame, plus the left eye for
+//    a 64-bit DCT hash (pHash) per frame, plus the left eye for
 //    side-by-side VR. An image is accepted only when some frame is within
 //    MATCH_THRESHOLD bits of it.
 //
@@ -206,16 +206,23 @@ function collectPreviewCandidates(data, { extraUrls = [] } = {}) {
 
 // ---- Perceptual hashing ----
 
-/** Bits (of 64) two hashes may differ by and still be the same picture.
- *  Calibrated on a real library: see MATCHING.md in the PR / the dry-run
- *  report of scripts/eroscripts-preview-check.mjs. */
+/** Bits (of 64) two pHashes may differ by and still be the same picture.
+ *
+ *  Calibrated on a real library (133 posters of the PR #14 batch, their
+ *  videos sampled by keyframe, every poster checked by eye): every poster
+ *  at distance ≤ 12 to its own video was a frame of it; 14 and above were
+ *  mostly banners, title cards and other videos' images. Against the
+ *  other creators' videos (impostors) 0.13% of pairs reach ≤ 12, 1.2%
+ *  ≤ 14, 4.5% ≤ 16. dHash separated far worse (4% impostors at 12). */
 const MATCH_THRESHOLD = 12;
-/** A 9×8 thumbnail whose luma standard deviation is below this is too flat
- *  (black, fades, solid banners) for its gradient bits to mean anything. */
-const MIN_CONTRAST = 6;
+/** A 32×32 thumbnail whose luma standard deviation is below this is too
+ *  flat (black, fades, solid fills) for its hash to mean anything. */
+const MIN_CONTRAST = 8;
 /** Frames at least this wide relative to their height are taken for
  *  side-by-side VR and also compared by their left eye. */
 const VR_MIN_ASPECT = 1.8;
+/** pHash works on a DCT of a HASH_SIZE² thumbnail, keeping 8×8 coefficients. */
+const HASH_SIZE = 32;
 
 /**
  * RGBA (or BGRA) pixels → 8-bit luma.
@@ -265,21 +272,43 @@ function areaResize(gray, w, h, tw, th, rect = { x: 0, y: 0, w, h }) {
   return out;
 }
 
+// cos((2x+1)uπ / 2N) for the 8 low frequencies.
+const DCT_COS = Array.from({ length: 8 }, (_, u) =>
+  Float64Array.from({ length: HASH_SIZE }, (_, x) => Math.cos(((2 * x + 1) * u * Math.PI) / (2 * HASH_SIZE))));
+
 /**
- * 64-bit difference hash of a grayscale image (or a rectangle of it), as 16
- * hex digits, plus the thumbnail's contrast. Each bit says whether a pixel
- * of the 9×8 thumbnail is darker than its right neighbour.
+ * 64-bit perceptual hash (pHash) of a grayscale image or a rectangle of it,
+ * as 16 hex digits, plus the thumbnail's contrast. The image is shrunk to
+ * 32×32; each bit says whether one of the 8×8 lowest DCT frequencies is
+ * above the median of the 63 non-DC ones.
  *
  * @returns {{hash: string, contrast: number}}
  */
-function dHash(gray, w, h, rect) {
-  const s = areaResize(gray, w, h, 9, 8, rect);
-  let hex = '';
-  for (let row = 0; row < 8; row++) {
-    let byte = 0;
-    for (let col = 0; col < 8; col++) {
-      byte = (byte << 1) | (s[row * 9 + col] < s[row * 9 + col + 1] ? 1 : 0);
+function pHash(gray, w, h, rect) {
+  const N = HASH_SIZE;
+  const s = areaResize(gray, w, h, N, N, rect);
+  // Separable 2-D DCT-II, low 8×8 only: rows first, then columns.
+  const rows = new Float64Array(N * 8);
+  for (let y = 0; y < N; y++) {
+    for (let u = 0; u < 8; u++) {
+      let sum = 0;
+      for (let x = 0; x < N; x++) sum += s[y * N + x] * DCT_COS[u][x];
+      rows[y * 8 + u] = sum;
     }
+  }
+  const dct = new Float64Array(64);
+  for (let v = 0; v < 8; v++) {
+    for (let u = 0; u < 8; u++) {
+      let sum = 0;
+      for (let y = 0; y < N; y++) sum += rows[y * 8 + u] * DCT_COS[v][y];
+      dct[v * 8 + u] = sum;
+    }
+  }
+  const median = Array.from(dct.subarray(1)).sort((a, b) => a - b)[31];
+  let hex = '';
+  for (let i = 0; i < 64; i += 8) {
+    let byte = 0;
+    for (let j = 0; j < 8; j++) byte = (byte << 1) | (dct[i + j] > median ? 1 : 0);
     hex += byte.toString(16).padStart(2, '0');
   }
   let mean = 0;
@@ -314,10 +343,10 @@ function hamming(a, b) {
  */
 function frameHashes(gray, w, h) {
   const out = [];
-  const full = dHash(gray, w, h);
+  const full = pHash(gray, w, h);
   if (full.contrast >= MIN_CONTRAST) out.push({ view: 'full', hash: full.hash });
   if (w / h >= VR_MIN_ASPECT) {
-    const left = dHash(gray, w, h, { x: 0, y: 0, w: w / 2, h });
+    const left = pHash(gray, w, h, { x: 0, y: 0, w: w / 2, h });
     if (left.contrast >= MIN_CONTRAST) out.push({ view: 'left', hash: left.hash });
   }
   return out;
@@ -346,7 +375,7 @@ function videoHashes(sample) {
 function imageHashes(frames) {
   const out = [];
   frames.forEach((f, i) => {
-    const { hash, contrast } = dHash(f.gray, f.width, f.height);
+    const { hash, contrast } = pHash(f.gray, f.width, f.height);
     if (contrast >= MIN_CONTRAST) out.push({ frame: i, hash });
   });
   return out;
@@ -402,7 +431,7 @@ module.exports = {
   dimensionExclusion,
   toGray,
   areaResize,
-  dHash,
+  pHash,
   hamming,
   frameHashes,
   videoHashes,
