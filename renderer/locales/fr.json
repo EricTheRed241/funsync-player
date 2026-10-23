@@ -1289,6 +1289,7 @@
     "downloadFailed": "Échec du téléchargement",
     "savedToast": "Script enregistré : {name}",
     "replacedGenerated": "{count, plural, one {# fichier d'axe généré remplacé} other {# fichiers d'axe générés remplacés}} par des fichiers faits main",
+    "replacedGeneratedSiblings": "{count, plural, one {# fichier d'axe généré remplacé} other {# fichiers d'axe générés remplacés}} par des fichiers faits main ; {siblings} appartenaient à d'autres versions de ce dossier, qui ne reçoivent pas de copie des axes faits main",
     "sessionExpired": "Session EroScripts expirée — reconnecte-toi via le panneau EroScripts",
     "conflictTitle": "Le script existe déjà",
     "conflictMessage": "{name} est déjà dans ce dossier. Le remplacer, ou garder les deux et enregistrer le nouveau comme variante ?",

@@ -13,7 +13,7 @@ import path from 'node:path';
 import { scriptsReplacedBy, trashReplacedGenerated } from '../../renderer/js/handmade-downloads.js';
 
 const require = createRequire(import.meta.url);
-const { isGeneratedCompanionOf, trashGeneratedCompanions } = require('../../electron/generated-companions.js');
+const { generatedStemOf, trashGeneratedCompanions } = require('../../electron/generated-companions.js');
 
 let dir;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trash-generated-')); });
@@ -27,7 +27,7 @@ function touch(...names) {
 }
 
 describe('trashGeneratedCompanions', () => {
-  it("trashes only `<stem>.generated.<axis>.funscript` beside the script", async () => {
+  it("trashes every `<stem>.generated.<axis>.funscript` in the script's folder, siblings' too, no other folder", async () => {
     touch(
       'Title.funscript',
       'Title.twist.funscript',
@@ -36,13 +36,22 @@ describe('trashGeneratedCompanions', () => {
       'Title.generated.notes.funscript',
       'Title.generated.twist.funscript.bak',
       'Title_hard.generated.pitch.funscript',
-      'Other.generated.roll.funscript',
+      'Title_4k.generated.roll.funscript',
       '._Title.generated.pitch.funscript',
       'sub/Title.generated.roll.funscript',
+      'sub/Title_4k.generated.twist.funscript',
     );
+    fs.mkdirSync(`${dir}-other`, { recursive: true });
+    fs.writeFileSync(`${dir}-other/Title.generated.twist.funscript`, '{}');
     const trashItem = vi.fn(async () => {});
     const result = await trashGeneratedCompanions(path.join(dir, 'Title.funscript'), { trashItem });
-    const expected = [path.join(dir, 'Title.GENERATED.R1.funscript'), path.join(dir, 'Title.generated.twist.funscript')];
+    fs.rmSync(`${dir}-other`, { recursive: true, force: true });
+    const expected = [
+      'Title.GENERATED.R1.funscript',
+      'Title.generated.twist.funscript',
+      'Title_4k.generated.roll.funscript',
+      'Title_hard.generated.pitch.funscript',
+    ].map((n) => path.join(dir, n));
     expect(result.trashed.sort()).toEqual(expected.sort());
     expect(result.failed).toEqual([]);
     expect(trashItem.mock.calls.map((c) => c[0]).sort()).toEqual(expected.sort());
@@ -64,11 +73,13 @@ describe('trashGeneratedCompanions', () => {
     expect(trashItem).not.toHaveBeenCalled();
   });
 
-  it('a generated companion named as the script trashes nothing else', async () => {
-    touch('Title.generated.twist.funscript', 'Title.generated.twist.generated.roll.funscript');
+  it('an axis companion named as the script trashes nothing', async () => {
+    touch('Title.generated.twist.funscript', 'Title.twist.funscript', 'Other.generated.roll.funscript');
     const trashItem = vi.fn(async () => {});
-    const r = await trashGeneratedCompanions(path.join(dir, 'Title.generated.twist.funscript'), { trashItem });
-    expect(r.trashed).toEqual([path.join(dir, 'Title.generated.twist.generated.roll.funscript')]);
+    for (const name of ['Title.generated.twist.funscript', 'Title.twist.funscript']) {
+      expect((await trashGeneratedCompanions(path.join(dir, name), { trashItem })).trashed).toEqual([]);
+    }
+    expect(trashItem).not.toHaveBeenCalled();
   });
 
   it('reports files the trash refused', async () => {
@@ -79,10 +90,13 @@ describe('trashGeneratedCompanions', () => {
     expect(r).toEqual({ trashed: [], failed: [path.join(dir, 'Title.generated.twist.funscript')] });
   });
 
-  it('isGeneratedCompanionOf matches the stem exactly, any case', () => {
-    expect(isGeneratedCompanionOf('title.Generated.suction.funscript', 'Title')).toBe(true);
-    expect(isGeneratedCompanionOf('Title 2.generated.twist.funscript', 'Title')).toBe(false);
-    expect(isGeneratedCompanionOf('Title.twist.funscript', 'Title')).toBe(false);
+  it('generatedStemOf reads `<stem>.generated.<axis>.funscript` only', () => {
+    expect(generatedStemOf('title.Generated.suction.funscript')).toBe('title');
+    expect(generatedStemOf('Title 2.generated.twist.funscript')).toBe('Title 2');
+    expect(generatedStemOf('Twist.funscript')).toBe(null);
+    expect(generatedStemOf('Title.twist.funscript')).toBe(null);
+    expect(generatedStemOf('Title.generated.notes.funscript')).toBe(null);
+    expect(generatedStemOf('._Title.generated.twist.funscript')).toBe(null);
   });
 });
 
@@ -105,10 +119,16 @@ describe('scriptsReplacedBy', () => {
     )).toEqual(['/v/Emb.funscript']);
   });
 
-  it('trashReplacedGenerated collects what the IPC trashed', async () => {
-    const trash = vi.fn(async (p) => ({ trashed: [p.replace('.funscript', '.generated.roll.funscript')], failed: [] }));
+  it('trashReplacedGenerated collects what the IPC trashed and tells sibling files apart', async () => {
+    const trash = vi.fn(async (p) => ({
+      trashed: [p.replace('.funscript', '.generated.roll.funscript'), '/v/T_4k.generated.twist.funscript'],
+      failed: [],
+    }));
     expect(await trashReplacedGenerated(['/v/T.twist.funscript', '/v/T.pitch.funscript'], { readScript: read({}), trash }))
-      .toEqual(['/v/T.generated.roll.funscript']);
+      .toEqual({
+        trashed: ['/v/T.generated.roll.funscript', '/v/T_4k.generated.twist.funscript'],
+        siblings: ['/v/T_4k.generated.twist.funscript'],
+      });
     expect(trash).toHaveBeenCalledTimes(1);
   });
 });

@@ -42,7 +42,9 @@ const USAGE = `Usage: npm run eroscripts:sync -- [options]
   --retry                re-check every video without a confirmed link now
   --limit N              check at most N videos this run
   --stale-days N         re-check unconfirmed results older than N days (default ${lib.DEFAULT_STALE_DAYS})
-  --install-axes         download missing hand-made axes into scene folders
+  --install-axes         download missing hand-made axes into scene folders, then
+                         copy them to sibling videos whose timing matches and
+                         archive every generated companion in those folders
   --archive <dir>        where --install-axes archives generated companions
                          (default <library parent>/Archive/_pruned-<date>)
   --report <file>        report path (.md or .json; default <userData>/eroscripts-sync-report.md)
@@ -200,6 +202,7 @@ async function main() {
 
   // Hand-made axes the linked posts offer.
   const axes = [];
+  const touched = new Map();
   for (const video of videos) {
     const link = state.links[video.path];
     if (!link || !video.funscriptPath || !fs.existsSync(video.funscriptPath)) continue;
@@ -213,6 +216,7 @@ async function main() {
       const archiveDir = opts.archive || path.join(relativeTo, 'Archive', `_pruned-${today()}`);
       try {
         entry.result = await lib.installAxes({ forum, local, plan, archiveDir, relativeTo, dryRun: opts.dryRun });
+        if (!opts.dryRun && entry.result.installed.length) touched.set(local.dir, { dir: local.dir, archiveDir, relativeTo });
       } catch (err) {
         if (err instanceof lib.RateLimitedError) { console.error(err.message); exitCode = 2; }
         else if (err instanceof lib.SessionExpiredError) { console.error(err.message); exitCode = 3; }
@@ -221,6 +225,9 @@ async function main() {
     }
     axes.push(entry);
   }
+  // Folder rule: sibling videos of the folders that got hand-made axes.
+  const siblings = await lib.pruneInstalledFolders([...touched.values()]);
+  for (const f of siblings) for (const e of f.errors) summary.errors.push({ video: f.dir, error: `siblings: ${e}` });
 
   // Previews: every linked video can get its post's image in the app.
   const custom = settings.library?.customThumbnails || {};
@@ -235,8 +242,8 @@ async function main() {
 
   const reportPath = opts.report || path.join(userData, 'eroscripts-sync-report.md');
   const report = reportPath.endsWith('.json')
-    ? JSON.stringify({ generatedAt: new Date().toISOString(), dryRun: opts.dryRun, summary, previews, links: state.links, review: state.review, axes }, null, 2)
-    : lib.renderReport({ state, summary, axes, previews, roots: available, dryRun: opts.dryRun });
+    ? JSON.stringify({ generatedAt: new Date().toISOString(), dryRun: opts.dryRun, summary, previews, links: state.links, review: state.review, axes, siblings }, null, 2)
+    : lib.renderReport({ state, summary, axes, siblings, previews, roots: available, dryRun: opts.dryRun });
   fs.writeFileSync(reportPath, report);
 
   const confirmed = linked.filter(([, l]) => l.confidence === 'confirmed').length;
@@ -250,6 +257,7 @@ async function main() {
     `Review list: ${Object.keys(state.review).length}`,
     `Previews available: ${previews.available} (${previews.withoutThumb} without a custom thumbnail)`,
     `Hand-made axes available: ${axisScenes.reduce((n, a) => n + a.plan.missing.length, 0)} files in ${axisScenes.length} scenes${opts.installAxes ? `; installed ${installed}` : ''}`,
+    ...(siblings.length ? [`Sibling videos: copied ${siblings.reduce((n, f) => n + f.copied.length, 0)} hand-made axes, ${siblings.reduce((n, f) => n + f.refused.length, 0)} not timing-compatible, archived ${siblings.reduce((n, f) => n + f.archived.length, 0)} generated files`] : []),
     opts.dryRun ? 'Dry run: links file not written.' : `Links: ${linksFilePath(userData)}`,
     `Report: ${reportPath}`,
   ].join('\n'));

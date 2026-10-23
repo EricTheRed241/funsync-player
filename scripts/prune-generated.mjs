@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Hand-made axis scripts always win. For every scene with hand-made axes,
-// write embedded axes out as companion files and move its generated
-// companions (`<stem>.generated.<axis>.funscript`) into an archive.
-// See prune-generated-lib.mjs for the rules.
+// Hand-made axis scripts always win, per folder. For every folder with
+// hand-made axes, write embedded axes out as companion files, copy the
+// hand-made axes to sibling videos whose timing provably matches, and move
+// every generated companion (`<stem>.generated.<axis>.funscript`) in the
+// folder into an archive. See prune-generated-lib.mjs for the rules.
 //
 //   npm run prune:generated -- --dry-run --archive /path/to/archive "/lib/Multi-Axis"
 //   npm run prune:generated -- --archive /path/to/archive "/lib/Multi-Axis" "/lib/Other"
@@ -19,7 +20,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
   ], { stdio: 'inherit' });
   process.exit(relaunch.status ?? 1);
 }
-const { planPrune, applyPrune } = await import('./prune-generated-lib.mjs');
+const { planPrune, applyPrune, folderChanges } = await import('./prune-generated-lib.mjs');
 
 const USAGE = 'Usage: npm run prune:generated -- [--dry-run] --archive <dir> <library folder>...';
 
@@ -51,29 +52,49 @@ async function main() {
   }
   const archiveDir = path.resolve(args.archive);
 
-  const scenes = await planPrune(args.roots, archiveDir);
+  const folders = await planPrune(args.roots, archiveDir);
   const label = args.dryRun ? ' (dry run, nothing changed)' : '';
-  for (const scene of scenes) {
-    const embedded = scene.embedded.length ? `; embedded: ${scene.embedded.join(', ')}` : '';
-    console.log(`scene    ${scene.video || scene.scripts[0]}`);
-    console.log(`         hand-made: ${scene.handmade.join(', ')}${embedded}`);
-    for (const e of scene.extract) console.log(`extract  ${e.path}`);
-    for (const a of scene.archive) console.log(`archive  ${a.from}\n      →  ${a.to}`);
-    if (scene.extract.length === 0 && scene.archive.length === 0) console.log('         nothing to do');
+  const MATCH_LABEL = { identical: 'identical actions', near: 'same timing within ±50 ms' };
+  for (const folder of folders) {
+    const refused = folder.siblings.filter((s) => !s.source);
+    if (!folderChanges(folder) && refused.length === 0) continue;
+    console.log(`folder   ${folder.dir}`);
+    for (const scene of folder.scenes) {
+      const embedded = scene.embedded.length ? `; embedded: ${scene.embedded.join(', ')}` : '';
+      console.log(`scene    ${scene.video || scene.scripts[0]}`);
+      console.log(`         hand-made: ${scene.handmade.join(', ')}${embedded}`);
+    }
+    for (const e of folder.extract) console.log(`extract  ${e.path}`);
+    for (const s of folder.siblings) {
+      console.log(`sibling  ${s.video}`);
+      if (!s.source) {
+        console.log('         sibling not timing-compatible, nothing copied');
+        continue;
+      }
+      console.log(`         from ${path.basename(s.source)} (${MATCH_LABEL[s.match]})`);
+      for (const c of s.copy) console.log(`copy     ${c.path}`);
+    }
+    for (const a of folder.archive) console.log(`archive  ${a.from}\n      →  ${a.to}`);
   }
 
-  const toExtract = scenes.reduce((n, s) => n + s.extract.length, 0);
-  const toArchive = scenes.reduce((n, s) => n + s.archive.length, 0);
-  const changing = scenes.filter((s) => s.extract.length > 0 || s.archive.length > 0).length;
-  const sceneLine = `${scenes.length} scenes with hand-made axes (${changing} with changes)`;
+  const sum = (f) => folders.reduce((n, x) => n + f(x), 0);
+  const scenes = sum((f) => f.scenes.length);
+  const toExtract = sum((f) => f.extract.length);
+  const toArchive = sum((f) => f.archive.length);
+  const toCopy = sum((f) => f.siblings.reduce((n, s) => n + s.copy.length, 0));
+  const copyTo = sum((f) => f.siblings.filter((s) => s.copy.length > 0).length);
+  const refused = sum((f) => f.siblings.filter((s) => !s.source).length);
+  const changing = folders.filter(folderChanges).length;
+  const head = `${folders.length} folders with hand-made axes (${changing} with changes), ${scenes} scenes with hand-made axes`;
+  const refusedLine = `${refused} siblings not timing-compatible`;
   if (args.dryRun) {
-    console.log(`\n${sceneLine}, ${toExtract} embedded axes to extract, ${toArchive} generated files to archive${label}`);
+    console.log(`\n${head}, ${toExtract} embedded axes to extract, ${toCopy} hand-made axes to copy to ${copyTo} siblings, ${refusedLine}, ${toArchive} generated files to archive${label}`);
     return;
   }
 
-  const { extracted, archived, errors } = await applyPrune(scenes, archiveDir);
+  const { extracted, copied, archived, errors } = await applyPrune(folders, archiveDir);
   for (const e of errors) console.error(`error    ${e}`);
-  console.log(`\n${sceneLine}, ${extracted.length} embedded axes extracted, ${archived.length} generated files archived to ${archiveDir}`);
+  console.log(`\n${head}, ${extracted.length} embedded axes extracted, ${copied.length} hand-made axes copied to siblings, ${refusedLine}, ${archived.length} generated files archived to ${archiveDir}`);
   if (archived.length > 0) console.log(`manifest ${path.join(archiveDir, 'MANIFEST.txt')}`);
   if (errors.length > 0) process.exit(1);
 }

@@ -14,13 +14,13 @@
 // Forum access is read-only and paced (≥ 700 ms between requests). A 429
 // stops the run with progress saved; a 401/403 stops it as an expired session.
 
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { getAxisBySuffix, parseAxisSuffix, getBaseName } from '../renderer/js/multi-axis.js';
 import { handmadeAxisSuffixes, generatedCompanionFiles } from '../renderer/js/handmade-axes.js';
-import { archiveFiles } from './prune-generated-lib.mjs';
+import { archiveFiles, planFolder, applyPrune } from './prune-generated-lib.mjs';
+import { actionsHash, normalisedActions } from './handmade-scenes.mjs';
 
 const require = createRequire(import.meta.url);
 const { AXIS_SUFFIXES } = require('../electron/library-scan.js');
@@ -212,25 +212,6 @@ export function parseScript(text) {
   } catch {
     return null;
   }
-}
-
-function normalisedActions(script) {
-  const acts = Array.isArray(script?.actions) ? script.actions : [];
-  return acts
-    .filter((a) => Number.isFinite(Number(a?.at)) && Number.isFinite(Number(a?.pos)))
-    .map((a) => [Math.round(Number(a.at)), Math.round(Number(a.pos))])
-    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-}
-
-/**
- * Hash of the normalised actions (rounded, sorted). Metadata, key order and
- * whitespace don't count. null for a script with fewer than 2 actions:
- * nothing to tell apart.
- */
-export function actionsHash(script) {
-  const acts = normalisedActions(script);
-  if (acts.length < 2) return null;
-  return crypto.createHash('sha1').update(JSON.stringify(acts)).digest('hex');
 }
 
 /** Time of the last action, ms (0 when empty). */
@@ -835,6 +816,28 @@ export async function installAxes({ forum, local, plan, archiveDir, relativeTo, 
   return { installed, skipped, archived };
 }
 
+/**
+ * The folder rule after `installAxes` (see prune-generated-lib.mjs): in each
+ * folder that got hand-made axes, copy them to sibling videos whose stroke
+ * script's timing provably matches and archive every generated file left.
+ *
+ * @param {Array<{dir: string, archiveDir: string, relativeTo: string}>} folders
+ * @returns {Promise<Array<{dir: string, copied: string[], refused: string[],
+ *   archived: Array<{from: string, to: string}>, errors: string[]}>>}
+ *   `refused`: sibling videos that got nothing (not timing-compatible)
+ */
+export async function pruneInstalledFolders(folders) {
+  const out = [];
+  for (const { dir, archiveDir, relativeTo } of folders) {
+    const plan = await planFolder(dir, archiveDir, relativeTo);
+    if (!plan) continue;
+    const { copied, archived, errors } = await applyPrune([plan], archiveDir);
+    const refused = plan.siblings.filter((s) => !s.source).map((s) => s.video);
+    if (copied.length || archived.length || refused.length || errors.length) out.push({ dir, copied, refused, archived, errors });
+  }
+  return out;
+}
+
 // ── Report ──────────────────────────────────────────────────────────────
 
 const rel = (p, roots) => {
@@ -845,7 +848,7 @@ const rel = (p, roots) => {
 /**
  * Markdown report of the links file plus this run's results.
  */
-export function renderReport({ state, summary, axes = [], previews, roots = [], dryRun = false, now = Date.now() }) {
+export function renderReport({ state, summary, axes = [], siblings = [], previews, roots = [], dryRun = false, now = Date.now() }) {
   const links = Object.entries(state.links || {});
   const confirmed = links.filter(([, l]) => l.confidence === 'confirmed');
   const probable = links.filter(([, l]) => l.confidence === 'probable');
@@ -894,6 +897,17 @@ export function renderReport({ state, summary, axes = [], previews, roots = [], 
       for (const amb of a.plan.ambiguous) out.push(`  - [${amb.topicId}](${amb.topicUrl}): several axis sets, none matches this scene (${amb.groups.map((g) => `\`${g}\``).join(' / ')})`);
       for (const s of a.result?.skipped || []) out.push(`  - ${s.axis}: not installed — ${s.reason}`);
       for (const x of a.result?.archived || []) out.push(`  - archived \`${path.basename(x.from)}\``);
+    }
+    out.push('');
+  }
+  if (siblings.length) {
+    out.push('## Sibling videos in folders that got hand-made axes', '');
+    for (const f of siblings) {
+      out.push(`- \`${rel(f.dir, roots)}\``);
+      for (const c of f.copied) out.push(`  - copied \`${path.basename(c)}\``);
+      for (const v of f.refused) out.push(`  - \`${path.basename(v)}\`: sibling not timing-compatible, nothing copied`);
+      for (const x of f.archived) out.push(`  - archived \`${path.basename(x.from)}\``);
+      for (const e of f.errors) out.push(`  - error: ${e}`);
     }
     out.push('');
   }

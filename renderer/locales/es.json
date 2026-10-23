@@ -1289,6 +1289,7 @@
     "downloadFailed": "Descarga fallida",
     "savedToast": "Script guardado: {name}",
     "replacedGenerated": "{count, plural, one {# archivo de eje generado reemplazado} other {# archivos de eje generados reemplazados}} por los hechos a mano",
+    "replacedGeneratedSiblings": "{count, plural, one {# archivo de eje generado reemplazado} other {# archivos de eje generados reemplazados}} por los hechos a mano; {siblings} eran de otras versiones de esta carpeta, que no reciben copia de los ejes hechos a mano",
     "sessionExpired": "Sesión de EroScripts expirada — inicia sesión de nuevo desde el panel EroScripts",
     "conflictTitle": "El script ya existe",
     "conflictMessage": "{name} ya está en esta carpeta. ¿Reemplazarlo, o conservar ambos y guardar el nuevo como variante?",
