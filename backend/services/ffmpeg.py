@@ -748,3 +748,81 @@ def generate_single_thumbnail(
         "height": (round(width * out_height / out_width)
                    if out_width and out_height else 0),
     }
+
+
+# Frame samples for matching an EroScripts preview image against the video
+# (electron/preview-match.js hashes them). Positions span the middle 90% of
+# the video: the first and last 5% are mostly idents, titles and credits.
+SAMPLE_EDGE_PCT = 0.05
+SAMPLE_MAX_COUNT = 64
+SAMPLE_MAX_WIDTH = 512
+
+
+def sample_positions(count: int) -> list[float]:
+    """`count` evenly spaced fractions of the duration, inside the middle 90%."""
+    span = 1.0 - 2 * SAMPLE_EDGE_PCT
+    return [SAMPLE_EDGE_PCT + span * (i + 0.5) / count for i in range(count)]
+
+
+def sample_gray_frames(video_path: str, count: int = 12, width: int = 128) -> dict[str, Any]:
+    """Grab `count` frames across the video as raw 8-bit grayscale.
+
+    One fast-seek keyframe decode per position (same strategy as
+    generate_single_thumbnail), run one after another: parallel seeks on a
+    slow external drive are slower than sequential ones. A position that
+    fails (corrupt stream, timeout) is left out rather than failing the
+    whole call.
+
+    Returns:
+        Dict with width / height of every frame (the video scaled to
+        `width`, aspect kept), duration, and frames: a list of
+        {"pct": float, "gray": bytes} with width*height bytes each.
+
+    Raises:
+        FileNotFoundError: video doesn't exist or is empty.
+        RuntimeError: no duration / dimensions, or no frame could be read.
+    """
+    if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    count = max(1, min(int(count), SAMPLE_MAX_COUNT))
+    width = max(16, min(int(width), SAMPLE_MAX_WIDTH))
+
+    metadata = get_metadata(video_path)
+    duration = metadata.get("duration") or 0
+    src_w = metadata.get("width") or 0
+    src_h = metadata.get("height") or 0
+    if duration <= 0 or not src_w or not src_h:
+        raise RuntimeError("Video has no duration or dimensions; cannot sample frames")
+    # Even height, as ffmpeg's `scale=W:-2` rounds it.
+    height = max(2, int(round(width * src_h / src_w / 2)) * 2)
+    frame_bytes = width * height
+
+    frames = []
+    for pct in sample_positions(count):
+        try:
+            result = run_silent(
+                [
+                    FFMPEG,
+                    "-v", "error",
+                    "-skip_frame", "nokey",
+                    "-ss", f"{duration * pct:.3f}",
+                    "-i", video_path,
+                    "-frames:v", "1",
+                    "-an", "-sn",
+                    "-vf", f"scale={width}:{height}:flags=area,format=gray",
+                    "-f", "rawvideo",
+                    "pipe:1",
+                ],
+                capture_output=True,
+                timeout=THUMBNAIL_TIMEOUT_SEC,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
+        except subprocess.TimeoutExpired:
+            continue
+        if result.returncode == 0 and len(result.stdout) == frame_bytes:
+            frames.append({"pct": pct, "gray": result.stdout})
+
+    if not frames:
+        raise RuntimeError("ffmpeg could not read any frame")
+    return {"width": width, "height": height, "duration": duration, "frames": frames}
