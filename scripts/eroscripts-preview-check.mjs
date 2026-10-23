@@ -133,21 +133,21 @@ function decodeWithFfmpeg(tmpDir) {
   };
 }
 
-/** A grid of images (ffmpeg tile), each labelled by its index in `items`. */
+/** A grid of images (ffmpeg tile), in the order of `items`. */
 function contactSheet(items, outFile, tmpDir) {
   if (items.length === 0) return null;
   const dir = fs.mkdtempSync(path.join(tmpDir, 'sheet-'));
-  items.forEach((it, i) => fs.copyFileSync(it.file, path.join(dir, `${String(i).padStart(3, '0')}.jpg`)));
+  // Same-size tiles first: the tile filter restarts when the input size changes.
+  items.forEach((it, i) => spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', it.file, '-frames:v', '1',
+    '-vf', 'scale=316:178:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2,setsar=1',
+    path.join(dir, `${String(i).padStart(3, '0')}.jpg`)]));
   const cols = 6;
   const rows = Math.ceil(items.length / cols);
   const r = spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', path.join(dir, '%03d.jpg'),
-    '-vf', `scale=316:178:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuvj420p,tile=${cols}x${rows}:padding=4`,
-    '-frames:v', '1', '-update', '1', outFile], { encoding: 'utf8' });
+    '-vf', `tile=${cols}x${rows}:padding=4`, '-frames:v', '1', '-update', '1', outFile], { encoding: 'utf8' });
   fs.rmSync(dir, { recursive: true, force: true });
   return r.status === 0 ? outFile : null;
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
@@ -188,7 +188,8 @@ async function main() {
 
   const sampler = startSampler(opts.python || defaultPython());
   const validator = createPreviewValidator({
-    cacheDir: tmpDir,
+    // In the output folder, so a re-run skips the sampling (never the app's data folder).
+    cacheDir: out,
     sampleVideo: sampler.sample,
     decodeImage: decodeWithFfmpeg(tmpDir),
     log: { warn: () => {} },
@@ -277,6 +278,7 @@ async function main() {
   };
   sheet(removed, 'removed', (r) => r.poster);
   sheet(kept, 'kept', (r) => r.poster);
+  sheet(replaced, 'replacements', (r) => r.bestFile);
 
   const name = (r) => path.basename(r.video);
   const d = (x) => (x == null ? '–' : x);
@@ -294,7 +296,7 @@ async function main() {
     `| Not checked (video missing / error) | ${summary.unchecked} |`,
     ...(opts.pending ? [`| Linked videos without a poster | ${summary.pending} |`, `| …with a matching post image | ${summary.pendingWithMatch} |`] : []),
     '',
-    `Contact sheets: ${sheets.join(', ') || 'none'} (removed-*.jpg in the order of the "Rejected" table).`,
+    `Contact sheets: ${sheets.join(', ') || 'none'} (removed-*.jpg in the order of the "Rejected" table, kept-*.jpg of "Accepted", replacements-*.jpg the matching images of the rejected rows that have one, in table order).`,
     '',
     '## Rejected',
     '',
