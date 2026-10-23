@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('funsync', {
   // Library
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   scanDirectory: (dirPath, sourceMap) => ipcRenderer.invoke('scan-directory', dirPath, sourceMap),
+  readEroscriptsLinks: () => ipcRenderer.invoke('eroscripts-read-links'),
   selectFunscript: () => ipcRenderer.invoke('select-funscript'),
   readFunscript: (filePath) => ipcRenderer.invoke('read-funscript', filePath),
   selectSubtitle: () => ipcRenderer.invoke('select-subtitle'),
