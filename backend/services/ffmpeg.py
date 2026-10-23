@@ -759,11 +759,17 @@ def generate_single_thumbnail(
 # sampler decodes every keyframe in the range instead: with
 # `-skip_frame nokey` that is one sequential read of the file and costs
 # about what twelve seeks do (1.5 s for a 150 MB 1080p file, 5 s for a
-# 1 GB 6K HEVC one, on an external drive).
+# 1 GB 6K HEVC one, on an external drive). The pass reads the whole file,
+# though, and 8K VR files run to 10+ GB (3 minutes each on the user's
+# drive), so files over SAMPLE_PASS_MAX_BYTES get SAMPLE_BIG_FILE_SEEKS
+# single-frame seeks instead: VR scenes are long takes, where seeks do find
+# the shot.
 SAMPLE_EDGE_PCT = 0.05
 SAMPLE_MAX_FRAMES = 400
 SAMPLE_MAX_WIDTH = 512
-SAMPLE_PASS_TIMEOUT_SEC = 180
+SAMPLE_PASS_TIMEOUT_SEC = 90
+SAMPLE_PASS_MAX_BYTES = 2_500_000_000
+SAMPLE_BIG_FILE_SEEKS = 24
 
 
 def sample_positions(count: int) -> list[float]:
@@ -856,7 +862,8 @@ def sample_gray_frames(video_path: str, min_count: int = 12, width: int = 128) -
 
     Every keyframe of the middle 90% (thinned to SAMPLE_MAX_FRAMES), or,
     when that yields fewer than `min_count` frames (long GOPs, a pass that
-    failed or timed out), `min_count` evenly spaced seeks instead.
+    failed or timed out), `min_count` evenly spaced seeks instead. Files
+    over SAMPLE_PASS_MAX_BYTES skip the pass for SAMPLE_BIG_FILE_SEEKS seeks.
 
     Returns:
         Dict with width / height of every frame (the video scaled to
@@ -882,9 +889,12 @@ def sample_gray_frames(video_path: str, min_count: int = 12, width: int = 128) -
     height = max(2, int(round(width * src_h / src_w / 2)) * 2)
 
     try:
-        frames = _keyframe_pass(video_path, duration, width, height)
-        if len(frames) < min_count:
-            frames = _seek_frames(video_path, duration, width, height, min_count)
+        if os.path.getsize(video_path) > SAMPLE_PASS_MAX_BYTES:
+            frames = _seek_frames(video_path, duration, width, height, max(min_count, SAMPLE_BIG_FILE_SEEKS))
+        else:
+            frames = _keyframe_pass(video_path, duration, width, height)
+            if len(frames) < min_count:
+                frames = _seek_frames(video_path, duration, width, height, min_count)
     except FileNotFoundError:
         raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
 
