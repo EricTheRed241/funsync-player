@@ -6,6 +6,18 @@ const log = require('./logger');
 let pythonProcess = null;
 let backendPort = 5123;
 
+// Who can reach the backend. The phone remote, HereSphere and DeoVR all
+// connect over the LAN, so the default binds every interface. Starting with
+// `--local-only` or `FUNSYNC_LOCAL_ONLY=1` binds 127.0.0.1 instead: the
+// desktop app works as before, and nothing else on the network can see or
+// reach the library, streams or remote.
+function backendHost(argv = process.argv, env = process.env) {
+  const flag = argv.includes('--local-only');
+  const value = String(env.FUNSYNC_LOCAL_ONLY || '').trim().toLowerCase();
+  const fromEnv = value !== '' && !['0', 'false', 'no', 'off'].includes(value);
+  return flag || fromEnv ? '127.0.0.1' : '0.0.0.0';
+}
+
 // --- Health monitor ---
 //
 // The backend is launched at app startup but can die mid-session
@@ -163,7 +175,7 @@ async function startBackend() {
     if (bundledBackend && fs.existsSync(bundledBackend)) {
       // Production: use PyInstaller-bundled executable
       cmd = bundledBackend;
-      args = ['--port', String(backendPort), '--user-data-dir', userDataDir];
+      args = ['--port', String(backendPort), '--host', backendHost(), '--user-data-dir', userDataDir];
       cwd = path.dirname(bundledBackend);
     } else {
       // Development: use venv Python or system Python
@@ -174,8 +186,11 @@ async function startBackend() {
       cmd = fs.existsSync(venvPython)
         ? venvPython
         : (process.platform === 'win32' ? 'python' : 'python3');
-      args = ['main.py', '--port', String(backendPort), '--user-data-dir', userDataDir];
+      args = ['main.py', '--port', String(backendPort), '--host', backendHost(), '--user-data-dir', userDataDir];
       cwd = backendDir;
+    }
+    if (backendHost() === '127.0.0.1') {
+      log.info('[Backend] Local-only: listening on 127.0.0.1, so the web remote, HereSphere and DeoVR are unreachable from other devices');
     }
 
     pythonProcess = spawn(cmd, args, {
@@ -388,4 +403,5 @@ module.exports = {
   startHealthMonitor,
   stopHealthMonitor,
   restartBackend,
+  backendHost,
 };

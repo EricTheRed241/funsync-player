@@ -29,6 +29,7 @@ A local desktop video player with device synchronization for funscript playback.
 - Script variant detection — `Title (Soft)`, `Title_hardcore` and `Title.intense` scripts next to `Title.mp4` become variants of that video
 
 ### Remote access
+- **Local-only mode** — start with `--local-only` (e.g. `npx electron . --local-only`) or set `FUNSYNC_LOCAL_ONLY=1` to bind the backend to `127.0.0.1`. The desktop app works as usual, but the web remote, HereSphere and DeoVR can't reach it from any other device. Without either, it listens on every interface so the phone and headsets can connect.
 - **Web Remote** — control FunSync from your phone on the same WiFi. Library, playback, device sync. Installable as a PWA from the phone's home screen.
 - **VR content server** — Quest standalone support via HereSphere (DeoVR works too). Your library appears in the headset; PC-connected devices sync automatically.
   - Library sections: VR, Flat, Slow / Medium / Fast (script average speed below 250, 250–349, 350 and up), Short (<5m) / Medium (5-15m) / Long (15m+), Hand-made (extra axes a scripter made: a companion file such as `Title.twist.funscript` that isn't a `.generated.` one, or non-empty axes embedded in the main script — `axes`, `channels`, `additional_axes`, `raw`, sibling axis keys or inline TCode values), and Recently Added (last 14 days). Empty sections are hidden; videos whose speed or duration isn't known yet are left out of those sections, and embedded axes are picked up a moment after the library is registered.
