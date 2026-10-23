@@ -57,6 +57,7 @@ const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
+const { importThumbnail, thumbStem, decodeWithChromium } = require('./custom-thumbs');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
@@ -1586,14 +1587,24 @@ ipcMain.handle('select-subtitle', async () => {
   return { name: path.basename(filePath), path: filePath };
 });
 
-// ---- Custom thumbnail images (user-uploaded posters, community #217) ----
-// Image I/O stays in the main process (renderer is sandboxed). The chosen
-// image is decoded via nativeImage, downscaled to tile width, re-encoded as
-// JPEG and stored under userData/custom-thumbs keyed by a hash of the video
-// path (re-picking overwrites). The renderer displays thumbnails as data
-// URLs (CSP img-src allows data:, not file:), so import/read both return one.
+// ---- Custom thumbnail images (user-uploaded posters, community #217, and
+// EroScripts post previews) ----
+// Both kinds go through custom-thumbs.js `importThumbnail` (decode,
+// downscale to tile width, re-encode as JPEG) into userData/custom-thumbs.
+// The renderer displays thumbnails as data URLs (CSP img-src allows data:,
+// not file:), so import/read both return one.
 
 const customThumbsDir = () => path.join(app.getPath('userData'), 'custom-thumbs');
+
+function importCustomThumbBytes(bytes, videoPath, source) {
+  const { nativeImage } = require('electron');
+  return importThumbnail(bytes, {
+    dir: customThumbsDir(),
+    stem: thumbStem(videoPath, source),
+    nativeImage,
+    decodeFallback: decodeWithChromium,
+  });
+}
 
 ipcMain.handle('select-thumbnail-image', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -1612,36 +1623,30 @@ ipcMain.handle('select-thumbnail-image', async () => {
 
 ipcMain.handle('import-custom-thumbnail', async (_event, videoPath, imagePath) => {
   try {
-    const { nativeImage } = require('electron');
-    const crypto = require('crypto');
-    const dir = customThumbsDir();
-    fs.mkdirSync(dir, { recursive: true });
-    const hash = crypto.createHash('md5').update(String(videoPath)).digest('hex');
-    // Re-picking may change the extension (jpg → raw png copy etc.) — drop
-    // any previous cached file for this video first so no stale sibling
-    // lingers.
-    for (const f of fs.readdirSync(dir)) {
-      if (f.startsWith(`${hash}.`)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* best-effort */ } }
-    }
-    let img = nativeImage.createFromPath(imagePath);
-    if (!img.isEmpty()) {
-      const size = img.getSize();
-      if (size.width > 640) img = img.resize({ width: 640 });
-      const jpeg = img.toJPEG(82);
-      const outPath = path.join(dir, `${hash}.jpg`);
-      fs.writeFileSync(outPath, jpeg);
-      return { path: outPath, dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` };
-    }
-    // Format nativeImage can't decode (e.g. some webp encodes) — copy the
-    // raw file; Chromium's <img> still renders it from a data URL.
-    const ext = path.extname(imagePath).toLowerCase().replace('.', '') || 'img';
-    const outPath = path.join(dir, `${hash}.${ext}`);
-    fs.copyFileSync(imagePath, outPath);
-    const bytes = fs.readFileSync(outPath);
-    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-    return { path: outPath, dataUrl: `data:${mime};base64,${bytes.toString('base64')}` };
+    const imported = await importCustomThumbBytes(fs.readFileSync(imagePath), videoPath, 'user');
+    if (!imported) log.warn('Custom thumbnail import failed: image could not be decoded');
+    return imported;
   } catch (err) {
     log.warn('Custom thumbnail import failed:', err.message);
+    return null;
+  }
+});
+
+// A post's preview image as the video's thumbnail. The download is checked
+// in eroscripts-api.js (forum/CDN hosts, image type, size cap); the image
+// then takes the same import path as a user upload.
+ipcMain.handle('eroscripts-import-preview', async (_event, videoPath, imageUrl) => {
+  try {
+    const dl = await eroScripts.downloadPreviewImage(String(imageUrl));
+    if (!dl.success) {
+      log.warn('[EroScripts] Preview download refused/failed:', dl.error);
+      return null;
+    }
+    const imported = await importCustomThumbBytes(dl.bytes, videoPath, 'eroscripts');
+    if (!imported) log.warn('[EroScripts] Preview image could not be decoded:', imageUrl);
+    return imported;
+  } catch (err) {
+    log.warn('[EroScripts] Preview import failed:', err.message);
     return null;
   }
 });

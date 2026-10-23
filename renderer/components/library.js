@@ -13,9 +13,11 @@ import {
   SLOT_STALL_MS,
 } from '../js/scroll-load-policy.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
-import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable, Shuffle, Columns2 } from '../js/icons.js';
+import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable, Shuffle, Columns2, ImageDown } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
+import { importPostPreview, fetchPreviewsBatch, planPreviewBatch, PREVIEW_EVENT } from '../js/eroscripts-preview.js';
+import { getScriptTags, recordScriptTags } from '../js/script-tags.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
 import { fuzzySearch, sortVideos, computeSpeedStats, compareNames, dedupeByName } from '../js/library-search.js';
 import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/multi-axis.js';
@@ -311,6 +313,24 @@ export class Library {
       this._folderPreviewsListenerAttached = true;
     }
 
+    // An EroScripts preview became a video's thumbnail (script download,
+    // kebab action or batch fetch, possibly while the player was showing):
+    // repaint its tile if it's on screen and tell the backend, so the phone
+    // and headsets serve it too. Batches fire this per video, hence the
+    // debounce on the backend push.
+    if (!this._previewListenerAttached) {
+      eventBus.on(PREVIEW_EVENT, ({ videoPath } = {}) => {
+        if (!videoPath) return;
+        const card = this._container?.querySelector(`[data-video-path="${CSS.escape(videoPath)}"]`);
+        if (card) this._refreshCardThumbnail(videoPath, card);
+        clearTimeout(this._previewRegisterTimer);
+        this._previewRegisterTimer = setTimeout(() => {
+          if (this._videos?.length > 0) this._registerWithBackend();
+        }, 1500);
+      });
+      this._previewListenerAttached = true;
+    }
+
     // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives).
     // `library.directory` is a legacy singleton setting that app.js migrates into `library.sources` on
     // startup, so there's no need to fall back to it here.
@@ -518,6 +538,7 @@ export class Library {
         <button class="folder-browse-btn view-toggle--folder" aria-label="${this._escapeHtml(t('library.folderBrowse'))}" title="${this._escapeHtml(t('library.folderBrowse'))}"></button>
         <button class="library__shuffle-btn" aria-label="${this._escapeHtml(t('library.shuffleAll'))}" title="${this._escapeHtml(t('library.shuffleAllTitle'))}"></button>
         <button class="library__refresh-btn" aria-label="${this._escapeHtml(t('library.refresh'))}" title="${this._escapeHtml(t('library.refreshTitle'))}"></button>
+        <button class="library__es-previews-btn" aria-label="${this._escapeHtml(t('library.esPreviewsFetch'))}" title="${this._escapeHtml(t('library.esPreviewsFetchTitle'))}"></button>
         <button class="library__select-mode-btn">${this._escapeHtml(t('library.select'))}</button>
         <button class="library__queue-toggle" aria-label="${this._escapeHtml(t('queuePanel.toggleAria'))}" title="${this._escapeHtml(t('queuePanel.toggleTooltip'))}" aria-pressed="false" aria-expanded="false"></button>
       </div>
@@ -642,6 +663,14 @@ export class Library {
     if (btnShuffle) {
       btnShuffle.appendChild(icon(Shuffle, { width: 16, height: 16 }));
       btnShuffle.addEventListener('click', () => this._shuffleAllVisible());
+    }
+
+    // Fetch EroScripts previews — post previews as thumbnails for videos
+    // whose script came from a known post.
+    const btnEsPreviews = this._container.querySelector('.library__es-previews-btn');
+    if (btnEsPreviews) {
+      btnEsPreviews.appendChild(icon(ImageDown, { width: 16, height: 16 }));
+      btnEsPreviews.addEventListener('click', () => this._fetchEroScriptsPreviews());
     }
 
     // Queue panel toggle — far-right of the header for location parity with
@@ -3056,6 +3085,87 @@ export class Library {
     showToast(t('library.customThumbSaved'), 'success');
   }
 
+  /**
+   * Kebab "Use EroScripts preview": the preview of the post this video's
+   * script came from when FunSync knows it, else of a post the user picks
+   * in the EroScripts search. Replaces whatever thumbnail is set, since
+   * the user asked; Reset brings back the generated frame.
+   */
+  async _useEroScriptsPreview(video) {
+    const { showToast } = await import('../js/toast.js');
+    const session = await window.funsync.eroscriptsStatus?.().catch(() => null);
+    if (!session?.loggedIn) {
+      showToast(t('library.esPreviewLoginFirst'), 'warn', 5000);
+      return;
+    }
+    let topic;
+    const known = getScriptTags(this._settings, video.path);
+    if (known?.topicId != null) {
+      topic = { id: known.topicId };
+    } else {
+      const { showEroScriptsSearchModal } = await import('./eroscripts-inline-search.js');
+      topic = await showEroScriptsSearchModal(video, { pickPost: true });
+      if (!topic) return;
+    }
+    const busy = showToast(t('library.esPreviewFetching'), 'info', 0);
+    const { status } = await importPostPreview({
+      settings: this._settings, api: window.funsync, videoPath: video.path, topic, force: true,
+    });
+    busy?.dismiss();
+    if (status === 'imported') showToast(t('library.esPreviewSet'), 'success');
+    else if (status === 'no-image') showToast(t('library.esPreviewNoImage'), 'warn', 5000);
+    else showToast(t('library.esPreviewFailed'), 'error');
+  }
+
+  /**
+   * Library header "Fetch EroScripts previews": every video whose script
+   * came from a known post and that has no custom thumbnail gets that
+   * post's preview. One post at a time, spaced out for the forum. Videos
+   * without a known post are left alone (no guessing by name).
+   */
+  async _fetchEroScriptsPreviews() {
+    const { showToast } = await import('../js/toast.js');
+    if (this._previewBatchRunning) {
+      showToast(t('library.esPreviewsBusy'), 'info');
+      return;
+    }
+    const videos = this._videos || [];
+    const { known, pending } = planPreviewBatch(this._settings, videos);
+    if (known === 0) {
+      showToast(t('library.esPreviewsNoneKnown', { total: videos.length }), 'info', 6000);
+      return;
+    }
+    if (pending.length === 0) {
+      showToast(t('library.esPreviewsAllSet', { known }), 'info', 6000);
+      return;
+    }
+    const session = await window.funsync.eroscriptsStatus?.().catch(() => null);
+    if (!session?.loggedIn) {
+      showToast(t('library.esPreviewLoginFirst'), 'warn', 5000);
+      return;
+    }
+
+    this._previewBatchRunning = true;
+    const progress = showToast(t('library.esPreviewsProgress', { done: 0, total: pending.length }), 'info', 0);
+    const body = progress?.el?.querySelector('.toast__body');
+    try {
+      const summary = await fetchPreviewsBatch({
+        settings: this._settings,
+        api: window.funsync,
+        videos,
+        onProgress: (done, total) => {
+          if (body) body.textContent = t('library.esPreviewsProgress', { done, total });
+        },
+      });
+      progress?.dismiss();
+      showToast(t('library.esPreviewsSummary', { ...summary, videos: videos.length }),
+        summary.failed > 0 ? 'warn' : 'success', 8000);
+    } finally {
+      progress?.dismiss();
+      this._previewBatchRunning = false;
+    }
+  }
+
   async _resetCustomThumbnail(video, cardEl) {
     const map = { ...(this._settings.get('library.customThumbnails') || {}) };
     delete map[video.path];
@@ -4330,6 +4440,18 @@ export class Library {
     });
     thumbItems.appendChild(thumbUploadBtn);
 
+    // The EroScripts post's preview image (the post this video's script
+    // came from, or one picked in a search).
+    const thumbEsBtn = document.createElement('button');
+    thumbEsBtn.className = 'library__kebab-menu-item';
+    thumbEsBtn.textContent = t('library.customThumbEroScripts');
+    thumbEsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeMenu();
+      this._useEroScriptsPreview(video);
+    });
+    thumbItems.appendChild(thumbEsBtn);
+
     // Reset to the auto-generated frame — only when a custom one is set.
     const customThumbs = this._settings.get('library.customThumbnails') || {};
     if (customThumbs[video.path]) {
@@ -5196,8 +5318,10 @@ export class Library {
         this._applyMultiAxisAssociation(video, cardEl, picked);
       }
       if (picked?.topic) {
-        const { recordScriptTags } = await import('../js/script-tags.js');
         recordScriptTags(this._settings, video.path, picked.topic);
+        // The post's preview becomes the thumbnail unless one is set.
+        importPostPreview({ settings: this._settings, api: window.funsync, videoPath: video.path, topic: picked.topic })
+          .catch((err) => console.warn('EroScripts preview import failed:', err?.message));
       }
       // Reopen so the new association is visible where it was requested —
       // same courtesy as the variant flow below.

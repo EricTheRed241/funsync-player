@@ -80,12 +80,15 @@ async function downloadGroup(group, videoPath, { mainOnly = false } = {}) {
  * Open the search dialog for a video.
  *
  * @param {{path: string, name: string}} video
+ * @param {{pickPost?: boolean}} [opts] `pickPost`: choose a post (for its
+ *   preview image) instead of downloading scripts from it
  * @returns {Promise<object|null>} an association payload for the Associate
- *   modal's consumer (`{mode:'single'|'multi', ...}`), or null if cancelled.
+ *   modal's consumer (`{mode:'single'|'multi', ...}`), or, with `pickPost`,
+ *   the chosen search result; null if cancelled.
  */
-export function showEroScriptsSearchModal(video) {
+export function showEroScriptsSearchModal(video, { pickPost = false } = {}) {
   return Modal.open({
-    title: t('eroscripts.inline.title'),
+    title: pickPost ? t('eroscripts.inline.pickTitle') : t('eroscripts.inline.title'),
     onRender: (body, close) => {
       const searchRow = document.createElement('div');
       searchRow.className = 'eroscripts-panel__input-row';
@@ -105,6 +108,13 @@ export function showEroScriptsSearchModal(video) {
 
       searchRow.append(input, searchBtn);
       body.appendChild(searchRow);
+
+      if (pickPost) {
+        const hint = document.createElement('div');
+        hint.className = 'eroscripts-inline__note';
+        hint.textContent = t('eroscripts.inline.pickHint');
+        body.appendChild(hint);
+      }
 
       const results = document.createElement('div');
       results.className = 'eroscripts-panel__results eroscripts-inline__results';
@@ -317,7 +327,8 @@ export function showEroScriptsSearchModal(video) {
           host.className = 'eroscripts-inline__groups';
           host.hidden = true;
 
-          head.addEventListener('click', () => openTopic(topic, host, head));
+          // Picking a post for its preview needs nothing from inside it.
+          head.addEventListener('click', () => (pickPost ? close(topic) : openTopic(topic, host, head)));
           card.append(head, host);
           results.appendChild(card);
         }

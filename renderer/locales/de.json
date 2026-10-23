@@ -350,6 +350,19 @@
     "openFileLocation": "Dateipfad öffnen",
     "customThumbSet": "Vorschaubild-Frame festlegen…",
     "customThumbUpload": "Vorschaubild hochladen…",
+    "customThumbEroScripts": "EroScripts-Vorschau verwenden",
+    "esPreviewLoginFirst": "Melde dich zuerst bei EroScripts an (EroScripts-Panel)",
+    "esPreviewFetching": "EroScripts-Vorschau wird geladen…",
+    "esPreviewSet": "Vorschaubild aus der EroScripts-Vorschau gesetzt",
+    "esPreviewNoImage": "Dieser EroScripts-Beitrag hat kein Vorschaubild",
+    "esPreviewFailed": "EroScripts-Vorschau konnte nicht geladen werden",
+    "esPreviewsFetch": "EroScripts-Vorschauen laden",
+    "esPreviewsFetchTitle": "EroScripts-Vorschauen laden — das Vorschaubild des Beitrags wird zum Vorschaubild jedes Videos, dessen Skript aus einem bekannten EroScripts-Beitrag stammt und das kein eigenes Vorschaubild hat",
+    "esPreviewsBusy": "EroScripts-Vorschauen werden bereits geladen",
+    "esPreviewsNoneKnown": "Videos mit bekanntem EroScripts-Beitrag: 0 von {total}. Über FunSync geladene Skripte verknüpfen ihren Beitrag.",
+    "esPreviewsAllSet": "Alle {known} Videos mit bekanntem EroScripts-Beitrag haben bereits ein eigenes Vorschaubild",
+    "esPreviewsProgress": "EroScripts-Vorschauen werden geladen… {done}/{total}",
+    "esPreviewsSummary": "EroScripts-Vorschauen: {imported} gesetzt, {noImage} ohne Bild, {failed} fehlgeschlagen. Videos mit bekanntem Beitrag: {known} von {videos}.",
     "customThumbUploadFailed": "Bild konnte nicht verwendet werden",
     "customThumbReset": "Vorschaubild zurücksetzen",
     "variantDefault": "Standard",
@@ -1298,7 +1311,9 @@
       "noAttachments": "Keine ladbaren Skripte in diesem Beitrag",
       "noMain": "Nur Achsendateien, kein Hauptskript",
       "zipNote": "{count} ZIP-Anhänge können noch nicht geöffnet werden",
-      "loadingPost": "Beitrag wird geladen..."
+      "loadingPost": "Beitrag wird geladen...",
+      "pickTitle": "EroScripts-Beitrag für dieses Vorschaubild wählen",
+      "pickHint": "Klicke auf einen Beitrag, um sein Vorschaubild für dieses Video zu verwenden."
     }
   },
   "upNext": {

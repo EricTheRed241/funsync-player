@@ -350,6 +350,19 @@
     "openFileLocation": "파일 위치 열기",
     "customThumbSet": "썸네일 프레임 설정…",
     "customThumbUpload": "썸네일 이미지 업로드…",
+    "customThumbEroScripts": "EroScripts 미리보기 사용",
+    "esPreviewLoginFirst": "먼저 EroScripts에 로그인하세요 (EroScripts 패널)",
+    "esPreviewFetching": "EroScripts 미리보기를 가져오는 중…",
+    "esPreviewSet": "EroScripts 미리보기로 썸네일을 설정했습니다",
+    "esPreviewNoImage": "이 EroScripts 게시물에는 미리보기 이미지가 없습니다",
+    "esPreviewFailed": "EroScripts 미리보기를 다운로드할 수 없습니다",
+    "esPreviewsFetch": "EroScripts 미리보기 가져오기",
+    "esPreviewsFetchTitle": "EroScripts 미리보기 가져오기 — 스크립트의 출처 게시물을 알고 있고 사용자 지정 썸네일이 없는 모든 동영상에 게시물의 미리보기 이미지를 썸네일로 사용합니다",
+    "esPreviewsBusy": "이미 EroScripts 미리보기를 가져오는 중입니다",
+    "esPreviewsNoneKnown": "EroScripts 게시물을 알고 있는 동영상: {total}개 중 0개. FunSync로 다운로드한 스크립트는 게시물과 연결됩니다.",
+    "esPreviewsAllSet": "EroScripts 게시물을 알고 있는 동영상 {known}개 모두 이미 사용자 지정 썸네일이 있습니다",
+    "esPreviewsProgress": "EroScripts 미리보기를 가져오는 중… {done}/{total}",
+    "esPreviewsSummary": "EroScripts 미리보기: {imported}개 설정, {noImage}개 이미지 없음, {failed}개 실패. 게시물을 알고 있는 동영상: {videos}개 중 {known}개.",
     "customThumbUploadFailed": "해당 이미지를 사용할 수 없습니다",
     "customThumbReset": "썸네일 초기화",
     "variantDefault": "기본",
@@ -1298,7 +1311,9 @@
       "noAttachments": "이 게시물에는 다운로드할 스크립트가 없습니다",
       "noMain": "축 파일만 있고 메인 스크립트가 없습니다",
       "zipNote": "zip 첨부 {count}개는 아직 열 수 없습니다",
-      "loadingPost": "게시물 불러오는 중..."
+      "loadingPost": "게시물 불러오는 중...",
+      "pickTitle": "이 썸네일에 사용할 EroScripts 게시물 선택",
+      "pickHint": "게시물을 클릭하면 해당 미리보기 이미지가 이 동영상의 썸네일이 됩니다."
     }
   },
   "upNext": {
