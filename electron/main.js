@@ -57,7 +57,7 @@ const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
-const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames } = require('./custom-thumbs');
+const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames, closeDecoder } = require('./custom-thumbs');
 const { createPreviewValidator } = require('./preview-validator');
 const { MATCH_THRESHOLD } = require('./preview-match');
 const editorPopout = require('./editor-popout-window');
@@ -250,6 +250,8 @@ function createWindow() {
     // Drop the caption-hover poll if the window went away mid-hover.
     const poll = _captionHoverPolls.get(_mainWinId);
     if (poll) { clearInterval(poll); _captionHoverPolls.delete(_mainWinId); }
+    // The hidden image decoder would otherwise keep window-all-closed from firing.
+    closeDecoder();
   });
 
   // Open DevTools in development
