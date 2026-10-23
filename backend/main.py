@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from routes.scripts import router as scripts_router
 from routes.thumbnails import router as thumbnails_router
 from routes.metadata import router as metadata_router
-from routes.media import router as media_router
+from routes.media import router as media_router, set_thumb_cache_dir
 from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
@@ -119,5 +119,9 @@ if __name__ == "__main__":
         video_info.set_cache_dir(args.user_data_dir)
         # Phone / headset edits waiting for the desktop survive a restart.
         library_edits.queue.set_persist_dir(args.user_data_dir)
+        # Same folder the desktop registers. Set here too so thumbnails work
+        # even when the desktop's first registration lands before the server
+        # is listening (it is fire-and-forget) or after a backend restart.
+        set_thumb_cache_dir(os.path.join(args.user_data_dir, "thumb-cache"))
 
     uvicorn.run(app, host=args.host, port=args.port)
