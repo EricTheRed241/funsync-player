@@ -57,7 +57,9 @@ const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
-const { importThumbnail, thumbStem, decodeWithChromium } = require('./custom-thumbs');
+const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames, closeDecoder } = require('./custom-thumbs');
+const { createPreviewValidator } = require('./preview-validator');
+const { MATCH_THRESHOLD } = require('./preview-match');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
@@ -248,6 +250,8 @@ function createWindow() {
     // Drop the caption-hover poll if the window went away mid-hover.
     const poll = _captionHoverPolls.get(_mainWinId);
     if (poll) { clearInterval(poll); _captionHoverPolls.delete(_mainWinId); }
+    // The hidden image decoder would otherwise keep window-all-closed from firing.
+    closeDecoder();
   });
 
   // Open DevTools in development
@@ -1199,6 +1203,120 @@ ipcMain.handle('eroscripts-import-preview', async (_event, videoPath, imageUrl) 
   } catch (err) {
     log.warn('[EroScripts] Preview import failed:', err.message);
     return null;
+  }
+});
+
+// ---- EroScripts preview matching (electron/preview-match.js) ----
+// An EroScripts image becomes a poster only when it shows the video: each
+// candidate image of the post is compared with frames sampled across the
+// video (backend /thumbnails/samples) by perceptual hash.
+
+let _previewValidator = null;
+function previewValidator() {
+  if (_previewValidator) return _previewValidator;
+  const { nativeImage } = require('electron');
+  _previewValidator = createPreviewValidator({
+    cacheDir: app.getPath('userData'),
+    log,
+    decodeImage: (bytes) => decodeGrayFrames(bytes, { nativeImage }),
+    sampleVideo: async (videoPath, minCount, width) => {
+      const { getBackendPort } = require('./python-bridge');
+      const params = new URLSearchParams({ video_path: videoPath, min_count: String(minCount), width: String(width) });
+      // A keyframe pass over a big file on a slow drive takes minutes.
+      const resp = await fetchWithTimeout(`http://localhost:${getBackendPort()}/thumbnails/samples?${params}`, { method: 'POST' }, 240000);
+      if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+      const body = await resp.json();
+      return { ...body, frames: body.frames.map((f) => ({ pct: f.pct, gray: new Uint8Array(Buffer.from(f.gray, 'base64')) })) };
+    },
+  });
+  return _previewValidator;
+}
+
+// Candidate downloads, reused while a batch walks a bundle topic whose
+// images every one of its videos is checked against.
+const _previewBytes = new Map();
+async function downloadPreviewCached(url) {
+  if (_previewBytes.has(url)) return _previewBytes.get(url);
+  const dl = await eroScripts.downloadPreviewImage(String(url));
+  if (dl.success) {
+    if (_previewBytes.size >= 24) _previewBytes.delete(_previewBytes.keys().next().value);
+    _previewBytes.set(url, dl);
+  }
+  return dl;
+}
+
+const publicScore = ({ bytes, ...rest }) => rest;
+
+/**
+ * Score every candidate image of a topic against the video.
+ * @returns {Promise<{status: 'ok', scored: object[], excluded: object[], best: object|null}
+ *   | {status: 'no-image'|'failed', error?: string}>}
+ */
+async function scoreTopicPreviews(videoPath, topicId, extraUrls) {
+  const found = await eroScripts.getPreviewCandidates(topicId, Array.isArray(extraUrls) ? extraUrls : []);
+  if (!found) return { status: 'failed', error: 'Topic unavailable' };
+  if (found.candidates.length === 0) return { status: 'no-image', excluded: found.excluded };
+  const { scored, best } = await previewValidator().scoreCandidates(videoPath, found.candidates, downloadPreviewCached);
+  return { status: 'ok', scored, excluded: found.excluded, best, threshold: MATCH_THRESHOLD };
+}
+
+// Every candidate with its score, for the user to pick from ("Use
+// EroScripts preview"). Nothing is imported.
+ipcMain.handle('eroscripts-preview-candidates', async (_event, videoPath, topicId, extraUrls) => {
+  try {
+    const res = await scoreTopicPreviews(String(videoPath), topicId, extraUrls);
+    if (res.status !== 'ok') return res;
+    return { ...res, scored: res.scored.map(publicScore), best: res.best ? publicScore(res.best) : null };
+  } catch (err) {
+    log.warn('[EroScripts] Preview candidates failed:', err.message);
+    return { status: 'failed', error: err.message };
+  }
+});
+
+// The best-matching candidate becomes the poster; none matching leaves the
+// video's thumbnail alone.
+ipcMain.handle('eroscripts-match-preview', async (_event, videoPath, topicId, extraUrls) => {
+  try {
+    const res = await scoreTopicPreviews(String(videoPath), topicId, extraUrls);
+    if (res.status !== 'ok') return { status: res.status, error: res.error };
+    if (!res.best) {
+      const distances = res.scored.map((s) => s.distance).filter((d) => d != null);
+      return { status: 'no-match', closest: distances.length ? Math.min(...distances) : null };
+    }
+    const imported = await importCustomThumbBytes(res.best.bytes, String(videoPath), 'eroscripts');
+    if (!imported) return { status: 'failed', error: 'Image could not be decoded' };
+    return { status: 'imported', ...imported, url: res.best.url, matchScore: res.best.distance };
+  } catch (err) {
+    log.warn('[EroScripts] Preview match failed:', err.message);
+    return { status: 'failed', error: err.message };
+  }
+});
+
+// Does a stored EroScripts poster show its video? `error` (video offline,
+// unreadable file) means it couldn't be checked, which is not a "no".
+ipcMain.handle('eroscripts-validate-poster', async (_event, videoPath, imagePath) => {
+  try {
+    const resolved = path.resolve(String(imagePath));
+    if (!resolved.startsWith(path.resolve(customThumbsDir()) + path.sep)) return { error: 'Not a custom thumbnail' };
+    const bytes = await fs.promises.readFile(resolved);
+    const score = await previewValidator().scoreImage(String(videoPath), bytes);
+    return { accepted: score.accepted, distance: score.distance, reason: score.reason };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Delete an EroScripts poster file that failed validation. Only
+// `*-eroscripts.*` files in custom-thumbs: user uploads are never removed.
+ipcMain.handle('delete-eroscripts-thumbnail', async (_event, imagePath) => {
+  const resolved = path.resolve(String(imagePath));
+  if (!resolved.startsWith(path.resolve(customThumbsDir()) + path.sep)) return false;
+  if (!/-eroscripts\.[a-z]+$/i.test(path.basename(resolved))) return false;
+  try {
+    await fs.promises.unlink(resolved);
+    return true;
+  } catch {
+    return false;
   }
 });
 

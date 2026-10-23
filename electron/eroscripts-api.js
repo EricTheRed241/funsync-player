@@ -2,6 +2,7 @@
 // Runs in main process (no CORS restrictions).
 
 const log = require('./logger');
+const { collectPreviewCandidates } = require('./preview-match');
 
 const BASE_URL = 'https://discuss.eroscripts.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -34,6 +35,9 @@ const PREVIEW_HOSTS = new Set([FORUM_HOST, UPLOAD_CDN_HOST]);
 const PREVIEW_MAX_BYTES = 15 * 1024 * 1024;
 const PREVIEW_MAX_REDIRECTS = 3;
 const PREVIEW_TIMEOUT_MS = 30_000;
+// Topic payloads reused by the preview batch (see getTopicData).
+const TOPIC_CACHE_MS = 10 * 60_000;
+const TOPIC_CACHE_SIZE = 50;
 
 /**
  * Read a response body, giving up (null) once it passes `limit` bytes:
@@ -652,19 +656,46 @@ class EroScriptsAPI {
   }
 
   /**
-   * The topic's preview image URL, or null. See topicPreviewUrl.
+   * A topic's `/t/{id}.json` payload, or null. Kept for TOPIC_CACHE_MS:
+   * a creator bundle links dozens of videos to one topic, and the preview
+   * batch asks for it once per video.
    */
-  async getTopicImage(topicId) {
+  async getTopicData(topicId) {
+    const key = String(topicId);
+    const hit = this._topicCache?.get(key);
+    if (hit && Date.now() - hit.at < TOPIC_CACHE_MS) return hit.data;
     try {
-      const resp = await fetch(`${BASE_URL}/t/${topicId}.json`, {
+      const resp = await fetch(`${BASE_URL}/t/${encodeURIComponent(key)}.json`, {
         headers: this._headers(),
       });
       const data = await this._safeJson(resp);
       if (!data) return null;
-      return topicPreviewUrl(data);
+      this._topicCache ||= new Map();
+      if (this._topicCache.size >= TOPIC_CACHE_SIZE) this._topicCache.delete(this._topicCache.keys().next().value);
+      this._topicCache.set(key, { at: Date.now(), data });
+      return data;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * The topic's preview image URL, or null. See topicPreviewUrl.
+   */
+  async getTopicImage(topicId) {
+    const data = await this.getTopicData(topicId);
+    return data ? topicPreviewUrl(data) : null;
+  }
+
+  /**
+   * Every image of the topic that could show the video, and the ones
+   * ruled out (see preview-match.js collectPreviewCandidates), or null when
+   * the topic can't be loaded. `extraUrls` (a search result's preview, a
+   * URL the sync CLI recorded) go through the same rules.
+   */
+  async getPreviewCandidates(topicId, extraUrls = []) {
+    const data = await this.getTopicData(topicId);
+    return data ? collectPreviewCandidates(data, { extraUrls }) : null;
   }
 
   /**

@@ -1,10 +1,11 @@
 """Thumbnail generation routes — generate and serve video thumbnails."""
 
+import base64
 import os
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from services.ffmpeg import generate_thumbnails, generate_single_thumbnail
+from services.ffmpeg import generate_thumbnails, generate_single_thumbnail, sample_gray_frames
 
 router = APIRouter()
 
@@ -55,6 +56,33 @@ def single(
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/samples")
+def samples(
+    video_path: str = Query(..., description="Absolute path to video file"),
+    min_count: int = Query(12, description="Fewest frames to return"),
+    width: int = Query(128, description="Frame width in pixels"),
+):
+    """Grayscale frames across the video, for matching EroScripts preview
+    images against it (electron/preview-validator.js). Each frame's raw
+    width*height luma bytes are base64-encoded.
+
+    Sync `def`: the ffmpeg pass blocks, FastAPI runs it in its threadpool.
+    """
+    try:
+        result = sample_gray_frames(video_path, min_count=min_count, width=width)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        **result,
+        "frames": [
+            {"pct": f["pct"], "gray": base64.b64encode(f["gray"]).decode("ascii")}
+            for f in result["frames"]
+        ],
+    }
 
 
 @router.get("/image")

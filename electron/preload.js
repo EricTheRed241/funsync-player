@@ -199,6 +199,10 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
   eroscriptsDownload: (url, savePath, opts) => ipcRenderer.invoke('eroscripts-download', url, savePath, opts),
   eroscriptsImportPreview: (videoPath, imageUrl) => ipcRenderer.invoke('eroscripts-import-preview', videoPath, imageUrl),
+  eroscriptsPreviewCandidates: (videoPath, topicId, extraUrls) => ipcRenderer.invoke('eroscripts-preview-candidates', videoPath, topicId, extraUrls),
+  eroscriptsMatchPreview: (videoPath, topicId, extraUrls) => ipcRenderer.invoke('eroscripts-match-preview', videoPath, topicId, extraUrls),
+  eroscriptsValidatePoster: (videoPath, imagePath) => ipcRenderer.invoke('eroscripts-validate-poster', videoPath, imagePath),
+  deleteEroScriptsThumbnail: (imagePath) => ipcRenderer.invoke('delete-eroscripts-thumbnail', imagePath),
 
   // Editor pop-out window
   editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),

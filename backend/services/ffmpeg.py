@@ -748,3 +748,156 @@ def generate_single_thumbnail(
         "height": (round(width * out_height / out_width)
                    if out_width and out_height else 0),
     }
+
+
+# Frame samples for matching an EroScripts preview image against the video
+# (electron/preview-match.js hashes them). Samples span the middle 90% of
+# the video: the first and last 5% are mostly idents, titles and credits.
+#
+# A preview is usually one shot of the video. Twelve evenly spaced seeks
+# rarely land in that shot (a 4-minute HMV cuts every 2-3 s), so the
+# sampler decodes every keyframe in the range instead: with
+# `-skip_frame nokey` that is one sequential read of the file and costs
+# about what twelve seeks do (1.5 s for a 150 MB 1080p file, 5 s for a
+# 1 GB 6K HEVC one, on an external drive). The pass reads the whole file,
+# though, and 8K VR files run to 10+ GB (3 minutes each on the user's
+# drive), so files over SAMPLE_PASS_MAX_BYTES get SAMPLE_BIG_FILE_SEEKS
+# single-frame seeks instead: VR scenes are long takes, where seeks do find
+# the shot.
+SAMPLE_EDGE_PCT = 0.05
+SAMPLE_MAX_FRAMES = 400
+SAMPLE_MAX_WIDTH = 512
+SAMPLE_PASS_TIMEOUT_SEC = 90
+SAMPLE_PASS_MAX_BYTES = 2_500_000_000
+SAMPLE_BIG_FILE_SEEKS = 24
+
+
+def sample_positions(count: int) -> list[float]:
+    """`count` evenly spaced fractions of the duration, inside the middle 90%."""
+    span = 1.0 - 2 * SAMPLE_EDGE_PCT
+    return [SAMPLE_EDGE_PCT + span * (i + 0.5) / count for i in range(count)]
+
+
+def _thin(items: list, limit: int) -> list:
+    """At most `limit` items, evenly spread over `items`."""
+    if len(items) <= limit:
+        return items
+    return [items[int(i * len(items) / limit)] for i in range(limit)]
+
+
+def _keyframe_pass(video_path: str, duration: float, width: int, height: int) -> list[dict[str, Any]]:
+    """Every keyframe of the middle 90%, as {"pct", "gray"}; [] on failure."""
+    start = duration * SAMPLE_EDGE_PCT
+    span = duration * (1 - 2 * SAMPLE_EDGE_PCT)
+    frame_bytes = width * height
+    try:
+        result = run_silent(
+            [
+                FFMPEG,
+                "-nostats", "-v", "info",
+                "-skip_frame", "nokey",
+                "-ss", f"{start:.3f}",
+                "-t", f"{span:.3f}",
+                "-i", video_path,
+                "-an", "-sn", "-dn",
+                "-fps_mode", "passthrough",
+                "-vf", f"scale={width}:{height}:flags=area,format=gray,showinfo",
+                "-f", "rawvideo",
+                "pipe:1",
+            ],
+            capture_output=True,
+            timeout=SAMPLE_PASS_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        return []
+    if result.returncode != 0 or not result.stdout or len(result.stdout) % frame_bytes:
+        return []
+    # showinfo logs one line per frame, `pts_time:` relative to the seek.
+    times = []
+    for line in result.stderr.decode("utf-8", "replace").splitlines():
+        if "Parsed_showinfo" in line and "pts_time:" in line:
+            try:
+                times.append(float(line.split("pts_time:")[1].split()[0]))
+            except (IndexError, ValueError):
+                times.append(None)
+    count = len(result.stdout) // frame_bytes
+    frames = []
+    for i in range(count):
+        t = times[i] if i < len(times) and times[i] is not None else span * (i + 0.5) / count
+        pct = min(1.0, max(0.0, (start + t) / duration))
+        frames.append({"pct": pct, "gray": result.stdout[i * frame_bytes:(i + 1) * frame_bytes]})
+    return frames
+
+
+def _seek_frames(video_path: str, duration: float, width: int, height: int, count: int) -> list[dict[str, Any]]:
+    """`count` evenly spaced single-frame seeks; failed positions are left out."""
+    frames = []
+    for pct in sample_positions(count):
+        try:
+            result = run_silent(
+                [
+                    FFMPEG,
+                    "-v", "error",
+                    "-skip_frame", "nokey",
+                    "-ss", f"{duration * pct:.3f}",
+                    "-i", video_path,
+                    "-frames:v", "1",
+                    "-an", "-sn",
+                    "-vf", f"scale={width}:{height}:flags=area,format=gray",
+                    "-f", "rawvideo",
+                    "pipe:1",
+                ],
+                capture_output=True,
+                timeout=THUMBNAIL_TIMEOUT_SEC,
+            )
+        except subprocess.TimeoutExpired:
+            continue
+        if result.returncode == 0 and len(result.stdout) == width * height:
+            frames.append({"pct": pct, "gray": result.stdout})
+    return frames
+
+
+def sample_gray_frames(video_path: str, min_count: int = 12, width: int = 128) -> dict[str, Any]:
+    """Frames across the video as raw 8-bit grayscale.
+
+    Every keyframe of the middle 90% (thinned to SAMPLE_MAX_FRAMES), or,
+    when that yields fewer than `min_count` frames (long GOPs, a pass that
+    failed or timed out), `min_count` evenly spaced seeks instead. Files
+    over SAMPLE_PASS_MAX_BYTES skip the pass for SAMPLE_BIG_FILE_SEEKS seeks.
+
+    Returns:
+        Dict with width / height of every frame (the video scaled to
+        `width`, aspect kept), duration, and frames: a list of
+        {"pct": float, "gray": bytes} with width*height bytes each.
+
+    Raises:
+        FileNotFoundError: video doesn't exist or is empty.
+        RuntimeError: no duration / dimensions, or no frame could be read.
+    """
+    if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    min_count = max(1, min(int(min_count), SAMPLE_MAX_FRAMES))
+    width = max(16, min(int(width), SAMPLE_MAX_WIDTH))
+
+    metadata = get_metadata(video_path)
+    duration = metadata.get("duration") or 0
+    src_w = metadata.get("width") or 0
+    src_h = metadata.get("height") or 0
+    if duration <= 0 or not src_w or not src_h:
+        raise RuntimeError("Video has no duration or dimensions; cannot sample frames")
+    # Even height, as ffmpeg's `scale=W:-2` rounds it.
+    height = max(2, int(round(width * src_h / src_w / 2)) * 2)
+
+    try:
+        if os.path.getsize(video_path) > SAMPLE_PASS_MAX_BYTES:
+            frames = _seek_frames(video_path, duration, width, height, max(min_count, SAMPLE_BIG_FILE_SEEKS))
+        else:
+            frames = _keyframe_pass(video_path, duration, width, height)
+            if len(frames) < min_count:
+                frames = _seek_frames(video_path, duration, width, height, min_count)
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
+
+    if not frames:
+        raise RuntimeError("ffmpeg could not read any frame")
+    return {"width": width, "height": height, "duration": duration, "frames": _thin(frames, SAMPLE_MAX_FRAMES)}
