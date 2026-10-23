@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from httpx import AsyncClient, ASGITransport
 from main import app
-from routes.media import register_videos, get_video_registry, _path_to_id
+from routes import remote_sync
+from routes.media import register_videos, register_playlists, register_ratings, get_video_registry, _path_to_id
 from services import vr_sections
 from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
 
@@ -41,6 +42,18 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _no_triage_state():
+    """No ratings, playlists or queued edits leak between tests."""
+    register_ratings({})
+    register_playlists([])
+    remote_sync._reset_state_for_tests()
+    yield
+    register_ratings({})
+    register_playlists([])
+    remote_sync._reset_state_for_tests()
 
 
 def _actions(n):
@@ -128,6 +141,7 @@ class TestBuildSections:
             ("Long (15m+)", ["b"]),
             ("Hand-made", ["b"]),
             ("Recently Added", ["b"]),
+            ("Unrated", ["a", "b", "c"]),
         ]
 
     def test_section_order_is_the_approved_list(self):
@@ -391,7 +405,7 @@ async def test_heresphere_sections(client, tmp_path):
     _register_library(tmp_path)
     data = (await client.get("/heresphere")).json()
     sections = {g["name"]: _ids(g["list"]) for g in data["library"]}
-    assert [g["name"] for g in data["library"]] == ALL_SECTIONS
+    assert [g["name"] for g in data["library"]] == ALL_SECTIONS + ["Unrated"]
 
     a, b, c, d = (_path_to_id(p) for p in ["/Lib/A_180_sbs.mp4", "/Lib/B.mp4", "/Lib/C.mp4", "/Lib/D.mp4"])
     m = _path_to_id(str(tmp_path / "Multi" / "Multi.mp4"))
@@ -413,7 +427,7 @@ async def test_heresphere_sections(client, tmp_path):
 async def test_deovr_sections(client, tmp_path):
     _register_library(tmp_path)
     data = (await client.get("/deovr")).json()
-    assert [g["name"] for g in data["scenes"]] == ALL_SECTIONS
+    assert [g["name"] for g in data["scenes"]] == ALL_SECTIONS + ["Unrated"]
     sections = {g["name"]: [i["title"] for i in g["list"]] for g in data["scenes"]}
     assert sections["Hand-made"] == ["Emb", "Multi"]
     assert sections["Medium"] == ["B", "C"]
@@ -429,15 +443,15 @@ async def test_empty_sections_omitted(client):
     _wait_for_embedded_scan()
     hs = [g["name"] for g in (await client.get("/heresphere")).json()["library"]]
     deo = [g["name"] for g in (await client.get("/deovr")).json()["scenes"]]
-    assert hs == ["Flat"]
-    assert deo == ["Flat"]
+    assert hs == ["Flat", "Unrated"]
+    assert deo == ["Flat", "Unrated"]
 
 
 @pytest.mark.anyio
 async def test_filter_param_still_applies(client, tmp_path):
     _register_library(tmp_path)
     hs = (await client.get("/heresphere?filter=vr")).json()["library"]
-    assert [g["name"] for g in hs] == ["VR", "Slow", "Short (<5m)", "Recently Added"]
+    assert [g["name"] for g in hs] == ["VR", "Slow", "Short (<5m)", "Recently Added", "Unrated"]
     deo = (await client.get("/deovr?filter=scripted")).json()["scenes"]
     assert "Flat" in [g["name"] for g in deo]
     assert all(i["title"] != "D" for g in deo for i in g["list"])

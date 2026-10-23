@@ -1,9 +1,16 @@
-"""Web remote routes — phone-friendly library listing.
+"""Web remote routes — phone-friendly library listing and triage edits.
 
 The SPA itself lives in `backend/web-remote/` and is served via a
 `StaticFiles` mount on `/remote/` (wired up in `main.py`). This module
-exposes the JSON endpoints the SPA calls: the flat video list plus the
-read-only collection/playlist/category groupings.
+exposes the JSON endpoints the SPA calls: the flat video list, the
+collection/playlist/category groupings, and the triage writes (rating,
+favourite, add to / remove from a playlist).
+
+The writes never touch the library here: the desktop owns it. Each becomes
+a library edit (`services.library_edits`) delivered to the desktop over the
+observer socket, queued while the desktop isn't connected. Responses carry
+`delivered` so the phone can say "saved, applies when the desktop app
+reconnects"; the GET endpoints reflect queued edits straight away.
 
 The heavy lifting (video streaming with Range support, funscript and
 subtitle serving, ffmpeg thumbnails) is already handled by the existing
@@ -14,18 +21,21 @@ duplication.
 import os
 import uuid
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 
 from routes.media import (
     get_video_registry,
     get_collections,
     get_playlists,
+    get_ratings,
     get_categories,
     get_video_categories,
     get_sources,
     bump_rescan_request,
     _path_to_id,
 )
+from routes.remote_sync import submit_library_edit
+from services import library_edits
 
 router = APIRouter()
 
@@ -95,6 +105,7 @@ async def list_videos():
     whatever origin it reached the backend on (LAN IP, mDNS, reverse proxy).
     """
     registry = get_video_registry()
+    ratings = get_ratings()
     out = []
     for vid_id, v in registry.items():
         name = v.get("name", "")
@@ -148,6 +159,9 @@ async def list_videos():
             # override store before the heuristic so the VR filter agrees with
             # the desktop.
             "manualVRType": v.get("manualVRType") or None,
+            # Triage state (0 = unrated), queued phone/headset edits included.
+            "rating": library_edits.rating_entry(ratings, v.get("path"))[0],
+            "favorite": library_edits.rating_entry(ratings, v.get("path"))[1],
         })
     out.sort(key=lambda v: v["name"].lower())
     return {"videos": out}
@@ -242,8 +256,76 @@ async def list_playlists():
             "totalDuration": _total_duration(video_ids),
             "videoIds": video_ids,
             "createdAt": p.get("createdAt") or 0,
+            # Created on the phone / headset, not yet applied by the desktop.
+            "pending": bool(p.get("pending")),
         })
     out.sort(key=lambda p: (p["name"] or "").lower())
+    return {"playlists": out}
+
+
+def _video_path_or_404(video_id) -> str:
+    entry = get_video_registry().get(video_id) if isinstance(video_id, str) else None
+    if not entry or not entry.get("path"):
+        raise HTTPException(status_code=404, detail="Unknown video")
+    return entry["path"]
+
+
+async def _submit(edit: dict) -> dict:
+    try:
+        stamped, delivered = await submit_library_edit(edit)
+    except library_edits.QueueFull as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return {"ok": True, "seq": stamped["seq"], "delivered": delivered}
+
+
+@router.post("/rating")
+async def set_rating(payload: dict = Body(default={})):
+    """Set a video's rating and/or favourite flag.
+
+    Body `{videoId, rating?, favorite?}`: `rating` 0-5 in steps of 0.5
+    (0 clears), `favorite` a bool; an absent field keeps its value. 400 on an
+    invalid value or nothing to change, 404 on an unknown video. Returns
+    `{ok, seq, delivered, rating, favorite}` with the resulting state.
+    """
+    path = _video_path_or_404(payload.get("videoId"))
+    try:
+        edit = library_edits.make_rating_edit(
+            path, rating=payload.get("rating"), favorite=payload.get("favorite"), source="remote",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    result = await _submit(edit)
+    rating, favorite = library_edits.rating_entry(get_ratings(), path)
+    return {**result, "rating": rating, "favorite": favorite}
+
+
+def _playlist_edit(kind: str, payload: dict) -> dict:
+    path = _video_path_or_404(payload.get("videoId"))
+    name = payload.get("name")
+    try:
+        return library_edits.make_playlist_edit(
+            kind, path,
+            playlist_id=payload.get("playlistId") if isinstance(payload.get("playlistId"), str) else None,
+            name=name if isinstance(name, str) else None,
+            source="remote",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/playlists/add-video")
+async def add_video_to_playlist(payload: dict = Body(default={})):
+    """Add a video to a playlist: `{videoId, playlistId?, name?}`. An
+    unknown `playlistId` falls back to `name`; a `name` matching no playlist
+    (case-insensitive) creates it. Adding a video that is already there is a
+    no-op on the desktop."""
+    return await _submit(_playlist_edit(library_edits.KIND_PLAYLIST_ADD, payload))
+
+
+@router.post("/playlists/remove-video")
+async def remove_video_from_playlist(payload: dict = Body(default={})):
+    """Remove a video from a playlist: `{videoId, playlistId?, name?}`."""
+    return await _submit(_playlist_edit(library_edits.KIND_PLAYLIST_REMOVE, payload))
     return {"playlists": out}
 
 

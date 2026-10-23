@@ -16,7 +16,7 @@ from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
 from routes.locale import router as locale_router, set_user_data_dir
-from services import video_info
+from services import library_edits, video_info
 
 app = FastAPI(title="FunSync Backend", version="0.1.0")
 
@@ -117,5 +117,7 @@ if __name__ == "__main__":
     if args.user_data_dir:
         set_user_data_dir(args.user_data_dir)
         video_info.set_cache_dir(args.user_data_dir)
+        # Phone / headset edits waiting for the desktop survive a restart.
+        library_edits.queue.set_persist_dir(args.user_data_dir)
 
     uvicorn.run(app, host=args.host, port=args.port)

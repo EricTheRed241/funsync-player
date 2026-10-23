@@ -8,7 +8,11 @@ Two WebSocket endpoints:
                                  stays open. Receives everything the phone
                                  sends; also sends device-status / script-*
                                  messages back, which the server forwards to
-                                 the phone.
+                                 the phone. It also carries library edits
+                                 made on the phone or in HereSphere down to
+                                 the desktop (`library-edit`, answered with
+                                 `library-edit-ack`; see
+                                 services/library_edits.py).
 
 Design notes:
 - Exactly one phone may be active at a time. A second phone triggers
@@ -29,7 +33,8 @@ import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from routes.media import get_video_registry
+from routes.media import apply_acked_edit, get_video_registry
+from services import library_edits
 
 router = APIRouter()
 log = logging.getLogger("funsync.remote")
@@ -86,6 +91,59 @@ async def _notify_observer(payload: dict) -> None:
     if not await _safe_send(_observer, payload):
         # Observer socket is dead — clear the slot so a future reconnect works.
         _observer = None
+
+
+# --- Library edits (phone / headset → desktop) -----------------------------
+#
+# See services/library_edits.py for the protocol. The observer socket is the
+# desktop's only inbound channel, so edits ride on it: each pending edit goes
+# down as `library-edit`, and the renderer's `library-edit-ack` retires it.
+
+def _edit_message(edit: dict) -> dict:
+    return {"type": "library-edit", "edit": edit}
+
+
+async def submit_library_edit(edit: dict) -> tuple[dict, bool]:
+    """Queue `edit` for the desktop and push it now if the desktop is
+    connected. Returns `(stamped_edit, delivered)`; `delivered` False means
+    it waits for the next observer connection. Raises
+    `library_edits.QueueFull`."""
+    stamped = library_edits.queue.enqueue(edit)
+    delivered = False
+    if _observer is not None:
+        await _notify_observer(_edit_message(stamped))
+        delivered = _observer is not None
+    log.info(
+        "[edits] #%s %s from %s %s",
+        stamped["seq"], stamped["kind"], stamped.get("source") or "?",
+        "sent to desktop" if delivered else "queued (desktop not connected)",
+    )
+    return stamped, delivered
+
+
+async def _replay_pending_edits(ws: WebSocket) -> None:
+    """Send every unacknowledged edit, oldest first, to a fresh observer."""
+    pending = library_edits.queue.pending()
+    if pending:
+        log.info("[edits] Replaying %d queued library edit(s) to the desktop", len(pending))
+    for edit in pending:
+        if not await _safe_send(ws, _edit_message(edit)):
+            return
+
+
+def _handle_edit_ack(msg: dict) -> None:
+    seq = msg.get("seq")
+    if isinstance(seq, bool) or not isinstance(seq, int):
+        return
+    edit = library_edits.queue.ack(seq)
+    if edit is None:
+        return
+    if msg.get("error"):
+        # The desktop could not apply it (e.g. the video is gone). Dropped,
+        # not retried: replaying it forever would wedge the queue.
+        log.warning("[edits] Desktop rejected edit #%s: %s", seq, msg.get("error"))
+        return
+    apply_acked_edit(edit)
 
 
 # --- Phone endpoint -------------------------------------------------------
@@ -217,6 +275,9 @@ async def observer_sync(ws: WebSocket) -> None:
                 "ip": _active_phone_ip,
             })
 
+    # Edits made while the desktop was away, in the order they were made.
+    await _replay_pending_edits(ws)
+
     try:
         while True:
             raw = await ws.receive_text()
@@ -225,6 +286,9 @@ async def observer_sync(ws: WebSocket) -> None:
             except (ValueError, TypeError):
                 continue
             if not isinstance(msg, dict):
+                continue
+            if msg.get("type") == "library-edit-ack":
+                _handle_edit_ack(msg)
                 continue
 
             # Forward to phone if one is connected
@@ -252,6 +316,7 @@ def _reset_state_for_tests() -> None:
     _active_phone_video_id = None
     _last_state = None
     _observer = None
+    library_edits.queue.clear()
 
 
 def _get_state_for_tests() -> dict:

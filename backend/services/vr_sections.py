@@ -11,9 +11,22 @@ Everything here works on fields already on the registry entry
 (`avgSpeed`, `duration`, `dateAdded`, `handmadeCompanions`, `embeddedAxes`), so
 a listing never touches the filesystem. A video missing a field is simply
 left out of the sections that depend on it.
+
+After those come the triage sections, from the desktop's ratings and
+playlists (registered with the backend, pending headset/phone edits
+included): Favorites, Top Rated (rating >= 4), Unrated, then one
+`Playlist: <name>` per playlist in the desktop's playlist order, its videos
+in playlist order.
+
+"Unrated" is every video without a rating. The issue asked for watched-but-
+unrated, but there is no reliable "watched" signal here: headset playback
+never reaches the desktop's resume tracking, so watching a scene in
+HereSphere — the case this queue exists for — would leave it out.
 """
 
 import time
+
+from services import library_edits
 
 # Speed buckets on the script's average speed (position units per second).
 SLOW_BELOW_SPEED = 250    # avgSpeed < 250        → Slow
@@ -36,6 +49,13 @@ SECTION_VR = 'VR'
 SECTION_FLAT = 'Flat'
 SECTION_HANDMADE_AXES = 'Hand-made'
 SECTION_RECENT = 'Recently Added'
+SECTION_FAVORITES = 'Favorites'
+SECTION_TOP_RATED = 'Top Rated'
+SECTION_UNRATED = 'Unrated'
+PLAYLIST_SECTION_PREFIX = 'Playlist: '
+
+# Same threshold as the desktop (renderer/js/ratings.js TOP_RATED_MIN).
+TOP_RATED_MIN = 4
 
 # Display order; empty sections are dropped.
 SECTION_ORDER = (
@@ -51,7 +71,14 @@ SECTION_ORDER = (
     SECTION_RECENT,
 )
 
+# After SECTION_ORDER, before the per-playlist sections.
+TRIAGE_SECTION_ORDER = (SECTION_FAVORITES, SECTION_TOP_RATED, SECTION_UNRATED)
+
 TAG_HANDMADE_AXES = 'Feature:Hand-made multi-axis'
+
+# Scene tag per playlist the video is in. Adding / removing one of these in
+# HereSphere adds the video to / removes it from that playlist.
+PLAYLIST_TAG_PREFIX = 'Playlist:'
 
 
 def _positive_number(value):
@@ -119,20 +146,81 @@ def video_sections(video, is_3d, now_ms):
     return names
 
 
-def build_sections(entries, now_ms=None):
+def rating_sections(video, ratings):
+    """Favorites / Top Rated / Unrated membership from the ratings map."""
+    rating, favorite = library_edits.rating_entry(ratings, (video or {}).get('path'))
+    names = []
+    if favorite:
+        names.append(SECTION_FAVORITES)
+    if rating >= TOP_RATED_MIN:
+        names.append(SECTION_TOP_RATED)
+    if rating == 0:
+        names.append(SECTION_UNRATED)
+    return names
+
+
+def build_sections(entries, now_ms=None, ratings=None, playlists=None):
     """Group listing items into sections.
 
-    `entries` yields `(item, video, is_3d)`. Returns `[(name, [item, ...])]`
-    in SECTION_ORDER with empty sections omitted; items keep the order
-    they came in.
+    `entries` yields `(item, video, is_3d)`. Returns `[(name, [item, ...])]`:
+    SECTION_ORDER, then Favorites / Top Rated / Unrated from `ratings`
+    (videoPath → {rating, favorite}), then one `Playlist: <name>` per entry
+    of `playlists` in the given order. Empty sections are omitted. Items keep
+    the order they came in, except playlist sections, which follow the
+    playlist's own order.
     """
     if now_ms is None:
         now_ms = time.time() * 1000
-    grouped = {name: [] for name in SECTION_ORDER}
+    ratings = ratings or {}
+    grouped = {name: [] for name in SECTION_ORDER + TRIAGE_SECTION_ORDER}
+    by_path = {}
     for item, video, is_3d in entries:
-        for name in video_sections(video, is_3d, now_ms):
+        for name in video_sections(video, is_3d, now_ms) + rating_sections(video, ratings):
             grouped[name].append(item)
-    return [(name, grouped[name]) for name in SECTION_ORDER if grouped[name]]
+        path = (video or {}).get('path')
+        if path:
+            by_path[path] = item
+    out = [(name, grouped[name]) for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name]]
+    for playlist in playlists or []:
+        items = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
+        if items:
+            out.append((playlist_section_name(playlist.get('name')), items))
+    return out
+
+
+def playlist_section_name(name):
+    """`Playlist: <name>` — the headset section for one playlist."""
+    return f'{PLAYLIST_SECTION_PREFIX}{(name or "").strip() or "(unnamed)"}'
+
+
+def playlist_tags(path, playlists):
+    """`Playlist:<name>` for every playlist holding `path`, in playlist order."""
+    if not path:
+        return []
+    return [
+        f'{PLAYLIST_TAG_PREFIX}{(p.get("name") or "").strip()}'
+        for p in playlists or []
+        if path in (p.get('videoPaths') or []) and (p.get('name') or '').strip()
+    ]
+
+
+def playlist_names_from_tags(tags):
+    """Playlist names named by `Playlist:<name>` tags in a HereSphere tag
+    list (`[{"name": ...}, ...]`), de-duplicated case-insensitively, in the
+    order given. The prefix is matched case-insensitively; other tags are
+    ignored."""
+    names, seen = [], set()
+    prefix = PLAYLIST_TAG_PREFIX.casefold()
+    for tag in tags or []:
+        raw = tag.get('name') if isinstance(tag, dict) else None
+        if not isinstance(raw, str) or not raw.casefold().startswith(prefix):
+            continue
+        name = raw[len(PLAYLIST_TAG_PREFIX):].strip()
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            names.append(name)
+    return names
 
 
 def filter_tags(video, is_3d):
