@@ -4,14 +4,17 @@
 // most SAMPLE_CONCURRENCY at once: the library lives on a slow external
 // drive), image decoding, and the scoring of a topic's candidates.
 //
-// Decoding and sampling are injected so the app (backend ffmpeg + Chromium)
-// and the dry-run CLI (ffmpeg directly) share the logic.
+// Decoding and sampling are injected so the app (backend sampler +
+// nativeImage/Chromium) and the dry-run CLI (backend sampler in a Python
+// child + ffmpeg) share the logic.
 
 const fs = require('fs');
 const path = require('path');
 const pm = require('./preview-match');
 
-/** Frames sampled per video, across the middle 90% of its duration. */
+/** Fewest frames sampled per video, across the middle 90% of its duration.
+ *  The backend returns every keyframe there (up to 400) when it can; see
+ *  backend/services/ffmpeg.py sample_gray_frames. */
 const SAMPLE_COUNT = 12;
 /** Width of the sampled grayscale frames. A 32×32 hash input needs little. */
 const SAMPLE_WIDTH = 128;
