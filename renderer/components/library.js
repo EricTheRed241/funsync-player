@@ -35,6 +35,7 @@ import {
   hasConfigForMode,
 } from '../js/association-shape.js';
 import { planAssociationRehome } from '../js/association-rehome.js';
+import { rehomeRatings } from '../js/ratings.js';
 import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks } from '../js/eroscripts-links.js';
 
@@ -891,6 +892,17 @@ export class Library {
       delete associations[from];
       assocMigrated = true;
       console.log(`[Associations] Re-homed moved video: ${from} → ${to}`);
+    }
+
+    // Ratings + favourites follow a moved video under the same rules.
+    const ratings = this._settings.get('library.ratings') || {};
+    const rated = rehomeRatings(ratings, this._videos.map((v) => v.path),
+      (p) => this._isUnderUnavailableSource(p));
+    if (rated.moves.length > 0) {
+      this._settings.set('library.ratings', rated.map);
+      for (const { from, to } of rated.moves) {
+        console.log(`[Ratings] Re-homed moved video: ${from} → ${to}`);
+      }
     }
 
     for (const video of this._videos) {
@@ -6550,6 +6562,8 @@ export class Library {
       playlists: this._settings.getPlaylists ? this._settings.getPlaylists() : [],
       categories: this._settings.getCategories ? this._settings.getCategories() : [],
       videoCategories: (this._settings._cache && this._settings._cache.videoCategories) || {},
+      // Ratings + favourites for the headset sections and the web remote.
+      ratings: this._settings.get('library.ratings') || {},
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can

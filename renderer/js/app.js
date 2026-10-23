@@ -3562,6 +3562,7 @@ class App {
       playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
       categories: this.settings.getCategories ? this.settings.getCategories() : [],
       videoCategories: (this.settings._cache && this.settings._cache.videoCategories) || {},
+      ratings: this.settings.get('library.ratings') || {},
     };
     try {
       fetch(`http://127.0.0.1:${this.backendPort}/api/media/register`, {
