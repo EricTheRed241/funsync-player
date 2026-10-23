@@ -1288,6 +1288,7 @@
     "noAttachments": "이 주제에 펀스크립트 첨부 파일이 없습니다",
     "downloadFailed": "다운로드 실패",
     "savedToast": "스크립트 저장됨: {name}",
+    "replacedGenerated": "생성된 축 파일 {count}개를 수작업 파일로 교체했습니다",
     "sessionExpired": "EroScripts 세션 만료됨 — EroScripts 패널을 통해 다시 로그인하세요",
     "conflictTitle": "스크립트가 이미 있습니다",
     "conflictMessage": "{name}이(가) 이미 이 폴더에 있습니다. 교체할까요, 아니면 둘 다 유지하고 새 파일을 변형으로 저장할까요?",

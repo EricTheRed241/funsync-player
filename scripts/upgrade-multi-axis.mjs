@@ -7,8 +7,11 @@
 // A 0% rest sits at centre and cannot last more than 10 seconds.
 //
 // The stroke file is never overwritten. An existing companion for an axis is
-// skipped. Companions are named `<stem>.generated.<axis>.funscript` and
-// written next to the video when one is known, otherwise next to the funscript.
+// skipped. A scene with any hand-made axes (a companion that isn't
+// `.generated.`, or axes embedded in the stroke script) is skipped entirely:
+// hand-made axis scripts always win. Companions are named
+// `<stem>.generated.<axis>.funscript` and written next to the video when one
+// is known, otherwise next to the funscript.
 //
 //   node scripts/upgrade-multi-axis.mjs ./clip.mp4 ./clip.funscript
 //   node scripts/upgrade-multi-axis.mjs ./library-folder
@@ -32,14 +35,15 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 const { createNoise1D } = await import('../renderer/js/motion-source.js');
 const { parseAxisSuffix, getBaseName } = await import('../renderer/js/multi-axis.js');
+const { handmadeAxisSuffixes } = await import('../renderer/js/handmade-axes.js');
 const {
   planUpgrade,
   serialiseUpgradeWrites,
   companionPathForScript,
 } = await import('../renderer/js/upgrade-multi-axis.js');
 const { pairUpgradeJobs } = await import('./upgrade-pairing.mjs');
+const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes } = await import('./handmade-scenes.mjs');
 
-const VIDEO_EXTS = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov']);
 const MODE_LABEL = {
   link: 'stroke, quieter early',
   random: 'smooth noise, quieter late',
@@ -133,22 +137,44 @@ function outputAnchor(video, script) {
   return path.join(path.dirname(video), `${stem}.funscript`);
 }
 
-async function existingSuffixes(anchor) {
-  const dir = path.dirname(anchor);
-  let names = [];
+async function listDir(dir) {
   try {
-    names = await fs.readdir(dir);
+    return await fs.readdir(dir);
   } catch {
-    return new Set();
+    return [];
   }
+}
+
+async function existingSuffixes(anchor) {
+  const names = await listDir(path.dirname(anchor));
   const suffixes = new Set();
   const base = getBaseName(anchor).toLowerCase();
   for (const name of names) {
+    if (name.startsWith('._')) continue;
     const axis = parseAxisSuffix(name);
     if (!axis) continue;
     if (getBaseName(name).toLowerCase() === base) suffixes.add(axis.suffix);
   }
   return suffixes;
+}
+
+/** Hand-made axes of the job's scene: every stroke script of the same
+ *  video in the script's folder (variants included), their companions and
+ *  embedded axes, plus companions of the output anchor. */
+async function jobHandmadeAxes(anchor, script, parsed) {
+  const dir = path.dirname(script);
+  const names = await listDir(dir);
+  const own = path.basename(script);
+  const scene = groupScenes(names).find((s) => s.scripts.includes(own));
+  const parse = (name) => (name === own ? parsed : readStrokeScript(path.join(dir, name)));
+  const { handmade } = await sceneHandmadeAxes(scene ? scene.scripts : [own], names, parse);
+  const found = new Set(handmade);
+  if (path.dirname(anchor) !== dir || getBaseName(anchor) !== getBaseName(script)) {
+    for (const s of handmadeAxisSuffixes({ primaryPath: anchor, allFiles: await listDir(path.dirname(anchor)) })) {
+      found.add(s);
+    }
+  }
+  return [...found].sort();
 }
 
 async function main() {
@@ -157,7 +183,8 @@ async function main() {
 
 Twist is a fraction of the stroke, quieter early. Roll and pitch are quieter late.
 A 0% rest sits at centre and cannot last more than 10 seconds.
-Does not overwrite the stroke file. Skips an axis whose companion already exists.`);
+Does not overwrite the stroke file. Skips an axis whose companion already exists.
+Skips a scene with any hand-made axes (companion files or axes embedded in the script).`);
     process.exit(paths.length === 0 ? 1 : 0);
   }
   if (!Number.isFinite(seed)) {
@@ -179,6 +206,7 @@ Does not overwrite the stroke file. Skips an axis whose companion already exists
 
   const noise = createNoise1D(seed);
   const planned = [];
+  let handmadeSkips = 0;
   for (const job of jobs) {
     let raw;
     try {
@@ -196,13 +224,20 @@ Does not overwrite the stroke file. Skips an axis whose companion already exists
     }
     const anchor = outputAnchor(job.video, job.script);
     const existing = await existingSuffixes(anchor);
+    const handmade = await jobHandmadeAxes(anchor, job.script, parsed);
     const plan = planUpgrade({
       primaryPath: anchor,
       strokeActions: parsed.actions,
       existingSuffixes: existing,
+      handmadeAxes: handmade,
       enabledTcodes: enabled,
       noise,
     });
+    if (plan.error === 'handmade-axes') {
+      console.log(`skip ${job.script}: has hand-made axes (${handmade.join(', ')}), nothing generated`);
+      handmadeSkips++;
+      continue;
+    }
     if (plan.error) {
       console.log(`skip ${job.script}: ${plan.error}`);
       continue;
@@ -213,6 +248,10 @@ Does not overwrite the stroke file. Skips an axis whose companion already exists
   const writes = planned.flatMap((p) => p.plan.writes);
   const skipped = planned.flatMap((p) => p.plan.skipped);
   if (writes.length === 0 && skipped.length === 0) {
+    if (handmadeSkips > 0) {
+      console.log('\nnothing to write');
+      return;
+    }
     console.error('nothing to write');
     process.exit(1);
   }

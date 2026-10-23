@@ -7,7 +7,8 @@
 // and so on) that FunSync's library scanner already round-trips.
 //
 // The original stroke file is never written. An axis whose companion already
-// exists is skipped.
+// exists is skipped. A script with any hand-made axes (see handmade-axes.js)
+// gets nothing at all: hand-made axis scripts always win.
 
 import { generateAxisActions, shapeGeneratedValue, axisPhase, createNoise1D } from './motion-source.js';
 import { getBaseName, detectCompanionFiles } from './multi-axis.js';
@@ -183,6 +184,8 @@ function applyDepth(actions, segments, noise, phase) {
  * @param {string} opts.primaryPath — stroke .funscript path (never overwritten)
  * @param {Array<{at:number, pos:number}>} opts.strokeActions
  * @param {Iterable<string>|Set<string>} [opts.existingSuffixes]
+ * @param {Iterable<string>} [opts.handmadeAxes] — the script's hand-made axis
+ *        suffixes (`handmadeAxisSuffixes`); any → no writes, error 'handmade-axes'
  * @param {Iterable<string>|Set<string>} [opts.enabledTcodes]
  * @param {(t:number)=>number} [opts.noise] — inject a seeded field; do not use Math.random
  * @returns {{
@@ -195,6 +198,7 @@ export function planUpgrade({
   primaryPath,
   strokeActions,
   existingSuffixes,
+  handmadeAxes,
   enabledTcodes,
   noise,
 } = {}) {
@@ -205,6 +209,10 @@ export function planUpgrade({
 
   if (!primaryPath) {
     return { writes: [], skipped: [], error: 'no-path' };
+  }
+  const handmade = [...(handmadeAxes || [])];
+  if (handmade.length > 0) {
+    return { writes: [], skipped: [], error: 'handmade-axes', handmadeAxes: handmade };
   }
   let actionCount = 0;
   for (const a of stroke) {

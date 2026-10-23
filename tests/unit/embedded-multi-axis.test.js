@@ -199,6 +199,52 @@ describe('extractEmbeddedAxes', () => {
     });
   });
 
+  describe('Format F — `channels` dict keyed by name or TCode id', () => {
+    const two = (p) => [{ at: 0, pos: 50 }, { at: 500, pos: p }];
+
+    it('extracts `{actions}` and bare-array channels by name or TCode id', () => {
+      const parsed = {
+        actions: two(80),
+        channels: {
+          twist: { metadata: { name: 'twist' }, actions: two(10) },
+          R1: two(20),
+          Suck: { actions: two(30) },
+          L0: two(40),
+          notes: two(50),
+        },
+      };
+      const map = extractEmbeddedAxes(parsed);
+      expect([...map.keys()].sort()).toEqual(['roll', 'suction', 'twist']);
+      expect(map.get('twist')[1].pos).toBe(10);
+      expect(map.get('roll')[1].pos).toBe(20);
+    });
+
+    it('is not mistaken for a sibling axis key and loses to earlier formats', () => {
+      const aActions = two(1);
+      const parsed = {
+        actions: two(80),
+        additional_axes: [{ axis: 'twist', actions: aActions }],
+        channels: { twist: two(2) },
+      };
+      expect(extractEmbeddedAxes(parsed).get('twist')).toBe(aActions);
+    });
+  });
+
+  describe('minimum action count', () => {
+    it('drops any embedded axis with fewer than 2 actions', () => {
+      const one = [{ at: 0, pos: 50 }];
+      const parsed = {
+        actions: [{ at: 0, pos: 50 }, { at: 500, pos: 80 }],
+        additional_axes: [{ axis: 'twist', actions: one }],
+        raw: { roll: { actions: one } },
+        axes: [{ id: 'R2', actions: one }],
+        channels: { surge: one },
+        sway: one,
+      };
+      expect(extractEmbeddedAxes(parsed).size).toBe(0);
+    });
+  });
+
   describe('Format E — `axes` array keyed by TCode id (99DM / Iwara convention)', () => {
     it('extracts each axis entry into the suffix map', () => {
       const parsed = {

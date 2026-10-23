@@ -5,7 +5,7 @@
 //
 // FunSync's companion-file detection (`multi-axis.js::detectCompanionFiles`)
 // already covers the OFS-canonical pattern. This module covers the
-// FIVE non-canonical embedded formats that show up on EroScripts and
+// SIX non-canonical embedded formats that show up on EroScripts and
 // other forums:
 //
 // Format A — HereSphere style (`additional_axes`):
@@ -52,6 +52,18 @@
 // than loose sibling sniffing or inline) but below A/B (which are the
 // most widely-documented formats and win precedence ties).
 //
+// Format F — `channels` dict keyed by axis name or TCode id:
+//   {
+//     "actions": [...],
+//     "channels": {
+//       "twist": { "actions": [...] },
+//       "R1": [...]
+//     }
+//   }
+// Same rules as backend/services/funscript.py `embedded_axes`.
+//
+// An axis counts only with at least 2 actions, in every format.
+//
 // Returns a `Map<suffix, actions>` keyed by the standard FunSync axis
 // suffix (matches `multi-axis.js::AXIS_DEFINITIONS`). Suffixes:
 // surge / sway / twist / roll / pitch / vib / lube / pump / suction / valve.
@@ -87,9 +99,12 @@ const NAME_ALIASES = Object.freeze({
   valve: 'valve',
 });
 
-/** A funscript's `actions` array element. */
+/** Fewest actions an embedded axis needs to count as one. */
+const MIN_AXIS_ACTIONS = 2;
+
+/** A funscript's `actions` array: at least MIN_AXIS_ACTIONS entries, each with a numeric `at`. */
 function isValidActionArray(arr) {
-  return Array.isArray(arr) && arr.length > 0 && arr.every(a =>
+  return Array.isArray(arr) && arr.length >= MIN_AXIS_ACTIONS && arr.every(a =>
     a && typeof a === 'object' && Number.isFinite(a.at)
   );
 }
@@ -98,6 +113,12 @@ function isValidActionArray(arr) {
 function normaliseAxisName(name) {
   if (typeof name !== 'string') return null;
   return NAME_ALIASES[name.toLowerCase().trim()] || null;
+}
+
+/** TCode id (`R1`, any case) → canonical suffix, or null (L0 included). */
+function tcodeAxisName(id) {
+  if (typeof id !== 'string') return null;
+  return TCODE_TO_SUFFIX[id.trim().toUpperCase()] || null;
 }
 
 /**
@@ -154,12 +175,22 @@ export function extractEmbeddedAxes(parsed) {
     }
   }
 
+  // --- Format F: `channels` dict of name/TCode → actions --------------
+  if (parsed.channels && typeof parsed.channels === 'object' && !Array.isArray(parsed.channels)) {
+    for (const [key, val] of Object.entries(parsed.channels)) {
+      const suffix = normaliseAxisName(key) || tcodeAxisName(key);
+      if (!suffix || out.has(suffix)) continue;
+      if (isValidActionArray(val)) out.set(suffix, val);
+      else if (val && typeof val === 'object' && isValidActionArray(val.actions)) out.set(suffix, val.actions);
+    }
+  }
+
   // --- Format C: direct sibling keys --------------------------------
   // Walk top-level keys; skip the standard funscript fields. Anything
   // that looks like an axis name gets considered.
   const SKIP = new Set([
     'actions', 'version', 'inverted', 'range', 'metadata', 'raw',
-    'additional_axes', 'tcode', 'axes',
+    'additional_axes', 'tcode', 'axes', 'channels',
     // Backend-cached / FunSync-internal fields — never axis data.
     'cachedAt', '_sourcePath', 'csvHash',
   ]);

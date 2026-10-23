@@ -134,7 +134,6 @@ def has_handmade_companions(script_path: str, filenames) -> bool:
 #   E  `axes`: [{id: <TCode>, actions}]
 #   C  top-level sibling keys: <name>: [actions] | {actions}
 #   D  inline TCode keys on the main actions: {at, pos, R0: 80, ...}
-# plus one shape the renderer doesn't read yet:
 #   F  `channels`: {<name or TCode>: [actions] | {actions}}
 # Only the axis set matters here (Hand-made section and tag), so precedence
 # between formats is irrelevant. An axis counts only with >= 2 actions.

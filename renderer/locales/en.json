@@ -1412,6 +1412,7 @@
     "noAttachments": "No funscript attachments found in this topic",
     "downloadFailed": "Download failed",
     "savedToast": "Script saved: {name}",
+    "replacedGenerated": "Replaced {count, plural, one {# generated axis file} other {# generated axis files}} with hand-made ones",
     "sessionExpired": "EroScripts session expired — log in again via the EroScripts panel",
     "conflictTitle": "Script already exists",
     "conflictMessage": "{name} is already in this folder. Replace it, or keep both and save the new one as a variant?",

@@ -136,6 +136,9 @@ contextBridge.exposeInMainWorld('funsync', {
   // Shell
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
+  // Moves `<stem>.generated.<axis>.funscript` beside `scriptPath` to the OS
+  // trash → `{trashed: string[], failed: string[]}`.
+  trashGeneratedCompanions: (scriptPath) => ipcRenderer.invoke('trash-generated-companions', scriptPath),
   // Diagnostics bundle for the "Report a problem" dialog. Renderer
   // passes its own connection-state snapshot since the device managers
   // live there.
