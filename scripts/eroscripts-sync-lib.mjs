@@ -275,6 +275,10 @@ function checkForumResult(r) {
  */
 export function createForum(api, { pacer = createPacer(), cache = {}, now = () => Date.now(), staleDays = DEFAULT_STALE_DAYS } = {}) {
   cache.search ||= {};
+  // Expired searches would only be re-run: drop them so the file stays small.
+  for (const [q, hit] of Object.entries(cache.search)) {
+    if (!(now() - Date.parse(hit?.at) < staleDays * DAY_MS)) delete cache.search[q];
+  }
   const topics = new Map();
   const files = new Map();
   return {
