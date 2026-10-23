@@ -350,6 +350,19 @@
     "openFileLocation": "Open File Location",
     "customThumbSet": "Set thumbnail frame…",
     "customThumbUpload": "Upload thumbnail image…",
+    "customThumbEroScripts": "Use EroScripts preview",
+    "esPreviewLoginFirst": "Log in to EroScripts first (EroScripts panel)",
+    "esPreviewFetching": "Fetching the EroScripts preview…",
+    "esPreviewSet": "Thumbnail set from the EroScripts preview",
+    "esPreviewNoImage": "That EroScripts post has no preview image",
+    "esPreviewFailed": "Couldn't download the EroScripts preview",
+    "esPreviewsFetch": "Fetch EroScripts previews",
+    "esPreviewsFetchTitle": "Fetch EroScripts previews — use the post's preview image as the thumbnail of every video whose script came from a known EroScripts post and that has no custom thumbnail",
+    "esPreviewsBusy": "Already fetching EroScripts previews",
+    "esPreviewsNoneKnown": "Videos with a known EroScripts post: 0 of {total}. Scripts downloaded through FunSync link their post.",
+    "esPreviewsAllSet": "All {known} videos with a known EroScripts post already have a custom thumbnail",
+    "esPreviewsProgress": "Fetching EroScripts previews… {done}/{total}",
+    "esPreviewsSummary": "EroScripts previews: {imported} set, {noImage} without an image, {failed} failed. Videos with a known post: {known} of {videos}.",
     "customThumbUploadFailed": "Couldn't use that image",
     "customThumbReset": "Reset thumbnail",
     "variantDefault": "Default",
@@ -1422,7 +1435,9 @@
       "noAttachments": "No downloadable scripts in this post",
       "noMain": "Axis files only, no main script",
       "zipNote": "{count} zip attachment(s) cannot be opened yet",
-      "loadingPost": "Loading post..."
+      "loadingPost": "Loading post...",
+      "pickTitle": "Pick the EroScripts post for this thumbnail",
+      "pickHint": "Click a post to use its preview image as this video's thumbnail."
     }
   },
   "upNext": {

@@ -350,6 +350,19 @@
     "openFileLocation": "ファイルの場所を開く",
     "customThumbSet": "サムネイルのフレームを設定…",
     "customThumbUpload": "サムネイル画像をアップロード…",
+    "customThumbEroScripts": "EroScriptsのプレビューを使用",
+    "esPreviewLoginFirst": "先にEroScriptsにログインしてください（EroScriptsパネル）",
+    "esPreviewFetching": "EroScriptsのプレビューを取得中…",
+    "esPreviewSet": "EroScriptsのプレビューをサムネイルに設定しました",
+    "esPreviewNoImage": "このEroScriptsの投稿にはプレビュー画像がありません",
+    "esPreviewFailed": "EroScriptsのプレビューをダウンロードできませんでした",
+    "esPreviewsFetch": "EroScriptsのプレビューを取得",
+    "esPreviewsFetchTitle": "EroScriptsのプレビューを取得 — スクリプトの元の投稿が分かっていて、カスタムサムネイルのない動画すべてに、投稿のプレビュー画像をサムネイルとして使用します",
+    "esPreviewsBusy": "EroScriptsのプレビューを取得中です",
+    "esPreviewsNoneKnown": "EroScriptsの投稿が分かっている動画：{total}本中0本。FunSyncでダウンロードしたスクリプトは投稿と紐付けられます。",
+    "esPreviewsAllSet": "EroScriptsの投稿が分かっている{known}本の動画は、すべてカスタムサムネイルが設定済みです",
+    "esPreviewsProgress": "EroScriptsのプレビューを取得中… {done}/{total}",
+    "esPreviewsSummary": "EroScriptsのプレビュー：設定 {imported}、画像なし {noImage}、失敗 {failed}。投稿が分かっている動画：{videos}本中{known}本。",
     "customThumbUploadFailed": "この画像は使用できませんでした",
     "customThumbReset": "サムネイルをリセット",
     "variantDefault": "デフォルト",
@@ -1298,7 +1311,9 @@
       "noAttachments": "この投稿にダウンロードできるスクリプトはありません",
       "noMain": "軸ファイルのみでメインスクリプトがありません",
       "zipNote": "{count} 件の zip 添付はまだ開けません",
-      "loadingPost": "投稿を読み込み中..."
+      "loadingPost": "投稿を読み込み中...",
+      "pickTitle": "このサムネイルに使うEroScriptsの投稿を選択",
+      "pickHint": "投稿をクリックすると、そのプレビュー画像がこの動画のサムネイルになります。"
     }
   },
   "upNext": {

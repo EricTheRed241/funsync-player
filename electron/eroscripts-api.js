@@ -27,6 +27,39 @@ const FORUM_HOST = new URL(BASE_URL).hostname;
 const DOWNLOAD_HOSTS = new Set([FORUM_HOST]);
 const UPLOAD_CDN_HOST = 'eroscripts-discourse.eroscripts.com';
 
+// Post preview images (a video's library thumbnail) come from the forum or
+// its upload CDN, where Discourse stores `/original/…` and `/optimized/…`
+// images. They're held in memory, so the size is capped.
+const PREVIEW_HOSTS = new Set([FORUM_HOST, UPLOAD_CDN_HOST]);
+const PREVIEW_MAX_BYTES = 15 * 1024 * 1024;
+const PREVIEW_MAX_REDIRECTS = 3;
+const PREVIEW_TIMEOUT_MS = 30_000;
+
+/**
+ * Read a response body, giving up (null) once it passes `limit` bytes:
+ * a missing or wrong Content-Length can't make it buffer more.
+ */
+async function readCapped(resp, limit) {
+  if (!resp.body?.getReader) {
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return buf.length > limit ? null : buf;
+  }
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      try { await reader.cancel(); } catch { /* already closed */ }
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)), total);
+}
+
 const SCRIPT_FILE_RE = /\.(funscript|zip)$/i;
 const PIXELDRAIN_RE = /https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/(u|l)\/([A-Za-z0-9]+)/gi;
 // Discourse stores an original upload under its SHA-1 (`…/original/4X/b/5/7/<sha1>.ext`);
@@ -67,9 +100,68 @@ function _debugLog(msg) {
  * fall through to the largest they do offer.
  *
  * @param {Array<{width?: number, url?: string}>} thumbnails
+ * @param {number} [minWidth]
  * @returns {string|null}
  */
 const MIN_THUMB_WIDTH = 400;
+
+// Library posters are stored 640 px wide (electron/custom-thumbs.js), so a
+// post preview imported as a video's thumbnail asks for at least that.
+const POSTER_WIDTH = 640;
+// Below this a preview makes a blurry tile. Plenty of posts set a 160×90
+// "thumbnail" for the topic list and show the real preview further down.
+const MIN_POSTER_SOURCE_WIDTH = 320;
+
+// Absolute URL for a forum-relative one (`/uploads/…`).
+function absoluteUrl(url) {
+  if (!url) return null;
+  return url.startsWith('http') ? url : `${BASE_URL}${url}`;
+}
+
+/** Widest `thumbnails[]` entry's width, or 0. */
+function widestThumbnail(thumbnails) {
+  if (!Array.isArray(thumbnails)) return 0;
+  return Math.max(0, ...thumbnails.map((x) => Number(x?.width) || 0));
+}
+
+/**
+ * Poster-size preview URL from a search result's `thumbnails[]`, or null
+ * when the topic's image is too small to be worth it (the topic endpoint
+ * may know a better one: see topicPreviewUrl).
+ */
+function searchPreviewUrl(thumbnails) {
+  if (widestThumbnail(thumbnails) < MIN_POSTER_SOURCE_WIDTH) return null;
+  return absoluteUrl(pickThumbnail(thumbnails, POSTER_WIDTH));
+}
+
+/**
+ * The preview image of a topic (`/t/{id}.json` payload), as a URL, or null.
+ *
+ * Discourse's representative image for the topic (`thumbnails[]` /
+ * `image_url`) wins when it is big enough to make a tile, at poster size.
+ * Otherwise the first post's first image at least MIN_POSTER_SOURCE_WIDTH
+ * wide (by its width attribute), skipping emoji: headings like
+ * ":framed_picture: Preview" put one first. Failing both, whatever small
+ * image the topic has beats no preview.
+ */
+function topicPreviewUrl(data) {
+  const representative = pickThumbnail(data?.thumbnails, POSTER_WIDTH) || data?.image_url || null;
+  if (representative && widestThumbnail(data?.thumbnails) >= MIN_POSTER_SOURCE_WIDTH) {
+    return absoluteUrl(representative);
+  }
+
+  let firstImage = null;
+  const html = data?.post_stream?.posts?.[0]?.cooked || '';
+  for (const [tag, src] of html.matchAll(/<img[^>]+src="([^"]+)"[^>]*>/gi)) {
+    if (/class="[^"]*\bemoji\b/i.test(tag) || src.includes('/images/emoji/')) continue;
+    if (!/\.(jpe?g|png|gif|webp|avif)(\?[^"]*)?$/i.test(src)) continue;
+    const url = absoluteUrl(decodeEntities(src));
+    firstImage ||= url;
+    const width = Number(tag.match(/\swidth="(\d+)"/i)?.[1]) || 0;
+    if (width >= MIN_POSTER_SOURCE_WIDTH) return url;
+  }
+  return absoluteUrl(representative) || firstImage;
+}
 
 /**
  * Decode the HTML entities Discourse emits inside post markup.
@@ -105,12 +197,12 @@ function decodeEntities(text) {
   });
 }
 
-function pickThumbnail(thumbnails) {
+function pickThumbnail(thumbnails, minWidth = MIN_THUMB_WIDTH) {
   if (!Array.isArray(thumbnails) || thumbnails.length === 0) return null;
   const usable = thumbnails.filter(x => x && typeof x.url === 'string' && x.url);
   if (usable.length === 0) return null;
   const big = usable
-    .filter(x => Number(x.width) >= MIN_THUMB_WIDTH)
+    .filter(x => Number(x.width) >= minWidth)
     .sort((a, b) => Number(a.width) - Number(b.width));
   return (big[0] || usable[0]).url;
 }
@@ -333,6 +425,9 @@ class EroScriptsAPI {
           // fetch one. Prefer an entry near the rendered size.
           let thumbnail = pickThumbnail(t.thumbnails) || t.image_url || null;
           if (thumbnail && !thumbnail.startsWith('http')) thumbnail = `${BASE_URL}${thumbnail}`;
+          // The same picture at poster size, for a video's library
+          // thumbnail; null when it's too small (getTopicImage decides then).
+          const preview = searchPreviewUrl(t.thumbnails);
 
           let avatar = post?.avatar_template || null;
           if (avatar) {
@@ -354,7 +449,7 @@ class EroScriptsAPI {
             // topic and not on the post. It only exists on /t/{id}.json.
             // Left at 0 rather than faked; the panel hides a 0 view count.
             views: t.views || 0,
-            tags, thumbnail, avatar,
+            tags, thumbnail, preview, avatar,
             creator: post?.username || user?.username || null,
             url: `${BASE_URL}/t/${t.slug || t.id}/${t.id}`,
           };
@@ -401,6 +496,7 @@ class EroScriptsAPI {
             views: rawTopic?.views || 0,
             tags: normTags,
             thumbnail,
+            preview: null,
             avatar,
             creator: post.username || user?.username || null,
             url: `${BASE_URL}/t/${rawTopic?.slug || post.topic_id}/${post.topic_id}`,
@@ -553,8 +649,7 @@ class EroScriptsAPI {
   }
 
   /**
-   * Fetch the first image URL from a topic's first post.
-   * Used for lazy thumbnail loading in search results.
+   * The topic's preview image URL, or null. See topicPreviewUrl.
    */
   async getTopicImage(topicId) {
     try {
@@ -563,17 +658,63 @@ class EroScriptsAPI {
       });
       const data = await this._safeJson(resp);
       if (!data) return null;
-
-      const html = data.post_stream?.posts?.[0]?.cooked || '';
-      const imgMatch = html.match(/<img[^>]+src="([^"]+\.(jpg|jpeg|png|gif|webp)(\?[^"]*)?)"/i);
-      if (imgMatch) {
-        let url = imgMatch[1];
-        if (!url.startsWith('http')) url = `${BASE_URL}${url}`;
-        return url;
-      }
-      return null;
+      return topicPreviewUrl(data);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Download a post's preview image into memory, to become a video's
+   * library thumbnail.
+   *
+   * https only, and only from the forum or its upload CDN. The session
+   * cookie goes to the forum alone: CDN images are public. Redirects are
+   * followed by hand so every hop passes the same checks. Refuses anything
+   * that isn't an image or is larger than PREVIEW_MAX_BYTES.
+   *
+   * @param {string} url
+   * @returns {Promise<{success: true, bytes: Buffer, contentType: string}
+   *   | {success: false, error: string}>}
+   */
+  async downloadPreviewImage(url) {
+    let current = url;
+    try {
+      for (let hop = 0; hop <= PREVIEW_MAX_REDIRECTS; hop++) {
+        let u;
+        try { u = new URL(current); } catch { return { success: false, error: 'Unsupported image link' }; }
+        if (u.protocol !== 'https:' || !PREVIEW_HOSTS.has(u.hostname)) {
+          return { success: false, error: 'Unsupported image link' };
+        }
+        const headers = { 'User-Agent': USER_AGENT, 'Accept': 'image/*' };
+        if (u.hostname === FORUM_HOST) {
+          const cookie = this._headers().Cookie;
+          if (cookie) headers.Cookie = cookie;
+        }
+        const resp = await fetch(u.href, {
+          headers, redirect: 'manual', signal: AbortSignal.timeout(PREVIEW_TIMEOUT_MS),
+        });
+        if (resp.status >= 300 && resp.status < 400) {
+          const location = resp.headers.get('location');
+          if (!location) return { success: false, error: `Image download failed (${resp.status})` };
+          current = new URL(location, u).href;
+          continue;
+        }
+        if (!resp.ok) return { success: false, error: `Image download failed (${resp.status})` };
+
+        const contentType = (resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (!contentType.startsWith('image/')) return { success: false, error: 'Not an image' };
+        const declared = Number(resp.headers.get('content-length'));
+        if (declared > PREVIEW_MAX_BYTES) return { success: false, error: 'Image too large' };
+
+        const bytes = await readCapped(resp, PREVIEW_MAX_BYTES);
+        if (!bytes) return { success: false, error: 'Image too large' };
+        return { success: true, bytes, contentType };
+      }
+      return { success: false, error: 'Too many redirects' };
+    } catch (err) {
+      log.warn('[EroScripts] Preview download error:', err.message);
+      return { success: false, error: err.message };
     }
   }
 
@@ -644,4 +785,4 @@ class EroScriptsAPI {
 
 }
 
-module.exports = { EroScriptsAPI, parsePostLinks };
+module.exports = { EroScriptsAPI, parsePostLinks, topicPreviewUrl };

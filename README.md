@@ -43,6 +43,9 @@ A local desktop video player with device synchronization for funscript playback.
 - Finds scripts across the whole post: the author's replies (updated versions) and other users' versions, labelled by poster; funscripts on pixeldrain are listed and open in the browser, and posts hosted on MEGA, Google Drive, Gofile and similar say so instead of "no scripts"
 - One-click download — scripts auto-renamed, auto-associated, and paired with the current video; axis files keep their axis suffix, and an existing script is never replaced without asking (Replace / Keep both as a variant / Cancel)
 - Auto-match on video load — if no script is found locally, silently searches EroScripts and notifies
+- **Post previews as thumbnails** — when a script is downloaded for a video (side panel or Associate → Find on EroScripts) and the video has no custom thumbnail, the post's preview image becomes its thumbnail everywhere: library, web remote, HereSphere and DeoVR. The image is downloaded once and stored locally (resized JPEG in the app's `custom-thumbs` folder), never hot-linked. A tiny topic-list thumbnail is skipped in favour of the post's first full-size preview.
+  - Per video: kebab → Thumbnail → **Use EroScripts preview** (the post the script came from, or pick a post in a search); **Reset thumbnail** goes back to the generated frame. An uploaded poster or pinned frame is never replaced automatically.
+  - Whole library: the header's **Fetch EroScripts previews** button fills in previews for every video whose script came from a known post and that has no custom thumbnail, one post at a time, then reports how many videos have a known post. Videos never linked to a post are left alone.
 
 ### Funscript Support
 - Heatmap overlay on the seek bar (speed-colored)

@@ -80,6 +80,8 @@ export { default as Scale } from '../../node_modules/lucide/dist/esm/icons/scale
 // History — playlist "Continue from last watched". (RotateCcw, used for
 // the matching Reset, is already exported above.)
 export { default as History } from '../../node_modules/lucide/dist/esm/icons/history.js';
+// ImageDown — library header "Fetch EroScripts previews".
+export { default as ImageDown } from '../../node_modules/lucide/dist/esm/icons/image-down.js';
 // Check — the "watched" mark on playlist cards and rows.
 export { default as Check } from '../../node_modules/lucide/dist/esm/icons/check.js';
 // Search — visible affordance in the library search input (left-side

@@ -350,6 +350,19 @@
     "openFileLocation": "Abrir ubicación del archivo",
     "customThumbSet": "Definir fotograma de miniatura…",
     "customThumbUpload": "Subir imagen de miniatura…",
+    "customThumbEroScripts": "Usar vista previa de EroScripts",
+    "esPreviewLoginFirst": "Inicia sesión en EroScripts primero (panel de EroScripts)",
+    "esPreviewFetching": "Descargando la vista previa de EroScripts…",
+    "esPreviewSet": "Miniatura establecida desde la vista previa de EroScripts",
+    "esPreviewNoImage": "Esa publicación de EroScripts no tiene imagen de vista previa",
+    "esPreviewFailed": "No se pudo descargar la vista previa de EroScripts",
+    "esPreviewsFetch": "Obtener vistas previas de EroScripts",
+    "esPreviewsFetchTitle": "Obtener vistas previas de EroScripts — usa la imagen de vista previa de la publicación como miniatura de cada vídeo cuyo script viene de una publicación de EroScripts conocida y que no tiene miniatura personalizada",
+    "esPreviewsBusy": "Ya se están obteniendo las vistas previas de EroScripts",
+    "esPreviewsNoneKnown": "Vídeos con publicación de EroScripts conocida: 0 de {total}. Los scripts descargados con FunSync enlazan su publicación.",
+    "esPreviewsAllSet": "Los {known} vídeos con publicación de EroScripts conocida ya tienen miniatura personalizada",
+    "esPreviewsProgress": "Obteniendo vistas previas de EroScripts… {done}/{total}",
+    "esPreviewsSummary": "Vistas previas de EroScripts: {imported} establecidas, {noImage} sin imagen, {failed} con error. Vídeos con publicación conocida: {known} de {videos}.",
     "customThumbUploadFailed": "No se pudo usar esa imagen",
     "customThumbReset": "Restablecer miniatura",
     "variantDefault": "Predeterminado",
@@ -1298,7 +1311,9 @@
       "noAttachments": "No hay scripts descargables en esta publicación",
       "noMain": "Solo archivos de eje, sin script principal",
       "zipNote": "{count} archivo(s) zip aún no se pueden abrir",
-      "loadingPost": "Cargando publicación..."
+      "loadingPost": "Cargando publicación...",
+      "pickTitle": "Elige la publicación de EroScripts para esta miniatura",
+      "pickHint": "Haz clic en una publicación para usar su imagen de vista previa como miniatura de este vídeo."
     }
   },
   "upNext": {

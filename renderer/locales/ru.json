@@ -349,6 +349,19 @@
     "openFileLocation": "Открыть расположение файла",
     "customThumbSet": "Выбрать кадр для миниатюры…",
     "customThumbUpload": "Загрузить изображение миниатюры…",
+    "customThumbEroScripts": "Использовать превью EroScripts",
+    "esPreviewLoginFirst": "Сначала войдите в EroScripts (панель EroScripts)",
+    "esPreviewFetching": "Загрузка превью EroScripts…",
+    "esPreviewSet": "Миниатюра взята из превью EroScripts",
+    "esPreviewNoImage": "У этой темы EroScripts нет превью",
+    "esPreviewFailed": "Не удалось загрузить превью EroScripts",
+    "esPreviewsFetch": "Загрузить превью EroScripts",
+    "esPreviewsFetchTitle": "Загрузить превью EroScripts — превью темы становится миниатюрой каждого видео, скрипт которого взят из известной темы EroScripts и у которого нет своей миниатюры",
+    "esPreviewsBusy": "Превью EroScripts уже загружаются",
+    "esPreviewsNoneKnown": "Видео с известной темой EroScripts: 0 из {total}. Скрипты, скачанные через FunSync, запоминают свою тему.",
+    "esPreviewsAllSet": "У всех {known} видео с известной темой EroScripts уже есть своя миниатюра",
+    "esPreviewsProgress": "Загрузка превью EroScripts… {done}/{total}",
+    "esPreviewsSummary": "Превью EroScripts: установлено {imported}, без изображения {noImage}, ошибок {failed}. Видео с известной темой: {known} из {videos}.",
     "customThumbUploadFailed": "Не удалось использовать это изображение",
     "customThumbReset": "Сбросить миниатюру",
     "variantDefault": "По умолчанию",
@@ -1298,7 +1311,9 @@
       "noAttachments": "В этой теме нет скриптов для скачивания",
       "noMain": "Только файлы осей, без основного скрипта",
       "zipNote": "Вложения zip ({count}) пока нельзя открыть",
-      "loadingPost": "Загрузка темы..."
+      "loadingPost": "Загрузка темы...",
+      "pickTitle": "Выберите тему EroScripts для этой миниатюры",
+      "pickHint": "Нажмите на тему, чтобы её превью стало миниатюрой этого видео."
     }
   },
   "upNext": {

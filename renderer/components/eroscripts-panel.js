@@ -4,6 +4,7 @@ import { icon, X } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
 import { recordScriptTags } from '../js/script-tags.js';
+import { importPostPreview } from '../js/eroscripts-preview.js';
 import { createResultThumb } from './result-thumb.js';
 import { joinPath, dirOfPath } from '../js/path-utils.js';
 import { parseAxisSuffix } from '../js/multi-axis.js';
@@ -462,7 +463,13 @@ export class EroScriptsPanel {
       // associated with. Only meaningful when a video is actually loaded —
       // saving into a source folder with nothing playing associates with
       // nothing, so there is no key to file the tags under.
-      if (videoPath && topic) recordScriptTags(this._settings, videoPath, topic);
+      if (videoPath && topic) {
+        recordScriptTags(this._settings, videoPath, topic);
+        // The post's preview becomes the video's thumbnail if it has no
+        // custom one. Background: the script is ready either way.
+        importPostPreview({ settings: this._settings, api: window.funsync, videoPath, topic })
+          .catch((err) => console.warn('EroScripts preview import failed:', err?.message));
+      }
       showToast(t('eroscripts.savedToast', { name: savedName }), 'info');
       if (this.onScriptDownloaded) this.onScriptDownloaded(savePath, savedName, { axis: axis?.suffix || null });
     } else {

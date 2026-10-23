@@ -194,6 +194,7 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
   eroscriptsDownload: (url, savePath, opts) => ipcRenderer.invoke('eroscripts-download', url, savePath, opts),
+  eroscriptsImportPreview: (videoPath, imageUrl) => ipcRenderer.invoke('eroscripts-import-preview', videoPath, imageUrl),
 
   // Editor pop-out window
   editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),

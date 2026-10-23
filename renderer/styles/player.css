@@ -113,10 +113,12 @@
   opacity: 0.6;
 }
 
-/* Shuffle All — icon-only header button, same shape as the refresh
-   button so the right-side control cluster reads as a unit. Plays the
-   currently-visible videos in a random no-repeat queue. */
-.library__shuffle-btn {
+/* Shuffle All and Fetch EroScripts previews — icon-only header buttons,
+   same shape as the refresh button so the right-side control cluster
+   reads as a unit. Shuffle plays the currently-visible videos in a random
+   no-repeat queue. */
+.library__shuffle-btn,
+.library__es-previews-btn {
   background: transparent;
   border: none;
   color: var(--text-secondary, #a0a0a0);
@@ -130,11 +132,13 @@
   padding: 0;
   transition: background 150ms, color 150ms;
 }
-.library__shuffle-btn:hover {
+.library__shuffle-btn:hover,
+.library__es-previews-btn:hover {
   background: var(--surface-overlay);
   color: var(--text-primary, #e0e0e0);
 }
-.library__shuffle-btn:focus-visible {
+.library__shuffle-btn:focus-visible,
+.library__es-previews-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

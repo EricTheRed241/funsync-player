@@ -350,6 +350,19 @@
     "openFileLocation": "Ouvrir l'emplacement du fichier",
     "customThumbSet": "Définir l'image de la vignette…",
     "customThumbUpload": "Téléverser une image de vignette…",
+    "customThumbEroScripts": "Utiliser l'aperçu EroScripts",
+    "esPreviewLoginFirst": "Connecte-toi d'abord à EroScripts (panneau EroScripts)",
+    "esPreviewFetching": "Téléchargement de l'aperçu EroScripts…",
+    "esPreviewSet": "Miniature définie depuis l'aperçu EroScripts",
+    "esPreviewNoImage": "Ce sujet EroScripts n'a pas d'image d'aperçu",
+    "esPreviewFailed": "Impossible de télécharger l'aperçu EroScripts",
+    "esPreviewsFetch": "Récupérer les aperçus EroScripts",
+    "esPreviewsFetchTitle": "Récupérer les aperçus EroScripts — l'image d'aperçu du sujet devient la miniature de chaque vidéo dont le script vient d'un sujet EroScripts connu et qui n'a pas de miniature personnalisée",
+    "esPreviewsBusy": "Récupération des aperçus EroScripts déjà en cours",
+    "esPreviewsNoneKnown": "Vidéos avec un sujet EroScripts connu : 0 sur {total}. Les scripts téléchargés via FunSync relient leur sujet.",
+    "esPreviewsAllSet": "Les {known} vidéos avec un sujet EroScripts connu ont déjà une miniature personnalisée",
+    "esPreviewsProgress": "Récupération des aperçus EroScripts… {done}/{total}",
+    "esPreviewsSummary": "Aperçus EroScripts : {imported} définis, {noImage} sans image, {failed} en échec. Vidéos avec un sujet connu : {known} sur {videos}.",
     "customThumbUploadFailed": "Impossible d'utiliser cette image",
     "customThumbReset": "Réinitialiser la vignette",
     "variantDefault": "Par défaut",
@@ -1298,7 +1311,9 @@
       "noAttachments": "Aucun script téléchargeable dans ce message",
       "noMain": "Fichiers d axes uniquement, sans script principal",
       "zipNote": "{count} pièce(s) jointe(s) zip ne peuvent pas encore être ouvertes",
-      "loadingPost": "Chargement du message..."
+      "loadingPost": "Chargement du message...",
+      "pickTitle": "Choisir le sujet EroScripts pour cette miniature",
+      "pickHint": "Clique sur un sujet pour utiliser son image d'aperçu comme miniature de cette vidéo."
     }
   },
   "upNext": {
