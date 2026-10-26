@@ -643,6 +643,7 @@
     "mutexTakeover": "{incoming} tomó el control de {evicted}",
     "added": "Añadido",
     "addedTo": "Añadido a \"{name}\"",
+    "rejectedDeleted": "Se eliminaron del disco {count} vídeo(s) de \"No thank you\"",
     "removed": "Eliminado",
     "saved": "Guardado",
     "copied": "Copiado",

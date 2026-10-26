@@ -643,6 +643,7 @@
     "mutexTakeover": "{incoming}이(가) {evicted}에서 인계받음",
     "added": "추가됨",
     "addedTo": "\"{name}\"에 추가됨",
+    "rejectedDeleted": "\"No thank you\"의 동영상 {count}개를 디스크에서 삭제함",
     "removed": "제거됨",
     "saved": "저장됨",
     "copied": "복사됨",

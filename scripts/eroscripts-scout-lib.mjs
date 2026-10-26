@@ -12,6 +12,10 @@
 //   • Animated only: a tag like animation / 3d / hentai / vam / sfm / mmd and
 //     no `real` tag. AI-generated video counts. A music post (PMV / HMV /
 //     Cock Hero …) by a creator already in the library is accepted as well.
+//   • Sex only: a sex-act tag (vaginal, blowjob, riding …) or word in the
+//     title or first post, or a porn music tag (HMV / PMV / Cock Hero) on a
+//     post that isn't a dance. Never a post tagged sfw / non-porn.
+//   • Videos shorter than a minute (by the main script) aren't downloaded.
 //   • Ranking: VR +3, music +2, creator already in the library +2,
 //     creampie / riding +2 (+0.5 for both), multi-axis +1, likes up to +3.
 //   • Skip posts the library already links and scenes whose video is
@@ -29,6 +33,25 @@ export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
 // Matched against tags, titles and first posts as whole words, so hyphenated
 // tags (`futa-on-male`) match and `Futaba` doesn't.
 const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
+// Tags that say a post has no porn in it.
+const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 'non-nude']);
+// Tags that name a sex act.
+const SEX_TAGS = new Set([
+  'sex', 'hardcore', 'vaginal', 'anal', 'pussy', 'creampie', 'anal-creampie', 'oral-creampie', 'riding', 'cowgirl',
+  'reverse-cowgirl', 'missionary', 'doggy', 'doggy-style', 'doggystyle', 'standing-doggy', 'pronebone', 'blowjob', 'bj',
+  'deepthroat', 'facefuck', 'throatpie', 'cum-in-mouth', 'handjob', 'titfuck', 'titjob', 'paizuri', 'boobjob', 'footjob',
+  'thighjob', 'cumshot', 'facial', 'gangbang', 'double-penetration', 'threesome', 'foursome', 'fivesome', 'orgy',
+  'milking', 'fingering', 'masturbation', 'dildo', 'tentacle',
+]);
+// Porn genres and music videos: sex unless the post is a dance.
+const PORN_TAGS = new Set(['hentai', 'straight', 'hmv', 'pmv', 'cock-hero', 'fap-hero']);
+const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck\w*|creampie|cum|cums|cumming|cumshots?|blowjobs?|bj|handjobs?|titjobs?|titfuck\w*|paizuri|boobjobs?|footjobs?|riding|rides?|cowgirl|doggy\w*|missionary|anal|vaginal|deepthroat\w*|penetration|gangbang|threesome|orgy|milking|pussy|cock|dick|penis|intercourse|nakadashi|bred|breeding)(?![\p{L}\p{N}])/iu;
+// Scripts without spaces between words.
+const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|フェラ|パイズリ|手コキ|足コキ|做爱|性爱|骑乘|口交|后入|中出|乳交|섹스/u;
+// A title that says the video is a dance counts like the `dance` tag.
+const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダンス|踊り|舞蹈|跳舞|댄스/iu;
+// Shortest video worth downloading, by its main script's last action.
+export const MIN_VIDEO_MS = 60_000;
 
 export const DISCOVERY_NAME = 'Discovery';
 export const FEED_TAGS = ['multi-axis', 'animation', 'hentai', '3d', 'vam', 'sfm', 'mmd'];
@@ -123,6 +146,7 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
   if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
+  if (tags.some((t) => SFW_TAGS.has(t))) return { ok: false, reason: 'not-sexual' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
   const animated = tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real');
@@ -130,6 +154,29 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   if (!animated && !(music && artist)) return { ok: false, reason: 'not-animated' };
   if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
   return { ok: true, music, vr: tags.includes('vr'), artist };
+}
+
+/**
+ * True when a post shows some sign of sex: a sex-act tag, a sex word in its
+ * title or first post, or a porn genre / music tag (hentai, straight, HMV,
+ * PMV, Cock Hero) on a post that isn't a dance. A post tagged sfw /
+ * non-porn never is.
+ *
+ * @param {{tags?: string[], title?: string, text?: string}} post
+ */
+export function isSexual({ tags = [], title = '', text = '' }) {
+  if (tags.some((t) => SFW_TAGS.has(t))) return false;
+  if (tags.some((t) => SEX_TAGS.has(t))) return true;
+  const words = `${title}\n${text}`;
+  if (SEX_WORDS.test(words) || SEX_WORDS_CJK.test(words)) return true;
+  const dance = tags.includes('dance') || DANCE_TITLE.test(title);
+  return !dance && tags.some((t) => PORN_TAGS.has(t));
+}
+
+/** Last action time of a parsed funscript in ms; 0 when it has none. */
+export function scriptDurationMs(script) {
+  const actions = Array.isArray(script?.actions) ? script.actions : [];
+  return actions.reduce((max, a) => (Number.isFinite(a?.at) && a.at > max ? a.at : max), 0);
 }
 
 /** Ranking score; higher downloads first. */

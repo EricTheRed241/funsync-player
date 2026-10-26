@@ -65,6 +65,7 @@ const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
 const { scanLibrary, isAppleDoubleSidecar } = require('./library-scan');
 const { readLinksFile } = require('./eroscripts-links');
+const { deleteRejectedVideo } = require('./rejected-videos');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -836,6 +837,20 @@ ipcMain.handle('add-video-to-playlist', (_event, id, videoPath) => {
 
 ipcMain.handle('remove-video-from-playlist', (_event, id, videoPath) => {
   store.removeVideoFromPlaylist(id, videoPath);
+});
+
+// "No thank you" rule (electron/rejected-videos.js): delete a rejected video
+// and its scripts from disk. Only paths inside a library source.
+ipcMain.handle('delete-rejected-video', (_event, videoPath) => {
+  try {
+    const sources = (store.getAll()?.settings?.library?.sources || []).map((s) => s?.path);
+    const result = deleteRejectedVideo(videoPath, { sources, userDataDir: app.getPath('userData') });
+    log.info(`[Rejected] deleted ${result.deleted.length} file(s) for ${videoPath}${result.removedDirs.length ? `; removed ${result.removedDirs.join(', ')}` : ''}`);
+    return { success: true, ...result };
+  } catch (err) {
+    log.warn(`[Rejected] ${videoPath}: ${err.message}`);
+    return { success: false, error: err.message };
+  }
 });
 
 // Categories

@@ -40,6 +40,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 const lib = await import('./eroscripts-scout-lib.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const require = createRequire(import.meta.url);
+const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
@@ -48,7 +49,8 @@ Scan (default):
   --anim-pages N         pages of each animation feed (animation, hentai, 3d, vam, sfm, mmd; default 3)
   --top N                candidates to print (default 40)
 Download:
-  --fetch                download the saved list (multi-axis first), add each scene to Discovery
+  --fetch                download the saved list (multi-axis first), add each scene to Discovery;
+                         skips videos under a minute and scenes rejected in the app (No thank you)
   --ids 1,2,3            only these post ids
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
@@ -225,6 +227,8 @@ async function scan(opts, { api, userData, config, incoming }) {
     for (const l of Object.values(links?.links || {})) if (l.topicId != null) knownTopics.add(l.topicId);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
+  // Posts the user turned down in the app (No thank you).
+  for (const e of rejectedVideos.readRejected(userData).entries) if (e.reason === 'no-thank-you') knownTopics.add(e.topicId);
 
   const topics = new Map();
   for (const tag of lib.FEED_TAGS) {
@@ -241,7 +245,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   }
   console.log(`Listed ${topics.size} posts`);
 
-  const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'in-library': 0, 'no-video': 0 };
+  const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0 };
   const candidates = [];
   const creators = [...library.creators];
   for (const t of topics.values()) {
@@ -252,7 +256,9 @@ async function scan(opts, { api, userData, config, incoming }) {
     const op = data?.post_stream?.posts?.[0];
     if (!op) { process.stderr.write(`! ${t.id} unreadable\n`); continue; }
     const cooked = op.cooked || '';
-    if (lib.hasExcludedText(cooked.replace(/<[^>]+>/g, ' '))) { rejected.excluded++; continue; }
+    const text = cooked.replace(/<[^>]+>/g, ' ');
+    if (lib.hasExcludedText(text)) { rejected.excluded++; continue; }
+    if (!lib.isSexual({ tags: t.tags, title: t.title, text })) { rejected['not-sexual']++; continue; }
     let files, hosts;
     try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked)); } catch (err) {
       if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
@@ -332,8 +338,9 @@ async function download(api, file, dest, staging) {
   return 'ok';
 }
 
-function fetchedScenes(incoming) {
-  const done = new Set();
+/** Scenes not to fetch: those with a sidecar and video, and every rejected one. */
+function fetchedScenes(incoming, userData) {
+  const done = new Set(rejectedVideos.readRejected(userData).entries.map((e) => e.key));
   walk(incoming, 0, (full, e) => {
     if (e.name !== 'eroscripts.json') return;
     try {
@@ -384,8 +391,8 @@ function flushPlaylist(userData, incoming, videoPaths) {
 }
 
 async function fetchPass(queue, { api, userData, incoming, staging }) {
-  const done = fetchedScenes(incoming);
-  let ok = 0; let failed = 0; let generated = 0;
+  const done = fetchedScenes(incoming, userData);
+  let ok = 0; let failed = 0; let generated = 0; let short = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     for (const sc of c.scenes) {
@@ -396,6 +403,19 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
       const video = path.join(dir, stem + path.extname(sc.video.name).toLowerCase());
       try {
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging);
+        let lengthMs = null;
+        try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
+        if (lengthMs !== null && lengthMs < lib.MIN_VIDEO_MS) {
+          for (const f of sc.scripts) fs.rmSync(path.join(dir, lib.scriptFileName(stem, f.axis)), { force: true });
+          removeIfEmpty(dir);
+          removeIfEmpty(path.dirname(dir));
+          rejectedVideos.recordRejection(userData, {
+            topicId: c.id, video: sc.video.name, title: c.title, url: c.url, reason: 'short', lengthMs, at: new Date().toISOString(),
+          });
+          console.log(`${now()} – ${creator}/${stem}: ${Math.round(lengthMs / 1000)} s, under a minute; skipped`);
+          short++;
+          continue;
+        }
         await download(api, sc.video, video, staging);
         fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
           topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
@@ -415,7 +435,7 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
       }
     }
   }
-  return { ok, failed, generated };
+  return { ok, failed, generated, short };
 }
 
 async function fetchAll(opts, { api, userData, incoming }) {
@@ -433,7 +453,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { api, userData, incoming, staging });
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.failed} failed`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under a minute, ${r.failed} failed`);
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min for host quotas`);
