@@ -270,6 +270,27 @@ export function fetchedKey(id) {
 }
 
 /**
+ * A `Cookie` header after a response's `Set-Cookie` lines: each cookie
+ * replaces the one of the same name; one set empty or expired goes.
+ *
+ * @param {string} jar current `name=value; name=value`
+ * @param {string[]} setCookies `Set-Cookie` header values
+ */
+export function mergeCookies(jar, setCookies) {
+  const cookies = new Map(String(jar || '').split(/;\s*/).filter((kv) => kv.includes('=')).map((kv) => [kv.slice(0, kv.indexOf('=')), kv]));
+  for (const line of setCookies || []) {
+    const kv = String(line).split(';')[0].trim();
+    const eq = kv.indexOf('=');
+    if (eq <= 0) continue;
+    const name = kv.slice(0, eq);
+    // Base64 values end in `=`; only a value with nothing after the first `=` is empty.
+    if (eq === kv.length - 1 || /;\s*max-age=0(;|$)/i.test(line) || /;\s*expires=thu, 01 jan 1970/i.test(line)) cookies.delete(name);
+    else cookies.set(name, kv);
+  }
+  return [...cookies.values()].join('; ');
+}
+
+/**
  * The saved list after a scan: candidates found now plus earlier ones not
  * yet fetched or rejected, best score first.
  *
