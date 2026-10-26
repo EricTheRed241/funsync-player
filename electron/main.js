@@ -835,6 +835,10 @@ ipcMain.handle('add-video-to-playlist', (_event, id, videoPath) => {
   store.addVideoToPlaylist(id, videoPath);
 });
 
+ipcMain.handle('add-videos-to-playlist', (_event, id, videoPaths) => {
+  store.addVideosToPlaylist(id, videoPaths);
+});
+
 ipcMain.handle('remove-video-from-playlist', (_event, id, videoPath) => {
   store.removeVideoFromPlaylist(id, videoPath);
 });

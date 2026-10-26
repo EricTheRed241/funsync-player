@@ -329,6 +329,18 @@ function addVideoToPlaylist(id, videoPath) {
   }
 }
 
+/** Append `videoPaths` the playlist doesn't hold yet, in order, with one write. */
+function addVideosToPlaylist(id, videoPaths) {
+  const playlists = getPlaylists();
+  const playlist = playlists.find((p) => p.id === id);
+  if (!playlist || !Array.isArray(videoPaths)) return;
+  const have = new Set(playlist.videoPaths);
+  const fresh = videoPaths.filter((p) => typeof p === 'string' && p && !have.has(p) && have.add(p));
+  if (!fresh.length) return;
+  playlist.videoPaths.push(...fresh);
+  conf.set('playlists', playlists);
+}
+
 /**
  * Replace a playlist's videoPaths with a new ordering. Used by drag/Move
  * reorder. Validates that `newVideoPaths` is the same SET as the current
@@ -573,6 +585,7 @@ module.exports = {
   setPlaylistBalance,
   setPlaylistPreferUnwatched,
   addVideoToPlaylist,
+  addVideosToPlaylist,
   removeVideoFromPlaylist,
   setPlaylistVideoPaths,
   getCategories,

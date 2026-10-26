@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('funsync', {
   updateWindowChrome: (theme, opts) => ipcRenderer.invoke('update-window-chrome', theme, opts),
   deletePlaylist: (id) => ipcRenderer.invoke('delete-playlist', id),
   addVideoToPlaylist: (id, videoPath) => ipcRenderer.invoke('add-video-to-playlist', id, videoPath),
+  addVideosToPlaylist: (id, videoPaths) => ipcRenderer.invoke('add-videos-to-playlist', id, videoPaths),
   removeVideoFromPlaylist: (id, videoPath) => ipcRenderer.invoke('remove-video-from-playlist', id, videoPath),
   setPlaylistVideoPaths: (id, videoPaths) => ipcRenderer.invoke('set-playlist-video-paths', id, videoPaths),
   deleteRejectedVideo: (videoPath) => ipcRenderer.invoke('delete-rejected-video', videoPath),

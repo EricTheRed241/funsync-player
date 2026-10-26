@@ -2434,7 +2434,7 @@ class App {
       return chain;
     };
     eventBus.on('playlist:changed', ({ action, id, playlist } = {}) => {
-      if (!['add', 'addVideo', 'reorder', 'rename'].includes(action)) return;
+      if (!['add', 'addVideo', 'addVideos', 'reorder', 'rename'].includes(action)) return;
       const pl = playlist || this.settings.getPlaylist(id);
       if (pl && isRejectPlaylist(pl.name)) sweep();
     });
