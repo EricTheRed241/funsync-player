@@ -887,6 +887,10 @@ ipcMain.handle('assign-category', (_event, videoPath, catId) => {
   store.assignCategory(videoPath, catId);
 });
 
+ipcMain.handle('assign-categories', (_event, pairs) => {
+  store.assignCategories(pairs);
+});
+
 ipcMain.handle('unassign-category', (_event, videoPath, catId) => {
   store.unassignCategory(videoPath, catId);
 });

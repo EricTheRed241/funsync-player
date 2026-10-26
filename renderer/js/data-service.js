@@ -313,6 +313,18 @@ class DataService {
     eventBus.emit('category:changed', { action: 'assign', videoPath, catId });
   }
 
+  /** Assign many `[videoPath, catId]` pairs with one write and one event. */
+  assignCategories(pairs) {
+    const list = (pairs || []).filter(([videoPath, catId]) => videoPath && catId);
+    if (!list.length) return;
+    for (const [videoPath, catId] of list) {
+      const ids = (this._cache.videoCategories[videoPath] ||= []);
+      if (!ids.includes(catId)) ids.push(catId);
+    }
+    window.funsync.assignCategories(list);
+    eventBus.emit('category:changed', { action: 'assign-many', count: list.length });
+  }
+
   unassignCategory(videoPath, catId) {
     if (this._cache.videoCategories[videoPath]) {
       this._cache.videoCategories[videoPath] = this._cache.videoCategories[videoPath].filter((id) => id !== catId);

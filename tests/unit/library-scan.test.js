@@ -47,6 +47,21 @@ describe('scanLibrary', () => {
     expect(r.failedPaths).toEqual([]);
   });
 
+  it("attaches a Discovery scene's post from its eroscripts.json, matching the recorded file", async () => {
+    touch('In/Artist/Scene/Artist - Scene.mp4');
+    touch('In/Artist/Pack/One.mp4');
+    touch('In/Artist/Pack/Two.mp4');
+    touch('In/Other/Plain.mp4');
+    fs.writeFileSync(path.join(tmp, 'In/Artist/Scene/eroscripts.json'), JSON.stringify({ topicId: 7, url: 'https://x/t/7', tags: ['vr', 'creampie'], video: '3.mp4' }));
+    fs.writeFileSync(path.join(tmp, 'In/Artist/Pack/eroscripts.json'), JSON.stringify({ topicId: 8, tags: [], file: 'two.MP4' }));
+
+    const byName = Object.fromEntries((await scanLibrary(path.join(tmp, 'In'))).videos.map((v) => [v.name, v]));
+    expect(byName['Artist - Scene.mp4'].eroscripts).toEqual({ topicId: 7, url: 'https://x/t/7', tags: ['vr', 'creampie'] });
+    expect(byName['Two.mp4'].eroscripts).toEqual({ topicId: 8, url: null, tags: [] });
+    expect(byName['One.mp4'].eroscripts).toBeUndefined();
+    expect(byName['Plain.mp4'].eroscripts).toBeUndefined();
+  });
+
   it('reports a missing source instead of throwing', async () => {
     const r = await scanLibrary([path.join(tmp, 'missing')]);
     expect(r.failedPaths).toEqual([path.join(tmp, 'missing')]);

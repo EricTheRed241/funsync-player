@@ -36,6 +36,8 @@ const yieldTick = () => new Promise((resolve) => setImmediate(resolve));
 const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
 const SUBTITLE_EXTS = ['.srt', '.vtt'];
+// The scout's per-scene record of its EroScripts post.
+const SCOUT_SIDECAR = 'eroscripts.json';
 
 const SILENT_LOG = { info() {}, warn() {} };
 
@@ -384,6 +386,25 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
     } catch {
       v.dateAdded = 0;
     }
+  }));
+
+  // Discovery scenes carry the EroScripts post they came from in an
+  // `eroscripts.json` sidecar (scripts/eroscripts-scout.mjs). Attach it so
+  // the renderer can record the post's tags like a download from the app.
+  const sidecarDirs = new Set(entries.filter((e) => e.isFile() && e.name === SCOUT_SIDECAR).map((e) => path.resolve(entryDir(e))));
+  const fold = (s) => String(s).normalize('NFC').toLowerCase();
+  await Promise.all(videos.map(async (v) => {
+    const dir = path.dirname(v.path);
+    if (!sidecarDirs.has(path.resolve(dir))) return;
+    try {
+      const rec = JSON.parse(await fs.promises.readFile(path.join(dir, SCOUT_SIDECAR), 'utf8'));
+      if (rec?.topicId == null || (rec.file && fold(rec.file) !== fold(v.name))) return;
+      v.eroscripts = {
+        topicId: rec.topicId,
+        url: typeof rec.url === 'string' ? rec.url : null,
+        tags: Array.isArray(rec.tags) ? rec.tags.filter((t) => typeof t === 'string' && t.trim()) : [],
+      };
+    } catch { /* unreadable sidecar: no post for this video */ }
   }));
 
   // Fuzzy match pass: pair unmatched videos with high-confidence funscript matches

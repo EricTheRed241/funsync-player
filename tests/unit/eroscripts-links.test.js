@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { mergeLinksIntoScriptTags, applyEroscriptsLinks, SYNC_SOURCE } from '../../renderer/js/eroscripts-links.js';
+import { mergeLinksIntoScriptTags, applyEroscriptsLinks, mergeScoutPosts, SYNC_SOURCE, SCOUT_SOURCE } from '../../renderer/js/eroscripts-links.js';
 import { SCRIPT_TAGS_KEY } from '../../renderer/js/script-tags.js';
 
 const { readLinksFile, writeLinksFile, linksFilePath, LINKS_FILE } = await import('../../electron/eroscripts-links.js');
@@ -53,6 +53,28 @@ describe('mergeLinksIntoScriptTags', () => {
     expect(next).toMatchObject({ added: 0, updated: 1, removed: 1 });
     expect(next.map['/a.mp4'].topicId).toBe(3);
     expect(next.map['/b.mp4']).toBeUndefined();
+  });
+});
+
+describe('mergeScoutPosts', () => {
+  const video = (p, topicId, tags = ['creampie']) => ({ path: p, eroscripts: { topicId, url: `https://x/t/${topicId}`, tags } });
+
+  it('records Discovery posts over sync guesses, but never over a download from the app', () => {
+    const current = {
+      '/sync.mp4': { tags: ['old'], topicId: 5, source: SYNC_SOURCE },
+      '/mine.mp4': { tags: ['vr'], topicId: 9, source: 'eroscripts' },
+    };
+    const r = mergeScoutPosts(current, [video('/new.mp4', 1), video('/sync.mp4', 2), video('/mine.mp4', 3), { path: '/plain.mp4' }], NOW);
+    expect(r).toMatchObject({ added: 1, updated: 1 });
+    expect(r.map['/new.mp4']).toEqual({ tags: ['creampie'], topicId: 1, topicUrl: 'https://x/t/1', source: SCOUT_SOURCE, savedAt: NOW });
+    expect(r.map['/sync.mp4'].topicId).toBe(2);
+    expect(r.map['/mine.mp4'].topicId).toBe(9);
+  });
+
+  it('changes nothing for a post it already has, and follows changed tags', () => {
+    const first = mergeScoutPosts({}, [video('/a.mp4', 1)], NOW).map;
+    expect(mergeScoutPosts(first, [video('/a.mp4', 1)], NOW + 1)).toBe(null);
+    expect(mergeScoutPosts(first, [video('/a.mp4', 1, ['creampie', 'vr'])], NOW + 1).map['/a.mp4'].tags).toEqual(['creampie', 'vr']);
   });
 });
 

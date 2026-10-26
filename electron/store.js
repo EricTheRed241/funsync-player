@@ -459,6 +459,20 @@ function assignCategory(videoPath, catId) {
   }
 }
 
+/** Assign many `[videoPath, catId]` pairs in one write. */
+function assignCategories(pairs) {
+  const mappings = conf.get('videoCategories') || {};
+  let changed = false;
+  for (const [videoPath, catId] of Array.isArray(pairs) ? pairs : []) {
+    if (typeof videoPath !== 'string' || !videoPath || typeof catId !== 'string' || !catId) continue;
+    if (!mappings[videoPath]) mappings[videoPath] = [];
+    if (mappings[videoPath].includes(catId)) continue;
+    mappings[videoPath].push(catId);
+    changed = true;
+  }
+  if (changed) conf.set('videoCategories', mappings);
+}
+
 function unassignCategory(videoPath, catId) {
   const mappings = conf.get('videoCategories') || {};
   if (mappings[videoPath]) {
@@ -568,6 +582,7 @@ module.exports = {
   setCategoryIcon,
   setCategoryColor,
   assignCategory,
+  assignCategories,
   unassignCategory,
   getVideoCategories,
   getVideosByCategory,

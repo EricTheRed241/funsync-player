@@ -28,7 +28,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_playlists, get_ratings, get_video_registry, _path_to_id, record_vr_activity
+from routes.media import get_categories, get_playlists, get_ratings, get_video_categories, get_video_registry, _path_to_id, record_vr_activity
 from routes.remote_sync import submit_library_edit
 from services import library_edits, video_info, vr_sections
 from services.network import get_local_ip
@@ -753,6 +753,9 @@ async def heresphere_scene(video_id: str, request: Request):
     # Playlist tags: removing one in the headset takes the video out of
     # that playlist, adding `Playlist:<name>` puts it in (creating it).
     tags.extend({'name': name} for name in vr_sections.playlist_tags(path, playlists))
+    # Category tags (desktop categories, EroScripts-made ones included) for
+    # filtering in the headset; read-only.
+    tags.extend({'name': name} for name in vr_sections.category_tags(path, get_categories(), get_video_categories()))
 
     # Auto-generate chapter tags for navigation (every 5 min)
     if duration > 300:

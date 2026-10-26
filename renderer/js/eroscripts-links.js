@@ -97,3 +97,37 @@ export async function applyEroscriptsLinks(settings, api, now = Date.now()) {
   const { added, updated, removed } = merged;
   return { added, updated, removed };
 }
+
+/** `source` of scriptTags records taken from a Discovery scene's `eroscripts.json`. */
+export const SCOUT_SOURCE = 'eroscripts-scout';
+
+/**
+ * Fold the posts the library scan found in Discovery sidecars
+ * (`video.eroscripts`, see electron/library-scan.js) into a scriptTags map.
+ * The scout downloaded the scene from that post, so its record replaces a
+ * sync guess; a record the app wrote itself (`source: 'eroscripts'`) still
+ * wins.
+ *
+ * @param {Object<string, object>} current scriptTags map
+ * @param {{path: string, eroscripts?: {topicId: number, url: string|null, tags: string[]}}[]} videos
+ * @param {number} now epoch ms
+ * @returns {{map: Object<string, object>, added: number, updated: number}|null} null when nothing changes
+ */
+export function mergeScoutPosts(current, videos, now) {
+  const map = { ...(current || {}) };
+  let added = 0;
+  let updated = 0;
+  for (const v of videos || []) {
+    const post = v?.eroscripts;
+    if (!v?.path || post?.topicId == null) continue;
+    const existing = map[v.path];
+    if (existing?.source === 'eroscripts') continue;
+    const tags = Array.isArray(post.tags) ? post.tags : [];
+    if (existing?.source === SCOUT_SOURCE && existing.topicId === post.topicId
+      && JSON.stringify(existing.tags || []) === JSON.stringify(tags)) continue;
+    map[v.path] = { tags, topicId: post.topicId, topicUrl: post.url || null, source: SCOUT_SOURCE, savedAt: now };
+    if (existing) updated++;
+    else added++;
+  }
+  return added || updated ? { map, added, updated } : null;
+}

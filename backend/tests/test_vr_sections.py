@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from httpx import AsyncClient, ASGITransport
 from main import app
 from routes import remote_sync
-from routes.media import register_videos, register_playlists, register_ratings, get_video_registry, _path_to_id
+from routes.media import register_videos, register_playlists, register_ratings, register_categories, get_video_registry, _path_to_id
 from services import vr_sections
 from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
 
@@ -46,13 +46,15 @@ async def client():
 
 @pytest.fixture(autouse=True)
 def _no_triage_state():
-    """No ratings, playlists or queued edits leak between tests."""
+    """No ratings, playlists, categories or queued edits leak between tests."""
     register_ratings({})
     register_playlists([])
+    register_categories([], {})
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
     register_playlists([])
+    register_categories([], {})
     remote_sync._reset_state_for_tests()
 
 
@@ -498,6 +500,22 @@ async def test_heresphere_scene_tags_without_stats(client, tmp_path):
     d = _path_to_id("/Lib/D.mp4")
     tags = [t["name"] for t in (await client.get(f"/heresphere/{d}")).json()["tags"]]
     assert tags == ["Studio:Lib", "Format:Flat"]
+
+
+@pytest.mark.anyio
+async def test_heresphere_scene_category_tags_follow_the_desktop(client, tmp_path):
+    _register_library(tmp_path)
+    register_categories(
+        [{"id": "c1", "name": "Creampie"}, {"id": "c2", "name": "VR"}, {"id": "c3", "name": " "}],
+        {"/Lib/D.mp4": ["c2", "c1", "c3", "gone"]},
+    )
+    d = _path_to_id("/Lib/D.mp4")
+    tags = [t["name"] for t in (await client.get(f"/heresphere/{d}")).json()["tags"]]
+    assert tags == ["Studio:Lib", "Format:Flat", "Category:Creampie", "Category:VR"]
+
+    # Editing them in the headset changes nothing.
+    await client.post(f"/heresphere/{d}", json={"tags": [{"name": "Studio:Lib"}]})
+    assert remote_sync.library_edits.queue.pending() == []
 
 
 @pytest.mark.anyio
