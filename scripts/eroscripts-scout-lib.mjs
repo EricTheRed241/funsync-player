@@ -546,6 +546,104 @@ export function remapPaths(value, moves) {
   return { value: walk(value), changed };
 }
 
+// ── Scan state ──────────────────────────────────────────────────────────
+//
+// A scan only judges posts it hasn't judged before. `<userData>/
+// eroscripts-scout-state.json` keeps every judged post id with its verdict
+// and, per feed, how deep the backfill has read:
+//
+//   { version, lastScanAt, feeds: {<tag>: {backfillPage, exhausted}},
+//     topics: {<id>: {verdict, rules, at}} }
+//
+// Feeds are newest activity first. A scan reads pages from the top until a
+// page holds nothing new (or the page cap), then `backfill` more pages from
+// where the backfill stopped last time, so older posts get covered a little
+// on every run. Verdicts made under older rules count as unseen.
+
+/** Bump when the screening rules change, so every post is judged again. */
+export const RULES_VERSION = 2;
+
+export function emptyScoutState() {
+  return { version: 1, lastScanAt: null, feeds: {}, topics: {} };
+}
+
+/** The state read from disk, or an empty one when it is missing or foreign. */
+export function normalizeScoutState(raw) {
+  if (!raw || raw.version !== 1 || typeof raw.topics !== 'object' || typeof raw.feeds !== 'object') return emptyScoutState();
+  return { ...emptyScoutState(), ...raw };
+}
+
+/** True when post `id` was judged under the current rules. */
+export function seenTopic(state, id) {
+  return state.topics[id]?.rules === RULES_VERSION;
+}
+
+/** Remember the verdict on post `id` (`candidate` or a reject reason). */
+export function markTopic(state, id, verdict, now = Date.now()) {
+  state.topics[id] = { verdict, rules: RULES_VERSION, at: new Date(now).toISOString() };
+}
+
+/** Backfill cursor of a feed, created on first use. */
+export function feedState(state, tag) {
+  state.feeds[tag] ||= { backfillPage: 0, exhausted: false };
+  return state.feeds[tag];
+}
+
+/**
+ * The saved candidate list after a scan: candidates found now, plus earlier
+ * ones that still have a scene to download, minus posts the user turned
+ * down. Best score first.
+ *
+ * @param {object[]} previous candidates from the last list
+ * @param {object[]} fresh candidates found by this scan
+ * @param {(topicId: number, videoName: string) => boolean} isDone scene fetched or rejected
+ * @param {Set<number>} [turnedDown] posts the user rejected
+ */
+export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set()) {
+  const byId = new Map();
+  for (const c of [...(previous || []), ...(fresh || [])]) byId.set(c.id, c);
+  return [...byId.values()]
+    .filter((c) => !turnedDown.has(c.id) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * One feed's posts for this scan: pages from the top until one holds
+ * nothing unjudged (at most `maxNew` pages), then `backfill` pages from the
+ * feed's backfill cursor, which moves on. `full` reads all `maxNew` pages.
+ *
+ * @param {object} state scan state (mutated: the feed's cursor)
+ * @param {string} tag
+ * @param {(tag: string, page: number) => Promise<{topics: {id: number}[], more: boolean}>} listPage
+ * @param {{maxNew: number, backfill: number, full?: boolean}} o
+ * @returns {Promise<{topics: object[], pagesRead: number}>}
+ */
+export async function listFeed(state, tag, listPage, { maxNew, backfill, full = false }) {
+  const feed = feedState(state, tag);
+  const topics = [];
+  let pagesRead = 0;
+  const read = async (page) => {
+    const r = await listPage(tag, page);
+    pagesRead++;
+    topics.push(...r.topics);
+    return r;
+  };
+  let page = 0;
+  while (page < maxNew) {
+    const r = await read(page);
+    page++;
+    if (!r.more) { feed.exhausted = true; break; }
+    if (!full && r.topics.every((t) => seenTopic(state, t.id))) break;
+  }
+  feed.backfillPage = Math.max(feed.backfillPage, page);
+  for (let i = 0; i < backfill && !feed.exhausted; i++) {
+    const r = await read(feed.backfillPage);
+    feed.backfillPage++;
+    if (!r.more) feed.exhausted = true;
+  }
+  return { topics, pagesRead };
+}
+
 // ── Queue & playlist ────────────────────────────────────────────────────
 
 /**
