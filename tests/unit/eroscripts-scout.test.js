@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, scoreCandidate, scriptParts, matchScore, planScenes,
-  videoPreference, creatorFolder, sceneStem, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
+  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const topic = (tags, title = 'Some scene', id = 1) => ({ id, title, tags });
@@ -166,15 +166,109 @@ describe('videoPreference', () => {
 });
 
 describe('folders', () => {
-  it('names the creator from the title, skipping labels, else the poster', () => {
+  it('names the creator from the title, skipping labels, then a trailing "by", else the poster', () => {
     expect(creatorFolder('[Multi-axis] [Bastati] Yuria Boss Battle 1', 'shuny404')).toBe('Bastati');
     expect(creatorFolder('[VAM] Elf ride', 'manluo77')).toBe('manluo77');
+    expect(creatorFolder('[Fap Hero] (poyopoyo) Tougen Renka', 'voloi')).toBe('poyopoyo');
     expect(creatorFolder('(Meliodaswrath) Oral Bliss 2', 'bekscript')).toBe('Meliodaswrath');
+    expect(creatorFolder('Cock Hero: Girls of Overwatch 1 and 2 by Duodimension', 'FiniteJest')).toBe('Duodimension');
+  });
+});
+
+describe('sceneTitle', () => {
+  const title = (t, author, video = 'x.mp4', shared = false) => sceneTitle({ title: t, author, video, shared });
+
+  it('is "Artist - Title (metadata)" from the post, without script labels', () => {
+    expect(title('[Multi-axis][VAM] Linger 2', 'manluo77', '3.mp4')).toBe('manluo77 - Linger 2 (VAM)');
+    expect(title('(Meliodaswrath) Oral Bliss 2 (Commissioned, Multi Axis Script)', 'bekscript')).toBe('Meliodaswrath - Oral Bliss 2');
+    expect(title('[Oniko] 【NIKKE#7】Goddess Of Booty', 'Phel')).toBe('Oniko - Goddess Of Booty (NIKKE#7)');
+    expect(title('[VR Multi-Axis] Hush LapDanceSEX (DLSS NR ON!)', 'laozhao')).toBe('laozhao - Hush LapDanceSEX (VR, DLSS NR ON!)');
+    expect(title('HALLOWEEN SPECIAL (FREE Bonus Round) by FapZone3D', '0721sikosiko')).toBe('FapZone3D - HALLOWEEN SPECIAL (Bonus Round)');
+    expect(title('Axis Master [SR6] Blonde beauty | ✦ 3-Axis Organic Movement', '1036476631')).toBe('1036476631 - Blonde beauty');
+    expect(title('（poyopoyo）すきっちゅーの！ / Sukichuuno! | Linnea（multi-axis）', 'voloi')).toBe('poyopoyo - すきっちゅーの！ - Sukichuuno! (Linnea)');
   });
 
-  it('prefixes a scene name that says nothing on its own with the post title', () => {
-    expect(sceneStem('7', "Cock Hero - King's Row Story Mode")).toBe("Cock Hero - King's Row Story Mode - 7");
-    expect(sceneStem('Widowmaker Doll', 'Overwatch Package')).toBe('Widowmaker Doll');
+  it('names each video of a several-video post by its own file, keeping words like (G)I-DLE whole', () => {
+    expect(title('[Seraphine] Overwatch Fuck Doll Package', 'Solace2K', '[Reinamation] - Overwatch Fuck Doll Compilation.mp4', true))
+      .toBe('Seraphine - Overwatch Fuck Doll Compilation (Reinamation)');
+    expect(title('(Multi-axis) Iwara MMD dance pack', 'loldorf', 'Iwara - 竖屏版---弱音haku----(G)I-DLE - Queencard [E1kz8fXZmnWTV6] [Source].mp4', true))
+      .toBe('loldorf - 竖屏版 - 弱音haku - (G)I-DLE - Queencard');
+    expect(title('VaM POV PMV - School Fantasy', 'Misiv', 'VaM POV PMV by Misiv - School Fantasy.mp4', true)).toBe('Misiv - VaM POV PMV - School Fantasy');
+  });
+
+  it('keeps the post title when a video name says nothing, and puts that name in the metadata', () => {
+    expect(title("Cock Hero - Overwatch King's Row Story Mode Part 1 UPDATED", 'FruitPunch96', '7.mp4', true))
+      .toBe("FruitPunch96 - Cock Hero - Overwatch King's Row Story Mode Part 1 (7)");
+  });
+
+  it('keeps a VR projection suffix at the end of the name', () => {
+    expect(title('Yvonne from Arknights VAM 8KVR', 'maechoon', 'Yvonne - She Ridin On Me Passthrough_180_3DH.mp4', true))
+      .toBe('maechoon - Yvonne - She Ridin On Me Passthrough_180_3DH');
+    expect(title('Some dance', 'a', 'dance_LRF_Full_SBS.mp4')).toBe('a - Some dance_LRF_Full_SBS');
+    expect(title('Some dance', 'a', 'dance Full.mp4')).toBe('a - Some dance');
+  });
+
+  it('stays within the file name limit, dropping metadata before cutting the title', () => {
+    const long = title(`[Artist] ${'長い'.repeat(40)} (Extra)`, 'p');
+    expect(Buffer.byteLength(long)).toBeLessThanOrEqual(180);
+    expect(long).not.toMatch(/\(/);
+  });
+});
+
+describe('retitlePlan', () => {
+  const scene = (dir, video, rec, extra = []) => ({ dir, files: [video, `${video.replace(/\.mp4$/, '')}.twist.funscript`, 'eroscripts.json', ...extra], rec: { video, ...rec } });
+
+  it('moves each scene to <artist>/<title>, renaming every file that carries the stem', () => {
+    const moves = retitlePlan([scene('/in/manluo77/3', '3.mp4', { topicId: 1, title: '[Multi-axis][VAM] Linger 2', author: 'manluo77' }, ['3.en.srt', 'cover.jpg'])], '/in');
+    expect(moves).toEqual([{
+      from: '/in/manluo77/3', to: '/in/manluo77/manluo77 - Linger 2 (VAM)', video: 'manluo77 - Linger 2 (VAM).mp4',
+      files: [
+        { from: '3.mp4', to: 'manluo77 - Linger 2 (VAM).mp4' },
+        { from: '3.twist.funscript', to: 'manluo77 - Linger 2 (VAM).twist.funscript' },
+        { from: '3.en.srt', to: 'manluo77 - Linger 2 (VAM).en.srt' },
+      ],
+    }]);
+  });
+
+  it('counts a post with several fetched videos as shared, and numbers clashing names', () => {
+    const rec = { topicId: 2, title: 'Pack', author: 'z' };
+    const moves = retitlePlan([scene('/in/z/a', 'Dance.mp4', rec), scene('/in/z/b', 'dance.mp4', rec)], '/in');
+    expect(moves.map((m) => m.to)).toEqual(['/in/z/z - Dance', '/in/z/z - dance (2)']);
+  });
+
+  it('plans nothing for scenes already named right', () => {
+    const s = scene('/in/manluo77/manluo77 - Linger 2 (VAM)', 'manluo77 - Linger 2 (VAM).mp4', { topicId: 1, title: '[VAM] Linger 2', author: 'manluo77', video: '3.mp4' });
+    expect(retitlePlan([s], '/in')).toEqual([]);
+  });
+
+  it('steps around a folder already on disk under the new name', () => {
+    const s = scene('/in/manluo77/3', '3.mp4', { topicId: 1, title: '[VAM] Linger 2', author: 'manluo77' });
+    const exists = (p) => p === '/in/manluo77/manluo77 - Linger 2 (VAM)';
+    expect(retitlePlan([s], '/in', exists)[0].to).toBe('/in/manluo77/manluo77 - Linger 2 (VAM) (2)');
+  });
+});
+
+describe('remapPaths', () => {
+  it('moves renamed files and anything else under a moved folder, in keys and values', () => {
+    const moves = [{ from: '/in/a/3', to: '/in/a/A - B', files: [{ from: '3.mp4', to: 'A - B.mp4' }] }];
+    const config = {
+      playlists: [{ videoPaths: ['/in/a/3/3.mp4', '/in/a/30/30.mp4'] }],
+      associations: { '/in/a/3/3.mp4': { main: '/in/a/3/3.funscript' } },
+    };
+    const { value, changed } = remapPaths(config, moves);
+    expect(value).toEqual({
+      playlists: [{ videoPaths: ['/in/a/A - B/A - B.mp4', '/in/a/30/30.mp4'] }],
+      associations: { '/in/a/A - B/A - B.mp4': { main: '/in/a/A - B/3.funscript' } },
+    });
+    expect(changed).toBe(3);
+  });
+
+  it('matches a path spelled in another case or Unicode form', () => {
+    const moves = [{ from: '/in/bubukuin/Mona パ', to: '/in/bubukuin/Bubukuin - Mona', files: [{ from: 'Mona パ.mp4', to: 'Bubukuin - Mona.mp4' }] }];
+    const old = '/in/Bubukuin/Mona パ'.normalize('NFD');
+    const sub = 'パ.en.srt'.normalize('NFD');
+    expect(remapPaths([`${old}/Mona ${'パ'.normalize('NFD')}.mp4`, `${old}/${sub}`], moves).value)
+      .toEqual(['/in/bubukuin/Bubukuin - Mona/Bubukuin - Mona.mp4', `/in/bubukuin/Bubukuin - Mona/${sub}`]);
   });
 });
 

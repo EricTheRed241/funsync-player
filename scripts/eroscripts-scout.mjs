@@ -4,10 +4,11 @@
 //
 //   npm run eroscripts:scout                 scan → <userData>/eroscripts-scout.json
 //   npm run eroscripts:scout -- --fetch      download the saved list
+//   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs. Scenes land in
-// `<library parent>/_incoming/<creator>/<scene>/` with an `eroscripts.json`
-// sidecar. Single-axis scenes get generated twist / roll / pitch companions
+// `<library parent>/_incoming/<creator>/<Artist - Title (metadata)>/` with an
+// `eroscripts.json` sidecar. Single-axis scenes get generated twist / roll / pitch companions
 // (scripts/upgrade-multi-axis.mjs). Each finished video joins the Discovery
 // playlist, and `_incoming` becomes a library source named Discovery, so the
 // scenes show in the library, the web remote and HereSphere. config.json is
@@ -15,7 +16,7 @@
 // `<userData>/eroscripts-scout-pending.json` for the next run.
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
-// last pass, 3 not logged in / session expired.
+// last pass / app running (--retitle), 3 not logged in / session expired.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -51,7 +52,10 @@ Download:
   --ids 1,2,3            only these post ids
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
-  --dry-run              list what would be downloaded
+  --dry-run              list what would be downloaded (or, with --retitle, renamed)
+Rename:
+  --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
+                         and the paths config.json keeps for them (app must be closed)
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default <library parent>/_incoming)`;
@@ -66,6 +70,7 @@ function parseArgs(argv) {
     const a = argv[i];
     switch (a) {
       case '--fetch': opts.fetch = true; break;
+      case '--retitle': opts.retitle = true; break;
       case '--dry-run': opts.dryRun = true; break;
       case '--pages': opts.pages = Number(value(i, a)); i++; break;
       case '--anim-pages': opts.animPages = Number(value(i, a)); i++; break;
@@ -104,6 +109,28 @@ function writeConfig(userData, config) {
   const tmp = `${file}.tmp-discovery`;
   fs.writeFileSync(tmp, JSON.stringify(config, null, '\t'));
   fs.renameSync(tmp, file);
+}
+
+/** Rename `from` to `to`, with its AppleDouble `._` sidecar if the volume keeps one. */
+function renameWithSidecar(from, to) {
+  fs.renameSync(from, to);
+  const side = (p) => path.join(path.dirname(p), `._${path.basename(p)}`);
+  if (fs.existsSync(side(from)) && !fs.existsSync(side(to))) fs.renameSync(side(from), side(to));
+}
+
+/**
+ * Remove a folder that holds nothing but `._*` / `.DS_Store` leftovers. exFAT
+ * lists names decomposed (NFD) but finds some `._` files only by their
+ * composed (NFC) spelling, so both are tried; a folder that won't go stays.
+ */
+function removeIfEmpty(dir) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return; }
+  if (names.some((n) => !n.startsWith('._') && n !== '.DS_Store')) return;
+  for (const n of names) for (const form of [n, n.normalize('NFC')]) fs.rmSync(path.join(dir, form), { force: true });
+  try { fs.rmdirSync(dir); } catch { return; }
+  const side = path.join(path.dirname(dir), `._${path.basename(dir)}`);
+  for (const form of [side, side.normalize('NFC')]) fs.rmSync(form, { force: true });
 }
 
 function librarySources(config, incoming) {
@@ -245,7 +272,7 @@ async function scan(opts, { api, userData, config, incoming }) {
     const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
     candidates.push({
       id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
-      creator: lib.creatorFolder(t.title, author), tags: t.tags, likes: t.likes,
+      tags: t.tags, likes: t.likes,
       vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts,
       score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!artistInLibrary, preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
       scenes: plan.scenes,
@@ -321,14 +348,19 @@ function fetchedScenes(incoming) {
 
 /**
  * `p` spelled the way the drive lists it. Names from MEGA come in one Unicode
- * form (NFC) while some volumes list another, and the playlist and headset
- * match the library scan's paths byte for byte.
+ * form (NFC) while some volumes list another, a folder may exist in another
+ * case (`bubukuin` for `Bubukuin`), and the playlist and headset match the
+ * library scan's paths byte for byte.
  */
 function onDiskPath(p) {
   let cur = path.sep;
   for (const seg of path.resolve(p).split(path.sep).filter(Boolean)) {
     let hit = seg;
-    try { hit = fs.readdirSync(cur).find((n) => n.normalize('NFC') === seg.normalize('NFC')) ?? seg; } catch { /* keep as given */ }
+    try {
+      const names = fs.readdirSync(cur);
+      const nfc = seg.normalize('NFC');
+      hit = names.find((n) => n.normalize('NFC') === nfc) ?? names.find((n) => n.normalize('NFC').toLowerCase() === nfc.toLowerCase()) ?? seg;
+    } catch { /* keep as given */ }
     cur = path.join(cur, hit);
   }
   return cur;
@@ -358,15 +390,16 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
   for (const c of queue) {
     for (const sc of c.scenes) {
       if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
-      const stem = lib.sceneStem(sc.base, c.title);
-      const dir = path.join(incoming, c.creator, stem);
+      const creator = lib.creatorFolder(c.title, c.author);
+      const stem = lib.sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 });
+      const dir = path.join(incoming, creator, stem);
       const video = path.join(dir, stem + path.extname(sc.video.name).toLowerCase());
       try {
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging);
         await download(api, sc.video, video, staging);
         fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
           topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
-          video: sc.video.name, file: path.basename(video), at: new Date().toISOString(),
+          video: sc.video.name, file: path.basename(video), scenes: c.scenes.length, at: new Date().toISOString(),
         }, null, 1));
         let note = '';
         if (!sc.axes.length) {
@@ -374,10 +407,10 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
           if (up.status === 0) { generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
         }
         const listed = flushPlaylist(userData, incoming, [video]);
-        console.log(`${now()} ✓ ${c.creator}/${stem}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
+        console.log(`${now()} ✓ ${creator}/${stem}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
         ok++;
       } catch (err) {
-        console.log(`${now()} ✗ ${c.creator}/${stem}: ${err.message}`);
+        console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
         failed++;
       }
     }
@@ -411,6 +444,68 @@ async function fetchAll(opts, { api, userData, incoming }) {
   return 2;
 }
 
+// ── Retitle ─────────────────────────────────────────────────────────────
+
+/** Rename fetched scenes to `Artist - Title (metadata)` and move config.json's paths with them. */
+function retitle(opts, { userData, incoming }) {
+  if (!opts.dryRun && appRunning(userData)) {
+    console.error('FunSync is running. Close it, then re-run --retitle: config.json holds the scene paths.');
+    return 2;
+  }
+  const scenes = [];
+  walk(incoming, 0, (full, e) => {
+    if (e.name !== 'eroscripts.json') return;
+    const dir = path.dirname(full);
+    try {
+      scenes.push({ dir, rec: JSON.parse(fs.readFileSync(full, 'utf8')), files: fs.readdirSync(dir).filter((n) => !n.startsWith('._')) });
+    } catch { process.stderr.write(`! unreadable ${full}\n`); }
+  });
+  const moves = lib.retitlePlan(scenes, incoming, (p) => fs.existsSync(p));
+  const rel = (p) => path.relative(incoming, p);
+  for (const m of moves) console.log(`${rel(m.from)}\n  → ${rel(m.to)}`);
+  console.log(`${moves.length} of ${scenes.length} scenes ${opts.dryRun ? 'would be renamed' : 'to rename'}`);
+  if (opts.dryRun || !moves.length) return 0;
+
+  const done = [];
+  let failed = 0;
+  for (const m of moves) {
+    const renamed = [];
+    try {
+      for (const f of m.files) {
+        renameWithSidecar(path.join(m.from, f.from), path.join(m.from, f.to));
+        renamed.push(f);
+      }
+      if (path.resolve(m.to) !== path.resolve(m.from)) {
+        fs.mkdirSync(path.dirname(m.to), { recursive: true });
+        renameWithSidecar(m.from, m.to);
+      }
+    } catch (err) {
+      for (const f of renamed.reverse()) {
+        try { renameWithSidecar(path.join(m.from, f.to), path.join(m.from, f.from)); } catch { /* reported below */ }
+      }
+      console.log(`✗ ${rel(m.from)}: ${err.message}`);
+      failed++;
+      continue;
+    }
+    const sidecar = path.join(m.to, 'eroscripts.json');
+    fs.writeFileSync(sidecar, JSON.stringify({ ...JSON.parse(fs.readFileSync(sidecar, 'utf8')), file: m.video }, null, 1));
+    removeIfEmpty(path.dirname(m.from));
+    const to = onDiskPath(m.to);
+    done.push({ from: m.from, to, files: m.files.map((f) => ({ from: f.from, to: path.basename(onDiskPath(path.join(to, f.to))) })) });
+  }
+
+  if (done.length) {
+    const { value, changed } = lib.remapPaths(readConfig(userData), done);
+    writeConfig(userData, value);
+    const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
+    if (fs.existsSync(pendingFile)) {
+      fs.writeFileSync(pendingFile, JSON.stringify(lib.remapPaths(JSON.parse(fs.readFileSync(pendingFile, 'utf8')), done).value, null, 1));
+    }
+    console.log(`Renamed ${done.length} scenes; ${changed} paths updated in config.json`);
+  }
+  return failed ? 1 : 0;
+}
+
 // ── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -418,12 +513,13 @@ async function main() {
   if (opts.help) { console.log(USAGE); return 0; }
   const userData = opts.userData || defaultUserDataDir();
   const config = readConfig(userData);
-  const session = config.settings?.eroscripts?.session || {};
-  if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
   const sources = librarySources(config, opts.incoming);
   const discovery = (config.settings?.library?.sources || []).find((s) => s.name === lib.DISCOVERY_NAME);
   const incoming = opts.incoming || discovery?.path || (sources[0] && path.join(path.dirname(sources[0].path), '_incoming'));
   if (!incoming) throw new Error('No library source to put _incoming next to; pass --incoming <dir>.');
+  if (opts.retitle) return retitle(opts, { userData, incoming });
+  const session = config.settings?.eroscripts?.session || {};
+  if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
 
   // The API module logs through electron-log; keep the CLI's output clean.
   const log = require('../electron/logger.js');

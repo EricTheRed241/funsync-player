@@ -235,29 +235,237 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
 // ── Folders ─────────────────────────────────────────────────────────────
 
 const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
-const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|vam|mmd|sfm/i;
+// Leading title groups that label the post rather than name its artist.
+const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|suggest|vam|mmd|sfm|fap ?hero|cock ?hero|[hp]mv|r-?18|hentai|^[23]d$|^ai$|^iwara$/i;
+// `[…]`, `（…）`, `【…】`, `{…}`, and `(…)` unless glued to a word (`(G)I-DLE`).
+const GROUP_RE = /\[([^\]]*)\]|（([^）]*)）|【([^】]*)】|\{([^}]*)\}|\(([^()]*)\)(?![\p{L}\p{N}])/gu;
+// Bracket parts that describe the script or the post, not the video.
+const NOISE_PART = /request|suggest|commission|script|organic|waveform|^(sr6|osr\d*|m-?a|updated|source)$/i;
+const AXIS_WORDS = /(?:multi|\d+)[- ]?axis|\baxis\b/giu;
+// HereSphere / DeoVR projection tokens at the end of a video name (`_180_3DH`,
+// `_LRF_Full_SBS`). The headset and the flatten view read them from the file name.
+const VR_TAIL = /(?:[_ .-](?:180|360|180x180|360x180|3dh|3dv|lrf?|rl|tbf?|bt|ouf?|sbsf?|full|mono180|mono360|mkx2[02]0|rf52|fisheye\d*|vrca220|fb360|eac360|eac))+$/i;
+// Scene stems stay well under the 255-byte name limit with `.generated.twist.funscript`.
+const STEM_BYTES = 180;
 
-/** Creator folder: the first leading `[Name]` / `(Name)` of the title that names someone, else the poster. */
-export function creatorFolder(title, author) {
-  const lead = (String(title).match(/^(\s*[[(（【][^\])）】]+[\])）】])+/) || [''])[0];
-  const named = [...lead.matchAll(/[[(（【]([^\])）】]+)[\])）】]/g)].map((m) => m[1].trim()).find((x) => !NOT_A_CREATOR.test(x));
-  return safeName(named || author) || 'unknown';
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Letters in a name; a CJK character says as much as a short word, so it counts twice.
+const letterCount = (s) => (coreName(s).match(/\p{L}/gu) || []).reduce((n, ch) => n + (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch) ? 2 : 1), 0);
+const squash = (s) => normName(s).replace(/ /g, '');
+
+/** Separators a file name can't hold become ` - `; runs of dashes and stray punctuation go. */
+function tidy(s) {
+  return String(s)
+    .replace(/\s+_\s+|\s+\/\s+|:\s+|\s*｜\s*/g, ' - ')
+    .replace(/\//g, '-')
+    .replace(/_+/g, ' ')
+    .replace(/\s*-{2,}\s*/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,，、])/g, '$1')
+    .replace(/^[\s\-–—,;.]+|[\s\-–—,;.]+$/g, '');
+}
+
+/** A bracket part worth keeping as metadata, or ''. */
+function metaPart(s) {
+  if (NOISE_PART.test(s.trim())) return '';
+  const t = tidy(s.replace(/\p{So}/gu, ' ').replace(AXIS_WORDS, ' ').replace(/\bfree\b/gi, ' '));
+  if (/^vr$/i.test(t)) return 'VR';
+  if (!t || NOISE_PART.test(t) || !coreName(t)) return '';
+  // Iwara video id: `3rUYW85MLIfCsu`, `QsmFYIhCwVnjBp`.
+  if (/^[A-Za-z0-9]{12,}$/.test(t) && (/\d/.test(t) || (t.match(/[a-z][A-Z]/g) || []).length >= 3)) return '';
+  return t;
+}
+
+/** Bracket groups (leading ones flagged) and the text around them. */
+function splitGroups(text) {
+  const groups = [];
+  let rest = '';
+  let last = 0;
+  let lead = true;
+  for (const m of text.matchAll(GROUP_RE)) {
+    const between = text.slice(last, m.index);
+    if (between.trim()) lead = false;
+    // Keep words on both sides apart; `Name[tag]-2025` closes up to `Name-2025`.
+    rest += between + (/^[\p{L}\p{N}]/u.test(text.slice(m.index + m[0].length)) ? ' ' : '');
+    groups.push({ text: (m.slice(1).find((g) => g !== undefined) || '').trim(), lead });
+    last = m.index + m[0].length;
+  }
+  return { groups, rest: rest + text.slice(last) };
 }
 
 /**
- * Scene folder and file stem. A base that says nothing on its own (`7`,
- * `A`, `01`) is prefixed with the post title so it stays findable.
+ * Artist, title core and metadata of a post title or a video name. The
+ * artist is the first leading `[Name]` / `(Name)` that names someone, else a
+ * trailing `by Name`, else `fallback`. Script labels (multi-axis, requested,
+ * SR6, …) are dropped; other bracket parts and ` | ` segments become metadata.
  */
-export function sceneStem(base, title) {
-  const stem = safeName(base);
-  const letters = (coreName(stem).match(/\p{L}/gu) || []).length;
-  if (letters >= 3) return stem;
-  return safeName(`${title.replace(/[[(（【][^\])）】]*[\])）】]/g, ' ')} - ${stem}`).slice(0, 150);
+function parseName(text, fallback) {
+  const { groups, rest } = splitGroups(String(text).replace(/^\s*(?:axis master|public release\s*:)\s*/i, ''));
+  let artist = groups.find((g) => g.lead && g.text && !NOT_A_CREATOR.test(g.text))?.text || '';
+  const [first, ...segments] = rest.split(/\s+\|\s+/);
+  let core = first.replace(/^\s*iwara\s*-\s*/i, '').replace(AXIS_WORDS, ' ').replace(/\s+updated\s*$/i, '');
+  if (!artist) {
+    const by = core.match(/^(.*\S)\s+by\s+(\S+(?:\s+\S+){0,2})\s*$/i);
+    if (by) [, core, artist] = by;
+  }
+  artist = tidy(artist || fallback || '');
+  if (artist) {
+    core = core.replace(new RegExp(`\\s+by\\s+${escapeRe(artist)}(?![\\p{L}\\p{N}])`, 'iu'), ' ')
+      .replace(new RegExp(`^\\s*${escapeRe(artist)}(?![\\p{L}\\p{N}])\\s*[-–—]?`, 'iu'), ' ');
+  }
+  const meta = groups.filter((g) => g.text !== artist).flatMap((g) => g.text.split(/[,，、]/)).map(metaPart);
+  for (const s of segments) {
+    const m = metaPart(s);
+    if (!m) break;
+    meta.push(m);
+  }
+  return { artist, core: tidy(core), meta: meta.filter(Boolean) };
+}
+
+/** Cut to `max` UTF-8 bytes on a character boundary. */
+function capBytes(s, max) {
+  let out = '';
+  let n = 0;
+  for (const ch of s) {
+    n += Buffer.byteLength(ch);
+    if (n > max) break;
+    out += ch;
+  }
+  return out.trim();
+}
+
+/** Creator folder: the post's artist (see parseName), else the poster. */
+export function creatorFolder(title, author) {
+  return safeName(parseName(title, author).artist) || 'unknown';
+}
+
+/**
+ * Scene folder and file stem, which the library shows as the title:
+ * `Artist - Title (metadata)`. The title comes from the post; a post with
+ * several videos (`shared`) names each by its own file instead, unless that
+ * name says nothing (`7`, `03`), which then goes into the metadata. A VR
+ * projection suffix of the video name (`_180_3DH`) is kept at the end.
+ *
+ * @param {object} o
+ * @param {string} o.title post title
+ * @param {string} o.author poster, the artist when the title names none
+ * @param {string} o.video video file name
+ * @param {boolean} [o.shared] the post has more than one video
+ */
+export function sceneTitle({ title, author, video, shared = false }) {
+  const post = parseName(title, author);
+  const base = String(video).replace(VIDEO_EXT_RE, '');
+  const tail = (base.match(VR_TAIL) || [''])[0];
+  const vrTail = /[a-z0-9]/i.test(tail.replace(/full/gi, '')) ? `_${tail.split(/[_ .-]/).filter(Boolean).join('_')}` : '';
+  const own = parseName(vrTail ? base.slice(0, -tail.length) : base, post.artist);
+  let { core, meta } = post;
+  if (shared || letterCount(core) < 3) {
+    const ownMeta = own.artist !== post.artist ? [own.artist, ...own.meta] : own.meta;
+    if (letterCount(own.core) >= 3) {
+      core = own.core;
+      meta = ownMeta;
+    } else meta = [tidy(own.core), ...ownMeta, ...meta];
+  }
+  const artistKey = squash(post.artist);
+  const seen = new Set();
+  meta = meta.filter((m) => {
+    const k = squash(m);
+    if (!k || k === artistKey || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const named = (m) => safeName(`${post.artist} - ${core}${m.length ? ` (${m.join(', ')})` : ''}`);
+  // Too long: drop metadata from the end, then cut the title.
+  while (meta.length && Buffer.byteLength(named(meta)) > STEM_BYTES) meta = meta.slice(0, -1);
+  return capBytes(named(meta), STEM_BYTES).replace(/[\s\-–—,;.(]+$/, '') + vrTail;
 }
 
 /** File name for a scene's script in the scan's spelling. */
 export function scriptFileName(stem, axis) {
   return `${stem}${axis ? `.${axis}` : ''}.funscript`;
+}
+
+// ── Retitle ─────────────────────────────────────────────────────────────
+
+// exFAT and APFS compare names case- and normalization-insensitively.
+const fold = (p) => p.normalize('NFC').toLowerCase();
+const pathKey = (p) => fold(path.resolve(p));
+
+/**
+ * Moves that give fetched scenes their current `<creator>/<title>` names.
+ * Each scene's files that carry the video's stem (video, scripts, axis
+ * companions, subtitles) take the new stem; the sidecar keeps its name. A
+ * name another scene or folder holds gets ` (2)`, ` (3)` …. Scenes already
+ * named right are left out, so a second run plans nothing.
+ *
+ * @param {{dir: string, files: string[], rec: object}[]} scenes scene folder,
+ *   its file names (no `._*`), and its `eroscripts.json`
+ * @param {string} incoming the Discovery folder
+ * @param {(dir: string) => boolean} [exists] whether a folder is already on disk
+ * @returns {{from: string, to: string, video: string, files: {from: string, to: string}[]}[]}
+ */
+export function retitlePlan(scenes, incoming, exists = () => false) {
+  const perTopic = new Map();
+  for (const s of scenes) perTopic.set(s.rec.topicId, (perTopic.get(s.rec.topicId) || 0) + 1);
+  const taken = new Set(scenes.map((s) => pathKey(s.dir)));
+  const moves = [];
+  for (const s of scenes) {
+    const video = s.files.find((n) => n === s.rec.file) || s.files.find(isVideoName);
+    if (!video) continue;
+    const ext = path.extname(video);
+    const oldStem = video.slice(0, -ext.length);
+    const { title, author } = s.rec;
+    const stem = sceneTitle({ title, author, video: s.rec.video || video, shared: (s.rec.scenes ?? perTopic.get(s.rec.topicId)) > 1 });
+    const parent = path.join(incoming, creatorFolder(title, author));
+    taken.delete(pathKey(s.dir));
+    const clash = (p) => taken.has(pathKey(p)) || (pathKey(p) !== pathKey(s.dir) && exists(p));
+    let to = path.join(parent, stem);
+    for (let n = 2; clash(to); n++) to = path.join(parent, `${stem} (${n})`);
+    taken.add(pathKey(to));
+    const newStem = path.basename(to);
+    if (pathKey(to) === pathKey(s.dir) && newStem.normalize('NFC') === oldStem.normalize('NFC')) continue;
+    const files = s.files.filter((n) => n.startsWith(`${oldStem}.`)).map((n) => ({ from: n, to: newStem + n.slice(oldStem.length) }));
+    moves.push({ from: s.dir, to, video: newStem + ext, files });
+  }
+  return moves;
+}
+
+/**
+ * Rewrite paths inside parsed JSON (keys and string values) after
+ * `retitlePlan` moves: renamed files map to their new path, anything else
+ * under a moved folder follows the folder. Paths match whatever their case
+ * or Unicode form, as the volume does. Returns the new value and how many
+ * keys and strings changed.
+ */
+export function remapPaths(value, moves) {
+  const files = new Map();
+  for (const m of moves) for (const f of m.files) files.set(fold(path.join(m.from, f.from)), path.join(m.to, f.to));
+  const dirs = moves.map((m) => ({ key: fold(m.from) + path.sep, depth: m.from.split(path.sep).length, to: m.to }));
+  const map = (s) => {
+    if (!s.startsWith(path.sep)) return s;
+    const k = fold(s);
+    if (files.has(k)) return files.get(k);
+    const d = dirs.find((x) => k.startsWith(x.key));
+    return d ? [d.to, ...s.split(path.sep).slice(d.depth)].join(path.sep) : s;
+  };
+  let changed = 0;
+  const walk = (v) => {
+    if (typeof v === 'string') {
+      const r = map(v);
+      if (r !== v) changed++;
+      return r;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (!v || typeof v !== 'object') return v;
+    const out = {};
+    for (const [k, x] of Object.entries(v)) {
+      const nk = map(k);
+      if (nk !== k) changed++;
+      out[nk] = walk(x);
+    }
+    return out;
+  };
+  return { value: walk(value), changed };
 }
 
 // ── Queue & playlist ────────────────────────────────────────────────────
