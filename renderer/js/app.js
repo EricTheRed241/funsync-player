@@ -35,7 +35,7 @@ import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
-import { isRejectPlaylist, sweepRejected } from './reject-rule.js';
+import { isRejectPlaylist, ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
@@ -497,6 +497,8 @@ class App {
 
     // Load saved collections into nav bar + library (must be after library creation)
     await this._refreshCollectionsUI();
+    // Collections made after a scan (auto-collections.js) join the nav bar.
+    eventBus.on('collections:changed', () => { this._refreshCollectionsUI().catch(() => {}); });
 
     // Playlists
     this.playlists = new Playlists({
@@ -2413,9 +2415,11 @@ class App {
   }
 
   /**
-   * Sweep the No thank you playlist now and whenever a video lands in it.
-   * Sweeps run one after another; a finished one rescans the library so the
-   * deleted scenes leave the grid, the phone and the headset.
+   * Triage rules (reject-rule.js): No thank you and ratings of 2 or lower
+   * delete from disk, 2½–3½ stars go to Review, 4+ leave it. Runs now and
+   * on every playlist add / rating change. Deletion sweeps run one after
+   * another; a finished one rescans the library so the deleted scenes leave
+   * the grid, the phone and the headset.
    */
   _wireRejectRule() {
     let chain = Promise.resolve();
@@ -2423,22 +2427,30 @@ class App {
       chain = chain.then(async () => {
         const { removed, failed } = await sweepRejected({
           data: this.settings,
-          deleteVideo: (p) => window.funsync.deleteRejectedVideo(p),
+          deleteVideo: (p, reason) => window.funsync.deleteRejectedVideo(p, reason),
         });
         for (const f of failed) console.warn(`[Rejected] kept ${f.path}: ${f.error}`);
         if (!removed.length) return;
-        console.log(`[Rejected] deleted ${removed.length} video(s) from disk`);
+        console.log(`[Rejected] deleted ${removed.length} video(s) from disk:`, removed.map((r) => r.reason));
         showToast(t('toast.rejectedDeleted', { count: removed.length }), 'info');
         await this._handleRescanRequest();
       }).catch((err) => console.warn('[Rejected] sweep failed:', err));
       return chain;
     };
+    const review = (path) => syncReview(this.settings, path)
+      .then((r) => { if (r.added || r.removed) console.log('[Review]', path || 'startup', r); })
+      .catch((err) => console.warn('[Review] failed:', err));
     eventBus.on('playlist:changed', ({ action, id, playlist } = {}) => {
       if (!['add', 'addVideo', 'addVideos', 'reorder', 'rename'].includes(action)) return;
       const pl = playlist || this.settings.getPlaylist(id);
       if (pl && isRejectPlaylist(pl.name)) sweep();
     });
-    sweep();
+    eventBus.on('rating:changed', ({ path, entry } = {}) => {
+      const verdict = ratingVerdict(entry);
+      if (verdict === 'delete') sweep();
+      else if (path && verdict) review(path);
+    });
+    sweep().then(() => review());
   }
 
   /**

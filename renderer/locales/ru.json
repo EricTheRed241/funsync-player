@@ -643,7 +643,7 @@
     "mutexTakeover": "{incoming} перехватил у {evicted}",
     "added": "Добавлено",
     "addedTo": "Добавлено в \"{name}\"",
-    "rejectedDeleted": "Удалено с диска видео из \"No thank you\": {count}",
+    "rejectedDeleted": "Удалено с диска отклонённых видео: {count} (\"No thank you\" или 2 звезды и ниже)",
     "removed": "Удалено",
     "saved": "Сохранено",
     "copied": "Скопировано",
