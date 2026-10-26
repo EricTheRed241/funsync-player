@@ -13,7 +13,7 @@
 // scene gets generated twist / roll / pitch companions after download.
 //
 // Rules: those of the EroScripts scout (scripts/eroscripts-scout-lib.mjs)
-// except the multi-axis one.
+// except the multi-axis one, narrowed to what the user wants from FapTap.
 //   • Never loli, shota, furry / anthro / yiff, futa / futanari (tags, title
 //     or description), nor FapTap's furry tags that don't say so (scalie,
 //     knot, Krystal, Renamon …).
@@ -24,10 +24,19 @@
 //     too). AI video counts. A music video (PMV / HMV / Cock Hero …) by a
 //     creator already in the library is taken too; a library folder named
 //     after a genre (`Cock Hero`, `PMV`) is no creator.
+//   • No audio roleplays (erotic audio / ASMR over a still or a loop).
+//   • Focus: PMV / HMV (Cock Hero and Fap Hero included), creampie or
+//     reverse cowgirl, by tag or title.
 //   • Sex only (as on EroScripts), at least a minute long.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream up to 4K (8K for VR); none below
 //     720p (1080p for VR).
+//
+// Tags: FapTap's free-text tags become the tags the library already uses
+// (EroScripts slugs, which the auto categories and collections match):
+// `Cum Inside Pussy` → `creampie`, `Reverse Cowgirl Position` →
+// `reverse-cowgirl`, `Animated 3d` → `3d`, `Mercy (Overwatch)` → also
+// `overwatch`.
 
 import {
   ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, hasExcludedText, isCreatorLabel, isSexual, normName, sameVideo, scoreCandidate,
@@ -36,15 +45,57 @@ import {
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 1;
+export const FAPTAP_RULES_VERSION = 2;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
-// FapTap's own spellings of animation tags, on top of the EroScripts ones.
-const FAPTAP_ANIMATION_TAGS = new Set([
-  'animated', 'animated-2d', 'animated-3d', 'animated-cartoon', 'animated-porn', 'animation-sex', 'animation-w-sound',
-  'hentai-anime', 'hentai-joi', 'ai-video', 'iwara',
-]);
+// Animation tags (after aliasing) the EroScripts list doesn't have.
+const FAPTAP_ANIMATION_TAGS = new Set(['2d', 'ai-video', 'iwara']);
+// FapTap spelling → the tag the library already uses.
+const TAG_ALIASES = Object.fromEntries(Object.entries({
+  animation: ['animated', 'animated-cartoon', 'animated-porn', 'animation-sex', 'animation-w-sound'],
+  '3d': ['animated-3d', '3d-animation'],
+  '2d': ['animated-2d', '2d-animated', '2d-animation'],
+  hentai: ['hentai-anime', 'hentai-joi'],
+  creampie: ['cum-in-pussy', 'cum-inside-pussy', 'cum-inside', 'cowgirl-creampie', 'balls-deep-creampie', 'breeding-creampie', 'multiple-creampie', 'tomboy-creampie'],
+  'anal-creampie': ['cum-in-ass'],
+  'cum-in-mouth': ['cim', 'cum-mouth', 'blowjob-cum-in-mouth'],
+  throatpie: ['cum-in-throat'],
+  'reverse-cowgirl': ['reverse-cowgirl-position', 'reverse-cowgirl-pov'],
+  cowgirl: ['cowgirl-position', 'cowgirl-pov', 'girl-on-top'],
+  riding: ['cock-riding', 'riding-cock', 'riding-dick', 'pov-riding', 'cowgirl-riding', 'best-cock-riding', 'ride', 'rides', 'riding-orgasm'],
+  doggystyle: ['doggystyle-position', 'doggystyle-pov', 'dog-style', 'from-behined'],
+  'standing-doggy': ['standing-doggystyle'],
+  pronebone: ['prone-bone'],
+  missionary: ['missionary-position', 'missionary-pov'],
+  blowjob: ['blow-jobs', 'blow', 'blowjob-pov', 'pov-blowjob', 'close-up-blowjob', 'deep-blowjob', 'sloppy-blowjob', 'slow-blowjob', 'blowjob-face',
+    'dick-sucking', 'sucking-dick', 'cocksucking', 'fellatio', 'oral', 'oral-sex', 'asian-blowjob', 'dildo-blowjob', 'double-blowjob', 'sloppy-head',
+    'suck', 'sucking', 'mamada', 'pijpen'],
+  deepthroat: ['extreme-deepthroat', 'sloppy-deepthroat', 'asian-deepthroat'],
+  facefuck: ['face-fuck', 'facefucking', 'throat-fuck'],
+  handjob: ['hj', 'pov-handjob', 'fast-handjob', 'edging-handjob', 'femdom-handjob'],
+  milking: ['milking-machine'],
+  titfuck: ['titty-fuck'],
+  orgy: ['group-sex', 'group'],
+  tentacle: ['tentacles', 'tentacle-sex', 'tentacle-monster'],
+  monstergirls: ['monster-girl'],
+  pmv: ['pmv-compilation'],
+  'cock-hero': ['selfmadecockhero'],
+  'beat-based': ['fap-to-beat', 'beat-bar', 'metronome'],
+  vr: ['virtual-reality'],
+  pov: ['point-of-view', 'partial-pov', 'punto-de-vista', 'sexo-pov', 'pov-sex'],
+  overwatch: ['ow'],
+  vaginal: ['vaginal-sex', 'penis-in-pussy'],
+  anal: ['anal-sex', 'ass-fuck', 'deep-anal'],
+  cumshot: ['cumshots', 'big-cumshot', 'huge-cumshot', 'multiple-cumshots'],
+}).flatMap(([tag, spellings]) => spellings.map((s) => [s, tag])));
+// Audio roleplays: erotic audio / ASMR tags (`asmr-audio-roleplay`,
+// `erotic-audio-for-men`, `lewdlexiaudio`) and titles.
+const isAudioTag = (t) => t.includes('asmr') || t.includes('audio-roleplay') || (t.endsWith('audio') && t !== 'audio');
+const AUDIO_TITLE = /(?<![\p{L}\p{N}])(erotic audio|asmr|audio role ?play|f4m)(?![\p{L}\p{N}])/iu;
+// What the user wants from FapTap: PMV / HMV, creampie, reverse cowgirl.
+const FOCUS_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video', 'creampie', 'anal-creampie', 'oral-creampie', 'reverse-cowgirl']);
+const FOCUS_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero|creampies?|reverse cowgirl)(?![\p{L}\p{N}])/iu;
 // Tags that say the video is live action.
 const LIVE_TAGS = new Set([
   'real', 'real-sex', 'real-couple-homemade', 'real-orgasm', 'reality', 'homemade', 'pornstar', 'onlyfans', 'brazzers',
@@ -78,9 +129,20 @@ export function tagSlug(name) {
   return String(name || '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
 }
 
-/** A listed video's tags as slugs, without duplicates. */
+/**
+ * A listed video's tags in the library's spelling, without duplicates:
+ * aliases replaced (see TAG_ALIASES), and the franchise of a character tag
+ * (`Mercy (Overwatch)`) added.
+ */
 export function videoTags(video) {
-  return [...new Set((video?.tags || []).map((t) => tagSlug(t?.name)).filter(Boolean))];
+  const out = new Set();
+  for (const t of video?.tags || []) {
+    const slug = tagSlug(t?.name);
+    if (slug) out.add(TAG_ALIASES[slug] || slug);
+    const franchise = String(t?.name || '').match(/\(([^()]+)\)\s*$/);
+    if (franchise && tagSlug(franchise[1])) out.add(tagSlug(franchise[1]));
+  }
+  return [...out];
 }
 
 const htmlText = (html) => String(html || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ');
@@ -101,6 +163,7 @@ export function vrSuffix(projection) {
  * @param {string[]} ctx.knownTitles normName of every library scene folder and video, and of the EroScripts scout's waiting posts
  * @param {string[]} [ctx.livePerformers] normName of FapTap's models and pornstars (see livePerformerNames)
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null, preferred: string[]}}
+ *   reasons: excluded, not-animated, audio-only, off-focus, not-sexual, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [] } = {}) {
   const tags = videoTags(video);
@@ -118,6 +181,8 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
     && !livePerformers.some((p) => words.includes(` ${p} `));
   const music = tags.some((t) => MUSIC_TAGS.has(t));
   if (!animated && !(music && artist)) return { ok: false, reason: 'not-animated' };
+  if (tags.some(isAudioTag) || AUDIO_TITLE.test(title)) return { ok: false, reason: 'audio-only' };
+  if (!tags.some((t) => FOCUS_TAGS.has(t)) && !FOCUS_TITLE.test(title)) return { ok: false, reason: 'off-focus' };
   if (!isSexual({ tags, title, text })) return { ok: false, reason: 'not-sexual' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.

@@ -1,9 +1,10 @@
 // Collections made from what the library already knows about each video:
 // the EroScripts post tags (`library.scriptTags`) and the duration
-// (`library.durationCache`). After each library scan four themes are kept
+// (`library.durationCache`). After each library scan five themes are kept
 // up to date: medium (Hentai, SFM, VaM …), session length (Quick, Sessions,
-// Marathons), franchise (Overwatch, Genshin Impact …) and script style
-// (Music / beat, Action).
+// Marathons), franchise (Overwatch, Genshin Impact …), script style
+// (Music / beat, Action) and source (FapTap: scenes `npm run faptap:scout`
+// brought in, by their scriptTags record).
 //
 // The user stays in charge, as with the EroScripts categories and the
 // artist playlists: a collection of the same name is reused, a collection
@@ -12,6 +13,7 @@
 // That history is `library.autoCollections`: `{created: [key], added:
 // {videoPath: [key]}}`.
 
+import { FAPTAP_SOURCE } from './eroscripts-links.js';
 import { SCRIPT_TAGS_KEY } from './script-tags.js';
 
 export const AUTO_COLLECTIONS_KEY = 'library.autoCollections';
@@ -43,6 +45,8 @@ export const AUTO_COLLECTIONS = [
   // Script style
   { key: 'music', name: 'Music / beat', match: anyTag('music', 'beat-based', 'music-based', 'music-video', 'hybrid-based', 'pmv', 'hmv', 'cock-hero', 'fap-hero') },
   { key: 'action', name: 'Action', match: anyTag('action-based', 'hybrid-based') },
+  // Source
+  { key: 'faptap', name: 'FapTap', match: (v) => v.source === FAPTAP_SOURCE },
 ];
 
 const nameKey = (s) => String(s || '').trim().toLocaleLowerCase();
@@ -91,7 +95,9 @@ export function planAutoCollections({ collections = [], videos = [], state = {} 
 export function applyAutoCollections(data, videoPaths, newId = () => crypto.randomUUID()) {
   const scriptTags = data.get(SCRIPT_TAGS_KEY) || {};
   const durations = data.get(DURATION_KEY) || {};
-  const videos = videoPaths.map((path) => ({ path, tags: new Set(scriptTags[path]?.tags || []), duration: Number(durations[path]) || 0 }));
+  const videos = videoPaths.map((path) => ({
+    path, tags: new Set(scriptTags[path]?.tags || []), source: scriptTags[path]?.source || null, duration: Number(durations[path]) || 0,
+  }));
   const collections = data.get(COLLECTIONS_KEY) || [];
   const plan = planAutoCollections({ collections, videos, state: data.get(AUTO_COLLECTIONS_KEY) || {} });
   if (plan.create.length || plan.extend.length) {
