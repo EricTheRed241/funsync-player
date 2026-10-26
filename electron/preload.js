@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // Category mappings
   assignCategory: (videoPath, catId) => ipcRenderer.invoke('assign-category', videoPath, catId),
+  assignCategories: (pairs) => ipcRenderer.invoke('assign-categories', pairs),
   unassignCategory: (videoPath, catId) => ipcRenderer.invoke('unassign-category', videoPath, catId),
   getVideoCategories: (videoPath) => ipcRenderer.invoke('get-video-categories', videoPath),
   getVideosByCategory: (catId) => ipcRenderer.invoke('get-videos-by-category', catId),

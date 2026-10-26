@@ -2404,6 +2404,7 @@ class App {
     };
     eventBus.on('rating:changed', schedule);
     eventBus.on('playlist:changed', schedule);
+    eventBus.on('category:changed', schedule);
 
     // The player's stars follow edits made anywhere (card, phone, headset).
     eventBus.on('rating:changed', ({ path } = {}) => {
@@ -2472,9 +2473,10 @@ class App {
   }
 
   /**
-   * Push ratings + playlists to the backend (`/api/media/register` treats
-   * each key independently, so the video registry is left alone). Keeps the
-   * headset sections, the HereSphere scene state and the phone current.
+   * Push ratings, playlists and categories to the backend
+   * (`/api/media/register` treats each key independently, so the video
+   * registry is left alone). Keeps the headset sections, the HereSphere
+   * scene state (`Playlist:` / `Category:` tags) and the phone current.
    */
   async _publishTriageState() {
     const port = this.backendPort || this.settings.get('backend.port') || 5123;
@@ -2484,6 +2486,8 @@ class App {
       body: JSON.stringify({
         ratings: this.settings.get('library.ratings') || {},
         playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
+        categories: this.settings.getCategories ? this.settings.getCategories() : [],
+        videoCategories: this.settings._cache?.videoCategories || {},
       }),
     });
     if (!res.ok) throw new Error(`register ${res.status}`);

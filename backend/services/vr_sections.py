@@ -79,6 +79,8 @@ TAG_HANDMADE_AXES = 'Feature:Hand-made multi-axis'
 # Scene tag per playlist the video is in. Adding / removing one of these in
 # HereSphere adds the video to / removes it from that playlist.
 PLAYLIST_TAG_PREFIX = 'Playlist:'
+# `Category:<name>` scene tags, one per desktop category the video is in.
+CATEGORY_TAG_PREFIX = 'Category:'
 
 
 def _positive_number(value):
@@ -201,6 +203,19 @@ def playlist_tags(path, playlists):
         f'{PLAYLIST_TAG_PREFIX}{(p.get("name") or "").strip()}'
         for p in playlists or []
         if path in (p.get('videoPaths') or []) and (p.get('name') or '').strip()
+    ]
+
+
+def category_tags(path, categories, video_categories):
+    """`Category:<name>` for every category holding `path`, in category order.
+    Read-only in the headset: editing them there changes nothing."""
+    if not path:
+        return []
+    ids = set((video_categories or {}).get(path) or [])
+    return [
+        f'{CATEGORY_TAG_PREFIX}{(c.get("name") or "").strip()}'
+        for c in categories or []
+        if c.get('id') in ids and (c.get('name') or '').strip()
     ]
 
 

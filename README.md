@@ -25,6 +25,7 @@ A local desktop video player with device synchronization for funscript playback.
 - Fuzzy search with exact-title precedence, path + collection + category matching, diacritic folding
 - Sort by name, duration, average speed, max speed (matched tab only)
 - Playlists, categories, and collections with pin-folder-as-collection support
+- **Categories from EroScripts tags.** After each library scan, videos whose script came from an EroScripts post (downloaded in the app, linked by `eroscripts:sync`, or fetched into Discovery by the scout, whose `eroscripts.json` the scan reads) are put in Creampie, Riding, Blowjob, Handjob, Titjob, Footjob, Anal, Doggy, Missionary, Group, Monster, PMV / HMV, VR and POV by the post's tags (`anal-creampie` counts as Creampie, `reverse-cowgirl` as Riding …). An existing category with the same name is reused. Each category is created once and each video put in it once, kept in `library.autoCategories`: delete a category or take a video out and it stays that way.
 - Multi-select for bulk playlist/category assignment
 - Script variant detection — `Title (Soft)`, `Title_hardcore` and `Title.intense` scripts next to `Title.mp4` become variants of that video
 - Ratings and favourites — half-star rating and a favourite heart on every card, list row and in the player; sort by rating and filter to Favorites, Top rated (4+) or Unrated. Ratings follow a moved file the same way script associations do.
