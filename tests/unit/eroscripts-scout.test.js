@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, MIN_VIDEO_MS, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
-  emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION,
+  emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const topic = (tags, title = 'Some scene', id = 1) => ({ id, title, tags });
@@ -388,6 +388,79 @@ describe('scan state', () => {
     state.topics[7].rules = RULES_VERSION - 1;
     expect(seenTopic(state, 7)).toBe(false);
     expect(normalizeScoutState({ version: 99 })).toEqual(emptyScoutState());
+  });
+
+  // Like feed(), with post `id` last active `id - 100` days after 2025-01-01.
+  const DAY = 864e5;
+  const bumpedOf = (id) => new Date(Date.UTC(2025, 0, 1) + (id - 100) * DAY).toISOString();
+  const datedFeed = (n) => {
+    const f = feed(n);
+    return { reads: f.reads, listPage: async (tag, page) => {
+      const r = await f.listPage(tag, page);
+      return { ...r, topics: r.topics.map((t) => ({ ...t, bumped: bumpedOf(t.id) })) };
+    } };
+  };
+
+  it('keeps posts a stopped run listed but never judged, though the cursor moved past them', async () => {
+    const state = emptyScoutState();
+    const f = feed(300);
+    const limited = async (tag, page) => { if (page === 3) throw new Error('Rate limited'); return f.listPage(tag, page); };
+    await expect(listFeed(state, 'mmd', limited, { maxNew: 2, backfill: 3, keepPending: true })).rejects.toThrow('Rate limited');
+    expect(state.feeds.mmd.backfillPage).toBe(3);
+    const left = normalizeScoutState(JSON.parse(JSON.stringify(state))); // as the next run reads it
+    expect(pendingTopics(left).map((t) => t.id)).toEqual(Array.from({ length: 90 }, (_, i) => 300 - i));
+    markTopic(left, 300, 'candidate');
+    markTopic(left, 299, 'no-video');
+    expect(pendingTopics(left)).toHaveLength(88);
+    expect(normalizeScoutState({ version: 1, feeds: {}, topics: {} }).pending).toEqual({});
+  });
+
+  it('backfills down to --since, skips older posts, and stays there until an earlier date', async () => {
+    const state = emptyScoutState();
+    const f = datedFeed(300); // ids 100 and up are active since 2025-01-01, page 7 (ids 90..61) is all older
+    const r = await listFeed(state, 'multi-axis', f.listPage, { maxNew: 1, backfill: 50, since: '2025-01-01' });
+    expect(f.reads).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(r.topics.map((t) => t.id)).toEqual(Array.from({ length: 201 }, (_, i) => 300 - i));
+    expect(state.feeds['multi-axis']).toMatchObject({ backfillPage: 6, doneSince: '2025-01-01', exhausted: false }); // back on the first page with older posts
+    markAll(state, r.topics);
+
+    const plain = datedFeed(300);
+    await listFeed(state, 'multi-axis', plain.listPage, { maxNew: 1, backfill: 2 });
+    expect(plain.reads).toEqual([0]);
+    const later = datedFeed(300);
+    await listFeed(state, 'multi-axis', later.listPage, { maxNew: 1, backfill: 2, since: '2025-02-01' });
+    expect(later.reads).toEqual([0]);
+
+    const earlier = datedFeed(300);
+    const more = await listFeed(state, 'multi-axis', earlier.listPage, { maxNew: 1, backfill: 2, since: '2024-12-01' });
+    expect(earlier.reads).toEqual([0, 6, 7]);
+    expect(more.topics.filter((t) => !seenTopic(state, t.id)).map((t) => t.id)).toEqual(Array.from({ length: 31 }, (_, i) => 99 - i)); // down to id 69 = 2024-12-01
+  });
+
+  it('judges a no-video or single-axis post again after new activity, other verdicts never', async () => {
+    const state = emptyScoutState();
+    const at = Date.parse('2026-10-01T00:00:00Z');
+    markTopic(state, 5, 'no-video', at);
+    markTopic(state, 6, 'single-axis', at);
+    markTopic(state, 7, 'excluded', at);
+    expect(needsJudging(state, { id: 5, bumped: '2026-10-02T00:00:00Z' })).toBe(true);
+    expect(needsJudging(state, { id: 6, bumped: '2026-10-02T00:00:00Z' })).toBe(true);
+    expect(needsJudging(state, { id: 5, bumped: '2026-09-30T00:00:00Z' })).toBe(false);
+    expect(needsJudging(state, { id: 5 })).toBe(false);
+    expect(needsJudging(state, { id: 7, bumped: '2026-10-02T00:00:00Z' })).toBe(false);
+    expect(needsJudging(state, { id: 8 })).toBe(true);
+
+    // A bumped no-video post on the first page keeps the scan reading, and waits as pending.
+    const seen = emptyScoutState();
+    markAll(seen, (await listFeed(emptyScoutState(), 'mmd', datedFeed(300).listPage, { maxNew: 10, backfill: 0 })).topics);
+    const quiet = datedFeed(300);
+    await listFeed(seen, 'mmd', quiet.listPage, { maxNew: 3, backfill: 0, keepPending: true });
+    expect(quiet.reads).toEqual([0]);
+    markTopic(seen, 290, 'no-video', 0); // judged long before its last activity
+    const bumped = datedFeed(300);
+    await listFeed(seen, 'mmd', bumped.listPage, { maxNew: 3, backfill: 0, keepPending: true });
+    expect(bumped.reads).toEqual([0, 1]);
+    expect(pendingTopics(seen).map((t) => t.id)).toEqual([290]);
   });
 
   it('keeps earlier candidates until every scene is fetched, and drops posts turned down', () => {

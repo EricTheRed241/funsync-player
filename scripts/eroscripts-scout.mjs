@@ -44,10 +44,13 @@ const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
-Scan (default; only posts not judged before, see <userData>/eroscripts-scout-state.json):
+Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.json):
   --pages N              most pages of new posts on the multi-axis feed (30 posts each, default 6)
   --anim-pages N         most pages of new posts on each animation feed (animation, hentai, 3d, vam, sfm, mmd; default 3)
   --backfill N           older pages to read per feed, continuing from the last run (default 2; 0 = none)
+  --feeds a,b            only these feeds (multi-axis, animation, hentai, 3d, vam, sfm, mmd; default all)
+  --since YYYY-MM-DD     backfill only down to posts last active on that date; a feed that gets there
+                         isn't backfilled again unless a later run passes an earlier date
   --full                 judge every listed post again, not only new ones
   --top N                candidates to print (default 40)
 Download:
@@ -84,6 +87,8 @@ function parseArgs(argv) {
       case '--passes': opts.passes = Number(value(i, a)); i++; break;
       case '--wait': opts.wait = parseInterval(value(i, a)); i++; break;
       case '--ids': opts.ids = new Set(value(i, a).split(',').map(Number)); i++; break;
+      case '--feeds': opts.feeds = value(i, a).split(',').map((s) => s.trim()).filter(Boolean); i++; break;
+      case '--since': opts.since = value(i, a); i++; break;
       case '--user-data': opts.userData = path.resolve(value(i, a)); i++; break;
       case '--incoming': opts.incoming = path.resolve(value(i, a)); i++; break;
       case '-h': case '--help': opts.help = true; break;
@@ -91,6 +96,10 @@ function parseArgs(argv) {
     }
   }
   for (const k of ['pages', 'animPages', 'backfill', 'top', 'passes']) if (!(opts[k] >= 0)) throw new Error(`--${k} must be 0 or more`);
+  const unknownFeed = opts.feeds?.find((f) => !lib.FEED_TAGS.includes(f));
+  if (unknownFeed !== undefined) throw new Error(`Unknown feed "${unknownFeed}" (feeds: ${lib.FEED_TAGS.join(', ')})`);
+  if (opts.feeds && !opts.feeds.length) throw new Error('--feeds needs at least one feed');
+  if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   return opts;
 }
@@ -202,15 +211,18 @@ async function scan(opts, { api, userData, config, incoming }) {
   try {
     const topics = new Map();
     let pages = 0;
-    for (const tag of lib.FEED_TAGS) {
+    const carried = lib.pendingTopics(state).length;
+    for (const tag of opts.feeds || lib.FEED_TAGS) {
       const maxNew = tag === 'multi-axis' ? opts.pages : opts.animPages;
-      const r = await lib.listFeed(state, tag, feedPage(api, pacer), { maxNew, backfill: opts.backfill, full: opts.full });
+      const r = await lib.listFeed(state, tag, feedPage(api, pacer), { maxNew, backfill: opts.backfill, full: opts.full, since: opts.since, keepPending: true });
       pages += r.pagesRead;
       for (const t of r.topics) topics.set(t.id, t);
     }
     listed = topics.size;
-    const todo = [...topics.values()].filter((t) => opts.full || !lib.seenTopic(state, t.id));
-    console.log(`Listed ${listed} posts on ${pages} pages; ${todo.length} not judged before`);
+    // Everything listed now or by an earlier run that stopped before judging it.
+    const todo = opts.full ? [...topics.values()] : lib.pendingTopics(state);
+    const bumped = todo.filter((t) => lib.seenTopic(state, t.id)).length;
+    console.log(`Listed ${listed} posts on ${pages} pages; ${todo.length} to judge${carried ? ` (${carried} left from an earlier run)` : ''}${bumped && !opts.full ? `, ${bumped} of them bumped since their verdict` : ''}`);
 
     const creators = [...library.creators];
     for (const t of todo) {
@@ -277,9 +289,11 @@ async function scan(opts, { api, userData, config, incoming }) {
     console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
   });
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
-  const backfill = lib.FEED_TAGS.map((tag) => `${tag} ${state.feeds[tag]?.exhausted ? 'done' : `p${state.feeds[tag]?.backfillPage ?? 0}`}`).join(', ');
+  const feedStatus = (f) => (f?.exhausted ? 'done' : f?.doneSince ? `done to ${f.doneSince} (p${f.backfillPage})` : `p${f?.backfillPage ?? 0}`);
+  const backfill = lib.FEED_TAGS.map((tag) => `${tag} ${feedStatus(state.feeds[tag])}`).join(', ');
+  const left = Object.keys(state.pending || {}).length;
   console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${multi} multi-axis, ${candidates.length - multi} single-axis), ${candidates.reduce((n, c) => n + c.scenes.length, 0)} videos, ${candidates.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
-  console.log(`Backfill: ${backfill} · ${Object.keys(state.topics).length} posts judged so far`);
+  console.log(`Backfill: ${backfill} · ${Object.keys(state.topics).length} posts judged so far${left ? ` · ${left} listed, not judged yet (next run goes on with them)` : ''}`);
   console.log(`Saved: ${out}`);
   return 0;
 }

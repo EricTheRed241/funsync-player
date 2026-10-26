@@ -552,22 +552,25 @@ export function remapPaths(value, moves) {
 // ── Scan state ──────────────────────────────────────────────────────────
 //
 // A scan only judges posts it hasn't judged before. `<userData>/
-// eroscripts-scout-state.json` keeps every judged post id with its verdict
-// and, per feed, how deep the backfill has read:
+// eroscripts-scout-state.json` keeps every judged post id with its verdict,
+// per feed how deep the backfill has read, and the posts listed but not
+// judged yet (a run stopped by a rate limit goes on with them next time):
 //
-//   { version, lastScanAt, feeds: {<tag>: {backfillPage, exhausted}},
-//     topics: {<id>: {verdict, rules, at}} }
+//   { version, lastScanAt, feeds: {<tag>: {backfillPage, exhausted, doneSince?, olderFrom?}},
+//     topics: {<id>: {verdict, rules, at}}, pending: {<id>: <listed topic>} }
 //
 // Feeds are newest activity first. A scan reads pages from the top until a
-// page holds nothing new (or the page cap), then `backfill` more pages from
-// where the backfill stopped last time, so older posts get covered a little
-// on every run. Verdicts made under older rules count as unseen.
+// page holds nothing to judge (or the page cap), then `backfill` more pages
+// from where the backfill stopped last time, so older posts get covered a
+// little on every run; `since` stops a feed's backfill at a date for good.
+// Verdicts made under older rules count as unseen, and a `no-video` or
+// `single-axis` post with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
 export const RULES_VERSION = 2;
 
 export function emptyScoutState() {
-  return { version: 1, lastScanAt: null, feeds: {}, topics: {} };
+  return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
 }
 
 /** The state read from disk, or an empty one when it is missing or foreign. */
@@ -581,9 +584,40 @@ export function seenTopic(state, id, rules = RULES_VERSION) {
   return state.topics[id]?.rules === rules;
 }
 
-/** Remember the verdict on post `id` (`candidate` or a reject reason). */
+/** Verdicts scripters often fix later (adding a video or axes): judged again after new activity. */
+export const REJUDGE_ON_BUMP = new Set(['no-video', 'single-axis']);
+
+/**
+ * True when a listed post needs a verdict: never judged under these rules,
+ * or a REJUDGE_ON_BUMP verdict older than the post's last activity
+ * (`topic.bumped`; posts without it are judged once).
+ */
+export function needsJudging(state, topic, rules = RULES_VERSION) {
+  const seen = state.topics[topic.id];
+  if (seen?.rules !== rules) return true;
+  return REJUDGE_ON_BUMP.has(seen.verdict) && !!topic.bumped && Date.parse(topic.bumped) > Date.parse(seen.at);
+}
+
+/** Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending. */
 export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION) {
   state.topics[id] = { verdict, rules, at: new Date(now).toISOString() };
+  if (state.pending) delete state.pending[id];
+}
+
+/** Keep listed posts until they get a verdict, so a run that stops early doesn't lose them. */
+export function addPending(state, topics) {
+  state.pending ||= {};
+  for (const t of topics) state.pending[t.id] = t;
+}
+
+/** Posts listed (now or by a run that stopped early) that still need a verdict, newest first; drops the rest from `pending`. */
+export function pendingTopics(state, rules = RULES_VERSION) {
+  const out = [];
+  for (const [id, t] of Object.entries(state.pending || {})) {
+    if (needsJudging(state, t, rules)) out.push(t);
+    else delete state.pending[id];
+  }
+  return out.sort((a, b) => Number(b.id) - Number(a.id));
 }
 
 /** Backfill cursor of a feed, created on first use. */
@@ -612,37 +646,60 @@ export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set())
 
 /**
  * One feed's posts for this scan: pages from the top until one holds
- * nothing unjudged (at most `maxNew` pages), then `backfill` pages from the
+ * nothing to judge (at most `maxNew` pages), then `backfill` pages from the
  * feed's backfill cursor, which moves on. `full` reads all `maxNew` pages.
+ * With `since` (YYYY-MM-DD) the backfill skips posts last active before it
+ * and, at the first page older than it, records `doneSince` and puts the
+ * cursor back on the first page that held an older post (so an earlier date
+ * later reads those skipped posts); a feed done to a date isn't backfilled
+ * again unless `since` is earlier. `keepPending`
+ * adds the posts to judge to `state.pending` as each page is read, so a run
+ * stopped mid-listing (rate limit) doesn't lose the pages the cursor passed.
  *
- * @param {object} state scan state (mutated: the feed's cursor)
+ * @param {object} state scan state (mutated: the feed's cursor, `pending`)
  * @param {string} tag
- * @param {(tag: string, page: number) => Promise<{topics: {id: number}[], more: boolean}>} listPage
- * @param {{maxNew: number, backfill: number, full?: boolean, rules?: number}} o `rules`: the scout's rules version
+ * @param {(tag: string, page: number) => Promise<{topics: {id: number, bumped?: string}[], more: boolean}>} listPage
+ * @param {{maxNew: number, backfill: number, full?: boolean, rules?: number, since?: string, keepPending?: boolean}} o `rules`: the scout's rules version
  * @returns {Promise<{topics: object[], pagesRead: number}>}
  */
-export async function listFeed(state, tag, listPage, { maxNew, backfill, full = false, rules = RULES_VERSION }) {
+export async function listFeed(state, tag, listPage, { maxNew, backfill, full = false, rules = RULES_VERSION, since = null, keepPending = false }) {
   const feed = feedState(state, tag);
   const topics = [];
   let pagesRead = 0;
   const read = async (page) => {
     const r = await listPage(tag, page);
     pagesRead++;
-    topics.push(...r.topics);
     return r;
+  };
+  const keep = (list) => {
+    topics.push(...list);
+    if (keepPending) addPending(state, full ? list : list.filter((t) => needsJudging(state, t, rules)));
   };
   let page = 0;
   while (page < maxNew) {
     const r = await read(page);
+    keep(r.topics);
     page++;
     if (!r.more) { feed.exhausted = true; break; }
-    if (!full && r.topics.every((t) => seenTopic(state, t.id, rules))) break;
+    if (!full && !r.topics.some((t) => needsJudging(state, t, rules))) break;
   }
   feed.backfillPage = Math.max(feed.backfillPage, page);
-  for (let i = 0; i < backfill && !feed.exhausted; i++) {
-    const r = await read(feed.backfillPage);
+  const sinceMs = since ? Date.parse(since) : null;
+  const older = (t) => !!t.bumped && Date.parse(t.bumped) < sinceMs;
+  const reachedDate = () => !!feed.doneSince && (sinceMs === null || Date.parse(feed.doneSince) <= sinceMs);
+  for (let i = 0; i < backfill && !feed.exhausted && !reachedDate(); i++) {
+    const pageNo = feed.backfillPage;
+    const r = await read(pageNo);
     feed.backfillPage++;
     if (!r.more) feed.exhausted = true;
+    if (sinceMs === null) { keep(r.topics); continue; }
+    keep(r.topics.filter((t) => !older(t)));
+    if (r.topics.some(older) && feed.olderFrom?.since !== since) feed.olderFrom = { page: pageNo, since };
+    if (r.topics.length && r.topics.every(older)) {
+      feed.doneSince = since;
+      feed.backfillPage = feed.olderFrom.page;
+      delete feed.olderFrom;
+    }
   }
   return { topics, pagesRead };
 }
