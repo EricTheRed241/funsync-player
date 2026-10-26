@@ -213,6 +213,18 @@ class DataService {
     eventBus.emit('playlist:changed', { action: 'addVideo', id, videoPath });
   }
 
+  /** Append the videos a playlist doesn't hold yet, with one write and one event. */
+  addVideosToPlaylist(id, videoPaths) {
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (!playlist) return;
+    const have = new Set(playlist.videoPaths);
+    const fresh = (videoPaths || []).filter((p) => p && !have.has(p) && have.add(p));
+    if (!fresh.length) return;
+    playlist.videoPaths.push(...fresh);
+    window.funsync.addVideosToPlaylist(id, fresh);
+    eventBus.emit('playlist:changed', { action: 'addVideos', id, videoPaths: fresh });
+  }
+
   removeVideoFromPlaylist(id, videoPath) {
     const playlist = this._cache.playlists.find((p) => p.id === id);
     if (playlist) {
