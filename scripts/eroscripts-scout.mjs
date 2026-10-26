@@ -227,8 +227,8 @@ async function scan(opts, { api, userData, config, incoming }) {
     for (const l of Object.values(links?.links || {})) if (l.topicId != null) knownTopics.add(l.topicId);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
-  // Posts the user turned down in the app (No thank you).
-  for (const e of rejectedVideos.readRejected(userData).entries) if (e.reason === 'no-thank-you') knownTopics.add(e.topicId);
+  // Posts the user turned down in the app (No thank you, 2 stars or lower).
+  for (const e of rejectedVideos.readRejected(userData).entries) if (e.reason !== 'short') knownTopics.add(e.topicId);
 
   const topics = new Map();
   for (const tag of lib.FEED_TAGS) {

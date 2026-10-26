@@ -1,10 +1,11 @@
 'use strict';
 
-// "No thank you" rule: a video the user puts in the No thank you playlist
-// (desktop, web remote or HereSphere) is deleted from disk, together with
-// its scripts, axis companions (hand-made and generated) and subtitles. A
-// scene folder left with nothing but its `eroscripts.json` sidecar goes too,
-// and so does a creator folder it leaves empty.
+// Triage deletions: a video the user puts in the No thank you playlist or
+// rates 2 stars or lower (desktop, web remote or HereSphere; see
+// renderer/js/reject-rule.js) is deleted from disk, together with its
+// scripts, axis companions (hand-made and generated) and subtitles. A scene
+// folder left with nothing but its `eroscripts.json` sidecar goes too, and
+// so does a creator folder it leaves empty.
 //
 // Rejections are remembered in `<userData>/eroscripts-scout-rejected.json`
 // so `npm run eroscripts:scout` never downloads them again. The scout adds
@@ -19,6 +20,9 @@ const { AXIS_SUFFIXES, VIDEO_EXTS, SUBTITLE_EXTS, isAppleDoubleSidecar } = requi
 const REJECT_PLAYLIST = 'No thank you';
 const REJECTED_FILE = 'eroscripts-scout-rejected.json';
 const REJECTED_VERSION = 1;
+// Why a video went: the user's triage (scout never takes the post again) or
+// the scout's own length check.
+const REASONS = new Set(['no-thank-you', 'low-rating', 'short']);
 // What may remain in a scene folder that is then removed whole.
 const LEFTOVERS = new Set(['eroscripts.json', '.ds_store']);
 
@@ -100,9 +104,11 @@ function removeDirIfOnly(dir, keep) {
  * @param {string[]} o.sources library source folders
  * @param {string} o.userDataDir where the rejection list lives
  * @param {number} [o.now]
+ * @param {'no-thank-you'|'low-rating'} [o.reason]
  * @returns {{deleted: string[], removedDirs: string[]}}
  */
-function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now() }) {
+function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now(), reason = 'no-thank-you' }) {
+  if (!REASONS.has(reason) || reason === 'short') throw new Error(`unknown reason: ${reason}`);
   const resolved = path.resolve(String(videoPath || ''));
   const roots = (sources || []).filter(Boolean).map((s) => path.resolve(s));
   if (!roots.some((r) => fold(resolved).startsWith(fold(r) + path.sep))) {
@@ -121,7 +127,7 @@ function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now()
   if (sidecar?.topicId != null && sidecar.video) {
     recordRejection(userDataDir, {
       topicId: sidecar.topicId, video: sidecar.video, title: sidecar.title || null, url: sidecar.url || null,
-      reason: 'no-thank-you', path: resolved, at: new Date(now).toISOString(),
+      reason, path: resolved, at: new Date(now).toISOString(),
     });
   }
 

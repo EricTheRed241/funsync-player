@@ -867,7 +867,7 @@
     "mutexTakeover": "{incoming} took over from {evicted}",
     "added": "Added",
     "addedTo": "Added to \"{name}\"",
-    "rejectedDeleted": "Deleted {count} video(s) in \"No thank you\" from disk",
+    "rejectedDeleted": "Deleted {count} rejected video(s) from disk (No thank you or 2 stars or lower)",
     "removed": "Removed",
     "saved": "Saved",
     "copied": "Copied",
