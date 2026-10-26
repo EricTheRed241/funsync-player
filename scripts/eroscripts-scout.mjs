@@ -352,37 +352,59 @@ async function scan(opts, { api, userData, config, incoming }) {
 
 // ── Fetch ───────────────────────────────────────────────────────────────
 
+/** The `.part` being written; removed if the run is stopped (Ctrl-C, kill). */
+let activePart = null;
+for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.on(sig, () => {
+    if (activePart) fs.rmSync(activePart, { force: true });
+    process.exit(code);
+  });
+}
+
+/**
+ * Download `file` to `dest` through `<staging>/<name>.part`. Every attempt
+ * starts from scratch, so a failed one deletes its `.part` rather than leave
+ * it behind.
+ */
 async function download(api, file, dest, staging) {
   if (fs.existsSync(dest)) return 'have';
   fs.mkdirSync(staging, { recursive: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = path.join(staging, `${path.basename(dest)}.part`);
-  if (file.host === 'forum') {
-    const r = await api.downloadFile(file.url, tmp, { overwrite: true });
-    if (!r.success) throw new Error(`forum: ${r.error}`);
-  } else if (file.host === 'mega') {
-    const { File } = await import('megajs');
-    const root = File.fromURL(file.url);
-    await root.loadAttributes();
-    const find = (n) => {
-      for (const c of n.children || []) {
-        if (c.directory) { const hit = find(c); if (hit) return hit; } else if (c.name === file.remote) return c;
-      }
-      return null;
-    };
-    const node = root.directory ? find(root) : root;
-    if (!node) throw new Error(`mega: ${file.remote} is gone`);
-    await pipeline(node.download({}), fs.createWriteStream(tmp));
-  } else if (file.host === 'pixeldrain') {
-    const resp = await fetch(file.url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}`);
-    await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
-  } else {
-    throw new Error(`unknown host ${file.host}`);
+  activePart = tmp;
+  try {
+    if (file.host === 'forum') {
+      const r = await api.downloadFile(file.url, tmp, { overwrite: true });
+      if (!r.success) throw new Error(`forum: ${r.error}`);
+    } else if (file.host === 'mega') {
+      const { File } = await import('megajs');
+      const root = File.fromURL(file.url);
+      await root.loadAttributes();
+      const find = (n) => {
+        for (const c of n.children || []) {
+          if (c.directory) { const hit = find(c); if (hit) return hit; } else if (c.name === file.remote) return c;
+        }
+        return null;
+      };
+      const node = root.directory ? find(root) : root;
+      if (!node) throw new Error(`mega: ${file.remote} is gone`);
+      await pipeline(node.download({}), fs.createWriteStream(tmp));
+    } else if (file.host === 'pixeldrain') {
+      const resp = await fetch(file.url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}`);
+      await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
+    } else {
+      throw new Error(`unknown host ${file.host}`);
+    }
+    const size = fs.statSync(tmp).size;
+    if (file.size && size !== file.size) throw new Error(`size ${size} ≠ ${file.size}`);
+    fs.renameSync(tmp, dest);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  } finally {
+    activePart = null;
   }
-  const size = fs.statSync(tmp).size;
-  if (file.size && size !== file.size) { fs.rmSync(tmp, { force: true }); throw new Error(`size ${size} ≠ ${file.size}`); }
-  fs.renameSync(tmp, dest);
   return 'ok';
 }
 
