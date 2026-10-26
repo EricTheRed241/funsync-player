@@ -8,7 +8,7 @@
 // (scripts/eroscripts-scout-lib.mjs). No forum, MEGA or pixeldrain.
 import { describe, it, expect } from 'vitest';
 import {
-  screenTopic, hasExcludedText, scoreCandidate, scriptParts, matchScore, planScenes,
+  screenTopic, hasExcludedText, isSexual, scriptDurationMs, MIN_VIDEO_MS, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 
@@ -45,6 +45,42 @@ describe('screenTopic', () => {
   it('skips posts the library already links or whose scene folder it has', () => {
     expect(screenTopic(topic(['animation'], 'X', 7), { knownTopics: new Set([7]) }).reason).toBe('known');
     expect(screenTopic(topic(['animation'], 'Fap Hero - Fantasy Play'), { sceneNames: ['fap hero fantasy play'] }).reason).toBe('in-library');
+  });
+
+  it('turns down posts tagged sfw or non-porn before reading them', () => {
+    expect(screenTopic(topic(['animation', 'sfw'])).reason).toBe('not-sexual');
+    expect(screenTopic(topic(['mmd', 'dance', 'non-porn', 'riding'])).reason).toBe('not-sexual');
+  });
+});
+
+describe('isSexual', () => {
+  it('needs a sex-act tag or word, in any language, for a dance', () => {
+    expect(isSexual({ tags: ['mmd', 'dance', 'solo-female'], title: 'CLC - Devil MMD Dance' })).toBe(false);
+    expect(isSexual({ tags: ['mmd', 'dance', 'straight', 'music'], title: 'Miku Tell Me What You Want' })).toBe(false);
+    expect(isSexual({ tags: ['mmd', 'dance', 'riding'], title: 'Lantern Rite' })).toBe(true);
+    expect(isSexual({ tags: ['mmd', 'dance'], title: 'Iroha Sex Dance' })).toBe(true);
+    expect(isSexual({ tags: ['vam'], title: '[VAM]红衣', text: '骑乘 动作' })).toBe(true);
+    expect(isSexual({ tags: ['vam'], title: 'Lapdance', text: 'she ends up riding him' })).toBe(true);
+  });
+
+  it('counts a porn genre or music tag only when the post is not a dance', () => {
+    expect(isSexual({ tags: ['hentai', 'straight'], title: 'Fluorite - Caught You Staring' })).toBe(true);
+    expect(isSexual({ tags: ['hmv', 'beat-based'], title: 'KDA PORN STARS' })).toBe(true);
+    expect(isSexual({ tags: ['hmv', 'dance', 'music'], title: 'Thumbs up' })).toBe(false);
+    expect(isSexual({ tags: ['animation', 'solo-female', 'ai-video'], title: 'Golden thread beauty sways' })).toBe(false);
+  });
+
+  it('never takes a post tagged sfw or non-porn, and matches whole words only', () => {
+    expect(isSexual({ tags: ['dance', 'non-porn', 'straight'], title: 'CH4NGE MMD (Hardcore Script)' })).toBe(false);
+    expect(isSexual({ tags: ['animation'], title: 'Cumulus Dickens Analysis' })).toBe(false);
+  });
+});
+
+describe('scriptDurationMs', () => {
+  it('is the last action time, so a 59 s script is under the minimum', () => {
+    expect(scriptDurationMs({ actions: [{ at: 0, pos: 0 }, { at: 59_000, pos: 90 }, { at: 120, pos: 10 }] })).toBe(59_000);
+    expect(scriptDurationMs({ actions: [{ at: 59_000 }] })).toBeLessThan(MIN_VIDEO_MS);
+    expect(scriptDurationMs({})).toBe(0);
   });
 });
 

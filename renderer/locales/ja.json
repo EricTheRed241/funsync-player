@@ -643,6 +643,7 @@
     "mutexTakeover": "{incoming} が {evicted} から引き継ぎました",
     "added": "追加しました",
     "addedTo": "「{name}」に追加しました",
+    "rejectedDeleted": "「No thank you」の動画 {count} 件をディスクから削除しました",
     "removed": "削除しました",
     "saved": "保存しました",
     "copied": "コピーしました",

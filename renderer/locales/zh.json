@@ -643,6 +643,7 @@
     "mutexTakeover": "{incoming} 已从 {evicted} 接管",
     "added": "已添加",
     "addedTo": "已添加到 \"{name}\"",
+    "rejectedDeleted": "已从磁盘删除 \"No thank you\" 中的 {count} 个视频",
     "removed": "已移除",
     "saved": "已保存",
     "copied": "已复制",

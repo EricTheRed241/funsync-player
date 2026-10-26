@@ -35,6 +35,7 @@ import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
+import { isRejectPlaylist, sweepRejected } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
@@ -839,6 +840,9 @@ class App {
       } catch (err) {
         console.warn('Remote bridge unavailable:', err.message);
       }
+
+      // "No thank you" deletes from disk (reject-rule.js).
+      this._wireRejectRule();
 
       // AudienceBridge — fans out HSSP commands to N viewer Handys for
       // the broadcast feature (SCOPE-audience-broadcast.md). Constructed
@@ -2405,6 +2409,35 @@ class App {
     eventBus.on('rating:changed', ({ path } = {}) => {
       if (path && path === this._currentVideoPath) this._renderPlayerRating();
     });
+  }
+
+  /**
+   * Sweep the No thank you playlist now and whenever a video lands in it.
+   * Sweeps run one after another; a finished one rescans the library so the
+   * deleted scenes leave the grid, the phone and the headset.
+   */
+  _wireRejectRule() {
+    let chain = Promise.resolve();
+    const sweep = () => {
+      chain = chain.then(async () => {
+        const { removed, failed } = await sweepRejected({
+          data: this.settings,
+          deleteVideo: (p) => window.funsync.deleteRejectedVideo(p),
+        });
+        for (const f of failed) console.warn(`[Rejected] kept ${f.path}: ${f.error}`);
+        if (!removed.length) return;
+        console.log(`[Rejected] deleted ${removed.length} video(s) from disk`);
+        showToast(t('toast.rejectedDeleted', { count: removed.length }), 'info');
+        await this._handleRescanRequest();
+      }).catch((err) => console.warn('[Rejected] sweep failed:', err));
+      return chain;
+    };
+    eventBus.on('playlist:changed', ({ action, id, playlist } = {}) => {
+      if (!['add', 'addVideo', 'reorder', 'rename'].includes(action)) return;
+      const pl = playlist || this.settings.getPlaylist(id);
+      if (pl && isRejectPlaylist(pl.name)) sweep();
+    });
+    sweep();
   }
 
   /**

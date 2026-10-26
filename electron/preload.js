@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('funsync', {
   addVideoToPlaylist: (id, videoPath) => ipcRenderer.invoke('add-video-to-playlist', id, videoPath),
   removeVideoFromPlaylist: (id, videoPath) => ipcRenderer.invoke('remove-video-from-playlist', id, videoPath),
   setPlaylistVideoPaths: (id, videoPaths) => ipcRenderer.invoke('set-playlist-video-paths', id, videoPaths),
+  deleteRejectedVideo: (videoPath) => ipcRenderer.invoke('delete-rejected-video', videoPath),
 
   // Categories
   getCategories: () => ipcRenderer.invoke('get-categories'),
