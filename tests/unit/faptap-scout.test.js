@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   tagSlug, videoTags, screenVideo, pickSource, csvToFunscript, vrSuffix, toCandidate, mergeCandidates, fetchedKey, FAPTAP_RULES_VERSION,
-  livePerformerNames, hasLivePerformer,
+  livePerformerNames, hasLivePerformer, mergeCookies,
 } from '../../scripts/faptap-scout-lib.mjs';
 import { emptyScoutState, listFeed, markTopic, seenTopic, RULES_VERSION } from '../../scripts/eroscripts-scout-lib.mjs';
 
@@ -166,6 +166,15 @@ describe('mergeCandidates', () => {
     expect(vr.score).toBeGreaterThan(plain.score);
     expect(plain).toMatchObject({ id: '1', url: 'https://faptap.net/v/1', author: 'Zoot' });
     expect(fetchedKey(plain.id)).toBe('faptap|1');
+  });
+});
+
+describe('mergeCookies', () => {
+  it('replaces cookies by name, drops cleared ones, and keeps the rest', () => {
+    const jar = mergeCookies('', ['auth=Y3NyZg==; Path=/; Max-Age=86400', 'theme=dark; Path=/']);
+    expect(jar).toBe('auth=Y3NyZg==; theme=dark');
+    expect(mergeCookies(jar, ['auth=session2; Path=/; HttpOnly', 'theme=; Max-Age=0'])).toBe('auth=session2');
+    expect(mergeCookies(jar, [])).toBe(jar);
   });
 });
 

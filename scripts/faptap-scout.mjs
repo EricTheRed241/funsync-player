@@ -4,6 +4,7 @@
 //
 //   npm run faptap:scout                 scan new videos (+ some backfill) → <userData>/faptap-scout.json
 //   npm run faptap:scout -- --fetch      download the saved list
+//   npm run faptap:scout -- --login      sign in to faptap.net (scripts need an account)
 //
 // Rules: scripts/faptap-scout-lib.mjs. Scenes land in `<library parent>/
 // _incoming/<creator>/<Artist - Title>/` with a `faptap.json` sidecar. FapTap
@@ -12,13 +13,21 @@
 // FapTap's HLS streams through ffmpeg. Finished videos join Discovery like
 // the EroScripts scout's (scripts/discovery-io.mjs).
 //
+// Listing and streams are open, but faptap.net serves a script only to a
+// signed-in account (anonymous requests get 401 unless Cloudflare happens to
+// hold a copy). `--login` keeps the session cookie in
+// `<userData>/faptap-session.json` (mode 600) and, on macOS, the password in
+// the login Keychain (service `funsync-faptap`) so an expired session is
+// renewed without asking.
+//
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
-// last pass.
+// last pass, 3 not signed in / sign-in failed.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 // renderer/*.js is ESM inside a CommonJS package. Re-exec once so Node does
@@ -52,6 +61,9 @@ Download (needs ffmpeg and ffprobe on PATH):
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded
+Account (scripts need one):
+  --login                sign in (asks for email and password, or FAPTAP_EMAIL / FAPTAP_PASSWORD)
+  --logout               forget the session and the stored password
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default: the Discovery source, else <library parent>/_incoming)`;
@@ -67,6 +79,8 @@ function parseArgs(argv) {
     switch (a) {
       case '--fetch': opts.fetch = true; break;
       case '--dry-run': opts.dryRun = true; break;
+      case '--login': opts.login = true; break;
+      case '--logout': opts.logout = true; break;
       case '--pages': opts.pages = Number(value(i, a)); i++; break;
       case '--backfill': opts.backfill = Number(value(i, a)); i++; break;
       case '--full': opts.full = true; break;
@@ -94,15 +108,113 @@ class RateLimitedError extends Error {
   }
 }
 
-const pacer = createPacer();
+class SignInError extends Error {
+  constructor(message = 'faptap.net only serves scripts to a signed-in account. Run: npm run faptap:scout -- --login') {
+    super(message);
+    this.name = 'SignInError';
+  }
+}
 
-/** One paced GET on faptap.net; JSON bodies unwrap their `data`. */
-async function faptap(pathname, { text = false } = {}) {
+const pacer = createPacer();
+const HEADERS = { 'User-Agent': 'Mozilla/5.0' };
+
+// The account: `{ email, username, cookie, at }` in <userData>/faptap-session.json.
+let account = null;
+let accountFile = null;
+const KEYCHAIN_SERVICE = 'funsync-faptap';
+
+function loadAccount(userData) {
+  accountFile = path.join(userData, 'faptap-session.json');
+  try { account = JSON.parse(fs.readFileSync(accountFile, 'utf8')); } catch { account = null; }
+}
+
+function saveAccount() {
+  const tmp = `${accountFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(account, null, 1), { mode: 0o600 });
+  fs.renameSync(tmp, accountFile);
+}
+
+function keychainPassword(email) {
+  if (process.platform !== 'darwin' || !email) return null;
+  const r = spawnSync('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', email, '-w'], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.replace(/\n$/, '') : null;
+}
+
+/** Sign in: CSRF cookie and token, then `POST /session`; the cookies make the session. */
+async function signIn(email, password) {
   await pacer.wait();
-  const resp = await fetch(`${lib.FAPTAP_ORIGIN}/api${pathname}`, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: text ? 'text/plain' : 'application/json' } });
+  const csrf = await fetch(`${lib.FAPTAP_ORIGIN}/api/csrf`, { headers: { ...HEADERS, Accept: 'application/json' } });
+  let cookie = lib.mergeCookies('', csrf.headers.getSetCookie());
+  const token = (await csrf.json())?.data?.csrf_token;
+  await pacer.wait();
+  const resp = await fetch(`${lib.FAPTAP_ORIGIN}/api/session`, {
+    method: 'POST',
+    headers: { ...HEADERS, Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': token || '', Cookie: cookie },
+    body: JSON.stringify({ email, password }),
+  });
   if (resp.status === 429) throw new RateLimitedError();
+  cookie = lib.mergeCookies(cookie, resp.headers.getSetCookie());
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new SignInError(`faptap.net sign-in failed: ${body?.error || `HTTP ${resp.status}`}`);
+  }
+  await pacer.wait();
+  const me = await fetch(`${lib.FAPTAP_ORIGIN}/api/session`, { headers: { ...HEADERS, Accept: 'application/json', Cookie: cookie } });
+  const user = (await me.json().catch(() => null))?.data;
+  if (!user) throw new SignInError('faptap.net accepted the password but no session came back; try --login again.');
+  account = { email, username: user.username || null, cookie, at: new Date().toISOString() };
+  saveAccount();
+  return account;
+}
+
+/** One paced GET on faptap.net, with the account's cookies; JSON bodies unwrap their `data`. */
+async function faptap(pathname, { text = false, renewed = false } = {}) {
+  await pacer.wait();
+  const headers = { ...HEADERS, Accept: text ? 'text/plain' : 'application/json' };
+  if (account?.cookie) headers.Cookie = account.cookie;
+  const resp = await fetch(`${lib.FAPTAP_ORIGIN}/api${pathname}`, { headers });
+  if (resp.status === 429) throw new RateLimitedError();
+  if (resp.status === 401) {
+    // An expired session is renewed once with the Keychain password.
+    const password = !renewed && keychainPassword(account?.email);
+    if (password) {
+      await signIn(account.email, password);
+      return faptap(pathname, { text, renewed: true });
+    }
+    throw account ? new SignInError('The faptap.net session has expired. Run: npm run faptap:scout -- --login') : new SignInError();
+  }
   if (!resp.ok) throw new Error(`faptap.net ${pathname}: HTTP ${resp.status}`);
   return text ? resp.text() : (await resp.json()).data;
+}
+
+/** Ask on the terminal; `hidden` doesn't echo what is typed. */
+async function ask(question, hidden = false) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  if (hidden) rl._writeToOutput = (s) => { if (s.includes(question)) process.stdout.write(question); };
+  const answer = await new Promise((resolve) => rl.question(question, resolve));
+  rl.close();
+  if (hidden) process.stdout.write('\n');
+  return answer.trim();
+}
+
+async function login() {
+  const email = process.env.FAPTAP_EMAIL || await ask('faptap.net email: ');
+  const password = process.env.FAPTAP_PASSWORD || await ask('faptap.net password: ', true);
+  if (!email || !password) throw new SignInError('Email and password are both needed.');
+  const { username } = await signIn(email, password);
+  if (process.platform === 'darwin') {
+    const r = spawnSync('security', ['add-generic-password', '-U', '-s', KEYCHAIN_SERVICE, '-a', email, '-w', password]);
+    console.log(r.status === 0 ? 'Password kept in the login Keychain to renew the session.' : 'Could not keep the password in the Keychain; run --login again when the session expires.');
+  }
+  console.log(`Signed in to faptap.net as ${username || email}.`);
+  return 0;
+}
+
+function logout() {
+  if (account?.email && process.platform === 'darwin') spawnSync('security', ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account.email]);
+  fs.rmSync(accountFile, { force: true });
+  console.log('Signed out of faptap.net.');
+  return 0;
 }
 
 // Videos per page; the API serves at most 42 whatever `limit` asks.
@@ -346,7 +458,7 @@ async function fetchPass(queue, { userData, incoming, staging }) {
       console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${note}${listed ? '' : ' (playlist pending: app is open)'}`);
       ok++;
     } catch (err) {
-      if (err instanceof RateLimitedError) throw err;
+      if (err instanceof RateLimitedError || err instanceof SignInError) throw err;
       console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
       failed++;
     }
@@ -387,12 +499,16 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) { console.log(USAGE); return 0; }
   const userData = opts.userData || defaultUserDataDir();
-  const config = readConfig(userData);
-  const incoming = incomingDir(config, opts.incoming);
+  loadAccount(userData);
   try {
+    if (opts.login) return await login();
+    if (opts.logout) return logout();
+    const config = readConfig(userData);
+    const incoming = incomingDir(config, opts.incoming);
     return opts.fetch ? await fetchAll(opts, { userData, incoming }) : await scan(opts, { userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
+    if (err instanceof SignInError) { console.error(err.message); return 3; }
     throw err;
   }
 }
