@@ -7,7 +7,8 @@
 //
 // Rules
 //   • Free Scripts only (the CLI lists that category).
-//   • Never: loli, shota, furry / anthro / yiff (tags, title or first post).
+//   • Never: loli, shota, furry / anthro / yiff, futa / futanari (tags, title
+//     or first post). Scenes already in the library stay.
 //   • Animated only: a tag like animation / 3d / hentai / vam / sfm / mmd and
 //     no `real` tag. AI-generated video counts. A music post (PMV / HMV /
 //     Cock Hero …) by a creator already in the library is accepted as well.
@@ -24,9 +25,10 @@ import path from 'node:path';
 
 export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
 export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
-export const EXCLUDED_TAGS = new Set(['loli', 'shota', 'furry', 'furries', 'anthro', 'yiff']);
 export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
-const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff)(?![\p{L}\p{N}])/iu;
+// Matched against tags, titles and first posts as whole words, so hyphenated
+// tags (`futa-on-male`) match and `Futaba` doesn't.
+const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
 
 export const DISCOVERY_NAME = 'Discovery';
 export const FEED_TAGS = ['multi-axis', 'animation', 'hentai', '3d', 'vam', 'sfm', 'mmd'];
@@ -120,7 +122,7 @@ export function hasExcludedText(text) {
 export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [] } = {}) {
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
-  if (tags.some((t) => EXCLUDED_TAGS.has(t)) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
+  if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
   const animated = tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real');
