@@ -23,6 +23,9 @@ describe('screenTopic', () => {
     ['furry tag', topic(['animation', 'furry'])],
     ['anthro tag', topic(['vam', 'anthro'])],
     ['furry in the title', topic(['animation', 'pmv'], '[LKYU] SAVAGE - Furry PMV Contest')],
+    ['futanari tag', topic(['hentai', 'futanari'])],
+    ['hyphenated futa tag', topic(['animation', 'futa-on-female'])],
+    ['futa in the title', topic(['3d'], '[Multi-axis] Futa Elf Riding')],
   ])('never accepts %s', (_, t) => {
     expect(screenTopic(t)).toEqual({ ok: false, reason: 'excluded' });
   });
@@ -50,6 +53,7 @@ describe('hasExcludedText', () => {
     expect(hasExcludedText('a lolicon edit')).toBe(true);
     expect(hasExcludedText('Furry/anthro pack')).toBe(true);
     expect(hasExcludedText('shotgun lollipop anthropology')).toBe(false);
+    expect(hasExcludedText('Futaba Sakura (Persona 5)')).toBe(false);
   });
 });
 
