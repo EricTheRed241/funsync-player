@@ -67,6 +67,7 @@ describe('isSexual', () => {
     expect(isSexual({ tags: ['hentai', 'straight'], title: 'Fluorite - Caught You Staring' })).toBe(true);
     expect(isSexual({ tags: ['hmv', 'beat-based'], title: 'KDA PORN STARS' })).toBe(true);
     expect(isSexual({ tags: ['hmv', 'dance', 'music'], title: 'Thumbs up' })).toBe(false);
+    expect(isSexual({ tags: ['hentai', 'straight', 'mmd'], title: '[mizuki_kirio] わためで生足トントンダンス！' })).toBe(false);
     expect(isSexual({ tags: ['animation', 'solo-female', 'ai-video'], title: 'Golden thread beauty sways' })).toBe(false);
   });
 

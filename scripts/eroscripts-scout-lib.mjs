@@ -48,6 +48,8 @@ const PORN_TAGS = new Set(['hentai', 'straight', 'hmv', 'pmv', 'cock-hero', 'fap
 const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck\w*|creampie|cum|cums|cumming|cumshots?|blowjobs?|bj|handjobs?|titjobs?|titfuck\w*|paizuri|boobjobs?|footjobs?|riding|rides?|cowgirl|doggy\w*|missionary|anal|vaginal|deepthroat\w*|penetration|gangbang|threesome|orgy|milking|pussy|cock|dick|penis|intercourse|nakadashi|bred|breeding)(?![\p{L}\p{N}])/iu;
 // Scripts without spaces between words.
 const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|フェラ|パイズリ|手コキ|足コキ|做爱|性爱|骑乘|口交|后入|中出|乳交|섹스/u;
+// A title that says the video is a dance counts like the `dance` tag.
+const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダンス|踊り|舞蹈|跳舞|댄스/iu;
 // Shortest video worth downloading, by its main script's last action.
 export const MIN_VIDEO_MS = 60_000;
 
@@ -167,7 +169,8 @@ export function isSexual({ tags = [], title = '', text = '' }) {
   if (tags.some((t) => SEX_TAGS.has(t))) return true;
   const words = `${title}\n${text}`;
   if (SEX_WORDS.test(words) || SEX_WORDS_CJK.test(words)) return true;
-  return !tags.includes('dance') && tags.some((t) => PORN_TAGS.has(t));
+  const dance = tags.includes('dance') || DANCE_TITLE.test(title);
+  return !dance && tags.some((t) => PORN_TAGS.has(t));
 }
 
 /** Last action time of a parsed funscript in ms; 0 when it has none. */
