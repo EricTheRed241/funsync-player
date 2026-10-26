@@ -521,6 +521,34 @@ class EroScriptsAPI {
   }
 
   /**
+   * Latest topics with `tag` in the Free Scripts category, one page (30 per
+   * page, newest activity first): `{ topics: [{id, title, tags, likes,
+   * created}], more }`. Used by `npm run eroscripts:scout`.
+   */
+  async listFreeTagTopics(tag, page = 0) {
+    try {
+      const resp = await fetch(`${BASE_URL}/tags/c/scripts/free-scripts/14/${encodeURIComponent(tag)}/l/latest.json?page=${page}`, {
+        headers: this._headers(),
+      });
+      if (resp.status === 429) return { topics: [], error: 'Rate limited', rateLimited: true };
+      if (resp.status === 403 || resp.status === 401) return { topics: [], error: 'Access denied — try logging in again', authExpired: true };
+      const data = await this._safeJson(resp);
+      if (!data) return { topics: [], error: `Failed to list tag ${tag} (${resp.status})` };
+      const list = data.topic_list || {};
+      const topics = (list.topics || []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        tags: (t.tags || []).map((x) => (typeof x === 'string' ? x : (x.name || x.text || String(x)))),
+        likes: t.like_count || 0,
+        created: t.created_at || null,
+      }));
+      return { topics, more: !!list.more_topics_url };
+    } catch (err) {
+      return { topics: [], error: err.message };
+    }
+  }
+
+  /**
    * Script files in a topic: attachments on every post (the author's
    * first, in post order, then other users'). Funscripts the posts link on
    * pixeldrain come back in `linked` (name + page URL, opened in the
