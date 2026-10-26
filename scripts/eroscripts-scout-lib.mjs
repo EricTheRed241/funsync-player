@@ -315,6 +315,9 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
 const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
 // Leading title groups that label the post rather than name its artist.
 const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|suggest|vam|mmd|sfm|fap ?hero|cock ?hero|[hp]mv|r-?18|hentai|^[23]d$|^ai$|^iwara$/i;
+
+/** True for a name that labels a script or genre (`Cock Hero`, `PMV`, `Multi-axis`) rather than naming an artist. */
+export const isCreatorLabel = (name) => NOT_A_CREATOR.test(String(name || ''));
 // `[…]`, `（…）`, `【…】`, `{…}`, and `(…)` unless glued to a word (`(G)I-DLE`).
 const GROUP_RE = /\[([^\]]*)\]|（([^）]*)）|【([^】]*)】|\{([^}]*)\}|\(([^()]*)\)(?![\p{L}\p{N}])/gu;
 // Bracket parts that describe the script or the post, not the video.
@@ -573,14 +576,14 @@ export function normalizeScoutState(raw) {
   return { ...emptyScoutState(), ...raw };
 }
 
-/** True when post `id` was judged under the current rules. */
-export function seenTopic(state, id) {
-  return state.topics[id]?.rules === RULES_VERSION;
+/** True when post `id` was judged under the current rules (`rules`: another scout's version). */
+export function seenTopic(state, id, rules = RULES_VERSION) {
+  return state.topics[id]?.rules === rules;
 }
 
 /** Remember the verdict on post `id` (`candidate` or a reject reason). */
-export function markTopic(state, id, verdict, now = Date.now()) {
-  state.topics[id] = { verdict, rules: RULES_VERSION, at: new Date(now).toISOString() };
+export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION) {
+  state.topics[id] = { verdict, rules, at: new Date(now).toISOString() };
 }
 
 /** Backfill cursor of a feed, created on first use. */
@@ -615,10 +618,10 @@ export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set())
  * @param {object} state scan state (mutated: the feed's cursor)
  * @param {string} tag
  * @param {(tag: string, page: number) => Promise<{topics: {id: number}[], more: boolean}>} listPage
- * @param {{maxNew: number, backfill: number, full?: boolean}} o
+ * @param {{maxNew: number, backfill: number, full?: boolean, rules?: number}} o `rules`: the scout's rules version
  * @returns {Promise<{topics: object[], pagesRead: number}>}
  */
-export async function listFeed(state, tag, listPage, { maxNew, backfill, full = false }) {
+export async function listFeed(state, tag, listPage, { maxNew, backfill, full = false, rules = RULES_VERSION }) {
   const feed = feedState(state, tag);
   const topics = [];
   let pagesRead = 0;
@@ -633,7 +636,7 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
     const r = await read(page);
     page++;
     if (!r.more) { feed.exhausted = true; break; }
-    if (!full && r.topics.every((t) => seenTopic(state, t.id))) break;
+    if (!full && r.topics.every((t) => seenTopic(state, t.id, rules))) break;
   }
   feed.backfillPage = Math.max(feed.backfillPage, page);
   for (let i = 0; i < backfill && !feed.exhausted; i++) {

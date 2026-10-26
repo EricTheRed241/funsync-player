@@ -2,10 +2,10 @@
 //
 // Every video whose script came from an EroScripts post has the post's tags
 // in `library.scriptTags` (downloads from the app, `eroscripts:sync` links and
-// Discovery sidecars). A fixed set of categories (Creampie, Riding, Blowjob,
-// VR, PMV / HMV …) is filled from those tags after each library scan, so the
-// desktop filters, the web remote and HereSphere (`Category:<name>` tags) can
-// use them.
+// Discovery sidecars; FapTap scenes bring their FapTap tags, same slugs). A
+// fixed set of categories (Creampie, Riding, Blowjob, VR, PMV / HMV …) is
+// filled from those tags after each library scan, so the desktop filters,
+// the web remote and HereSphere (`Category:<name>` tags) can use them.
 //
 // The user stays in charge: each category is created once (a deleted one is
 // not made again), an existing category with the same name is reused, and

@@ -857,15 +857,16 @@ export class Library {
 
     this._applyManualAssociations();
 
-    // Posts of Discovery scenes (their `eroscripts.json`, attached by the
-    // scan), then links found by `npm run eroscripts:sync` (written to a
-    // file in userData; the CLI never touches config.json), then the
-    // categories made from those posts' tags. Off the scan's critical path:
+    // Sources of Discovery scenes (their `eroscripts.json` post or
+    // `faptap.json` scene, attached by the scan), then links found by
+    // `npm run eroscripts:sync` (written to a file in userData; the CLI
+    // never touches config.json; a link replaces a FapTap record), then the
+    // categories made from those tags. Off the scan's critical path:
     // nothing below needs them.
     const scout = mergeScoutPosts(this._settings.get(SCRIPT_TAGS_KEY) || {}, this._videos, Date.now());
     if (scout) {
       this._settings.set(SCRIPT_TAGS_KEY, scout.map);
-      console.log('[Library] Discovery posts recorded:', { added: scout.added, updated: scout.updated });
+      console.log('[Library] Discovery sources recorded:', { added: scout.added, updated: scout.updated });
     }
     applyEroscriptsLinks(this._settings, window.funsync)
       .then((merged) => { if (merged) console.log('[Library] EroScripts links merged:', merged); })

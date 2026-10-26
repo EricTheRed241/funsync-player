@@ -135,8 +135,11 @@ const DEFAULTS = {
       hideDuplicateNames: false,
       // EroScripts tags of the post each video's script came from, keyed by
       // VIDEO PATH. Recorded on download from any route (standalone panel or
-      // the Associate-modal search); nothing displays it yet. Shape:
+      // the Associate-modal search), from `eroscripts:sync` links and from
+      // Discovery sidecars. Shape:
       //   `{ tags: string[], topicId, topicUrl, source, savedAt }`
+      // FapTap scenes (`source: 'faptap-scout'`) have `topicId: null` and
+      // add `faptapId`, `faptapUrl`.
       // Last write wins — the record describes the CURRENT script's post.
       scriptTags: {},
       collections: [],
