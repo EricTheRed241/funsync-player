@@ -16,6 +16,9 @@
 //     title or first post, or a porn music tag (HMV / PMV / Cock Hero) on a
 //     post that isn't a dance. Never a post tagged sfw / non-porn.
 //   • Videos shorter than a minute (by the main script) aren't downloaded.
+//   • Multi-axis scenes only. A single-axis scene is taken only when the post
+//     is VR, has creampie, and is by a creator already in the library or a
+//     PMV / HMV / Cock Hero / Fap Hero.
 //   • Ranking: VR +3, music +2, creator already in the library +2,
 //     creampie / riding +2 (+0.5 for both), multi-axis +1, likes up to +3.
 //   • Skip posts the library already links and scenes whose video is
@@ -154,6 +157,34 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   if (!animated && !(music && artist)) return { ok: false, reason: 'not-animated' };
   if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
   return { ok: true, music, vr: tags.includes('vr'), artist };
+}
+
+// Music videos that let a single-axis VR creampie post in.
+const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
+const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu;
+const CREAMPIE_TITLE = /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])|中出し|内射/iu;
+
+/**
+ * Whether a post's single-axis scenes may be downloaded: only VR + creampie
+ * + (a creator already in the library, or a PMV / HMV). Multi-axis scenes
+ * don't need this.
+ *
+ * @param {{tags?: string[], title?: string, vr?: boolean, artistInLibrary?: boolean}} post
+ */
+export function takesSingleAxis({ tags = [], title = '', vr = false, artistInLibrary = false }) {
+  const creampie = tags.some((t) => t === 'creampie' || t.endsWith('-creampie')) || CREAMPIE_TITLE.test(title);
+  const pmv = tags.some((t) => PMV_TAGS.has(t)) || PMV_TITLE.test(title);
+  return vr && creampie && (artistInLibrary || pmv);
+}
+
+/**
+ * The scenes of a post worth downloading: every multi-axis one, and the
+ * single-axis ones only when `takesSingleAxis` allows them.
+ *
+ * @param {{tags?: string[], title?: string, vr?: boolean, artistInLibrary?: boolean, scenes: {axes: string[]}[]}} post
+ */
+export function wantedScenes(post) {
+  return takesSingleAxis(post) ? post.scenes : post.scenes.filter((sc) => sc.axes.length);
 }
 
 /**
@@ -517,9 +548,14 @@ export function remapPaths(value, moves) {
 
 // ── Queue & playlist ────────────────────────────────────────────────────
 
-/** Download order: multi-axis posts first, then single-axis; each by score. */
+/**
+ * Download order: multi-axis posts first, then single-axis; each by score.
+ * Scenes a saved list holds but the rules no longer want are dropped.
+ */
 export function downloadQueue(candidates) {
-  const ok = candidates.filter((c) => c.scenes.length);
+  const ok = candidates
+    .map((c) => ({ ...c, scenes: wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
+    .filter((c) => c.scenes.length);
   const byScore = (a, b) => b.score - a.score;
   return [...ok.filter((c) => c.axisType === 'multi').sort(byScore), ...ok.filter((c) => c.axisType !== 'multi').sort(byScore)];
 }
