@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { mergeLinksIntoScriptTags, applyEroscriptsLinks, mergeScoutPosts, SYNC_SOURCE, SCOUT_SOURCE } from '../../renderer/js/eroscripts-links.js';
+import { mergeLinksIntoScriptTags, applyEroscriptsLinks, mergeScoutPosts, SYNC_SOURCE, SCOUT_SOURCE, FAPTAP_SOURCE } from '../../renderer/js/eroscripts-links.js';
 import { SCRIPT_TAGS_KEY } from '../../renderer/js/script-tags.js';
 
 const { readLinksFile, writeLinksFile, linksFilePath, LINKS_FILE } = await import('../../electron/eroscripts-links.js');
@@ -46,6 +46,18 @@ describe('mergeLinksIntoScriptTags', () => {
     expect(mergeLinksIntoScriptTags({}, { '/a.mp4': link(1, 'review') }, NOW)).toBe(null);
   });
 
+  it('replaces a FapTap scene record with the post, but never a Discovery post record', () => {
+    const current = {
+      '/ft.mp4': { tags: ['riding'], topicId: null, topicUrl: null, faptapId: '5', faptapUrl: 'https://faptap.net/v/5', source: FAPTAP_SOURCE, savedAt: 1 },
+      '/scout.mp4': { tags: ['vr'], topicId: 9, topicUrl: 'u', source: SCOUT_SOURCE, savedAt: 1 },
+    };
+    const r = mergeLinksIntoScriptTags(current, { '/ft.mp4': link(1), '/scout.mp4': link(2) }, NOW);
+    expect(r).toMatchObject({ added: 0, updated: 1, removed: 0 });
+    expect(r.map['/ft.mp4']).toMatchObject({ topicId: 1, source: SYNC_SOURCE, tags: ['osr2'] });
+    expect(r.map['/ft.mp4'].faptapId).toBeUndefined();
+    expect(r.map['/scout.mp4']).toBe(current['/scout.mp4']);
+  });
+
   it('updates changed sync records, leaves identical ones and drops withdrawn ones', () => {
     const first = mergeLinksIntoScriptTags({}, { '/a.mp4': link(1), '/b.mp4': link(2) }, NOW).map;
     expect(mergeLinksIntoScriptTags(first, { '/a.mp4': link(1), '/b.mp4': link(2) }, NOW + 1)).toBe(null);
@@ -75,6 +87,32 @@ describe('mergeScoutPosts', () => {
     const first = mergeScoutPosts({}, [video('/a.mp4', 1)], NOW).map;
     expect(mergeScoutPosts(first, [video('/a.mp4', 1)], NOW + 1)).toBe(null);
     expect(mergeScoutPosts(first, [video('/a.mp4', 1, ['creampie', 'vr'])], NOW + 1).map['/a.mp4'].tags).toEqual(['creampie', 'vr']);
+  });
+
+  const scene = (p, faptapId, tags = ['riding']) => ({ path: p, faptap: { faptapId, url: `https://faptap.net/v/${faptapId}`, tags } });
+
+  it('records FapTap scenes without a post, under every EroScripts record', () => {
+    const current = {
+      '/mine.mp4': { tags: ['vr'], topicId: 9, source: 'eroscripts' },
+      '/sync.mp4': { tags: ['old'], topicId: 5, source: SYNC_SOURCE },
+      '/scout.mp4': { tags: ['old'], topicId: 6, source: SCOUT_SOURCE },
+    };
+    const r = mergeScoutPosts(current, [scene('/new.mp4', '11'), scene('/mine.mp4', '12'), scene('/sync.mp4', '13'), scene('/scout.mp4', '14')], NOW);
+    expect(r).toMatchObject({ added: 1, updated: 0 });
+    expect(r.map['/new.mp4']).toEqual({
+      tags: ['riding'], topicId: null, topicUrl: null, faptapId: '11', faptapUrl: 'https://faptap.net/v/11', source: FAPTAP_SOURCE, savedAt: NOW,
+    });
+    for (const p of ['/mine.mp4', '/sync.mp4', '/scout.mp4']) expect(r.map[p]).toBe(current[p]);
+  });
+
+  it('leaves an unchanged FapTap record, follows changed tags, and gives way to a Discovery post', () => {
+    const first = mergeScoutPosts({}, [scene('/a.mp4', '11')], NOW).map;
+    expect(mergeScoutPosts(first, [scene('/a.mp4', '11')], NOW + 1)).toBe(null);
+    const retagged = mergeScoutPosts(first, [scene('/a.mp4', '11', ['riding', 'animation'])], NOW + 1);
+    expect(retagged).toMatchObject({ added: 0, updated: 1 });
+    expect(retagged.map['/a.mp4'].tags).toEqual(['riding', 'animation']);
+    const post = mergeScoutPosts(first, [{ ...scene('/a.mp4', '11'), ...video('/a.mp4', 3) }], NOW + 1);
+    expect(post.map['/a.mp4']).toMatchObject({ topicId: 3, source: SCOUT_SOURCE });
   });
 });
 

@@ -1,0 +1,161 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
+// npm run faptap:scout — which faptap.net videos qualify, which stream is
+// taken and how FapTap's script becomes a funscript
+// (scripts/faptap-scout-lib.mjs). No faptap.net.
+import { describe, it, expect } from 'vitest';
+import {
+  tagSlug, screenVideo, pickSource, csvToFunscript, vrSuffix, toCandidate, mergeCandidates, fetchedKey, FAPTAP_RULES_VERSION,
+  livePerformerNames, hasLivePerformer,
+} from '../../scripts/faptap-scout-lib.mjs';
+import { emptyScoutState, listFeed, markTopic, seenTopic, RULES_VERSION } from '../../scripts/eroscripts-scout-lib.mjs';
+
+const video = (tagNames, extra = {}) => ({
+  id: '1', name: 'Bulma Yoga', description: '', duration: 300, user: { username: 'Zoot' },
+  tags: tagNames.map((name) => ({ name })), ...extra,
+});
+
+describe('tagSlug', () => {
+  it('spells FapTap tags like EroScripts tags', () => {
+    expect(tagSlug('Cum in Mouth')).toBe('cum-in-mouth');
+    expect(tagSlug(' Doggystyle ')).toBe('doggystyle');
+    expect(tagSlug('Five Nights at Freddy\'s')).toBe('five-nights-at-freddy-s');
+  });
+});
+
+describe('screenVideo', () => {
+  it.each([
+    ['a futa tag', video(['Animated', 'Futa', 'Riding'])],
+    ['a hyphenated furry tag', video(['Animation', 'gay furry animation', 'Sex'])],
+    ['a furry tag that does not say furry', video(['Animated', 'scalie', 'Sex'])],
+    ['futa in the title', video(['Hentai', 'Riding'], { name: 'Futa Elf rides' })],
+    ['loli in the description', video(['Hentai', 'Riding'], { description: '<p>loli edit</p>' })],
+  ])('never takes %s', (_, v) => {
+    expect(screenVideo(v)).toEqual({ ok: false, reason: 'excluded' });
+  });
+
+  it('takes animated videos, FapTap tag spellings included, but not live action', () => {
+    expect(screenVideo(video(['Animated 3d', 'Cowgirl'])).ok).toBe(true);
+    expect(screenVideo(video(['ai-video', 'Blowjob'])).ok).toBe(true);
+    expect(screenVideo(video(['Hentai', 'amateur anal'])).reason).toBe('not-animated');
+    expect(screenVideo(video(['Animation', 'OnlyFans', 'Riding'])).reason).toBe('not-animated');
+    expect(screenVideo(video(['POV', 'Blowjob'])).reason).toBe('not-animated');
+  });
+
+  it('takes a music video by a creator already in the library without an animation tag', () => {
+    const v = video(['PMV', 'Cock Hero'], { name: 'Sunset Cock Hero', user: { username: 'Bastati' } });
+    expect(screenVideo(v, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, artist: 'bastati' });
+    expect(screenVideo(v, { creators: [] }).reason).toBe('not-animated');
+  });
+
+  it('does not take a genre folder (Cock Hero, PMV) for a creator', () => {
+    const v = video(['PMV', 'Blowjob'], { name: 'NON STOP - Cock Hero', user: { username: 'someone' } });
+    expect(screenVideo(v, { creators: ['cock hero', 'pmv'] }).reason).toBe('not-animated');
+  });
+
+  it('turns down a live video tagged as animation when its title names a FapTap model or pornstar', () => {
+    const livePerformers = livePerformerNames([
+      { name: 'Molly Little', category: 'model' }, { name: 'Kendra Sunderland', category: 'pornstar' },
+      { name: 'Moecode', category: 'none' }, { name: 'Ava', category: 'model' },
+    ]);
+    expect(livePerformers).toEqual(['molly little', 'kendra sunderland']);
+    expect(screenVideo(video(['Animation', 'Blowjob'], { name: 'Molly Little Dirty Talk Blowjob' }), { livePerformers }).reason).toBe('not-animated');
+    expect(screenVideo(video(['Animation', 'Blowjob'], { name: 'Ava rides Ganondorf' }), { livePerformers }).ok).toBe(true);
+  });
+
+  it('spots a model or pornstar listed as the performer', () => {
+    expect(hasLivePerformer({ performers: [{ name: 'Molly Little', category: 'model' }] })).toBe(true);
+    expect(hasLivePerformer({ performers: [{ name: 'Moecode', category: '' }] })).toBe(false);
+    expect(hasLivePerformer({ performers: null })).toBe(false);
+  });
+
+  it('needs sex and at least a minute', () => {
+    expect(screenVideo(video(['Animated', 'dance'], { name: 'Bulma dances' })).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', 'non-nude', 'Riding'])).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', 'Riding'], { duration: 59 })).reason).toBe('short');
+    expect(screenVideo(video(['Animated', 'Riding'], { duration: 60 })).ok).toBe(true);
+  });
+
+  it('skips a video the library or the EroScripts list already has under its own title', () => {
+    const v = video(['Animated', 'Riding'], { name: 'YOGA TIME with Bulma! - Zoot Interactive' });
+    expect(screenVideo(v, { knownTitles: ['zoot yoga time with bulma'] }).reason).toBe('in-library');
+    expect(screenVideo(v, { knownTitles: ['zoot yoga time with chichi'] }).ok).toBe(true);
+  });
+
+  it('reports VR from the flag or the tag, and the preferred tags', () => {
+    expect(screenVideo(video(['Animated', 'Creampie', 'Riding'], { vr: true }))).toMatchObject({ vr: true, preferred: ['creampie', 'riding'] });
+    expect(screenVideo(video(['Animated', 'VR', 'Riding'])).vr).toBe(true);
+  });
+});
+
+describe('pickSource', () => {
+  const src = (...qualities) => qualities.map((q) => ({ url: `https://cdn/${q}p/video.m3u8`, quality: String(q), format: 'hls' }));
+
+  it('takes the best stream within the cap', () => {
+    expect(pickSource(src(2160, 1080, 720), false).height).toBe(2160);
+    expect(pickSource(src(4320, 2160), false).height).toBe(2160);
+    expect(pickSource(src(4320, 2160), true).height).toBe(4320);
+  });
+
+  it('turns down preview-only uploads: under 720p flat, under 1080p VR', () => {
+    expect(pickSource(src(480, 240), false)).toBeNull();
+    expect(pickSource(src(720), false).height).toBe(720);
+    expect(pickSource(src(720), true)).toBeNull();
+    expect(pickSource([], false)).toBeNull();
+  });
+});
+
+describe('csvToFunscript', () => {
+  it('keeps time order, one action per millisecond, positions within 0..100', () => {
+    const s = csvToFunscript('500,50\n100,120\nms,pos\n\n300,-4\n500,70\r\n');
+    expect(s.actions).toEqual([{ at: 100, pos: 100 }, { at: 300, pos: 0 }, { at: 500, pos: 70 }]);
+    expect(s).toMatchObject({ version: '1.0', inverted: false, range: 100 });
+  });
+});
+
+describe('vrSuffix', () => {
+  it('names the projection the way the headset reads it', () => {
+    expect(vrSuffix('STEREO_180_LR')).toBe('_180_LR');
+    expect(vrSuffix('STEREO_180_TB_SPHERICAL')).toBe('_180_TB');
+    expect(vrSuffix('STEREO_FISHEYE_200_LR')).toBe('_MKX200');
+    expect(vrSuffix('MONO_FLAT')).toBe('');
+  });
+});
+
+describe('mergeCandidates', () => {
+  it('keeps waiting candidates, drops fetched or rejected ones, best first', () => {
+    const c = (id, score) => ({ id, score });
+    const list = mergeCandidates([c('1', 1), c('2', 5)], [c('3', 3), c('1', 4)], (id) => id === '2');
+    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 4], ['3', 3]]);
+  });
+
+  it('ranks VR and preferred tags above plain videos', () => {
+    const plain = toCandidate(video(['Animated', 'Blowjob']), screenVideo(video(['Animated', 'Blowjob'])));
+    const vr = toCandidate(video(['Animated', 'Creampie'], { vr: true }), screenVideo(video(['Animated', 'Creampie'], { vr: true })));
+    expect(vr.score).toBeGreaterThan(plain.score);
+    expect(plain).toMatchObject({ id: '1', url: 'https://faptap.net/v/1', author: 'Zoot' });
+    expect(fetchedKey(plain.id)).toBe('faptap|1');
+  });
+});
+
+describe('scan state with the FapTap rules version', () => {
+  it('counts a video as judged only under its own rules version', () => {
+    const state = emptyScoutState();
+    markTopic(state, '7', 'candidate', 0, FAPTAP_RULES_VERSION + 100);
+    expect(seenTopic(state, '7', FAPTAP_RULES_VERSION + 100)).toBe(true);
+    expect(seenTopic(state, '7', RULES_VERSION + 200)).toBe(false);
+  });
+
+  it('stops reading new pages at a page judged under the given rules', async () => {
+    const state = emptyScoutState();
+    const rules = 42;
+    for (const id of ['a', 'b']) markTopic(state, id, 'candidate', 0, rules);
+    const pages = [[{ id: 'a' }, { id: 'b' }], [{ id: 'c' }]];
+    const read = async (_feed, page) => ({ topics: pages[page] || [], more: page < pages.length - 1 });
+    expect((await listFeed(state, 'all', read, { maxNew: 5, backfill: 0, rules })).pagesRead).toBe(1);
+    expect((await listFeed(emptyScoutState(), 'all', read, { maxNew: 5, backfill: 0, rules })).pagesRead).toBe(2);
+  });
+});

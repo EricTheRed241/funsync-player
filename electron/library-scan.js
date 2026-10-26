@@ -36,8 +36,10 @@ const yieldTick = () => new Promise((resolve) => setImmediate(resolve));
 const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
 const SUBTITLE_EXTS = ['.srt', '.vtt'];
-// The scout's per-scene record of its EroScripts post.
+// The scouts' per-scene records: the EroScripts post (eroscripts:scout) and
+// the FapTap scene (faptap:scout) a Discovery scene came from.
 const SCOUT_SIDECAR = 'eroscripts.json';
+const FAPTAP_SIDECAR = 'faptap.json';
 
 const SILENT_LOG = { info() {}, warn() {} };
 
@@ -388,23 +390,33 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
     }
   }));
 
-  // Discovery scenes carry the EroScripts post they came from in an
-  // `eroscripts.json` sidecar (scripts/eroscripts-scout.mjs). Attach it so
-  // the renderer can record the post's tags like a download from the app.
-  const sidecarDirs = new Set(entries.filter((e) => e.isFile() && e.name === SCOUT_SIDECAR).map((e) => path.resolve(entryDir(e))));
+  // Discovery scenes carry where they came from in a sidecar: the EroScripts
+  // post in `eroscripts.json` (scripts/eroscripts-scout.mjs), the FapTap
+  // scene in `faptap.json` (scripts/faptap-scout.mjs). Attach it so the
+  // renderer can record the tags like a download from the app.
+  const sidecarDirs = new Map();
+  for (const e of entries) {
+    if (!e.isFile() || (e.name !== SCOUT_SIDECAR && e.name !== FAPTAP_SIDECAR)) continue;
+    const dir = path.resolve(entryDir(e));
+    if (!sidecarDirs.has(dir)) sidecarDirs.set(dir, []);
+    sidecarDirs.get(dir).push(e.name);
+  }
   const fold = (s) => String(s).normalize('NFC').toLowerCase();
-  await Promise.all(videos.map(async (v) => {
+  const cleanTags = (tags) => (Array.isArray(tags) ? tags.filter((t) => typeof t === 'string' && t.trim()) : []);
+  await Promise.all(videos.map((v) => {
     const dir = path.dirname(v.path);
-    if (!sidecarDirs.has(path.resolve(dir))) return;
-    try {
-      const rec = JSON.parse(await fs.promises.readFile(path.join(dir, SCOUT_SIDECAR), 'utf8'));
-      if (rec?.topicId == null || (rec.file && fold(rec.file) !== fold(v.name))) return;
-      v.eroscripts = {
-        topicId: rec.topicId,
-        url: typeof rec.url === 'string' ? rec.url : null,
-        tags: Array.isArray(rec.tags) ? rec.tags.filter((t) => typeof t === 'string' && t.trim()) : [],
-      };
-    } catch { /* unreadable sidecar: no post for this video */ }
+    return Promise.all((sidecarDirs.get(path.resolve(dir)) || []).map(async (name) => {
+      try {
+        const rec = JSON.parse(await fs.promises.readFile(path.join(dir, name), 'utf8'));
+        if (rec?.file && fold(rec.file) !== fold(v.name)) return;
+        const url = typeof rec?.url === 'string' ? rec.url : null;
+        if (name === SCOUT_SIDECAR && rec?.topicId != null) {
+          v.eroscripts = { topicId: rec.topicId, url, tags: cleanTags(rec.tags) };
+        } else if (name === FAPTAP_SIDECAR && rec?.faptapId != null && rec.faptapId !== '') {
+          v.faptap = { faptapId: String(rec.faptapId), url, tags: cleanTags(rec.tags) };
+        }
+      } catch { /* unreadable sidecar: no source for this video */ }
+    }));
   }));
 
   // Fuzzy match pass: pair unmatched videos with high-confidence funscript matches

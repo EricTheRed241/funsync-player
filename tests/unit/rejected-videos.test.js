@@ -14,7 +14,7 @@ import path from 'node:path';
 import { sweepRejected, syncReview, ratingVerdict, REVIEW_PLAYLIST } from '../../renderer/js/reject-rule.js';
 
 const require = createRequire(import.meta.url);
-const { deleteRejectedVideo, readRejected, recordRejection } = require('../../electron/rejected-videos.js');
+const { deleteRejectedVideo, readRejected, recordRejection, faptapRejectionKey } = require('../../electron/rejected-videos.js');
 
 let tmp;
 let lib;
@@ -59,6 +59,39 @@ describe('deleteRejectedVideo', () => {
     expect(() => deleteRejectedVideo(touch('B/S/S.mp4'), { sources: [lib], userDataDir: userData, reason: 'short' })).toThrow(/unknown reason/);
   });
 
+  it('deletes a FapTap scene with its companions and sidecar, and remembers it under its FapTap key', () => {
+    const stem = 'Zoot - YOGA TIME with Bulma!';
+    const video = touch(`Zoot/${stem}/${stem}.mp4`);
+    touch(`Zoot/${stem}/${stem}.funscript`);
+    touch(`Zoot/${stem}/${stem}.generated.roll.funscript`);
+    touch(`Zoot/${stem}/faptap.json`, JSON.stringify({
+      faptapId: '2114528228239478785', url: 'https://faptap.net/v/2114528228239478785', title: 'YOGA TIME with Bulma!',
+      author: 'Zoot', tags: ['riding'], file: `${stem}.mp4`,
+    }));
+    touch('Zoot/Other/Other.mp4');
+
+    const r = deleteRejectedVideo(video, { sources: [lib], userDataDir: userData, now: 0, reason: 'low-rating' });
+
+    expect(r.deleted).toHaveLength(3);
+    expect(r.removedDirs).toEqual([path.join(lib, 'Zoot', stem)]);
+    expect(exists(`Zoot/${stem}`)).toBe(false);
+    expect(exists('Zoot/Other/Other.mp4')).toBe(true);
+    expect(faptapRejectionKey('2114528228239478785')).toBe('faptap|2114528228239478785');
+    expect(readRejected(userData).entries).toEqual([{
+      key: 'faptap|2114528228239478785', source: 'faptap', faptapId: '2114528228239478785', title: 'YOGA TIME with Bulma!',
+      url: 'https://faptap.net/v/2114528228239478785', reason: 'low-rating', path: video, at: new Date(0).toISOString(),
+    }]);
+  });
+
+  it('prefers the EroScripts sidecar when a scene has both', () => {
+    const video = touch('A/S/S.mp4');
+    touch('A/S/eroscripts.json', JSON.stringify({ topicId: 9, video: 'v.mp4' }));
+    touch('A/S/faptap.json', JSON.stringify({ faptapId: '5' }));
+    deleteRejectedVideo(video, { sources: [lib], userDataDir: userData });
+    expect(readRejected(userData).entries.map((e) => e.key)).toEqual(['9|v.mp4']);
+    expect(exists('A')).toBe(false);
+  });
+
   it('leaves another video of the folder, its scripts, and a folder with other files', () => {
     const video = touch('Pack/Title.mp4');
     touch('Pack/Title.funscript');
@@ -89,6 +122,13 @@ describe('recordRejection', () => {
     recordRejection(userData, { topicId: 1, video: 'a.mp4', reason: 'no-thank-you' });
     recordRejection(userData, { topicId: 1, video: 'b.mp4', reason: 'short' });
     expect(readRejected(userData).entries.map((e) => `${e.key} ${e.reason}`)).toEqual(['1|a.mp4 no-thank-you', '1|b.mp4 short']);
+  });
+
+  it('keys FapTap entries by their FapTap id', () => {
+    recordRejection(userData, { source: 'faptap', faptapId: '11', reason: 'low-rating' });
+    recordRejection(userData, { source: 'faptap', faptapId: '11', reason: 'no-thank-you' });
+    recordRejection(userData, { topicId: 11, video: 'a.mp4', reason: 'short' });
+    expect(readRejected(userData).entries.map((e) => `${e.key} ${e.reason}`)).toEqual(['faptap|11 no-thank-you', '11|a.mp4 short']);
   });
 });
 

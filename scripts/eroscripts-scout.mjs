@@ -21,7 +21,6 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -38,6 +37,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
+const { appRunning, flushPlaylist, incomingDir, librarySources, libraryState, onDiskPath, readConfig, removeIfEmpty, walk, writeConfig } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
@@ -97,77 +97,11 @@ function parseArgs(argv) {
 
 // ── App state ───────────────────────────────────────────────────────────
 
-const configPath = (userData) => path.join(userData, 'config.json');
-const readConfig = (userData) => JSON.parse(fs.readFileSync(configPath(userData), 'utf8'));
-
-/** The app holds Chromium's SingletonLock (`<host>-<pid>`) in userData while it runs. */
-function appRunning(userData) {
-  let target;
-  try { target = fs.readlinkSync(path.join(userData, 'SingletonLock')); } catch { return false; }
-  const pid = Number(target.split('-').pop());
-  if (!pid) return true;
-  try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
-}
-
-function writeConfig(userData, config) {
-  const file = configPath(userData);
-  fs.copyFileSync(file, `${file}.bak-discovery`);
-  const tmp = `${file}.tmp-discovery`;
-  fs.writeFileSync(tmp, JSON.stringify(config, null, '\t'));
-  fs.renameSync(tmp, file);
-}
-
 /** Rename `from` to `to`, with its AppleDouble `._` sidecar if the volume keeps one. */
 function renameWithSidecar(from, to) {
   fs.renameSync(from, to);
   const side = (p) => path.join(path.dirname(p), `._${path.basename(p)}`);
   if (fs.existsSync(side(from)) && !fs.existsSync(side(to))) fs.renameSync(side(from), side(to));
-}
-
-/**
- * Remove a folder that holds nothing but `._*` / `.DS_Store` leftovers. exFAT
- * lists names decomposed (NFD) but finds some `._` files only by their
- * composed (NFC) spelling, so both are tried; a folder that won't go stays.
- */
-function removeIfEmpty(dir) {
-  let names;
-  try { names = fs.readdirSync(dir); } catch { return; }
-  if (names.some((n) => !n.startsWith('._') && n !== '.DS_Store')) return;
-  for (const n of names) for (const form of [n, n.normalize('NFC')]) fs.rmSync(path.join(dir, form), { force: true });
-  try { fs.rmdirSync(dir); } catch { return; }
-  const side = path.join(path.dirname(dir), `._${path.basename(dir)}`);
-  for (const form of [side, side.normalize('NFC')]) fs.rmSync(form, { force: true });
-}
-
-function librarySources(config, incoming) {
-  return (config.settings?.library?.sources || [])
-    .filter((s) => s.enabled !== false && s.path && path.resolve(s.path) !== path.resolve(incoming || '/nonexistent'));
-}
-
-function walk(dir, depth, visit) {
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    if (e.name.startsWith('.')) continue;
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) { visit(full, e, depth); if (depth < 3) walk(full, depth + 1, visit); } else visit(full, e, depth);
-  }
-}
-
-/** What the library already has: creators, scene folder names, video names. */
-function libraryState(roots) {
-  const creators = new Set();
-  const sceneNames = [];
-  const videos = [];
-  for (const root of roots) {
-    walk(root, 0, (full, e, depth) => {
-      if (e.isDirectory()) {
-        if (depth === 0) creators.add(e.name.toLowerCase());
-        if (depth === 1) sceneNames.push(lib.normName(e.name));
-      } else if (lib.isVideoName(e.name)) videos.push(lib.coreName(e.name));
-    });
-  }
-  return { creators, sceneNames, videos };
 }
 
 // ── Hosts ───────────────────────────────────────────────────────────────
@@ -257,7 +191,7 @@ async function scan(opts, { api, userData, config, incoming }) {
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
   // Posts the user turned down in the app (No thank you, 2 stars or lower).
-  const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short').map((e) => e.topicId));
+  const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);
 
   const state = readScoutState(userData);
@@ -423,43 +357,6 @@ function fetchedScenes(incoming, userData) {
   return done;
 }
 
-/**
- * `p` spelled the way the drive lists it. Names from MEGA come in one Unicode
- * form (NFC) while some volumes list another, a folder may exist in another
- * case (`bubukuin` for `Bubukuin`), and the playlist and headset match the
- * library scan's paths byte for byte.
- */
-function onDiskPath(p) {
-  let cur = path.sep;
-  for (const seg of path.resolve(p).split(path.sep).filter(Boolean)) {
-    let hit = seg;
-    try {
-      const names = fs.readdirSync(cur);
-      const nfc = seg.normalize('NFC');
-      hit = names.find((n) => n.normalize('NFC') === nfc) ?? names.find((n) => n.normalize('NFC').toLowerCase() === nfc.toLowerCase()) ?? seg;
-    } catch { /* keep as given */ }
-    cur = path.join(cur, hit);
-  }
-  return cur;
-}
-
-/** Add finished videos (and any left from earlier runs) to Discovery; false when the app is open. */
-function flushPlaylist(userData, incoming, videoPaths) {
-  const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
-  let pending = [];
-  try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf8')); } catch { /* none */ }
-  const all = [...new Set([...pending, ...videoPaths].filter((p) => fs.existsSync(p)).map(onDiskPath))];
-  if (!all.length) return true;
-  if (appRunning(userData)) { fs.writeFileSync(pendingFile, JSON.stringify(all, null, 1)); return false; }
-  const config = readConfig(userData);
-  const changes = lib.addToDiscovery(config, all, { incomingDir: incoming, newId: randomUUID });
-  if (changes.sourceAdded || changes.playlistCreated || changes.added.length) writeConfig(userData, config);
-  fs.rmSync(pendingFile, { force: true });
-  if (changes.sourceAdded) console.log(`  added library source "${lib.DISCOVERY_NAME}" → ${incoming}`);
-  if (changes.playlistCreated) console.log(`  created playlist "${lib.DISCOVERY_NAME}"`);
-  return true;
-}
-
 async function fetchPass(queue, { api, userData, incoming, staging }) {
   const done = fetchedScenes(incoming, userData);
   let ok = 0; let failed = 0; let generated = 0; let short = 0;
@@ -603,10 +500,7 @@ async function main() {
   if (opts.help) { console.log(USAGE); return 0; }
   const userData = opts.userData || defaultUserDataDir();
   const config = readConfig(userData);
-  const sources = librarySources(config, opts.incoming);
-  const discovery = (config.settings?.library?.sources || []).find((s) => s.name === lib.DISCOVERY_NAME);
-  const incoming = opts.incoming || discovery?.path || (sources[0] && path.join(path.dirname(sources[0].path), '_incoming'));
-  if (!incoming) throw new Error('No library source to put _incoming next to; pass --incoming <dir>.');
+  const incoming = incomingDir(config, opts.incoming);
   if (opts.retitle) return retitle(opts, { userData, incoming });
   const session = config.settings?.eroscripts?.session || {};
   if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }

@@ -62,6 +62,26 @@ describe('scanLibrary', () => {
     expect(byName['Plain.mp4'].eroscripts).toBeUndefined();
   });
 
+  it("attaches a FapTap scene from its faptap.json, matching the recorded file", async () => {
+    touch('In/Zoot/Yoga/Zoot - YOGA TIME with Bulma!.mp4');
+    touch('In/Zoot/Yoga/Zoot - YOGA TIME with Bulma!.funscript');
+    touch('In/Zoot/Other/Other.mp4');
+    touch('In/Zoot/NoId/NoId.mp4');
+    fs.writeFileSync(path.join(tmp, 'In/Zoot/Yoga/faptap.json'), JSON.stringify({
+      faptapId: '2114528228239478785', url: 'https://faptap.net/v/2114528228239478785', title: 'YOGA TIME with Bulma!',
+      author: 'Zoot', tags: ['animation', 'riding', '', 3], file: 'zoot - yoga time with bulma!.MP4',
+    }));
+    fs.writeFileSync(path.join(tmp, 'In/Zoot/Other/faptap.json'), JSON.stringify({ faptapId: '5', tags: ['riding'], file: 'Elsewhere.mp4' }));
+    fs.writeFileSync(path.join(tmp, 'In/Zoot/NoId/faptap.json'), JSON.stringify({ tags: ['riding'] }));
+
+    const byName = Object.fromEntries((await scanLibrary(path.join(tmp, 'In'))).videos.map((v) => [v.name, v]));
+    const yoga = byName['Zoot - YOGA TIME with Bulma!.mp4'];
+    expect(yoga.faptap).toEqual({ faptapId: '2114528228239478785', url: 'https://faptap.net/v/2114528228239478785', tags: ['animation', 'riding'] });
+    expect(yoga.eroscripts).toBeUndefined();
+    expect(byName['Other.mp4'].faptap).toBeUndefined();
+    expect(byName['NoId.mp4'].faptap).toBeUndefined();
+  });
+
   it('reports a missing source instead of throwing', async () => {
     const r = await scanLibrary([path.join(tmp, 'missing')]);
     expect(r.failedPaths).toEqual([path.join(tmp, 'missing')]);
