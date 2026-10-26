@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, MIN_VIDEO_MS, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
+  emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const topic = (tags, title = 'Some scene', id = 1) => ({ id, title, tags });
@@ -337,6 +338,64 @@ describe('takesSingleAxis', () => {
     const scenes = [{ axes: ['twist'] }, { axes: [] }];
     expect(wantedScenes({ vr: false, tags: [], scenes })).toEqual([{ axes: ['twist'] }]);
     expect(wantedScenes({ vr: true, tags: ['creampie', 'hmv'], scenes })).toEqual(scenes);
+  });
+});
+
+describe('scan state', () => {
+  // A feed of `n` posts, newest first (ids n..1), 30 per page.
+  const feed = (n) => {
+    const reads = [];
+    const listPage = async (tag, page) => {
+      reads.push(page);
+      const ids = Array.from({ length: n }, (_, i) => n - i).slice(page * 30, page * 30 + 30);
+      return { topics: ids.map((id) => ({ id })), more: (page + 1) * 30 < n };
+    };
+    return { reads, listPage };
+  };
+  const markAll = (state, topics) => topics.forEach((t) => markTopic(state, t.id, 'candidate', 0));
+
+  it('reads new pages up to the cap on a first run, then backfills from there', async () => {
+    const state = emptyScoutState();
+    const f = feed(300);
+    const r = await listFeed(state, 'mmd', f.listPage, { maxNew: 3, backfill: 2 });
+    expect(f.reads).toEqual([0, 1, 2, 3, 4]);
+    expect(r.topics).toHaveLength(150);
+    expect(state.feeds.mmd).toEqual({ backfillPage: 5, exhausted: false });
+  });
+
+  it('stops at the first page with nothing new, and the backfill goes on from its cursor', async () => {
+    const state = emptyScoutState();
+    await listFeed(state, 'mmd', feed(300).listPage, { maxNew: 3, backfill: 2 }).then((r) => markAll(state, r.topics));
+    const f = feed(310); // ten new posts on top
+    const r = await listFeed(state, 'mmd', f.listPage, { maxNew: 3, backfill: 2 });
+    expect(f.reads).toEqual([0, 1, 5, 6]);
+    expect(r.topics.filter((t) => !seenTopic(state, t.id)).map((t) => t.id).slice(0, 10)).toEqual([310, 309, 308, 307, 306, 305, 304, 303, 302, 301]);
+    expect(state.feeds.mmd.backfillPage).toBe(7);
+  });
+
+  it('marks a feed done at its end and stops backfilling it', async () => {
+    const state = emptyScoutState();
+    const f = feed(70);
+    await listFeed(state, 'vam', f.listPage, { maxNew: 1, backfill: 5 });
+    expect(f.reads).toEqual([0, 1, 2]);
+    expect(state.feeds.vam.exhausted).toBe(true);
+  });
+
+  it('judges posts again after a rules change, and reads a foreign state as empty', () => {
+    const state = emptyScoutState();
+    markTopic(state, 7, 'not-sexual');
+    expect(seenTopic(state, 7)).toBe(true);
+    state.topics[7].rules = RULES_VERSION - 1;
+    expect(seenTopic(state, 7)).toBe(false);
+    expect(normalizeScoutState({ version: 99 })).toEqual(emptyScoutState());
+  });
+
+  it('keeps earlier candidates until every scene is fetched, and drops posts turned down', () => {
+    const c = (id, score, ...videos) => ({ id, score, scenes: videos.map((name) => ({ video: { name } })) });
+    const done = new Set(['1|a.mp4', '2|b.mp4']);
+    const merged = mergeCandidates([c(1, 5, 'a.mp4'), c(2, 3, 'b.mp4', 'c.mp4'), c(3, 9, 'd.mp4')], [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4')],
+      (id, v) => done.has(`${id}|${v}`), new Set([3]));
+    expect(merged.map((x) => [x.id, x.score])).toEqual([[4, 7], [2, 4]]);
   });
 });
 

@@ -2,7 +2,7 @@
 // npm run eroscripts:scout — find free EroScripts posts worth adding, then
 // download them into a review folder and the app's "Discovery" playlist.
 //
-//   npm run eroscripts:scout                 scan → <userData>/eroscripts-scout.json
+//   npm run eroscripts:scout                 scan new posts (+ a little backfill) → <userData>/eroscripts-scout.json
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //
@@ -44,9 +44,11 @@ const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
-Scan (default):
-  --pages N              pages of the multi-axis feed (30 posts each, default 6)
-  --anim-pages N         pages of each animation feed (animation, hentai, 3d, vam, sfm, mmd; default 3)
+Scan (default; only posts not judged before, see <userData>/eroscripts-scout-state.json):
+  --pages N              most pages of new posts on the multi-axis feed (30 posts each, default 6)
+  --anim-pages N         most pages of new posts on each animation feed (animation, hentai, 3d, vam, sfm, mmd; default 3)
+  --backfill N           older pages to read per feed, continuing from the last run (default 2; 0 = none)
+  --full                 judge every listed post again, not only new ones
   --top N                candidates to print (default 40)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
@@ -63,7 +65,7 @@ Both:
   --incoming <dir>       download folder (default <library parent>/_incoming)`;
 
 function parseArgs(argv) {
-  const opts = { pages: 6, animPages: 3, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false };
+  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false };
   const value = (i, flag) => {
     if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
     return argv[i + 1];
@@ -76,6 +78,8 @@ function parseArgs(argv) {
       case '--dry-run': opts.dryRun = true; break;
       case '--pages': opts.pages = Number(value(i, a)); i++; break;
       case '--anim-pages': opts.animPages = Number(value(i, a)); i++; break;
+      case '--backfill': opts.backfill = Number(value(i, a)); i++; break;
+      case '--full': opts.full = true; break;
       case '--top': opts.top = Number(value(i, a)); i++; break;
       case '--passes': opts.passes = Number(value(i, a)); i++; break;
       case '--wait': opts.wait = parseInterval(value(i, a)); i++; break;
@@ -86,7 +90,7 @@ function parseArgs(argv) {
       default: throw new Error(`Unknown option: ${a}`);
     }
   }
-  for (const k of ['pages', 'animPages', 'top', 'passes']) if (!(opts[k] >= 0)) throw new Error(`--${k} must be 0 or more`);
+  for (const k of ['pages', 'animPages', 'backfill', 'top', 'passes']) if (!(opts[k] >= 0)) throw new Error(`--${k} must be 0 or more`);
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   return opts;
 }
@@ -217,6 +221,31 @@ async function topicFiles(api, pacer, topicId, cooked) {
 
 // ── Scan ────────────────────────────────────────────────────────────────
 
+const statePath = (userData) => path.join(userData, 'eroscripts-scout-state.json');
+
+function readScoutState(userData) {
+  try { return lib.normalizeScoutState(JSON.parse(fs.readFileSync(statePath(userData), 'utf8'))); } catch { return lib.emptyScoutState(); }
+}
+
+function writeScoutState(userData, state) {
+  const target = statePath(userData);
+  const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state));
+  fs.renameSync(tmp, target);
+}
+
+/** One page of a Free Scripts tag feed, paced; forum errors become exceptions. */
+function feedPage(api, pacer) {
+  return async (tag, page) => {
+    await pacer.wait();
+    const r = await api.listFreeTagTopics(tag, page);
+    if (r.rateLimited) throw new RateLimitedError();
+    if (r.authExpired) throw new SessionExpiredError();
+    if (r.error) throw new Error(r.error);
+    return r;
+  };
+}
+
 async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
   const roots = librarySources(config, incoming).map((s) => s.path).filter((p) => fs.existsSync(p));
@@ -228,78 +257,95 @@ async function scan(opts, { api, userData, config, incoming }) {
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
   // Posts the user turned down in the app (No thank you, 2 stars or lower).
-  for (const e of rejectedVideos.readRejected(userData).entries) if (e.reason !== 'short') knownTopics.add(e.topicId);
+  const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short').map((e) => e.topicId));
+  for (const id of turnedDown) knownTopics.add(id);
 
-  const topics = new Map();
-  for (const tag of lib.FEED_TAGS) {
-    const pages = tag === 'multi-axis' ? opts.pages : opts.animPages;
-    for (let page = 0; page < pages; page++) {
-      await pacer.wait();
-      const r = await api.listFreeTagTopics(tag, page);
-      if (r.rateLimited) throw new RateLimitedError();
-      if (r.authExpired) throw new SessionExpiredError();
-      if (r.error) throw new Error(r.error);
-      for (const t of r.topics) topics.set(t.id, t);
-      if (!r.more) break;
-    }
-  }
-  console.log(`Listed ${topics.size} posts`);
-
+  const state = readScoutState(userData);
   const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
-  const candidates = [];
-  const creators = [...library.creators];
-  for (const t of topics.values()) {
-    const s = lib.screenTopic(t, { knownTopics, creators, sceneNames: library.sceneNames });
-    if (!s.ok) { rejected[s.reason]++; continue; }
-    await pacer.wait();
-    const data = await api.getTopicData(t.id);
-    const op = data?.post_stream?.posts?.[0];
-    if (!op) { process.stderr.write(`! ${t.id} unreadable\n`); continue; }
-    const cooked = op.cooked || '';
-    const text = cooked.replace(/<[^>]+>/g, ' ');
-    if (lib.hasExcludedText(text)) { rejected.excluded++; continue; }
-    if (!lib.isSexual({ tags: t.tags, title: t.title, text })) { rejected['not-sexual']++; continue; }
-    let files, hosts;
-    try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked)); } catch (err) {
-      if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
-      process.stderr.write(`! ${t.id} ${err.message}\n`);
-      continue;
+  const fresh = [];
+  let listed = 0;
+  let judged = 0;
+  try {
+    const topics = new Map();
+    let pages = 0;
+    for (const tag of lib.FEED_TAGS) {
+      const maxNew = tag === 'multi-axis' ? opts.pages : opts.animPages;
+      const r = await lib.listFeed(state, tag, feedPage(api, pacer), { maxNew, backfill: opts.backfill, full: opts.full });
+      pages += r.pagesRead;
+      for (const t of r.topics) topics.set(t.id, t);
     }
-    const plan = lib.planScenes({
-      scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
-      videos: files.filter((f) => lib.isVideoName(f.name)),
-      vr: s.vr,
-      libraryVideos: library.videos,
-    });
-    if (!plan.scenes.length) { rejected[plan.inLibrary > 0 ? 'in-library' : 'no-video']++; continue; }
-    const author = op.username;
-    const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
-    const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
-    if (!scenes.length) { rejected['single-axis']++; continue; }
-    const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
-    const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
-    candidates.push({
-      id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
-      tags: t.tags, likes: t.likes,
-      vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts,
-      score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!artistInLibrary, preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
-      scenes,
-    });
-    process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
+    listed = topics.size;
+    const todo = [...topics.values()].filter((t) => opts.full || !lib.seenTopic(state, t.id));
+    console.log(`Listed ${listed} posts on ${pages} pages; ${todo.length} not judged before`);
+
+    const creators = [...library.creators];
+    for (const t of todo) {
+      const verdict = (v) => { lib.markTopic(state, t.id, v); judged++; if (v !== 'candidate') rejected[v]++; };
+      const s = lib.screenTopic(t, { knownTopics, creators, sceneNames: library.sceneNames });
+      if (!s.ok) { verdict(s.reason); continue; }
+      await pacer.wait();
+      const data = await api.getTopicData(t.id);
+      const op = data?.post_stream?.posts?.[0];
+      if (!op) { process.stderr.write(`! ${t.id} unreadable\n`); continue; }
+      const cooked = op.cooked || '';
+      const text = cooked.replace(/<[^>]+>/g, ' ');
+      if (lib.hasExcludedText(text)) { verdict('excluded'); continue; }
+      if (!lib.isSexual({ tags: t.tags, title: t.title, text })) { verdict('not-sexual'); continue; }
+      let files, hosts;
+      try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked)); } catch (err) {
+        if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
+        process.stderr.write(`! ${t.id} ${err.message}\n`);
+        continue;
+      }
+      const plan = lib.planScenes({
+        scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
+        videos: files.filter((f) => lib.isVideoName(f.name)),
+        vr: s.vr,
+        libraryVideos: library.videos,
+      });
+      if (!plan.scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
+      const author = op.username;
+      const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
+      const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
+      if (!scenes.length) { verdict('single-axis'); continue; }
+      const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
+      const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
+      fresh.push({
+        id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
+        tags: t.tags, likes: t.likes,
+        vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts,
+        score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!artistInLibrary, preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
+        scenes,
+      });
+      verdict('candidate');
+      process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
+    }
+  } finally {
+    // Progress survives a rate limit or an expired session: the next run
+    // goes on from here.
+    state.lastScanAt = new Date().toISOString();
+    writeScoutState(userData, state);
   }
-  candidates.sort((a, b) => b.score - a.score);
+
   const out = path.join(userData, 'eroscripts-scout.json');
-  fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), listed: topics.size, rejected, candidates }, null, 1));
+  let previous = [];
+  try { previous = JSON.parse(fs.readFileSync(out, 'utf8')).candidates || []; } catch { /* first scan */ }
+  const done = fetchedScenes(incoming, userData);
+  const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown);
+  fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
 
   const gb = (c) => c.scenes.reduce((n, sc) => n + (sc.video.size || 0), 0) / 1e9;
-  console.log('\n| # | Post | Axis | Tags | Videos | GB | Host |\n|---|---|---|---|---|---|---|');
+  const freshIds = new Set(fresh.map((c) => c.id));
+  console.log('\n| # | New | Post | Axis | Tags | Videos | GB | Host |\n|---|---|---|---|---|---|---|---|');
   candidates.slice(0, opts.top).forEach((c, i) => {
     const axis = c.axisType === 'multi' ? `Multi (${1 + new Set(c.scenes.flatMap((sc) => sc.axes)).size})` : 'Single';
     const tags = [c.vr && 'VR', ...c.preferred, c.music && 'music'].filter(Boolean).join(', ');
-    console.log(`| ${i + 1} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
+    console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
   });
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
-  console.log(`\nListed ${topics.size} · rejected ${JSON.stringify(rejected)} · candidates ${candidates.length} (${multi} multi-axis, ${candidates.length - multi} single-axis), ${candidates.reduce((n, c) => n + c.scenes.length, 0)} videos, ${candidates.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
+  const backfill = lib.FEED_TAGS.map((tag) => `${tag} ${state.feeds[tag]?.exhausted ? 'done' : `p${state.feeds[tag]?.backfillPage ?? 0}`}`).join(', ');
+  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${multi} multi-axis, ${candidates.length - multi} single-axis), ${candidates.reduce((n, c) => n + c.scenes.length, 0)} videos, ${candidates.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
+  console.log(`Backfill: ${backfill} · ${Object.keys(state.topics).length} posts judged so far`);
   console.log(`Saved: ${out}`);
   return 0;
 }
