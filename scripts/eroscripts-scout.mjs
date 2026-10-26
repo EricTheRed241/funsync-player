@@ -245,7 +245,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   }
   console.log(`Listed ${topics.size} posts`);
 
-  const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0 };
+  const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const candidates = [];
   const creators = [...library.creators];
   for (const t of topics.values()) {
@@ -273,15 +273,17 @@ async function scan(opts, { api, userData, config, incoming }) {
     });
     if (!plan.scenes.length) { rejected[plan.inLibrary > 0 ? 'in-library' : 'no-video']++; continue; }
     const author = op.username;
-    const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
-    const axisType = plan.scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
     const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
+    const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
+    if (!scenes.length) { rejected['single-axis']++; continue; }
+    const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
+    const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
     candidates.push({
       id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
       tags: t.tags, likes: t.likes,
       vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts,
       score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!artistInLibrary, preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
-      scenes: plan.scenes,
+      scenes,
     });
     process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
   }
