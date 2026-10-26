@@ -189,7 +189,10 @@ async function scan(opts, { userData, config, incoming }) {
   const done = doneScenes(incoming, userData);
 
   const state = readState(userData);
-  const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'not-sexual': 0, short: 0, 'in-library': 0, 'no-script': 0, 'no-stream': 0, 'low-quality': 0 };
+  const rejected = {
+    known: 0, excluded: 0, 'not-animated': 0, 'audio-only': 0, 'off-focus': 0, 'not-sexual': 0, short: 0, 'in-library': 0,
+    'no-script': 0, 'no-stream': 0, 'low-quality': 0,
+  };
   const fresh = [];
   let listed = 0;
   let judged = 0;

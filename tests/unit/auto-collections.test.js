@@ -64,4 +64,16 @@ describe('applyAutoCollections', () => {
     expect(store[AUTO_COLLECTIONS_KEY].added).toEqual({ '/a': ['hentai', 'sessions'] });
     expect(applyAutoCollections(data, ['/a'])).toEqual({ created: [], extended: 0 });
   });
+
+  it('puts every FapTap scout scene in a FapTap collection, whatever its tags', () => {
+    const store = {
+      [SCRIPT_TAGS_KEY]: {
+        '/f': { tags: [], topicId: null, faptapId: '1', source: 'faptap-scout' },
+        '/e': { tags: [], topicId: 7, source: 'eroscripts-scout' },
+      },
+    };
+    const data = { get: (k) => store[k], set: (k, val) => { store[k] = val; } };
+    expect(applyAutoCollections(data, ['/f', '/e'], () => 'id')).toEqual({ created: ['FapTap'], extended: 0 });
+    expect(store[COLLECTIONS_KEY]).toEqual([{ id: 'id', name: 'FapTap', videoPaths: ['/f'] }]);
+  });
 });
