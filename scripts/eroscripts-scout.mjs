@@ -54,6 +54,10 @@ Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.
                          isn't backfilled again unless a later run passes an earlier date
   --full                 judge every listed post again, not only new ones
   --top N                candidates to print (default 40)
+Pick:
+  --add 1,2,3            judge these post ids and put them on the list: only the exclusions, posts the
+                         library has or the user turned down, and library duplicates count (the animation,
+                         sex and multi-axis rules don't; single-axis scenes get generated axes)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
                          skips videos under 2 minutes and scenes rejected in the app (No thank you)
@@ -88,6 +92,7 @@ function parseArgs(argv) {
       case '--passes': opts.passes = Number(value(i, a)); i++; break;
       case '--wait': opts.wait = parseInterval(value(i, a)); i++; break;
       case '--ids': opts.ids = new Set(value(i, a).split(',').map(Number)); i++; break;
+      case '--add': opts.add = [...new Set(value(i, a).split(',').map((s) => Number(s.trim())).filter((n) => n > 0))]; i++; break;
       case '--feeds': opts.feeds = value(i, a).split(',').map((s) => s.trim()).filter(Boolean); i++; break;
       case '--since': opts.since = value(i, a); i++; break;
       case '--user-data': opts.userData = path.resolve(value(i, a)); i++; break;
@@ -181,8 +186,8 @@ function feedPage(api, pacer) {
   };
 }
 
-async function scan(opts, { api, userData, config, incoming }) {
-  const pacer = createPacer();
+/** What screening needs: the library, the posts it already links or the user turned down, favourites. */
+function scoutContext(config, userData, incoming) {
   const roots = librarySources(config, incoming).map((s) => s.path).filter((p) => fs.existsSync(p));
   const library = libraryState(roots);
   const knownTopics = new Set(Object.values(config.settings?.library?.scriptTags || {}).map((r) => r?.topicId).filter((id) => id != null));
@@ -195,9 +200,26 @@ async function scan(opts, { api, userData, config, incoming }) {
   // a short video or an extra copy of one (dedupe) doesn't turn down the post.
   const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.reason !== 'duplicate' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);
+  return { library, knownTopics, turnedDown, favourites: live.readFavourites(userData) };
+}
 
+/** A judged post as a saved candidate. */
+function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, picked = false }) {
+  const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
+  const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
+  return {
+    id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
+    tags: t.tags, likes: t.likes,
+    vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, ...(picked ? { picked } : {}),
+    score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
+    scenes,
+  };
+}
+
+async function scan(opts, { api, userData, config, incoming }) {
+  const pacer = createPacer();
+  const { library, knownTopics, turnedDown, favourites } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
-  const favourites = live.readFavourites(userData);
   const rejected = { known: 0, excluded: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
   let listed = 0;
@@ -250,15 +272,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
       const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
-      const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
-      const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
-      fresh.push({
-        id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
-        tags: t.tags, likes: t.likes,
-        vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota,
-        score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
-        scenes,
-      });
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes }));
       verdict('candidate');
       process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
     }
@@ -291,6 +305,59 @@ async function scan(opts, { api, userData, config, incoming }) {
   console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${multi} multi-axis, ${candidates.length - multi} single-axis), ${candidates.reduce((n, c) => n + c.scenes.length, 0)} videos, ${candidates.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
   console.log(`Backfill: ${backfill} · ${Object.keys(state.topics).length} posts judged so far${left ? ` · ${left} listed, not judged yet (next run goes on with them)` : ''}`);
   console.log(`Saved: ${out}`);
+  return 0;
+}
+
+// ── Pick ────────────────────────────────────────────────────────────────
+
+/** `--add`: judge posts the user picked by id and put them on the list (lib.screenPick). */
+async function addPicked(opts, { api, userData, config, incoming }) {
+  const pacer = createPacer();
+  const { library, knownTopics, turnedDown, favourites } = scoutContext(config, userData, incoming);
+  const state = readScoutState(userData);
+  const fresh = [];
+  try {
+    for (const id of opts.add) {
+      await pacer.wait();
+      const data = await api.getTopicData(id);
+      const op = data?.post_stream?.posts?.[0];
+      if (!op) { console.log(`✗ ${id}: unreadable`); continue; }
+      const t = { id, title: data.title || '', tags: (data.tags || []).map((x) => (typeof x === 'string' ? x : x?.name || '')).filter(Boolean), likes: data.like_count || 0 };
+      if (data.category_id !== lib.FREE_SCRIPTS_CATEGORY) { console.log(`✗ ${id} ${t.title}: not in Free Scripts`); continue; }
+      const s = lib.screenPick(t, { knownTopics, creators: [...library.creators], sceneNames: library.sceneNames, favourites });
+      if (!s.ok) { console.log(`✗ ${id} ${t.title}: ${s.reason}`); continue; }
+      const cooked = op.cooked || '';
+      if (lib.hasExcludedText(cooked.replace(/<[^>]+>/g, ' '))) { console.log(`✗ ${id} ${t.title}: excluded`); continue; }
+      let files, hosts;
+      try { ({ files, hosts } = await topicFiles(api, pacer, id, cooked)); } catch (err) {
+        if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
+        console.log(`✗ ${id} ${t.title}: ${err.message}`);
+        continue;
+      }
+      const plan = lib.planScenes({
+        scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
+        videos: files.filter((f) => lib.isVideoName(f.name)),
+        vr: s.vr,
+        libraryVideos: library.videos,
+      });
+      if (!plan.scenes.length) { console.log(`✗ ${id} ${t.title}: ${plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
+      const author = op.username;
+      const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
+      const favourite = s.favourite || live.favouriteIn([author], favourites);
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, picked: true }));
+      lib.markTopic(state, id, 'candidate');
+      console.log(`✓ ${id} ${t.title} (${plan.scenes.length} video${plan.scenes.length > 1 ? 's' : ''}, ${plan.scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis'})`);
+    }
+  } finally {
+    writeScoutState(userData, state);
+  }
+  const out = path.join(userData, 'eroscripts-scout.json');
+  let saved = { candidates: [] };
+  try { saved = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { /* no list yet */ }
+  const done = fetchedScenes(incoming, userData);
+  const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown);
+  fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
+  console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run eroscripts:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
   return 0;
 }
 
@@ -495,6 +562,7 @@ async function main() {
   api.restoreSession(session.cookie, session.username);
 
   try {
+    if (opts.add) return await addPicked(opts, { api, userData, config, incoming });
     return opts.fetch ? await fetchAll(opts, { api, userData, incoming }) : await scan(opts, { api, userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
