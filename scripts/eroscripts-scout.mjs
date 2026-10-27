@@ -222,13 +222,13 @@ function scoutContext(config, userData, incoming) {
 function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, sexual, picked = false }) {
   const preferred = t.tags.filter((x) => prefs.PREFERRED_TAGS.has(x));
   const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
-  return {
+  const c = {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
     vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, sexual, ...(picked ? { picked } : {}),
-    score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes, hentaiOnly: s.hentaiOnly }).toFixed(2),
     scenes,
   };
+  return { ...c, score: lib.candidateScore(c) };
 }
 
 async function scan(opts, { api, userData, config, incoming }) {

@@ -119,8 +119,12 @@ export const LIVE_QUOTA_EVERY = 20;
 export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
 /** Preferred acts (+ RANKING.preferred, + RANKING.preferredExtra for each one more). */
 export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
-/** Candidate score; higher downloads first. Likes add likes / likesPer, up to likesMax; 2D hentai only loses hentaiOnly. */
-export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 1, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
+/**
+ * Candidate score; higher downloads first. Likes add likes / likesPer, up to
+ * likesMax; 2D hentai only loses hentaiOnly. multiAxis applies to EroScripts
+ * only (FapTap has no multi-axis scripts).
+ */
+export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
 /** 2D hentai only: animation tags among these, no THREE_D_TAGS and no THREE_D_TITLE. */
 export const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
 export const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);
@@ -162,8 +166,8 @@ export const TOP_RATED_MIN = 4;
 
 // ── Artist playlists ────────────────────────────────────────────────────
 
-/** An artist folder with at least this many videos gets a playlist ("more than six"); favourites from one. */
-export const MIN_ARTIST_VIDEOS = 7;
+/** An artist folder with at least this many videos gets a playlist; favourites from one. */
+export const MIN_ARTIST_VIDEOS = 5;
 export const FAVOURITES_PLAYLIST = 'Favourite artists';
 /** Folder names that hold videos of many artists (lower case). */
 export const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'others', 'new folder', 'cock hero', 'fap hero', 'pmv', 'hmv', 'compilation', 'compilations']);
