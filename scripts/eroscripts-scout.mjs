@@ -380,6 +380,10 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
       const stem = lib.sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 });
       const dir = path.join(incoming, creator, stem);
       const video = path.join(dir, stem + path.extname(sc.video.name).toLowerCase());
+      // Another post already brought this scene (same folder and video file): leave the
+      // folder alone. Its scripts, sidecar and length were judged when it came, so this
+      // post's files and the current length rule don't apply to it.
+      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in Discovery from another post; left as is`); continue; }
       try {
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging);
         let lengthMs = null;
