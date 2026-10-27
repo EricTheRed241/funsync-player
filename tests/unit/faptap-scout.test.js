@@ -17,6 +17,8 @@ const video = (tagNames, extra = {}) => ({
   id: '1', name: 'Bulma Yoga', description: '', duration: 300, user: { username: 'Zoot' },
   tags: tagNames.map((name) => ({ name })), ...extra,
 });
+// Two focus themes, so tests about other rules aren't turned down as off-focus.
+const FOCUS2 = ['Creampie', 'HMV'];
 
 describe('tagSlug', () => {
   it('spells FapTap tags like EroScripts tags', () => {
@@ -49,32 +51,34 @@ describe('screenVideo', () => {
   });
 
   it('takes animated videos, FapTap tag spellings included, but not live action', () => {
-    expect(screenVideo(video(['Animated 3d', 'Creampie'])).ok).toBe(true);
-    expect(screenVideo(video(['animated 2d', 'Creampie'])).ok).toBe(true);
-    expect(screenVideo(video(['ai-video', 'Creampie'])).ok).toBe(true);
-    expect(screenVideo(video(['Hentai', 'amateur anal', 'Creampie'])).reason).toBe('not-animated');
-    expect(screenVideo(video(['Animation', 'OnlyFans', 'Creampie'])).reason).toBe('not-animated');
+    expect(screenVideo(video(['Animated 3d', ...FOCUS2])).ok).toBe(true);
+    expect(screenVideo(video(['animated 2d', ...FOCUS2])).ok).toBe(true);
+    expect(screenVideo(video(['ai-video', ...FOCUS2])).ok).toBe(true);
+    expect(screenVideo(video(['Hentai', 'amateur anal', ...FOCUS2])).reason).toBe('not-animated');
+    expect(screenVideo(video(['Animation', 'OnlyFans', ...FOCUS2])).reason).toBe('not-animated');
     expect(screenVideo(video(['POV', 'Creampie'])).reason).toBe('not-animated');
   });
 
-  it('takes only PMV / HMV, creampie or reverse cowgirl, by tag or title', () => {
-    expect(screenVideo(video(['Hentai', 'HMV'])).ok).toBe(true);
-    expect(screenVideo(video(['Hentai', 'Fap Hero'])).ok).toBe(true);
-    expect(screenVideo(video(['Hentai', 'Cum Inside Pussy'])).ok).toBe(true);
-    expect(screenVideo(video(['Hentai', 'reverse cowgirl pov'])).ok).toBe(true);
-    expect(screenVideo(video(['Hentai', 'Riding'], { name: 'Bulma creampie' })).ok).toBe(true);
+  it('needs two of PMV / HMV, creampie, reverse cowgirl and VR, by tag, title or VR flag', () => {
+    expect(screenVideo(video(['Hentai', 'HMV', 'Cum Inside Pussy'])).focus).toEqual(['PMV / HMV', 'creampie']);
+    expect(screenVideo(video(['Hentai', 'Fap Hero', 'reverse cowgirl pov'])).ok).toBe(true);
+    expect(screenVideo(video(['Hentai', 'Creampie'], { vr: true })).focus).toEqual(['creampie', 'VR']);
+    expect(screenVideo(video(['Hentai', 'Virtual Reality', 'Reverse Cowgirl'])).ok).toBe(true);
+    expect(screenVideo(video(['Hentai', 'Riding'], { name: 'Bulma reverse cowgirl creampie' })).ok).toBe(true);
+    expect(screenVideo(video(['Hentai', 'Reverse Cowgirl'])).reason).toBe('off-focus');
+    expect(screenVideo(video(['Hentai', 'HMV'])).reason).toBe('off-focus');
     expect(screenVideo(video(['Hentai', 'Cowgirl', 'Blowjob'])).reason).toBe('off-focus');
   });
 
   it('never takes an audio roleplay', () => {
-    expect(screenVideo(video(['Hentai', 'Creampie', 'asmr audio roleplay'])).reason).toBe('audio-only');
-    expect(screenVideo(video(['Hentai', 'Creampie', 'lewdlexiaudio'])).reason).toBe('audio-only');
-    expect(screenVideo(video(['Hentai', 'Creampie'], { name: 'Checking On Your Teacher [Erotic Audio Roleplay]' })).reason).toBe('audio-only');
-    expect(screenVideo(video(['Hentai', 'Creampie', 'Audio', 'Audio Based'])).ok).toBe(true);
+    expect(screenVideo(video(['Hentai', ...FOCUS2, 'asmr audio roleplay'])).reason).toBe('audio-only');
+    expect(screenVideo(video(['Hentai', ...FOCUS2, 'lewdlexiaudio'])).reason).toBe('audio-only');
+    expect(screenVideo(video(['Hentai', ...FOCUS2], { name: 'Checking On Your Teacher [Erotic Audio Roleplay]' })).reason).toBe('audio-only');
+    expect(screenVideo(video(['Hentai', ...FOCUS2, 'Audio', 'Audio Based'])).ok).toBe(true);
   });
 
   it('takes a music video by a creator already in the library without an animation tag', () => {
-    const v = video(['PMV', 'Cock Hero'], { name: 'Sunset Cock Hero', user: { username: 'Bastati' } });
+    const v = video(['PMV', 'Cock Hero', 'Creampie'], { name: 'Sunset Cock Hero', user: { username: 'Bastati' } });
     expect(screenVideo(v, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, artist: 'bastati' });
     expect(screenVideo(v, { creators: [] }).reason).toBe('not-animated');
   });
@@ -91,7 +95,7 @@ describe('screenVideo', () => {
     ]);
     expect(livePerformers).toEqual(['molly little', 'kendra sunderland']);
     expect(screenVideo(video(['Animation', 'Blowjob'], { name: 'Molly Little Dirty Talk Blowjob' }), { livePerformers }).reason).toBe('not-animated');
-    expect(screenVideo(video(['Animation', 'Creampie'], { name: 'Ava rides Ganondorf' }), { livePerformers }).ok).toBe(true);
+    expect(screenVideo(video(['Animation', ...FOCUS2], { name: 'Ava rides Ganondorf' }), { livePerformers }).ok).toBe(true);
   });
 
   it('spots a model or pornstar listed as the performer', () => {
@@ -101,14 +105,14 @@ describe('screenVideo', () => {
   });
 
   it('needs sex and at least a minute', () => {
-    expect(screenVideo(video(['Animated', 'dance', 'HMV'], { name: 'Bulma dances' })).reason).toBe('not-sexual');
-    expect(screenVideo(video(['Animated', 'non-nude', 'Creampie'])).reason).toBe('not-sexual');
-    expect(screenVideo(video(['Animated', 'Creampie'], { duration: 59 })).reason).toBe('short');
-    expect(screenVideo(video(['Animated', 'Creampie'], { duration: 60 })).ok).toBe(true);
+    expect(screenVideo(video(['Animated', 'dance', 'HMV', 'VR'], { name: 'Bulma dances' })).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', 'non-nude', ...FOCUS2])).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 59 })).reason).toBe('short');
+    expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 60 })).ok).toBe(true);
   });
 
   it('skips a video the library or the EroScripts list already has under its own title', () => {
-    const v = video(['Animated', 'Creampie'], { name: 'YOGA TIME with Bulma! - Zoot Interactive' });
+    const v = video(['Animated', ...FOCUS2], { name: 'YOGA TIME with Bulma! - Zoot Interactive' });
     expect(screenVideo(v, { knownTitles: ['zoot yoga time with bulma'] }).reason).toBe('in-library');
     expect(screenVideo(v, { knownTitles: ['zoot yoga time with chichi'] }).ok).toBe(true);
   });
@@ -154,17 +158,17 @@ describe('vrSuffix', () => {
 });
 
 describe('mergeCandidates', () => {
-  it('keeps waiting candidates, drops fetched or rejected ones, best first', () => {
-    const c = (id, score) => ({ id, score });
-    const list = mergeCandidates([c('1', 1), c('2', 5)], [c('3', 3), c('1', 4)], (id) => id === '2');
+  it('keeps waiting candidates still in focus, drops fetched, rejected or off-focus ones, best first', () => {
+    const c = (id, score, tags = ['creampie', 'hmv']) => ({ id, score, tags, title: '' });
+    const list = mergeCandidates([c('1', 1), c('2', 5), c('4', 9, ['reverse-cowgirl'])], [c('3', 3), c('1', 4)], (id) => id === '2');
     expect(list.map((x) => [x.id, x.score])).toEqual([['1', 4], ['3', 3]]);
   });
 
   it('ranks VR and preferred tags above plain videos', () => {
-    const plain = toCandidate(video(['Animated', 'Blowjob']), screenVideo(video(['Animated', 'Blowjob'])));
+    const plain = toCandidate(video(['Animated', 'HMV', 'PMV']), screenVideo(video(['Animated', 'HMV', 'Reverse Cowgirl'])));
     const vr = toCandidate(video(['Animated', 'Creampie'], { vr: true }), screenVideo(video(['Animated', 'Creampie'], { vr: true })));
     expect(vr.score).toBeGreaterThan(plain.score);
-    expect(plain).toMatchObject({ id: '1', url: 'https://faptap.net/v/1', author: 'Zoot' });
+    expect(plain).toMatchObject({ id: '1', url: 'https://faptap.net/v/1', author: 'Zoot', focus: ['PMV / HMV', 'reverse cowgirl'] });
     expect(fetchedKey(plain.id)).toBe('faptap|1');
   });
 });

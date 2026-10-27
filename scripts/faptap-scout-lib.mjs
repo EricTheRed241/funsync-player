@@ -25,8 +25,9 @@
 //     creator already in the library is taken too; a library folder named
 //     after a genre (`Cock Hero`, `PMV`) is no creator.
 //   • No audio roleplays (erotic audio / ASMR over a still or a loop).
-//   • Focus: PMV / HMV (Cock Hero and Fap Hero included), creampie or
-//     reverse cowgirl, by tag or title.
+//   • Focus: at least two of PMV / HMV (Cock Hero and Fap Hero included),
+//     creampie, reverse cowgirl and VR, each by tag or title (VR also by
+//     FapTap's VR flag).
 //   • Sex only (as on EroScripts), at least a minute long.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream up to 4K (8K for VR); none below
@@ -45,7 +46,7 @@ import {
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 2;
+export const FAPTAP_RULES_VERSION = 3;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -93,9 +94,27 @@ const TAG_ALIASES = Object.fromEntries(Object.entries({
 // `erotic-audio-for-men`, `lewdlexiaudio`) and titles.
 const isAudioTag = (t) => t.includes('asmr') || t.includes('audio-roleplay') || (t.endsWith('audio') && t !== 'audio');
 const AUDIO_TITLE = /(?<![\p{L}\p{N}])(erotic audio|asmr|audio role ?play|f4m)(?![\p{L}\p{N}])/iu;
-// What the user wants from FapTap: PMV / HMV, creampie, reverse cowgirl.
-const FOCUS_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video', 'creampie', 'anal-creampie', 'oral-creampie', 'reverse-cowgirl']);
-const FOCUS_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero|creampies?|reverse cowgirl)(?![\p{L}\p{N}])/iu;
+// What the user wants from FapTap: two of PMV / HMV, creampie, reverse
+// cowgirl and VR.
+const FOCUS = [
+  { name: 'PMV / HMV', tags: ['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video'], title: /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu },
+  { name: 'creampie', tags: ['creampie', 'anal-creampie', 'oral-creampie'], title: /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])/iu },
+  { name: 'reverse cowgirl', tags: ['reverse-cowgirl'], title: /(?<![\p{L}\p{N}])reverse[ -]cowgirl(?![\p{L}\p{N}])/iu },
+  { name: 'VR', tags: ['vr'], title: /(?<![\p{L}\p{N}])vr(?![\p{L}\p{N}])/iu },
+];
+/** How many focus themes a video needs. */
+export const FOCUS_MIN = 2;
+
+/**
+ * The focus themes a video has (`PMV / HMV`, `creampie`, `reverse cowgirl`,
+ * `VR`), by its library-spelled tags, its title, or FapTap's VR flag.
+ *
+ * @param {{tags?: string[], title?: string, vr?: boolean}} video
+ */
+export function focusOf({ tags = [], title = '', vr = false }) {
+  return FOCUS.filter((f) => f.tags.some((t) => tags.includes(t)) || f.title.test(title) || (f.name === 'VR' && vr)).map((f) => f.name);
+}
+
 // Tags that say the video is live action.
 const LIVE_TAGS = new Set([
   'real', 'real-sex', 'real-couple-homemade', 'real-orgasm', 'reality', 'homemade', 'pornstar', 'onlyfans', 'brazzers',
@@ -182,13 +201,14 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   const music = tags.some((t) => MUSIC_TAGS.has(t));
   if (!animated && !(music && artist)) return { ok: false, reason: 'not-animated' };
   if (tags.some(isAudioTag) || AUDIO_TITLE.test(title)) return { ok: false, reason: 'audio-only' };
-  if (!tags.some((t) => FOCUS_TAGS.has(t)) && !FOCUS_TITLE.test(title)) return { ok: false, reason: 'off-focus' };
+  const vr = !!video.vr || tags.includes('vr');
+  const focus = focusOf({ tags, title, vr });
+  if (focus.length < FOCUS_MIN) return { ok: false, reason: 'off-focus' };
   if (!isSexual({ tags, title, text })) return { ok: false, reason: 'not-sexual' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
   if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
-  const vr = !!video.vr || tags.includes('vr') || tags.includes('virtual-reality');
-  return { ok: true, tags, vr, music, artist, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)) };
+  return { ok: true, tags, vr, music, artist, focus, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)) };
 }
 
 /** Performer categories FapTap gives real people. */
@@ -258,6 +278,7 @@ export function toCandidate(video, screen) {
     vr: screen.vr,
     projection: video.projection || 'MONO_FLAT',
     music: screen.music,
+    focus: screen.focus,
     preferred: screen.preferred,
     artistInLibrary: screen.artist,
     score: +scoreCandidate({ vr: screen.vr, music: screen.music, artistInLibrary: !!screen.artist, preferred: screen.preferred, likes }).toFixed(2),
@@ -290,9 +311,12 @@ export function mergeCookies(jar, setCookies) {
   return [...cookies.values()].join('; ');
 }
 
+/** True when a saved candidate still meets the focus rule (lists saved under older rules may not). */
+export const inFocus = (c) => focusOf(c).length >= FOCUS_MIN;
+
 /**
  * The saved list after a scan: candidates found now plus earlier ones not
- * yet fetched or rejected, best score first.
+ * yet fetched or rejected and still in focus, best score first.
  *
  * @param {object[]} previous
  * @param {object[]} fresh
@@ -301,5 +325,5 @@ export function mergeCookies(jar, setCookies) {
 export function mergeCandidates(previous, fresh, isDone) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(String(c.id), c);
-  return [...byId.values()].filter((c) => !isDone(String(c.id))).sort((a, b) => b.score - a.score);
+  return [...byId.values()].filter((c) => !isDone(String(c.id)) && inFocus(c)).sort((a, b) => b.score - a.score);
 }
