@@ -1267,6 +1267,7 @@
       "collections": "Search collections",
       "playlists": "Search playlists",
       "categories": "Search categories",
+      "tags": "Search tags",
       "sources": "Search sources",
       "short": "Search",
       "aria": "Search",
@@ -1291,6 +1292,7 @@
       "collections": "Collections",
       "playlists": "Playlists",
       "categories": "Categories",
+      "tags": "Tags",
       "folders": "Folders"
     },
     "filterSheet": {
@@ -1329,6 +1331,12 @@
       "script": "Script",
       "vr": "VR"
     },
+    "tags": {
+      "aria": "Categories and tags",
+      "filterChip": "Tag: {tag}",
+      "filterBy": "Show videos tagged {tag}",
+      "openCategory": "Open category {name}"
+    },
     "breadcrumb": {
       "allSources": "All sources",
       "folders": "Folders",
@@ -1356,9 +1364,9 @@
       "emptyFolderBody": "No subfolders or videos here.",
       "videoNotFoundTitle": "Video not found",
       "videoNotFoundBody": "Go back and try again.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Couldn't load collections} playlists {Couldn't load playlists} categories {Couldn't load categories} other {Couldn't load items}}",
-      "noGroupingTitle": "{kind, select, collections {No collections yet} playlists {No playlists yet} categories {No categories yet} other {Nothing yet}}",
-      "noGroupingBody": "{kind, select, collections {Create collections in FunSync on your desktop — they'll show up here.} playlists {Create playlists in FunSync on your desktop — they'll show up here.} categories {Create categories in FunSync on your desktop — they'll show up here.} other {Create items in FunSync on your desktop.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {Couldn't load collections} playlists {Couldn't load playlists} categories {Couldn't load categories} tags {Couldn't load tags} other {Couldn't load items}}",
+      "noGroupingTitle": "{kind, select, collections {No collections yet} playlists {No playlists yet} categories {No categories yet} tags {No tags yet} other {Nothing yet}}",
+      "noGroupingBody": "{kind, select, collections {Create collections in FunSync on your desktop — they'll show up here.} playlists {Create playlists in FunSync on your desktop — they'll show up here.} categories {Create categories in FunSync on your desktop — they'll show up here.} tags {Tags come from the EroScripts and FapTap posts linked to your videos on the desktop.} other {Create items in FunSync on your desktop.}}",
       "groupingNotFoundTitle": "Not found",
       "groupingNotFoundBody": "{kind, select, collections {This collection no longer exists on the desktop.} playlists {This playlist no longer exists on the desktop.} categories {This category no longer exists on the desktop.} other {This item no longer exists on the desktop.}}",
       "groupingEmptyTitle": "Empty",

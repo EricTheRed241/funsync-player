@@ -744,6 +744,7 @@
       "collections": "Rechercher des collections",
       "playlists": "Rechercher des listes",
       "categories": "Rechercher des catégories",
+      "tags": "Rechercher des tags",
       "sources": "Rechercher des sources",
       "short": "Rechercher",
       "aria": "Rechercher",
@@ -768,6 +769,7 @@
       "collections": "Collections",
       "playlists": "Listes",
       "categories": "Catégories",
+      "tags": "Tags",
       "folders": "Dossiers"
     },
     "filterSheet": {
@@ -806,6 +808,12 @@
       "script": "Script",
       "vr": "VR"
     },
+    "tags": {
+      "aria": "Catégories et tags",
+      "filterChip": "Tag : {tag}",
+      "filterBy": "Afficher les vidéos avec le tag {tag}",
+      "openCategory": "Ouvrir la catégorie {name}"
+    },
     "breadcrumb": {
       "allSources": "Toutes les sources",
       "folders": "Dossiers",
@@ -833,9 +841,9 @@
       "emptyFolderBody": "Aucun sous-dossier ni vidéo ici.",
       "videoNotFoundTitle": "Vidéo introuvable",
       "videoNotFoundBody": "Revenez en arrière et réessayez.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} other {Impossible de charger les éléments}}",
-      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} other {Rien pour l'instant}}",
-      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} tags {Impossible de charger les tags} other {Impossible de charger les éléments}}",
+      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} tags {Aucun tag pour l'instant} other {Rien pour l'instant}}",
+      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} tags {Les tags viennent des publications EroScripts et FapTap liées à vos vidéos sur l'ordinateur.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
       "groupingNotFoundTitle": "Introuvable",
       "groupingNotFoundBody": "{kind, select, collections {Cette collection n'existe plus sur l'ordinateur.} playlists {Cette liste n'existe plus sur l'ordinateur.} categories {Cette catégorie n'existe plus sur l'ordinateur.} other {Cet élément n'existe plus sur l'ordinateur.}}",
       "groupingEmptyTitle": "Vide",
