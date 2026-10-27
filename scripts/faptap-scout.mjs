@@ -38,7 +38,9 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 
 const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
+const dedupe = await import('./scene-dedupe-lib.mjs');
+const { libraryVideos, readProbeCache, writeProbeCache } = await import('./scene-probe.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const require = createRequire(import.meta.url);
@@ -256,10 +258,15 @@ function saveList(userData, fresh, done, { top, listed = 0, judged = 0, rejected
 async function scan(opts, { userData, config, incoming }) {
   const ctx = await screenContext(config, userData, incoming);
   const done = doneScenes(incoming, userData);
+  // Every library video (Discovery included) with its length, for the duplicate check.
+  const roots = [...new Set([...(config.settings?.library?.sources || []).filter((s) => s.enabled !== false && s.path).map((s) => s.path), incoming])].filter((p) => fs.existsSync(p));
+  const probeCache = readProbeCache(userData);
+  const libVideos = await libraryVideos(roots, probeCache);
+  writeProbeCache(userData, probeCache);
 
   const state = readState(userData);
   const rejected = {
-    known: 0, excluded: 0, 'audio-only': 0, 'off-focus': 0, 'not-sexual': 0, short: 0, 'in-library': 0,
+    known: 0, excluded: 0, 'audio-only': 0, 'off-focus': 0, 'not-sexual': 0, short: 0, 'in-library': 0, duplicate: 0,
     'no-script': 0, 'no-stream': 0, 'low-quality': 0,
   };
   const fresh = [];
@@ -283,6 +290,8 @@ async function scan(opts, { userData, config, incoming }) {
       if (done.has(lib.fetchedKey(v.id))) { verdict('known'); continue; }
       const s = lib.screenVideo(v, ctx);
       if (!s.ok) { verdict(s.reason); continue; }
+      // Same title and length as a library video (an EroScripts scene always wins over FapTap).
+      if (dedupe.firstDuplicate({ words: dedupe.titleWords(v.name || ''), duration: Number(v.duration) || 0, vr: s.vr }, libVideos)) { verdict('duplicate'); continue; }
       let plan;
       try { plan = await videoPlan(v.id, s.vr); } catch (err) {
         if (err instanceof RateLimitedError) throw err;
@@ -462,6 +471,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming) });
     console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under a minute, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    if (r.ok) dedupeAfterFetch(userData);
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min before the next pass`);

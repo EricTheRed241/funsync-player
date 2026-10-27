@@ -18,7 +18,7 @@ Local desktop video player that plays funscripts on stroker and vibration device
 | Renderer | `renderer/` (`js/`, `components/`, `styles/`, `locales/`) | ESM inside a CommonJS package; UI strings go through i18n (`data-i18n*`, `t()`), with every locale file updated |
 | Backend | `backend/` (FastAPI, Python 3.13, `backend/.venv`) | Port **5123**; `routes/` (media, remote, vr_api, …) and `services/` (vr_sections, library_edits, funscript, …) |
 | Web remote | `backend/web-remote/` | PWA served at `/remote/` |
-| CLIs | `scripts/*.mjs` | `eroscripts:sync`, `eroscripts:scout`, `faptap:scout`, `upgrade:axes`, `prune:generated`, `eroscripts:preview-check`; the two scouts share `scripts/discovery-io.mjs` (config lock, library walk, Discovery playlist) |
+| CLIs | `scripts/*.mjs` | `eroscripts:sync`, `eroscripts:scout`, `faptap:scout`, `dedupe:scenes`, `upgrade:axes`, `prune:generated`, `eroscripts:preview-check`; the two scouts share `scripts/discovery-io.mjs` (config lock, library walk, Discovery playlist) and run `dedupe:scenes --apply` after downloads (`scripts/scene-dedupe-lib.mjs`: same video → one copy kept) |
 
 Invariants:
 - **The desktop app owns the library.** The backend keeps view-only copies registered by the desktop (`POST /api/media/register`). Edits from the phone or headset go through `services/library_edits` and are applied by the desktop. CLIs write `config.json` only while the app is closed (check `SingletonLock` in userData), or they write side files the app merges (`eroscripts-links.json`).

@@ -51,11 +51,14 @@ describe('deleteRejectedVideo', () => {
     expect(readRejected(userData).entries).toEqual([expect.objectContaining({ key: '42|3.mp4', topicId: 42, reason: 'no-thank-you' })]);
   });
 
-  it('records a low rating as its own reason, and refuses an unknown one', () => {
+  it('records a low rating and a duplicate as their own reasons, and refuses an unknown one', () => {
     const video = touch('A/S/S.mp4');
     touch('A/S/eroscripts.json', JSON.stringify({ topicId: 7, video: 'v.mp4' }));
     deleteRejectedVideo(video, { sources: [lib], userDataDir: userData, reason: 'low-rating' });
-    expect(readRejected(userData).entries.map((e) => e.reason)).toEqual(['low-rating']);
+    const copy = touch('C/S/S.mp4');
+    touch('C/S/eroscripts.json', JSON.stringify({ topicId: 8, video: 'w.mp4' }));
+    deleteRejectedVideo(copy, { sources: [lib], userDataDir: userData, reason: 'duplicate' });
+    expect(readRejected(userData).entries.map((e) => [e.key, e.reason])).toEqual([['7|v.mp4', 'low-rating'], ['8|w.mp4', 'duplicate']]);
     expect(() => deleteRejectedVideo(touch('B/S/S.mp4'), { sources: [lib], userDataDir: userData, reason: 'short' })).toThrow(/unknown reason/);
   });
 

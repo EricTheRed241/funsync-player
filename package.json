@@ -25,7 +25,8 @@
     "vault:stamp": "node scripts/vault-freshness.mjs --stamp",
     "eroscripts:preview-check": "node scripts/eroscripts-preview-check.mjs",
     "eroscripts:scout": "node scripts/eroscripts-scout.mjs",
-    "faptap:scout": "node scripts/faptap-scout.mjs"
+    "faptap:scout": "node scripts/faptap-scout.mjs",
+    "dedupe:scenes": "node scripts/dedupe-scenes.mjs"
   },
   "keywords": [
     "video-player",

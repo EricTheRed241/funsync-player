@@ -33,6 +33,7 @@
 
 import path from 'node:path';
 import { favouriteIn } from './scout-live.mjs';
+import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 
 export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
 export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
@@ -245,18 +246,25 @@ function resolutionOf(n) {
   return 3;
 }
 
-/** Preference among a scene's video files; the highest wins. */
+/**
+ * Preference among a scene's video files; the highest wins. VR: ≤ 8K, ≤ 60
+ * fps, low bitrate (heavier files stutter in the headset). Flat: ≤ 4K, and
+ * otherwise the highest quality (more fps is better).
+ */
 export function videoPreference(name, size, vr) {
   const n = String(name).toLowerCase();
   const res = resolutionOf(n);
   const fps = Number((n.match(/(\d{2,3})\s*fps/) || [])[1] || 60);
   const isVr = /(^|[^a-z])(vr|sbs|180|fisheye)([^a-z]|$)/.test(n);
   let score = 0;
-  if (vr) score += (isVr ? 100 : 0) + (res <= 8 ? res * 5 : -50);
-  else score += (isVr ? -30 : 0) + (res <= 4 ? res * 5 : -20);
-  if (fps > 60) score -= 40;
-  if (/low[- _]?bitrate|lowbit/.test(n)) score += 8;
-  if (/high[- _]?bitrate/.test(n)) score -= 8;
+  if (vr) {
+    score += (isVr ? 100 : 0) + (res <= 8 ? res * 5 : -50);
+    if (fps > 60) score -= 40;
+    if (/low[- _]?bitrate|lowbit/.test(n)) score += 8;
+    if (/high[- _]?bitrate/.test(n)) score -= 8;
+  } else {
+    score += (isVr ? -30 : 0) + (res <= 4 ? res * 5 : -20) + Math.min(fps, 240) / 60;
+  }
   if (/preview|trailer|sample/.test(n)) score -= 200;
   return score + Math.min((size || 0) / 1e10, 1);
 }
@@ -267,10 +275,13 @@ export function videoPreference(name, size, vr) {
  * Pair a post's script sets with its video files.
  *
  * Scripts are grouped by base (bracket / punctuation variants of one name
- * merge; per axis the first file wins, so list forum uploads first). Each
- * group with a main script takes its best-matching video, best matches
- * first, and each video (all its encodes) pairs with one group only. A post
- * with a single script set whose videos don't name it takes its best video.
+ * merge; per axis the first file wins, so list forum uploads first). Sets
+ * that are the same files under names that differ only in quality words
+ * (`… 1080p60fps.funscript` / `… 4k120fps.funscript`, same size per axis)
+ * become one scene, which takes the best of both sets' videos. Each group
+ * with a main script takes its best-matching video, best matches first, and
+ * each video (all its encodes) pairs with one group only. A post with a
+ * single script set whose videos don't name it takes its best video.
  * Handy-only scripts are ignored.
  *
  * @param {object} o
@@ -290,12 +301,20 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
     if (!g.files.some((x) => x.axis === p.axis)) g.files.push({ ...f, axis: p.axis });
     groups.set(key, g);
   }
-  const withMain = [...groups.values()].filter((g) => g.files.some((f) => f.axis === ''));
+  const merged = [];
+  const sizes = (g) => (g.files.every((f) => f.size > 0) ? g.files.map((f) => `${f.axis}:${f.size}`).sort().join('|') : null);
+  for (const g of groups.values()) {
+    if (!g.files.some((f) => f.axis === '')) continue;
+    const same = merged.find((m) => sizes(m) !== null && sizes(m) === sizes(g) && titlesMatch(titleWords(m.base), titleWords(g.base)));
+    if (same) same.bases.push(g.base);
+    else merged.push({ ...g, bases: [g.base] });
+  }
+  const withMain = merged;
 
   const options = new Map();
   for (const g of withMain) {
     for (const v of videos) {
-      const m = matchScore(g.base, v.name);
+      const m = Math.max(...g.bases.map((b) => matchScore(b, v.name)));
       if (m > 0) options.set(g, [...(options.get(g) || []), { v, m }]);
     }
   }

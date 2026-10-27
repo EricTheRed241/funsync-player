@@ -4,9 +4,11 @@
 // app is closed; otherwise finished videos wait in
 // `<userData>/eroscripts-scout-pending.json` for the next run of either scout.
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { addToDiscovery, coreName, DISCOVERY_NAME, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
 
 const configPath = (userData) => path.join(userData, 'config.json');
@@ -174,6 +176,16 @@ export function flushPlaylist(userData, incoming, videoPaths) {
   if (changes.sourceAdded) console.log(`  added library source "${DISCOVERY_NAME}" → ${incoming}`);
   if (changes.playlistCreated) console.log(`  created playlist "${DISCOVERY_NAME}"`);
   return true;
+}
+
+/**
+ * After downloads: remove extra copies of a video the library now holds twice
+ * (`npm run dedupe:scenes -- --apply`; rules in scripts/scene-dedupe-lib.mjs).
+ */
+export function dedupeAfterFetch(userData) {
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dedupe-scenes.mjs');
+  const r = spawnSync(process.execPath, [cli, '--apply', '--quiet', '--user-data', userData], { stdio: 'inherit' });
+  if (r.status !== 0) console.log('  duplicate check failed; run npm run dedupe:scenes to see why');
 }
 
 /** The Discovery folder: --incoming, the Discovery source, else `_incoming` beside the first library source. */

@@ -10,8 +10,9 @@
 // Rejections are remembered in `<userData>/eroscripts-scout-rejected.json`
 // so neither `npm run eroscripts:scout` nor `npm run faptap:scout` downloads
 // them again: EroScripts scenes under `<topicId>|<video>`, FapTap scenes
-// under `faptap|<faptapId>`. The EroScripts scout adds its own entries there
-// (videos shorter than a minute). No Electron dependency: the scout CLIs
+// under `faptap|<faptapId>`. The scouts add their own entries there (videos
+// shorter than a minute) and so does `npm run dedupe:scenes` (extra copies of
+// a video, reason `duplicate`). No Electron dependency: the scout CLIs
 // read and write the same file through this module.
 
 const fs = require('fs');
@@ -21,9 +22,10 @@ const { AXIS_SUFFIXES, VIDEO_EXTS, SUBTITLE_EXTS, isAppleDoubleSidecar } = requi
 const REJECT_PLAYLIST = 'No thank you';
 const REJECTED_FILE = 'eroscripts-scout-rejected.json';
 const REJECTED_VERSION = 1;
-// Why a video went: the user's triage (scout never takes the post again) or
-// the scout's own length check.
-const REASONS = new Set(['no-thank-you', 'low-rating', 'short']);
+// Why a video went: the user's triage (scout never takes the post again),
+// the scout's own length check, or an extra copy of a video kept elsewhere
+// (`duplicate`; the post's other videos still come).
+const REASONS = new Set(['no-thank-you', 'low-rating', 'short', 'duplicate']);
 // What may remain in a scene folder that is then removed whole.
 const LEFTOVERS = new Set(['eroscripts.json', 'faptap.json', '.ds_store']);
 
@@ -116,7 +118,7 @@ function removeDirIfOnly(dir, keep) {
  * @param {string[]} o.sources library source folders
  * @param {string} o.userDataDir where the rejection list lives
  * @param {number} [o.now]
- * @param {'no-thank-you'|'low-rating'} [o.reason]
+ * @param {'no-thank-you'|'low-rating'|'duplicate'} [o.reason]
  * @returns {{deleted: string[], removedDirs: string[]}}
  */
 function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now(), reason = 'no-thank-you' }) {
