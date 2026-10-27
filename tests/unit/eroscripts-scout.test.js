@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, textRuleBreak,
+  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 
@@ -29,31 +29,14 @@ describe('screenTopic', () => {
     ['futanari tag', topic(['hentai', 'futanari'])],
     ['hyphenated futa tag', topic(['animation', 'futa-on-female'])],
     ['futa in the title', topic(['3d'], '[Multi-axis] Futa Elf Riding')],
-    ['monster tag', topic(['animation', 'vaginal', 'tentacle'])],
-    ['monster-girl tag', topic(['3d', 'riding', 'monster-girl'])],
-    ['horse-cock tag', topic(['sfm', 'anal', 'horse-cock'])],
-    ['horse guy in the title', topic(['sfm', 'riding'], 'Solace2K - Mercy X Horseguy')],
-    ['WW (werewolf) in the title', topic(['sfm', 'pmv'], '2B X WW - BJ')],
-    ['werewolf in the title', topic(['3d', 'vaginal'], 'Tracer and the Werewolves')],
-    ['orc in the title', topic(['vam', 'creampie'], 'Elf captured by orcs')],
-    ['tentacles in Japanese', topic(['mmd', 'sex'], '触手 セックス')],
-    ['footjob tag', topic(['animation', 'riding', 'footjob'])],
-    ['feet tag', topic(['3d', 'vaginal', 'feet'])],
-    ['feet in the title', topic(['3d', 'riding'], 'Tifa feet and riding')],
-    ['footjob in Japanese', topic(['mmd', 'creampie'], '足コキ 中出し')],
   ])('never accepts %s', (_, t) => {
     expect(screenTopic(t)).toEqual({ ok: false, reason: 'excluded' });
   });
 
-  it('keeps succubi, demons and elves, and matches whole words only (Orchid, trolley, Footloose, Ww)', () => {
-    expect(screenTopic(topic(['3d', 'riding'], 'Succubus demon girl rides the elf'))).toMatchObject({ ok: true });
-    expect(screenTopic(topic(['3d', 'riding'], 'Orchid trolley at Footloose Ww'))).toMatchObject({ ok: true });
-  });
-
-  it('turns down monsters and feet for favourites too', () => {
-    const favourites = ['Solace2K'];
-    expect(screenTopic(topic(['sfm', 'riding'], 'Solace2K - Mercy X Horseguy'), { favourites })).toEqual({ ok: false, reason: 'excluded' });
-    expect(screenTopic(topic(['sfm', 'riding', 'toes'], 'Solace2K - Mercy'), { favourites })).toEqual({ ok: false, reason: 'excluded' });
+  it('takes monster and feet posts, favourites too; they only rank lower', () => {
+    expect(screenTopic(topic(['sfm', 'riding'], 'Solace2K - Mercy X Horseguy'), { favourites: ['Solace2K'] })).toMatchObject({ ok: true, favourite: 'Solace2K' });
+    expect(screenTopic(topic(['animation', 'riding', 'footjob']))).toMatchObject({ ok: true });
+    expect(screenTopic(topic(['mmd', 'sex'], '触手 セックス'))).toMatchObject({ ok: true });
   });
 
   it('takes animated posts, including AI-generated video; live action only waits for the live quota', () => {
@@ -92,19 +75,48 @@ describe('screenTopic', () => {
   });
 });
 
+describe('lessPreferred and the monster / feet penalty', () => {
+  it.each([
+    ['monster tag', { tags: ['tentacle'] }, { monster: true, feet: false }],
+    ['horse-cock tag', { tags: ['horse-cock'] }, { monster: true, feet: false }],
+    ['horse guy in the title', { title: 'Solace2K - Mercy X Horseguy' }, { monster: true, feet: false }],
+    ['WW (werewolf) in the title', { title: '2B X WW - BJ' }, { monster: true, feet: false }],
+    ['orcs in the title', { title: 'Elf captured by orcs' }, { monster: true, feet: false }],
+    ['tentacles in Japanese', { title: '触手 セックス' }, { monster: true, feet: false }],
+    ['footjob tag', { tags: ['footjob'] }, { monster: false, feet: true }],
+    ['feet in the title', { title: 'Tifa feet and riding' }, { monster: false, feet: true }],
+    ['a werewolf and soles in the first post', { title: 'X', text: 'a werewolf licks her soles' }, { monster: true, feet: true }],
+    ['succubi, demons, elves and lookalike words', { title: 'Succubus demon elf at the Orchid trolley, Footloose Ww' }, { monster: false, feet: false }],
+  ])('spots %s', (_, post, expected) => {
+    expect(lessPreferred(post)).toEqual(expected);
+  });
+
+  it('takes 0.5 off for a monster, 0.5 for feet, 1.0 for both', () => {
+    const base = { title: 'Tracer rides', tags: ['animation', 'riding'], axisType: 'multi', likes: 20 };
+    const plain = candidateScore(base);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'tentacle'] })).toBe(plain - RANKING.monster);
+    expect(candidateScore({ ...base, title: 'Tracer rides - footjob' })).toBe(plain - RANKING.feet);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet'] })).toBe(plain - 1);
+    expect(candidateScore({ ...base, monster: true })).toBe(plain - 0.5);
+    expect(candidateScore({ ...base, contentBreak: 'feet' })).toBe(plain - 0.5);
+    expect(RANKING.monster + RANKING.feet).toBe(1);
+  });
+});
+
 describe('contentRuleBreak', () => {
-  it('names the rule a post or saved candidate breaks, by its tags and title', () => {
-    expect(contentRuleBreak({ tags: ['sfm', 'riding'], title: 'Solace2K - Mercy X Horseguy' })).toBe('monster');
-    expect(contentRuleBreak({ tags: ['animation', 'footjob', 'vaginal'], title: 'X' })).toBe('feet');
+  it('names the rule a post or saved candidate breaks, by its tags and title; monsters and feet break none', () => {
+    expect(contentRuleBreak({ tags: ['sfm', 'riding'], title: 'Solace2K - Mercy X Horseguy' })).toBeNull();
+    expect(contentRuleBreak({ tags: ['animation', 'footjob', 'vaginal'], title: 'X' })).toBeNull();
     expect(contentRuleBreak({ tags: ['animation', 'blowjob'], title: 'X' })).toBe('not-sexual');
     expect(contentRuleBreak({ tags: ['animation', 'blowjob', 'riding'], title: 'X' })).toBeNull();
   });
 
-  it('lets sex shown by the first post pass, but never a monster, feet or a mark for good', () => {
+  it('lets sex shown by the first post pass; an old monster / feet mark no longer breaks anything', () => {
     expect(contentRuleBreak({ tags: ['animation', 'straight'], title: 'X', sexual: 'text' })).toBeNull();
     expect(contentRuleBreak({ tags: ['animation', 'sfw'], title: 'X', sexual: 'text' })).toBe('not-sexual');
-    expect(contentRuleBreak({ tags: ['animation', 'tentacle'], title: 'X', sexual: 'text' })).toBe('monster');
-    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'feet' })).toBe('feet');
+    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'feet' })).toBeNull();
+    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'monster' })).toBeNull();
+    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'excluded' })).toBe('excluded');
   });
 });
 
@@ -119,33 +131,33 @@ describe('sexEvidence and judgeFirstPost', () => {
     expect(sexEvidence({ tags: ['animation', 'sfw'], title: 'X', text: 'sex' })).toBeNull();
   });
 
-  it('turns down a first post naming excluded content, monsters or feet, then needs sex somewhere', () => {
-    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'with tentacles')).toEqual({ ok: false, reason: 'excluded' });
-    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'soles and toes')).toEqual({ ok: false, reason: 'excluded' });
+  it('turns down a first post naming excluded content, then needs sex somewhere; monster / feet words only flag it', () => {
     expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'a loli edit')).toEqual({ ok: false, reason: 'excluded' });
+    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'with tentacles')).toEqual({ ok: true, sexual: 'tags', monster: true, feet: false });
+    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'soles and toes')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: true });
     expect(judgeFirstPost({ tags: ['animation', 'titjob'], title: 'Rio Paizuri' }, 'paizuri only')).toEqual({ ok: false, reason: 'not-sexual' });
-    expect(judgeFirstPost({ tags: ['animation', 'blowjob'], title: 'Seraphine BJ' }, 'then she rides you')).toEqual({ ok: true, sexual: 'text' });
-    expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, '')).toEqual({ ok: true, sexual: 'tags' });
-    expect(textRuleBreak('Orchid trolley at Footloose')).toBeNull();
+    expect(judgeFirstPost({ tags: ['animation', 'blowjob'], title: 'Seraphine BJ' }, 'then she rides you')).toEqual({ ok: true, sexual: 'text', monster: false, feet: false });
+    expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, '')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: false });
   });
 });
 
 describe('recheck', () => {
   const c = (title, tags, extra = {}) => ({ id: 1, title, tags, score: 1, ...extra });
 
-  it('reads the first post only of candidates failing just the sex rule without evidence', () => {
+  it('reads the first post only of candidates failing just the sex rule without evidence, old monster / feet marks included', () => {
     expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight']))).toBe(true);
     expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { sexual: 'text' }))).toBe(false);
-    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { contentBreak: 'monster' }))).toBe(false);
-    expect(needsSexRecheck(c('Necromancer steamy footjob', ['animation']))).toBe(false);
+    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { contentBreak: 'monster' }))).toBe(true);
+    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { contentBreak: 'excluded' }))).toBe(false);
     expect(needsSexRecheck(c('Tracer rides', ['animation']))).toBe(false);
   });
 
-  it('keeps sex shown by the text, marks excluded text for good, and leaves the rest skipped', () => {
+  it('keeps sex shown by the text (flagging monster / feet), marks excluded text for good, and leaves the rest skipped', () => {
     const post = c('Silver Streaks', ['animation', 'straight']);
-    expect(recheckWithText(post, 'She ends up riding him')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text' } });
-    expect(recheckWithText(post, 'riding a werewolf')).toEqual({ outcome: 'excluded', candidate: { ...post, contentBreak: 'monster' } });
-    expect(recheckWithText(post, 'lots of footjob')).toEqual({ outcome: 'excluded', candidate: { ...post, contentBreak: 'feet' } });
+    expect(recheckWithText(post, 'She ends up riding him')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: false, feet: false } });
+    expect(recheckWithText(post, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false } });
+    expect(recheckWithText({ ...post, contentBreak: 'monster' }, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false } });
+    expect(recheckWithText(post, 'a loli edit')).toEqual({ outcome: 'excluded', candidate: { ...post, contentBreak: 'excluded' } });
     expect(recheckWithText(post, 'a slow blowjob')).toEqual({ outcome: 'not-sexual', candidate: post });
   });
 });
@@ -473,21 +485,22 @@ describe('downloadQueue', () => {
     expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[3, 2]]);
   });
 
-  it('drops saved posts that break the content rules, picks and favourites too', () => {
-    const c = (id, title, tags, extra = {}) => ({ id, title, tags, axisType: 'multi', score: 1, vr: false, scenes: [{ axes: ['twist'] }], ...extra });
+  it('drops saved posts that break the content rules, picks and favourites too; monster and feet posts stay, ranked lower', () => {
+    const c = (id, title, tags, extra = {}) => ({ id, title, tags, axisType: 'multi', score: 1, vr: false, likes: 20, scenes: [{ axes: ['twist'] }], ...extra });
     const q = downloadQueue([
-      c(1, 'Solace2K - Mercy X Horseguy', ['sfm', 'riding'], { favourite: 'Solace2K' }),
-      c(2, 'Necromancer steamy footjob', ['animation', 'footjob'], { picked: true }),
+      c(1, 'Solace2K - Mercy X Horseguy', ['sfm', 'riding']),
+      c(2, 'Necromancer steamy footjob', ['animation', 'riding']),
       c(3, 'Rio Paizuri', ['animation', 'titjob'], { picked: true }),
       c(4, 'Tracer rides', ['animation', 'riding']),
+      c(5, 'Werewolf footjob', ['animation', 'riding']),
     ]);
-    expect(q.map((x) => x.id)).toEqual([4]);
+    expect(q.map((x) => x.id)).toEqual([4, 1, 2, 5]);
   });
 
-  it('takes a saved post whose first post shows the sex, and drops one its text excluded', () => {
+  it('takes a saved post whose first post shows the sex, and brings back one an older --recheck marked monster / feet', () => {
     const c = (id, extra) => ({ id, title: 'Silver Streaks', tags: ['animation', 'straight'], axisType: 'multi', score: 1, vr: false, scenes: [{ axes: ['twist'] }], ...extra });
-    const q = downloadQueue([c(1, { sexual: 'text' }), c(2, { sexual: 'text', contentBreak: 'monster' }), c(3, {})]);
-    expect(q.map((x) => x.id)).toEqual([1]);
+    const q = downloadQueue([c(1, { sexual: 'text' }), c(2, { sexual: 'text', contentBreak: 'monster' }), c(3, {}), c(4, { sexual: 'text', contentBreak: 'excluded' })]);
+    expect(q.map((x) => x.id)).toEqual([1, 2]);
   });
 });
 
@@ -500,8 +513,7 @@ describe('screenPick', () => {
 
   it('still refuses exclusions, the content rules, posts the library links or the user turned down, and library scenes', () => {
     expect(screenPick(topic(['pmv', 'futanari'], 'X', 6))).toEqual({ ok: false, reason: 'excluded' });
-    expect(screenPick(topic(['sfm', 'pmv'], '2B X WW - BJ', 6))).toEqual({ ok: false, reason: 'excluded' });
-    expect(screenPick(topic(['animation', 'tentacle', 'riding'], 'Seraphine', 6))).toEqual({ ok: false, reason: 'excluded' });
+    expect(screenPick(topic(['sfm', 'pmv'], '2B X WW - BJ', 6))).toMatchObject({ ok: true, picked: true });
     expect(screenPick(topic(['pmv', 'sfw'], 'X', 6))).toEqual({ ok: false, reason: 'not-sexual' });
     expect(screenPick(topic(['pmv'], 'X', 7), { knownTopics: new Set([7]) })).toEqual({ ok: false, reason: 'known' });
     expect(screenPick(topic(['pmv'], 'JJULEZ - Work That Body', 8), { sceneNames: ['jjulez work that body'] })).toEqual({ ok: false, reason: 'in-library' });
@@ -647,13 +659,13 @@ describe('scan state', () => {
     expect(pendingTopics(seen).map((t) => t.id)).toEqual([290]);
   });
 
-  it('keeps earlier candidates until every scene is fetched, and drops posts turned down or breaking the content rules', () => {
+  it('keeps earlier candidates until every scene is fetched, drops posts turned down or breaking the content rules, and ranks monsters lower', () => {
     const c = (id, likes, ...videos) => ({ id, likes, title: 'X', tags: ['vaginal'], scenes: videos.map((name) => ({ video: { name } })) });
     const done = new Set(['1|a.mp4', '2|b.mp4']);
     const merged = mergeCandidates([c(1, 5, 'a.mp4'), c(2, 3, 'b.mp4', 'c.mp4'), c(3, 9, 'd.mp4'), { ...c(5, 8, 'f.mp4'), tags: ['tentacle', 'vaginal'] }],
       [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4'), { ...c(6, 6, 'g.mp4'), tags: ['titjob'] }],
       (id, v) => done.has(`${id}|${v}`), new Set([3]));
-    expect(merged.map((x) => x.id)).toEqual([4, 2]);
+    expect(merged.map((x) => x.id)).toEqual([4, 2, 5]);
   });
 
   it('scores a saved list again under the current weights', () => {
