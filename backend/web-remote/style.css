@@ -523,17 +523,17 @@ body::-webkit-scrollbar {
      nav whenever chrome retracted. In-flow placement ties the nav to
      #app's height — which is dynamic via `--app-vh` — so the nav
      always sits flush against the visible viewport bottom. */
-  /* Grid (not flex) so the four tabs are always exactly 1/4 of the
+  /* Grid (not flex) so the five tabs are always exactly 1/5 of the
      container width. Flex with `flex: 1` was the prior choice but
      flex items default to `min-width: auto`, which prevents them
      from shrinking below their intrinsic content width — at narrow
-     viewports the four labels (Library / Collections / Playlists /
+     viewports the labels (Library / Collections / Playlists /
      Categories) summed to ~280 px of min-content and pushed the nav
      wider than the viewport, dragging Playlists + Categories off the
      right edge. `minmax(0, 1fr)` is the grid equivalent of `flex: 1
      + min-width: 0` and just works. */
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   padding-bottom: var(--safe-bottom);
@@ -787,6 +787,15 @@ body::-webkit-scrollbar {
      narrow viewports instead of forcing the row wider. */
   flex-wrap: wrap;
   overflow-wrap: anywhere;
+}
+/* Categories + tags under the row's sub line, clipped to one line. */
+.list__tags {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .list__badge {
   display: inline-flex;
@@ -1105,6 +1114,15 @@ body::-webkit-scrollbar {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+/* Categories + tags under the card's badges, clipped to one line. */
+.card__tags {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card__badge {
   display: inline-flex;
@@ -1486,6 +1504,35 @@ body::-webkit-scrollbar {
      line on narrow screens instead of overflowing. */
   flex-wrap: wrap;
   overflow-wrap: anywhere;
+}
+/* Category and tag chips on the player view: tap a category to open it,
+   a tag to filter the library by it. */
+.player__tags {
+  padding: 0 16px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  overflow-wrap: anywhere;
+}
+.tag-chip:hover { color: var(--text-primary); }
+.tag-chip--category {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .player__speed {
   padding: 0 16px 16px;

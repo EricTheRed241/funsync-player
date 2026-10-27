@@ -744,6 +744,7 @@
       "collections": "컬렉션 검색",
       "playlists": "재생 목록 검색",
       "categories": "카테고리 검색",
+      "tags": "태그 검색",
       "sources": "소스 검색",
       "short": "검색",
       "aria": "검색",
@@ -768,6 +769,7 @@
       "collections": "컬렉션",
       "playlists": "재생 목록",
       "categories": "카테고리",
+      "tags": "태그",
       "folders": "폴더"
     },
     "filterSheet": {
@@ -806,6 +808,12 @@
       "script": "스크립트",
       "vr": "VR"
     },
+    "tags": {
+      "aria": "카테고리 및 태그",
+      "filterChip": "태그: {tag}",
+      "filterBy": "{tag} 태그가 있는 동영상 보기",
+      "openCategory": "{name} 카테고리 열기"
+    },
     "breadcrumb": {
       "allSources": "모든 소스",
       "folders": "폴더",
@@ -833,9 +841,9 @@
       "emptyFolderBody": "여기에는 하위 폴더나 동영상이 없습니다.",
       "videoNotFoundTitle": "동영상을 찾을 수 없습니다",
       "videoNotFoundBody": "돌아가서 다시 시도하세요.",
-      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} other {항목을 로드할 수 없습니다}}",
-      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} other {아직 항목이 없습니다}}",
-      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} tags {태그를 로드할 수 없습니다} other {항목을 로드할 수 없습니다}}",
+      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} tags {아직 태그가 없습니다} other {아직 항목이 없습니다}}",
+      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} tags {태그는 데스크톱에서 동영상에 연결된 EroScripts 및 FapTap 게시물에서 가져옵니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
       "groupingNotFoundTitle": "찾을 수 없음",
       "groupingNotFoundBody": "{kind, select, collections {이 컬렉션은 더 이상 데스크톱에 존재하지 않습니다.} playlists {이 재생 목록은 더 이상 데스크톱에 존재하지 않습니다.} categories {이 카테고리는 더 이상 데스크톱에 존재하지 않습니다.} other {이 항목은 더 이상 데스크톱에 존재하지 않습니다.}}",
       "groupingEmptyTitle": "비어 있음",

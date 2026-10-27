@@ -744,6 +744,7 @@
       "collections": "搜索合集",
       "playlists": "搜索播放列表",
       "categories": "搜索分类",
+      "tags": "搜索标签",
       "sources": "搜索来源",
       "short": "搜索",
       "aria": "搜索",
@@ -768,6 +769,7 @@
       "collections": "合集",
       "playlists": "播放列表",
       "categories": "分类",
+      "tags": "标签",
       "folders": "文件夹"
     },
     "filterSheet": {
@@ -806,6 +808,12 @@
       "script": "脚本",
       "vr": "VR"
     },
+    "tags": {
+      "aria": "分类和标签",
+      "filterChip": "标签：{tag}",
+      "filterBy": "显示带有标签 {tag} 的视频",
+      "openCategory": "打开分类 {name}"
+    },
     "breadcrumb": {
       "allSources": "所有来源",
       "folders": "文件夹",
@@ -833,9 +841,9 @@
       "emptyFolderBody": "此处没有子文件夹或视频。",
       "videoNotFoundTitle": "未找到视频",
       "videoNotFoundBody": "请返回并重试。",
-      "loadGroupingFailedTitle": "{kind, select, collections {无法加载合集} playlists {无法加载播放列表} categories {无法加载分类} other {无法加载项目}}",
-      "noGroupingTitle": "{kind, select, collections {尚无合集} playlists {尚无播放列表} categories {尚无分类} other {尚无项目}}",
-      "noGroupingBody": "{kind, select, collections {在桌面端的 FunSync 中创建合集——它们将显示在此处。} playlists {在桌面端的 FunSync 中创建播放列表——它们将显示在此处。} categories {在桌面端的 FunSync 中创建分类——它们将显示在此处。} other {在桌面端的 FunSync 中创建项目。}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {无法加载合集} playlists {无法加载播放列表} categories {无法加载分类} tags {无法加载标签} other {无法加载项目}}",
+      "noGroupingTitle": "{kind, select, collections {尚无合集} playlists {尚无播放列表} categories {尚无分类} tags {尚无标签} other {尚无项目}}",
+      "noGroupingBody": "{kind, select, collections {在桌面端的 FunSync 中创建合集——它们将显示在此处。} playlists {在桌面端的 FunSync 中创建播放列表——它们将显示在此处。} categories {在桌面端的 FunSync 中创建分类——它们将显示在此处。} tags {标签来自桌面端与你的视频关联的 EroScripts 和 FapTap 帖子。} other {在桌面端的 FunSync 中创建项目。}}",
       "groupingNotFoundTitle": "未找到",
       "groupingNotFoundBody": "{kind, select, collections {此合集在桌面端已不存在。} playlists {此播放列表在桌面端已不存在。} categories {此分类在桌面端已不存在。} other {此项目在桌面端已不存在。}}",
       "groupingEmptyTitle": "空",

@@ -744,6 +744,7 @@
       "collections": "コレクションを検索",
       "playlists": "プレイリストを検索",
       "categories": "カテゴリーを検索",
+      "tags": "タグを検索",
       "sources": "ソースを検索",
       "short": "検索",
       "aria": "検索",
@@ -768,6 +769,7 @@
       "collections": "コレクション",
       "playlists": "プレイリスト",
       "categories": "カテゴリー",
+      "tags": "タグ",
       "folders": "フォルダー"
     },
     "filterSheet": {
@@ -806,6 +808,12 @@
       "script": "スクリプト",
       "vr": "VR"
     },
+    "tags": {
+      "aria": "カテゴリーとタグ",
+      "filterChip": "タグ: {tag}",
+      "filterBy": "タグ {tag} の動画を表示",
+      "openCategory": "カテゴリー {name} を開く"
+    },
     "breadcrumb": {
       "allSources": "すべてのソース",
       "folders": "フォルダー",
@@ -833,9 +841,9 @@
       "emptyFolderBody": "ここにはサブフォルダーや動画がありません。",
       "videoNotFoundTitle": "動画が見つかりません",
       "videoNotFoundBody": "戻ってもう一度お試しください。",
-      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} other {読み込めませんでした}}",
-      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} other {まだ項目がありません}}",
-      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} other {デスクトップの FunSync で項目を作成してください。}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} tags {タグを読み込めませんでした} other {読み込めませんでした}}",
+      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} tags {まだタグがありません} other {まだ項目がありません}}",
+      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} tags {タグは、デスクトップで動画にリンクされた EroScripts と FapTap の投稿から取得されます。} other {デスクトップの FunSync で項目を作成してください。}}",
       "groupingNotFoundTitle": "見つかりません",
       "groupingNotFoundBody": "{kind, select, collections {このコレクションはもうデスクトップに存在しません。} playlists {このプレイリストはもうデスクトップに存在しません。} categories {このカテゴリーはもうデスクトップに存在しません。} other {この項目はもうデスクトップに存在しません。}}",
       "groupingEmptyTitle": "空",

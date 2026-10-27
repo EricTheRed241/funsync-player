@@ -81,6 +81,8 @@ TAG_HANDMADE_AXES = 'Feature:Hand-made multi-axis'
 PLAYLIST_TAG_PREFIX = 'Playlist:'
 # `Category:<name>` scene tags, one per desktop category the video is in.
 CATEGORY_TAG_PREFIX = 'Category:'
+# `Tag:<tag>` scene tags, one per chip tag (`services.video_tags`).
+TAG_TAG_PREFIX = 'Tag:'
 
 
 def _positive_number(value):
@@ -217,6 +219,12 @@ def category_tags(path, categories, video_categories):
         for c in categories or []
         if c.get('id') in ids and (c.get('name') or '').strip()
     ]
+
+
+def chip_tag_names(chip_tags):
+    """`Tag:<tag>` for every chip tag, in the given order. Read-only in the
+    headset like `Category:`."""
+    return [f'{TAG_TAG_PREFIX}{tag}' for tag in chip_tags or []]
 
 
 def playlist_names_from_tags(tags):

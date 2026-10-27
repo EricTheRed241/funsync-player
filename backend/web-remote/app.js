@@ -8,7 +8,9 @@ import { computeBins, renderBins } from './heatmap.js';
 import { RemoteSyncClient } from './remote-sync.js';
 import { fuzzySearch, sortVideos } from './library-search.js';
 import { buildContextMapFromGroupings } from './search-context.js';
-import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from './vr-detect.js';
+import { setOverrideStore as setVRTypeOverrideStore } from './vr-detect.js';
+import { videoIsVR, filterByTag, tagGroupings } from './video-tags.js';
+import { groupingDetailHash, parseGroupingDetailHash } from './grouping-routes.js';
 import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
 import { t, initWebRemoteI18n, translatePage } from './i18n.js';
@@ -135,6 +137,7 @@ document.getElementById('navLibraryIcon').appendChild(svgIcon('library', 22));
 document.getElementById('navCollectionsIcon').appendChild(svgIcon('layoutGrid', 22));
 document.getElementById('navPlaylistsIcon').appendChild(svgIcon('listMusic', 22));
 document.getElementById('navCategoriesIcon').appendChild(svgIcon('tag', 22));
+document.getElementById('navTagsIcon').appendChild(svgIcon('hash', 22));
 
 let library = null;       // cached list of video objects
 
@@ -162,7 +165,7 @@ let categories = null;    // cached list from /api/remote/categories
 let searchContextMap = null;
 let _searchContextLoading = false;
 let currentView = 'list'; // 'list' | 'player' | 'groupings' | 'grouping-detail'
-let currentMode = 'library'; // 'library' | 'collections' | 'playlists' | 'categories'
+let currentMode = 'library'; // 'library' | 'collections' | 'playlists' | 'categories' | 'tags'
 let activeSyncClient = null;  // torn down on view change / unload
 
 // Persisted filter/sort state
@@ -207,6 +210,7 @@ let uiState = {
   sortDirs: { ...DEFAULT_SORT_DIRS, ...(storedState.sortDirs || {}) },
   vr: storedState.vr || 'all',             // all | vr | flat
   rating: storedState.rating || 'all',     // all | favorites | top | unrated
+  tag: storedState.tag || '',              // '' = any, else one chip tag
   view: storedState.view || 'grid',        // grid | list
 };
 
@@ -385,6 +389,8 @@ function _scheduleDurationRefreshIfNeeded() {
         if (hit.duration && !v.duration) { v.duration = hit.duration; updated++; }
         if (hit.avgSpeed != null && v.avgSpeed == null) { v.avgSpeed = hit.avgSpeed; updated++; }
         if (hit.maxSpeed != null && v.maxSpeed == null) { v.maxSpeed = hit.maxSpeed; updated++; }
+        // A VR decision that waited for the frame size lands here too.
+        if (typeof hit.isVR === 'boolean' && hit.isVR !== v.isVR) { v.isVR = hit.isVR; updated++; }
       }
       // Also refresh grouping caches so their totalDuration gets refreshed —
       // cheap, same backend call pattern the refresh button uses. Folder
@@ -457,6 +463,9 @@ async function ensureSearchContext() {
  * switching modes doesn't re-fetch. Refresh button clears the cache.
  */
 async function loadGrouping(kind) {
+  // Tags aren't a desktop grouping: they come with the videos, so the
+  // list is built from the library each time (cheap, and never stale).
+  if (kind === 'tags') return tagGroupings(await loadLibrary());
   const cache = { collections, playlists, categories }[kind];
   if (cache) return cache;
   const resp = await fetch(`/api/remote/${kind}`);
@@ -487,18 +496,17 @@ async function render() {
   }
 
   // Grouping detail: #collection/:id, #playlist/:id, #category/:id
-  const detailMatch = hash.match(/^(collection|playlist|category)\/(.+)$/);
-  if (detailMatch) {
-    const kind = detailMatch[1] + 's';  // collection → collections
-    currentMode = kind;
+  const detail = parseGroupingDetailHash(hash);
+  if (detail) {
+    currentMode = detail.kind;
     currentView = 'grouping-detail';
     backBtn.hidden = false;
-    await renderGroupingDetail(kind, detailMatch[2]);
+    await renderGroupingDetail(detail.kind, detail.id);
     return;
   }
 
-  // Grouping list: #collections, #playlists, #categories
-  if (hash === 'collections' || hash === 'playlists' || hash === 'categories') {
+  // Grouping list: #collections, #playlists, #categories, #tags
+  if (hash === 'collections' || hash === 'playlists' || hash === 'categories' || hash === 'tags') {
     currentMode = hash;
     currentView = 'groupings';
     backBtn.hidden = true;
@@ -636,9 +644,10 @@ function applyMatchedVrFilters(videos) {
   let out = videos;
   if (uiState.tab === 'matched') out = out.filter(v => v.hasFunscript);
   else if (uiState.tab === 'unmatched') out = out.filter(v => !v.hasFunscript);
-  if (uiState.vr === 'vr') out = out.filter(v => isVRVideo(v.name));
-  else if (uiState.vr === 'flat') out = out.filter(v => !isVRVideo(v.name));
+  if (uiState.vr === 'vr') out = out.filter(v => videoIsVR(v));
+  else if (uiState.vr === 'flat') out = out.filter(v => !videoIsVR(v));
   out = filterByRating(out, uiState.rating);
+  out = filterByTag(out, uiState.tag);
   return out;
 }
 
@@ -710,10 +719,12 @@ async function renderGroupingsList(kind) {
 }
 
 function createGroupingRow(kind, item) {
-  const singular = kind.slice(0, -1); // collections → collection
   const row = document.createElement('div');
   row.className = 'grouping-row';
-  row.addEventListener('click', () => { location.hash = `${singular}/${item.id}`; });
+  row.addEventListener('click', () => {
+    if (kind === 'tags') showLibraryWithTag(item.name);
+    else location.hash = groupingDetailHash(kind, item.id);
+  });
 
   // Colour dot for categories, icon tile for others
   const badge = document.createElement('span');
@@ -722,7 +733,7 @@ function createGroupingRow(kind, item) {
     badge.classList.add('grouping-row__badge--dot');
     badge.style.backgroundColor = item.color || '#888';
   } else {
-    badge.appendChild(svgIcon(kind === 'playlists' ? 'play' : 'layoutGrid', 18));
+    badge.appendChild(svgIcon({ playlists: 'play', tags: 'hash' }[kind] || 'layoutGrid', 18));
   }
   row.appendChild(badge);
 
@@ -1352,7 +1363,7 @@ function createCard(v) {
     b.textContent = t('webRemote.badge.script');
     meta.appendChild(b);
   }
-  if (isVRVideo(v.name)) {
+  if (videoIsVR(v)) {
     const b = document.createElement('span');
     b.className = 'card__badge card__badge--vr';
     b.textContent = t('webRemote.badge.vr');
@@ -1363,8 +1374,61 @@ function createCard(v) {
   if (speedBadge) meta.appendChild(speedBadge);
 
   body.appendChild(meta);
+  const labels = createLabelsLine(v, 'card__tags');
+  if (labels) body.appendChild(labels);
   card.appendChild(body);
   return card;
+}
+
+/**
+ * One muted line naming the video's categories, then its tags, for cards
+ * and rows. CSS clips it to a single line; the full set is on the player
+ * view as tappable chips. Null when the video has neither.
+ */
+function createLabelsLine(v, className) {
+  const labels = [...(v.categories || []), ...(v.tags || [])];
+  if (labels.length === 0) return null;
+  const line = document.createElement('div');
+  line.className = className;
+  line.textContent = labels.join(' · ');
+  return line;
+}
+
+/**
+ * Player-view chips: one per category (opens that category) and one per
+ * tag (shows the library filtered to it). Null when there are none.
+ */
+function buildTagChips(video) {
+  const cats = video.categories || [];
+  const tags = video.tags || [];
+  if (cats.length === 0 && tags.length === 0) return null;
+  const row = document.createElement('div');
+  row.className = 'player__tags';
+  row.setAttribute('aria-label', t('webRemote.tags.aria'));
+  const chip = (label, aria, onClick, extraClass) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = extraClass ? `tag-chip ${extraClass}` : 'tag-chip';
+    btn.textContent = label;
+    btn.setAttribute('aria-label', aria);
+    btn.addEventListener('click', onClick);
+    row.appendChild(btn);
+  };
+  for (const name of cats) {
+    chip(name, t('webRemote.tags.openCategory', { name }), () => openCategoryByName(name), 'tag-chip--category');
+  }
+  for (const tag of tags) {
+    chip(`#${tag}`, t('webRemote.tags.filterBy', { tag }), () => showLibraryWithTag(tag));
+  }
+  return row;
+}
+
+/** Open the category detail for a category name from `/api/remote/videos`. */
+async function openCategoryByName(name) {
+  let list;
+  try { list = await loadGrouping('categories'); } catch { return; }
+  const hit = list.find((c) => (c.name || '').trim() === name);
+  if (hit) location.hash = groupingDetailHash('categories', hit.id);
 }
 
 /**
@@ -1440,7 +1504,7 @@ function createRow(v) {
     b.textContent = t('webRemote.badge.script');
     sub.appendChild(b);
   }
-  if (isVRVideo(v.name)) {
+  if (videoIsVR(v)) {
     const b = document.createElement('span');
     b.className = 'list__badge';
     b.textContent = t('webRemote.badge.vr');
@@ -1461,6 +1525,8 @@ function createRow(v) {
     sub.appendChild(b);
   }
   info.appendChild(sub);
+  const labels = createLabelsLine(v, 'list__tags');
+  if (labels) info.appendChild(labels);
   row.appendChild(info);
   return row;
 }
@@ -1845,12 +1911,26 @@ const FILTER_LABELS = {
   tab: { matched: 'Matched', unmatched: 'Unmatched' },
   vr:  { vr: 'VR only', flat: 'Non-VR' },
 };
-const FILTER_DEFAULTS = { tab: 'all', vr: 'all', rating: 'all' };
-const FILTER_KEYS = ['tab', 'vr', 'rating'];
+const FILTER_DEFAULTS = { tab: 'all', vr: 'all', rating: 'all', tag: '' };
+const FILTER_KEYS = ['tab', 'vr', 'rating', 'tag'];
 
 function filterLabel(key, value) {
   if (key === 'rating') return t(`webRemote.triage.filter.${value}`);
+  if (key === 'tag') return t('webRemote.tags.filterChip', { tag: value });
   return FILTER_LABELS[key]?.[value] || value;
+}
+
+/**
+ * The library, filtered to one chip tag: a row in the Tags view or a tag
+ * chip in the player. The search is cleared — whatever was typed searched
+ * the tag names, not the videos.
+ */
+function showLibraryWithTag(tag) {
+  uiState.tag = tag;
+  uiState.search = '';
+  saveFilterState();
+  if (location.hash.slice(1)) location.hash = '';
+  else rerenderCurrent();
 }
 
 function renderFilterChips() {
@@ -2041,8 +2121,8 @@ function rerenderCurrent() {
   if (currentView === 'list') return renderList();
   if (currentView === 'groupings') return renderGroupingsList(currentMode);
   if (currentView === 'grouping-detail') {
-    const m = location.hash.slice(1).match(/^(collection|playlist|category)\/(.+)$/);
-    if (m) return renderGroupingDetail(m[1] + 's', m[2]);
+    const detail = parseGroupingDetailHash(location.hash.slice(1));
+    if (detail) return renderGroupingDetail(detail.kind, detail.id);
   }
   if (currentView === 'folders') return renderFolderRoot();
   if (currentView === 'folder-detail') {
@@ -2064,6 +2144,7 @@ function saveFilterState() {
       sortDirs: uiState.sortDirs,
       vr: uiState.vr,
       rating: uiState.rating,
+      tag: uiState.tag,
       view: uiState.view,
     }));
   } catch { /* ignore quota */ }
@@ -2766,6 +2847,11 @@ async function renderPlayer(id) {
     meta.appendChild(dur);
   }
   wrap.appendChild(meta);
+
+  // Categories and tags as chips: tap to open the category or filter the
+  // library by the tag.
+  const tagChips = buildTagChips(video);
+  if (tagChips) wrap.appendChild(tagChips);
 
   // Triage: rating, favourite, add to playlist (triage.js).
   wrap.appendChild(buildTriageRow(video));

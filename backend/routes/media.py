@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from services import library_edits
+from services import library_edits, video_tags
 from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
 
 router = APIRouter()
@@ -47,6 +47,13 @@ _video_categories: dict[str, list[str]] = {}
 _sources: list[dict] = []
 # library.ratings — videoPath → {rating, favorite, updatedAt}.
 _ratings: dict[str, dict] = {}
+# library.vrFormat — videoPath → {projection, ...} from the desktop's VR
+# Format panel. Only `projection` matters here: 'flat' makes a video flat,
+# any other projection makes it VR (see `routes.vr_api`).
+_vr_format: dict[str, dict] = {}
+# Chip tags per video — videoPath → [tag, ...], the registered `scriptTags`
+# already filtered by `services.video_tags.chip_tags`.
+_chip_tags: dict[str, list[str]] = {}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -427,6 +434,30 @@ def register_categories(categories: list[dict], video_categories: dict):
         _video_categories.update(video_categories)
 
 
+def register_vr_format(vr_format: dict):
+    """Register library.vrFormat (videoPath → {projection, ...}). Entries
+    without a string projection are dropped. Rebinds, like the registry, so
+    a reader never sees the map half rebuilt."""
+    global _vr_format
+    _vr_format = {
+        path: entry
+        for path, entry in (vr_format.items() if isinstance(vr_format, dict) else ())
+        if isinstance(entry, dict) and isinstance(entry.get("projection"), str) and entry["projection"]
+    }
+
+
+def register_script_tags(script_tags: dict):
+    """Register the post tags per video (videoPath → [tag, ...]) as their
+    chip-tag display lists. Videos left with no chip tags are not stored."""
+    global _chip_tags
+    chips_by_path = {}
+    for path, tags in (script_tags.items() if isinstance(script_tags, dict) else ()):
+        chips = video_tags.chip_tags(tags) if isinstance(tags, list) else []
+        if chips:
+            chips_by_path[path] = chips
+    _chip_tags = chips_by_path
+
+
 def register_sources(sources: list[dict]):
     """Register the library source folders (id/name/path per source).
     Filters out disabled sources — they don't belong in folder browse."""
@@ -462,6 +493,18 @@ def get_categories() -> list[dict]:
 
 def get_video_categories() -> dict:
     return dict(_video_categories)
+
+
+def get_vr_projection(path) -> str | None:
+    """The VR Format panel's projection for `path` ('flat', 'sbs-half',
+    'equirect-180', ...), or None when the desktop set none."""
+    entry = _vr_format.get(path) if path else None
+    return entry["projection"] if entry else None
+
+
+def get_chip_tags(path) -> list[str]:
+    """Chip tags for `path` (sorted, noise dropped); [] when it has none."""
+    return list(_chip_tags.get(path, ())) if path else []
 
 
 def get_sources() -> list[dict]:
@@ -729,17 +772,37 @@ async def get_speed_stats():
     return out
 
 
+@router.get("/vr-flags")
+async def get_vr_flags():
+    """Whether each registered video is VR, as the backend decides it for
+    the headsets and the web remote: the desktop's VR Format projection
+    (`vrFormat`), then `manualVRType`, then the filename, then the frame
+    shape (`routes.vr_api.detect_vr_format_for_video`).
+
+    Returns `{"flags": {"<videoPath>": true|false}, "pending": n}`. Videos
+    still waiting for their dimensions (nothing else decides them) are left
+    out of `flags` and counted in `pending`; the registration warm-up is
+    probing them, so the desktop asks again until `pending` is 0. Never
+    probes; a pure registry scan.
+    """
+    from routes.vr_api import vr_flags  # deferred: vr_api imports this module
+    return vr_flags(_video_registry)
+
+
+
 @router.post("/register")
 async def register_library(request: Request):
     """Register videos from a library scan (called by Electron main process).
 
     Also accepts collections/playlists/categories so the web remote can show
-    the same groupings the desktop app does. Every field is independent:
-    omit a key to leave that slice untouched on the backend. That lets the
-    renderer push groupings FAST (in-memory, no filesystem work) ahead of
-    the slower video scan — the phone can render Collections / Playlists /
-    Categories tabs within ~100 ms of desktop startup instead of waiting
-    for the scan to finish.
+    the same groupings the desktop app does, plus `vrFormat` (videoPath →
+    {projection, ...}, the VR Format panel's choices) and `scriptTags`
+    (videoPath → [post tag, ...], kept as chip tags). Every field is
+    independent: omit a key to leave that slice untouched on the backend.
+    That lets the renderer push groupings FAST (in-memory, no filesystem
+    work) ahead of the slower video scan — the phone can render
+    Collections / Playlists / Categories tabs within ~100 ms of desktop
+    startup instead of waiting for the scan to finish.
     """
     data = await request.json()
     await run_in_threadpool(_apply_registration, data)
@@ -778,6 +841,10 @@ def _apply_registration(data: dict):
         register_sources(data.get("sources") or [])
     if "ratings" in data:
         register_ratings(data.get("ratings") or {})
+    if "vrFormat" in data:
+        register_vr_format(data.get("vrFormat") or {})
+    if "scriptTags" in data:
+        register_script_tags(data.get("scriptTags") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

@@ -30,11 +30,13 @@ from routes.media import (
     get_ratings,
     get_categories,
     get_video_categories,
+    get_chip_tags,
     get_sources,
     bump_rescan_request,
     _path_to_id,
 )
 from routes.remote_sync import submit_library_edit
+from routes.vr_api import vr_decision
 from services import library_edits
 
 router = APIRouter()
@@ -106,6 +108,8 @@ async def list_videos():
     """
     registry = get_video_registry()
     ratings = get_ratings()
+    categories = get_categories()
+    video_categories = get_video_categories()
     out = []
     for vid_id, v in registry.items():
         name = v.get("name", "")
@@ -159,10 +163,32 @@ async def list_videos():
             # override store before the heuristic so the VR filter agrees with
             # the desktop.
             "manualVRType": v.get("manualVRType") or None,
+            # The backend's VR decision (VR Format projection, manual toggle,
+            # filename, frame shape — `routes.vr_api`), the same one the
+            # headsets get. False while the frame shape is still unknown.
+            "isVR": bool(vr_decision(vid_id, v)),
+            # Chip tags (EroScripts / FapTap post tags without the noise,
+            # `services.video_tags`) and desktop category names.
+            "tags": get_chip_tags(v.get("path")),
+            "categories": _category_names(v.get("path"), categories, video_categories),
             # Triage state (0 = unrated), queued phone/headset edits included.
             "rating": library_edits.rating_entry(ratings, v.get("path"))[0],
             "favorite": library_edits.rating_entry(ratings, v.get("path"))[1],
         })
+    out.sort(key=lambda v: v["name"].lower())
+    return {"videos": out}
+
+
+def _category_names(path: str, categories: list[dict], video_categories: dict) -> list[str]:
+    """Names of the desktop categories holding `path`, in category order."""
+    ids = set(video_categories.get(path) or []) if path else set()
+    if not ids:
+        return []
+    return [
+        (c.get("name") or "").strip()
+        for c in categories
+        if c.get("id") in ids and (c.get("name") or "").strip()
+    ]
     out.sort(key=lambda v: v["name"].lower())
     return {"videos": out}
 

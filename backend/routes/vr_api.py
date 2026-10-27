@@ -12,9 +12,14 @@ request fields are the ones XBVR (`pkg/api/heresphere.go`,
 `videoDataRequestDto`) read: `rating` (number, 0-5 in 0.5 steps),
 `isFavorite` (bool) and `tags` (`[{"name", "start", "end", "track"}]`, the
 full list). Only `Playlist:<name>` tags are acted on; every other tag edit
-is ignored (the generated `Studio:` / `Format:` / ... tags simply come back
-on the next load). `hsp` and `deleteFile` are ignored too (`writeHSP` stays
-false; nothing is ever deleted from the headset).
+is ignored (the generated `Studio:` / `Format:` / `Category:` / `Tag:` ...
+tags simply come back on the next load). `hsp` and `deleteFile` are ignored
+too (`writeHSP` stays false; nothing is ever deleted from the headset).
+
+Whether a video is VR follows the desktop first (VR Format panel
+projection, then the manual toggle), then the filename, then the frame
+shape (`detect_vr_format_for_video`); `GET /api/media/vr-flags` reports
+that decision per video.
 """
 
 import asyncio
@@ -28,7 +33,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_categories, get_playlists, get_ratings, get_video_categories, get_video_registry, _path_to_id, record_vr_activity
+from routes.media import get_categories, get_chip_tags, get_playlists, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
 from routes.remote_sync import submit_library_edit
 from services import library_edits, video_info, vr_sections
 from services.network import get_local_ip
@@ -205,6 +210,25 @@ _SEP_SPLIT_RE = re.compile(rf'{SEP}+')
 # Studio code fused to a number: "SIVR178" (no separator).
 _STUDIO_COMBO_RE = re.compile(r'^([A-Z]{2,8})(\d{2,5})$')
 
+# VR Format panel projections (`library.vrFormat[path].projection`, see
+# renderer/components/vr-format-panel.js) that name a geometry the headsets
+# can play. The side-by-side planar ones (`sbs-half`, `sbs-full`) say only
+# "stereo, side by side": they keep the filename's layout, or the default.
+_PROJECTION_FORMATS = {
+    'tb-half': ('dome', 'tb'),
+    'tb-full': ('dome', 'tb'),
+    'equirect-180': ('dome', 'sbs'),
+    'equirect-360': ('sphere', 'sbs'),
+    'fisheye-180': ('fisheye', 'sbs'),
+    'fisheye-190': ('fisheye', 'sbs'),
+    'fisheye-200': ('mkx200', 'sbs'),
+    'mkx200': ('mkx200', 'sbs'),
+    'rf52': ('rf52', 'sbs'),
+}
+
+# Layout for a video known to be VR whose filename doesn't say which.
+_DEFAULT_VR_FORMAT = ('mkx200', 'sbs')
+
 
 def _dims_suggest_vr(width, height):
     """Conservative resolution/aspect fallback for untagged VR files.
@@ -233,39 +257,83 @@ def _dims_suggest_vr(width, height):
 def detect_vr_format_for_video(video, dims=None):
     """Return `(screenType, stereoMode, is3d)` for a registered video dict.
 
-    Wraps `detect_vr_format` to apply the per-video manual override
-    (`video['manualVRType']`) before falling through to filename heuristics —
-    matches the renderer-side precedence in `renderer/js/vr-detect.js`.
+    The desktop's own decision comes first, in the renderer's order
+    (`renderer/components/library.js`, VR override store):
 
-      - `manualVRType == 'flat'` forces `('flat', 'off', False)`.
-      - `manualVRType == 'vr'`  uses the heuristic when it already matches a
-        VR pattern; otherwise falls back to a sensible default
-        (`mkx200` SBS) so HereSphere has a projection to play with.
+      1. The VR Format panel's projection (`library.vrFormat`, registered
+         as `vrFormat`): `'flat'` forces `('flat', 'off', False)`; any other
+         projection makes the video VR, laid out per `_PROJECTION_FORMATS`,
+         else as the filename says, else `_DEFAULT_VR_FORMAT`.
+      2. The manual toggle (`video['manualVRType']`): `'flat'` forces flat;
+         `'vr'` uses the filename's layout when it has one, else the
+         default (`mkx200` SBS) so HereSphere has a projection to play with.
+      3. Filename heuristics (`detect_vr_format`).
 
     `dims` is an optional `(width, height)` tuple. When the filename gives
-    no VR signal AND the user hasn't overridden, a conservative
+    no VR signal AND the desktop decided nothing, a conservative
     resolution/aspect heuristic (`_dims_suggest_vr`) upgrades the video to
     VR SBS so an untagged VR master isn't served flat. Callers pass dims
     from cached ffprobe results — never triggering a probe just to group
     the library (see the library-listing loops, which use cached-only dims).
     """
-    override = (video or {}).get('manualVRType')
+    video = video or {}
+    projection = get_vr_projection(video.get('path'))
+    if projection == 'flat':
+        return 'flat', 'off', False
+    if projection in _PROJECTION_FORMATS:
+        return (*_PROJECTION_FORMATS[projection], True)
+
+    override = None if projection else video.get('manualVRType')
     if override == 'flat':
         return 'flat', 'off', False
 
-    name = (video or {}).get('name', '') or ''
-    screen, stereo, is_3d = detect_vr_format(name)
+    screen, stereo, is_3d = detect_vr_format(video.get('name', '') or '')
+    if is_3d:
+        return screen, stereo, is_3d
 
-    if override == 'vr' and not is_3d:
-        return 'mkx200', 'sbs', True
+    if projection or override == 'vr':
+        return (*_DEFAULT_VR_FORMAT, True)
 
     # Resolution/aspect fallback — only when filename said flat and the
     # user hasn't set an override either way. Matches the manual 'vr'
     # default projection (mkx200 SBS).
-    if not is_3d and override is None and dims and _dims_suggest_vr(*dims):
-        return 'mkx200', 'sbs', True
+    if override is None and dims and _dims_suggest_vr(*dims):
+        return (*_DEFAULT_VR_FORMAT, True)
 
     return screen, stereo, is_3d
+
+
+def vr_decision(vid_id, video):
+    """True / False when the backend knows whether the video is VR, None
+    while that hinges on dimensions not probed yet (no desktop decision, no
+    filename signal). Never probes."""
+    dims = _dims_for_detection(vid_id, video)
+    _, _, is_3d = detect_vr_format_for_video(video, dims=dims)
+    if is_3d or dims is not None:
+        return is_3d
+    video = video or {}
+    if get_vr_projection(video.get('path')) or video.get('manualVRType') is not None:
+        return False
+    return None
+
+
+def vr_flags(registry):
+    """`{"flags": {path: bool}, "pending": n}` for every registered video:
+    the VR decision per path, leaving out (and counting as pending) the
+    videos `vr_decision` can't decide yet. Their dimensions are being
+    probed since registration (`queue_dims_warmup`), so asking again later
+    settles them."""
+    flags, pending = {}, 0
+    for vid_id, video in registry.items():
+        path = video.get('path')
+        if not path:
+            continue
+        decision = vr_decision(vid_id, video)
+        if decision is None:
+            pending += 1
+        else:
+            flags[path] = decision
+    return {'flags': flags, 'pending': pending}
 
 
 def detect_vr_format(filename):
@@ -355,9 +423,10 @@ async def _scene_video_info(video_id, path):
 def queue_dims_warmup(registry) -> int:
     """Make every registered video's dimensions known without anyone opening
     it (called at registration). Videos whose VR status hinges on their
-    dimensions — no filename VR tag, no manual override — are probed first;
-    the rest only feed the scene-detail media block. Returns the number of
-    videos queued for probing."""
+    dimensions — no filename VR tag, no desktop decision (VR Format panel
+    projection or manual toggle) — are probed first; the rest only feed the
+    scene-detail media block. Returns the number of videos queued for
+    probing."""
     first, later = [], []
     for vid_id, video in registry.items():
         if video.get('width') and video.get('height'):
@@ -366,7 +435,8 @@ def queue_dims_warmup(registry) -> int:
         if not path:
             continue
         _, _, tagged = detect_vr_format_for_video(video)
-        (later if tagged or video.get('manualVRType') else first).append((vid_id, path))
+        decided = tagged or video.get('manualVRType') or get_vr_projection(path)
+        (later if decided else first).append((vid_id, path))
     return video_info.queue_warmup(first + later)
 
 
@@ -403,16 +473,23 @@ def _filtered_videos(registry, vr_filter):
         yield vid_id, video, is_3d
 
 
-def _scene_tag_names(video, is_3d):
-    """Scene-detail tags: `Studio:<source>`, `Feature:Is scripted`, then the
-    filter tags (`Format:`, `Speed:`, `Length:`, hand-made multi-axis)."""
+def _scene_tag_names(video, is_3d, playlists):
+    """Scene-detail tags, the same for HereSphere and DeoVR:
+    `Studio:<source>`, `Feature:Is scripted`, the filter tags (`Format:`,
+    `Speed:`, `Length:`, hand-made multi-axis), then `Playlist:<name>` per
+    playlist holding the video (two-way in HereSphere), `Category:<name>`
+    per desktop category and `Tag:<tag>` per chip tag (both read-only)."""
     tags = []
-    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(video.get('path', '')))
+    path = video.get('path', '')
+    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
     if source_name:
         tags.append(f'Studio:{source_name}')
     if video.get('hasFunscript'):
         tags.append('Feature:Is scripted')
     tags.extend(vr_sections.filter_tags(video, is_3d))
+    tags.extend(vr_sections.playlist_tags(path, playlists))
+    tags.extend(vr_sections.category_tags(path, get_categories(), get_video_categories()))
+    tags.extend(vr_sections.chip_tag_names(get_chip_tags(path)))
     return tags
 
 
@@ -615,7 +692,7 @@ async def deovr_scene(video_id: str, request: Request):
         'isScripted': bool(fs_path),
         'categories': [
             {'tag': {'id': i, 'name': name}}
-            for i, name in enumerate(_scene_tag_names(video, is_3d), start=1)
+            for i, name in enumerate(_scene_tag_names(video, is_3d, get_playlists()), start=1)
         ],
         'isFavorite': library_edits.rating_entry(get_ratings(), path)[1],
         'fullVideoReady': True,
@@ -748,14 +825,11 @@ async def heresphere_scene(video_id: str, request: Request):
             'url': f'{base_url}/api/media/script/{video_id}',
         })
 
-    # Tags: studio, scripted, and the filter tags; chapters follow
-    tags = [{'name': name} for name in _scene_tag_names(video, is_3d)]
-    # Playlist tags: removing one in the headset takes the video out of
-    # that playlist, adding `Playlist:<name>` puts it in (creating it).
-    tags.extend({'name': name} for name in vr_sections.playlist_tags(path, playlists))
-    # Category tags (desktop categories, EroScripts-made ones included) for
-    # filtering in the headset; read-only.
-    tags.extend({'name': name} for name in vr_sections.category_tags(path, get_categories(), get_video_categories()))
+    # Tags: studio, scripted, filter tags, then Playlist: (removing one in
+    # the headset takes the video out of that playlist, adding
+    # `Playlist:<name>` puts it in, creating it), Category: and Tag: (both
+    # read-only); chapters follow.
+    tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists)]
 
     # Auto-generate chapter tags for navigation (every 5 min)
     if duration > 300:
