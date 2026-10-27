@@ -11,7 +11,7 @@
 // so neither `npm run eroscripts:scout` nor `npm run faptap:scout` downloads
 // them again: EroScripts scenes under `<topicId>|<video>`, FapTap scenes
 // under `faptap|<faptapId>`. The scouts add their own entries there (videos
-// shorter than a minute) and so does `npm run dedupe:scenes` (extra copies of
+// shorter than the scouts' minimum, two minutes) and so does `npm run dedupe:scenes` (extra copies of
 // a video, reason `duplicate`). No Electron dependency: the scout CLIs
 // read and write the same file through this module.
 

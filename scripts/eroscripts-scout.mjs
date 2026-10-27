@@ -56,7 +56,7 @@ Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.
   --top N                candidates to print (default 40)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
-                         skips videos under a minute and scenes rejected in the app (No thank you)
+                         skips videos under 2 minutes and scenes rejected in the app (No thank you)
   --ids 1,2,3            only these post ids
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
@@ -391,7 +391,7 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
           rejectedVideos.recordRejection(userData, {
             topicId: c.id, video: sc.video.name, title: c.title, url: c.url, reason: 'short', lengthMs, at: new Date().toISOString(),
           });
-          console.log(`${now()} – ${creator}/${stem}: ${Math.round(lengthMs / 1000)} s, under a minute; skipped`);
+          console.log(`${now()} – ${creator}/${stem}: ${Math.round(lengthMs / 1000)} s, under ${lib.MIN_VIDEO_LABEL}; skipped`);
           short++;
           continue;
         }
@@ -434,7 +434,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { api, userData, incoming, staging });
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under a minute, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (!r.failed) return 0;
     if (pass < opts.passes) {

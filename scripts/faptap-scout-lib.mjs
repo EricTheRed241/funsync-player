@@ -33,7 +33,7 @@
 //     or title (VR also by FapTap's VR flag).
 //   • Videos the user picks by id (`--add`) skip the animation, focus and
 //     sex rules; the exclusions, audio, length and library checks stay.
-//   • Sex only (as on EroScripts), at least a minute long.
+//   • Sex only (as on EroScripts), at least two minutes long.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream up to 4K (8K for VR); none below
 //     720p (1080p for VR).

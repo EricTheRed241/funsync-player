@@ -168,11 +168,11 @@ describe('screenVideo', () => {
     expect(hasLivePerformer({ performers: null })).toBe(false);
   });
 
-  it('needs sex and at least a minute', () => {
+  it('needs sex and at least two minutes', () => {
     expect(screenVideo(video(['Animated', 'dance', 'HMV', 'VR'], { name: 'Bulma dances' })).reason).toBe('not-sexual');
     expect(screenVideo(video(['Animated', 'non-nude', ...FOCUS2])).reason).toBe('not-sexual');
-    expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 59 })).reason).toBe('short');
-    expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 60 })).ok).toBe(true);
+    expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 119 })).reason).toBe('short');
+    expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 120 })).ok).toBe(true);
   });
 
   it('skips a video the library or the EroScripts list already has under its own title', () => {

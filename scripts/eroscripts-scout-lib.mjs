@@ -18,7 +18,8 @@
 //   • Sex only: a sex-act tag (vaginal, blowjob, riding …) or word in the
 //     title or first post, or a porn music tag (HMV / PMV / Cock Hero) on a
 //     post that isn't a dance. Never a post tagged sfw / non-porn.
-//   • Videos shorter than a minute (by the main script) aren't downloaded.
+//   • Videos shorter than two minutes (by the main script) aren't downloaded;
+//     shorter scenes fetched under the old one-minute rule stay.
 //   • Multi-axis scenes only. A single-axis scene is taken only when the post
 //     is VR, has creampie, and is by a creator already in the library or a
 //     PMV / HMV / Cock Hero / Fap Hero.
@@ -59,7 +60,9 @@ const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|フェラ|パイ�
 // A title that says the video is a dance counts like the `dance` tag.
 const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダンス|踊り|舞蹈|跳舞|댄스/iu;
 // Shortest video worth downloading, by its main script's last action.
-export const MIN_VIDEO_MS = 60_000;
+export const MIN_VIDEO_MS = 120_000;
+/** The minimum as words for messages: `2 min`. */
+export const MIN_VIDEO_LABEL = `${MIN_VIDEO_MS / 60_000} min`;
 
 export const DISCOVERY_NAME = 'Discovery';
 export const FEED_TAGS = ['multi-axis', 'animation', 'hentai', '3d', 'vam', 'sfm', 'mmd'];
