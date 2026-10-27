@@ -25,7 +25,7 @@ export const FURRY_TAGS = new Set([
   'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
   'renamon-digimon', 'five-nights-at-freddy-s', 'roxanne-wolf-five-nights-at-freddy-s',
 ]);
-/** Monsters, by tag or title word (`X WW` = werewolf), favourites and picks included. Succubi, demon girls and elves aren't monsters. */
+/** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post), favourites and picks included. Succubi, demon girls and elves aren't monsters. */
 export const MONSTER_TAGS = new Set([
   'monster', 'monsters', 'monstergirls', 'monstergirl', 'monster-girl', 'monster-girls', 'tentacle', 'tentacles', 'tentacle-sex',
   'tentacle-monster', 'werewolf', 'werewolves', 'horse', 'horse-cock', 'horsecock', 'bestiality', 'animated-bestiality', 'zoophilia',
@@ -34,7 +34,7 @@ export const MONSTER_TAGS = new Set([
 export const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
 /** `Mercy X WW`: Solace2K and Rekin3D's short for werewolf, a standalone capital token. */
 export const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
-/** Feet, by tag or title word: never. */
+/** Feet, by tag or title word (EroScripts also in the first post): never. */
 export const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
 export const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
 /** Tags that say a post has no porn in it: never taken. */
@@ -65,7 +65,7 @@ export const SEX_TAGS = new Set([
   'cum-in-pussy', 'cum-in-ass', 'double-penetration', 'penetration', 'intercourse', 'threesome', 'foursome', 'fivesome', 'gangbang',
   'orgy', 'group-sex', 'breeding', 'nakadashi',
 ]);
-/** Sex words in a title, looked for after NON_SEX_PHRASES are taken out. */
+/** Sex words in a title (EroScripts: else in the first post, saved as `sexual: 'text'`), looked for after NON_SEX_PHRASES are taken out. */
 export const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck|fucks|fucked|fucking|riding|rides?|cowgirl|doggy\w*|missionary|creampies?|anal|vaginal|mating ?press|prone ?bone|intercourse|penetration|gangbang\w*|threesome|foursome|orgy|orgies|nakadashi|breeding|cum ?inside)(?![\p{L}\p{N}])/iu;
 /** Sex words in scripts without spaces between words. */
 export const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|正常位|做爱|性爱|骑乘|后入|中出|内射|섹스|내사/u;

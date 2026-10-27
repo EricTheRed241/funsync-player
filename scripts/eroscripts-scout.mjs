@@ -5,6 +5,7 @@
 //   npm run eroscripts:scout                 scan new posts (+ a little backfill) → <userData>/eroscripts-scout.json
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
+//   npm run eroscripts:scout -- --recheck    judge saved candidates' sex by their first post (one-off)
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (no monsters, no feet
 // and sex required for every post, favourites and picks too; 2D hentai
@@ -73,6 +74,10 @@ Download:
 Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
                          and the paths config.json keeps for them (app must be closed)
+Recheck (one-off):
+  --recheck              for saved candidates that fail only the sex rule and were saved without its
+                         evidence, read the first post: sex there keeps them (sexual: text), monster /
+                         feet / excluded words there drop them for good; the rest stay skipped
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default <library parent>/_incoming)`;
@@ -88,6 +93,7 @@ function parseArgs(argv) {
     switch (a) {
       case '--fetch': opts.fetch = true; break;
       case '--retitle': opts.retitle = true; break;
+      case '--recheck': opts.recheck = true; break;
       case '--dry-run': opts.dryRun = true; break;
       case '--pages': opts.pages = Number(value(i, a)); i++; break;
       case '--anim-pages': opts.animPages = Number(value(i, a)); i++; break;
@@ -172,11 +178,15 @@ function readScoutState(userData) {
   try { return lib.normalizeScoutState(JSON.parse(fs.readFileSync(statePath(userData), 'utf8'))); } catch { return lib.emptyScoutState(); }
 }
 
-function writeScoutState(userData, state) {
-  const target = statePath(userData);
+/** Write a file through a temporary one, so a reader never sees half of it. */
+function writeAtomic(target, text) {
   const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state));
+  fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, target);
+}
+
+function writeScoutState(userData, state) {
+  writeAtomic(statePath(userData), JSON.stringify(state));
 }
 
 /** One page of a Free Scripts tag feed, paced; forum errors become exceptions. */
@@ -209,13 +219,13 @@ function scoutContext(config, userData, incoming) {
 }
 
 /** A judged post as a saved candidate. */
-function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, picked = false }) {
+function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, sexual, picked = false }) {
   const preferred = t.tags.filter((x) => prefs.PREFERRED_TAGS.has(x));
   const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
   return {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
-    vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, ...(picked ? { picked } : {}),
+    vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, sexual, ...(picked ? { picked } : {}),
     score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes, hentaiOnly: s.hentaiOnly }).toFixed(2),
     scenes,
   };
@@ -256,7 +266,8 @@ async function scan(opts, { api, userData, config, incoming }) {
       if (!op) { process.stderr.write(`! ${t.id} unreadable\n`); continue; }
       const cooked = op.cooked || '';
       const text = cooked.replace(/<[^>]+>/g, ' ');
-      if (lib.hasExcludedText(text)) { verdict('excluded'); continue; }
+      const first = lib.judgeFirstPost(t, text);
+      if (!first.ok) { verdict(first.reason); continue; }
       let files, hosts;
       try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
@@ -276,7 +287,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
       const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes }));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, sexual: first.sexual }));
       verdict('candidate');
       process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
     }
@@ -331,7 +342,8 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const s = lib.screenPick(t, { knownTopics, creators: [...library.creators], sceneNames: library.sceneNames, favourites });
       if (!s.ok) { console.log(`✗ ${id} ${t.title}: ${s.reason}`); continue; }
       const cooked = op.cooked || '';
-      if (lib.hasExcludedText(cooked.replace(/<[^>]+>/g, ' '))) { console.log(`✗ ${id} ${t.title}: excluded`); continue; }
+      const first = lib.judgeFirstPost(t, cooked.replace(/<[^>]+>/g, ' '));
+      if (!first.ok) { console.log(`✗ ${id} ${t.title}: ${first.reason}`); continue; }
       let files, hosts;
       try { ({ files, hosts } = await topicFiles(api, pacer, id, cooked)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
@@ -348,7 +360,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, picked: true }));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, sexual: first.sexual, picked: true }));
       lib.markTopic(state, id, 'candidate');
       console.log(`✓ ${id} ${t.title} (${plan.scenes.length} video${plan.scenes.length > 1 ? 's' : ''}, ${plan.scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis'})`);
     }
@@ -362,6 +374,60 @@ async function addPicked(opts, { api, userData, config, incoming }) {
   const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown);
   fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
   console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run eroscripts:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
+  return 0;
+}
+
+// ── Recheck ─────────────────────────────────────────────────────────────
+
+/**
+ * `--recheck`: saved candidates that fail only the sex rule and carry no
+ * evidence (saved before it was kept) are judged again with their first
+ * post (lib.recheckWithText). The list is re-read before writing, so only
+ * the judged candidates change.
+ */
+async function recheck({ api, userData }) {
+  const file = path.join(userData, 'eroscripts-scout.json');
+  if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
+  const todo = (JSON.parse(fs.readFileSync(file, 'utf8')).candidates || []).filter(lib.needsSexRecheck);
+  console.log(`Recheck: ${todo.length} waiting posts fail only the sex rule by tags and title`);
+  if (!todo.length) return 0;
+  if (!(await api.validateSession()).valid) throw new SessionExpiredError();
+  const pacer = createPacer();
+  const changed = new Map();
+  const counts = { text: 0, 'not-sexual': 0, excluded: 0, unreadable: 0 };
+  const examples = { text: [], 'not-sexual': [], excluded: [] };
+  try {
+    for (const c of todo) {
+      await pacer.wait();
+      const data = await api.getTopicData(c.id);
+      if (data?.error_type === 'rate_limit') throw new RateLimitedError();
+      const op = data?.post_stream?.posts?.[0];
+      if (!op) {
+        if (!(await api.validateSession()).valid) throw new SessionExpiredError();
+        counts.unreadable++;
+        process.stderr.write(`! ${c.id} unreadable\n`);
+        continue;
+      }
+      const r = lib.recheckWithText(c, (op.cooked || '').replace(/<[^>]+>/g, ' '));
+      counts[r.outcome]++;
+      examples[r.outcome].push(`${c.title}${r.candidate.contentBreak ? ` (${r.candidate.contentBreak})` : ''}`);
+      if (r.candidate !== c) changed.set(c.id, r.candidate);
+    }
+  } finally {
+    // Progress survives a rate limit or an expired session.
+    if (changed.size) {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      saved.candidates = (saved.candidates || []).map((c) => {
+        const r = changed.get(c.id);
+        return r ? { ...c, ...(r.sexual ? { sexual: r.sexual } : {}), ...(r.contentBreak ? { contentBreak: r.contentBreak } : {}) } : c;
+      });
+      writeAtomic(file, JSON.stringify(saved, null, 1));
+    }
+    console.log(`\nKept by first-post text ${counts.text} · still not sexual ${counts['not-sexual']} · newly excluded ${counts.excluded}${counts.unreadable ? ` · unreadable ${counts.unreadable}` : ''}`);
+    for (const [k, label] of [['text', 'Kept'], ['excluded', 'Excluded'], ['not-sexual', 'Still not sexual']]) {
+      if (examples[k].length) console.log(`${label}: ${examples[k].slice(0, 8).join(' · ')}${examples[k].length > 8 ? ' …' : ''}`);
+    }
+  }
   return 0;
 }
 
@@ -574,6 +640,7 @@ async function main() {
 
   try {
     if (opts.add) return await addPicked(opts, { api, userData, config, incoming });
+    if (opts.recheck) return await recheck({ api, userData });
     return opts.fetch ? await fetchAll(opts, { api, userData, incoming }) : await scan(opts, { api, userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
