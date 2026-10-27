@@ -60,7 +60,7 @@ Pick:
                          sex and multi-axis rules don't; single-axis scenes get generated axes)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
-                         skips videos under 2 minutes and scenes rejected in the app (No thank you)
+                         skips videos under 2 minutes and scenes rejected in the app (2 stars or lower)
   --ids 1,2,3            only these post ids
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
@@ -196,7 +196,7 @@ function scoutContext(config, userData, incoming) {
     for (const l of Object.values(links?.links || {})) if (l.topicId != null) knownTopics.add(l.topicId);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
-  // Posts the user turned down in the app (No thank you, 2 stars or lower);
+  // Posts the user turned down in the app (2 stars or lower; formerly the No thank you playlist);
   // a short video or an extra copy of one (dedupe) doesn't turn down the post.
   const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.reason !== 'duplicate' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);

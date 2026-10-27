@@ -58,7 +58,7 @@ Pick:
                          rules (exclusions, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, add each scene to Discovery;
-                         skips scripts under 2 minutes and scenes rejected in the app (No thank you)
+                         skips scripts under 2 minutes and scenes rejected in the app (2 stars or lower)
   --ids a,b,c            only these FapTap video ids
                          (live action by non-favourites waits for the live quota: one in every 20 downloads)
   --passes N             repeat the queue until no failures, at most N times (default 1)
