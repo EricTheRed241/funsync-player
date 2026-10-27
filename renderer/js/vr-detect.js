@@ -96,6 +96,42 @@ export function setOverrideStore(getter) {
   _overrideGetter = (typeof getter === 'function') ? getter : () => null;
 }
 
+// VR decided by the backend per registered video (`GET /api/media/vr-flags`:
+// filename markers, then the frame shape it probed). Keyed by path; a path
+// missing from the map (not registered, or its frame size still unknown)
+// falls back to the filename heuristic. Set by the library after each scan.
+let _detectedFlags = {};
+
+/**
+ * Register the backend's VR decisions (`{path: boolean}`); `null` clears.
+ *
+ * @param {Object<string, boolean> | null} flags
+ */
+export function setDetectedFlags(flags) {
+  _detectedFlags = (flags && typeof flags === 'object') ? flags : {};
+}
+
+/** Drop the backend's decision for `paths` (their override just changed). */
+export function forgetDetectedFlags(paths) {
+  if (!paths?.length) return;
+  _detectedFlags = { ..._detectedFlags };
+  for (const p of paths) delete _detectedFlags[p];
+}
+
+/**
+ * VR as auto-detected, ignoring the per-video override: the backend's
+ * decision when it has one for this path, else the filename heuristic.
+ *
+ * @param {string | {name?: string, path?: string} | null | undefined} input
+ * @returns {boolean}
+ */
+export function isVRAutoDetected(input) {
+  if (!input) return false;
+  const path = typeof input === 'string' ? input : input.path;
+  if (path && typeof _detectedFlags[path] === 'boolean') return _detectedFlags[path];
+  return _check(typeof input === 'string' ? input : (input.path || input.name || ''));
+}
+
 function _check(s) {
   if (!s) return false;
   const stem = s.replace(/\.[^./\\]+$/, ''); // strip trailing extension
@@ -185,6 +221,9 @@ export function isFlattenableStereo(format) {
 }
 
 /**
+ * Override (VR Format projection, then Mark as VR/Flat) first, then the
+ * backend's decision, then the filename heuristic.
+ *
  * @param {string | {name?: string, path?: string} | null | undefined} input
  * @returns {boolean}
  */
@@ -200,6 +239,7 @@ export function isVRVideo(input) {
     const override = _overrideGetter(input.path);
     if (override === 'vr') return true;
     if (override === 'flat') return false;
+    return isVRAutoDetected(input);
   }
   const s = typeof input === 'string'
     ? input

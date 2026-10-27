@@ -12,7 +12,10 @@ import {
   chunk,
   SLOT_STALL_MS,
 } from '../js/scroll-load-policy.js';
-import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
+import {
+  isVRVideo, isVRAutoDetected, setOverrideStore as setVRTypeOverrideStore,
+  setDetectedFlags as setDetectedVRFlags, forgetDetectedFlags as forgetDetectedVRFlags,
+} from '../js/vr-detect.js';
 import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable, Shuffle, Columns2, ImageDown } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
@@ -42,7 +45,7 @@ import { matchesRatingFilter, ratingOf, rehomeRatings } from '../js/ratings.js';
 import { createRatingControl, updateRatingControl } from '../js/rating-stars.js';
 import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js';
-import { applyAutoCategories } from '../js/auto-categories.js';
+import { applyAutoCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
 
@@ -59,6 +62,12 @@ import { applyAutoCollections } from '../js/auto-collections.js';
 // H.264 case. If you raise this again, benchmark against an 8K HEVC
 // sample (`Test.mp4` is H.264 1080p — won't catch the regression).
 const MAX_CONCURRENT_THUMBNAILS = 4;
+
+// While the backend is still probing frame sizes (`pending` from
+// `/api/media/vr-flags`), ask for its VR decisions again this often, at
+// most this many times per scan (10 minutes); the next scan starts over.
+const VR_FLAGS_RETRY_MS = 30_000;
+const VR_FLAGS_RETRIES = 20;
 
 /**
  * Resolve the seek percentage for a video's thumbnail from its optional
@@ -861,7 +870,8 @@ export class Library {
     // `faptap.json` scene, attached by the scan), then links found by
     // `npm run eroscripts:sync` (written to a file in userData; the CLI
     // never touches config.json; a link replaces a FapTap record), then the
-    // categories made from those tags. Off the scan's critical path:
+    // categories made from those tags, then VR as the backend decides it
+    // (after the registration below). Off the scan's critical path:
     // nothing below needs them.
     const scout = mergeScoutPosts(this._settings.get(SCRIPT_TAGS_KEY) || {}, this._videos, Date.now());
     if (scout) {
@@ -881,7 +891,9 @@ export class Library {
         // them; send the library again so the phone and headset get them.
         this._registerWithBackend();
       })
-      .catch((err) => console.warn('[Library] Categories from EroScripts tags failed:', err?.message || err));
+      .catch((err) => console.warn('[Library] Categories from EroScripts tags failed:', err?.message || err))
+      .then(() => this._syncVRFromBackend({ fresh: true }))
+      .catch((err) => console.warn('[Library] VR from the backend not applied:', err?.message || err));
 
     // One playlist per artist with more than six videos, per favourite
     // artist from one video, and "Favourite artists" (artist-playlists.js).
@@ -4707,14 +4719,13 @@ export class Library {
     const vrItems = this._makeKebabGroup(menu, t('library.kebabGroupVR'));
 
     // VR classification override — single tri-state item that flips
-    // wording based on current state. Heuristic check uses the
-    // string-overload (skips override lookup) so the wording reflects
-    // "what would the auto-detector say if there were no override?" —
-    // letting "Mark as VR" appear next to a file the heuristic missed,
-    // even if a previous override is set.
+    // wording based on current state. The auto check skips the override
+    // so the wording reflects "what would the auto-detector say if there
+    // were no override?" — letting "Mark as VR" appear next to a file the
+    // detector missed, even if a previous override is set.
     const vrOverrides = this._settings.get('library.manualVRType') || {};
     const currentVROverride = vrOverrides[video.path] || null;
-    const heuristicVR = isVRVideo(video.path);
+    const heuristicVR = isVRAutoDetected(video.path);
     const vrItem = document.createElement('button');
     vrItem.className = 'library__kebab-menu-item';
     if (currentVROverride === 'vr') {
@@ -6288,10 +6299,11 @@ export class Library {
       delete map[video.path];
       next = null;
     } else {
-      next = isVRVideo(video.path) ? 'flat' : 'vr';
+      next = isVRAutoDetected(video.path) ? 'flat' : 'vr';
       map[video.path] = next;
     }
     this._settings.set('library.manualVRType', map);
+    this._resyncVRAfterOverride([video.path]);
 
     this._applyFilters();
 
@@ -6319,6 +6331,7 @@ export class Library {
       }
     }
     this._settings.set('library.manualVRType', map);
+    if (changed) this._resyncVRAfterOverride(paths);
     this._applyFilters();
 
     const { showToast } = await import('../js/toast.js');
@@ -6761,6 +6774,19 @@ export class Library {
     // poster, and the headset keeps the first thumbnail it gets.
     this._customThumbsDirReady ??= Promise.resolve(window.funsync.getCustomThumbsDir?.())
       .then((dir) => dir || undefined, () => undefined);
+    // VR Format projections and post tags for the registered videos: the
+    // backend decides VR from the projection first (`GET
+    // /api/media/vr-flags`, so the phone, the headset and the VR category
+    // agree with the desktop) and shows the tags as chips.
+    const vrFormatAll = this._settings.get('library.vrFormat') || {};
+    const scriptTagsAll = this._settings.get(SCRIPT_TAGS_KEY) || {};
+    const vrFormat = {};
+    const scriptTags = {};
+    for (const v of this._videos) {
+      if (vrFormatAll[v.path]) vrFormat[v.path] = vrFormatAll[v.path];
+      const tags = scriptTagsAll[v.path]?.tags;
+      if (Array.isArray(tags) && tags.length) scriptTags[v.path] = tags;
+    }
     const payload = {
       videos: videosWithOverride,
       customThumbnails: this._settings.get('library.customThumbnails') || {},
@@ -6774,12 +6800,21 @@ export class Library {
       videoCategories: (this._settings._cache && this._settings._cache.videoCategories) || {},
       // Ratings + favourites for the headset sections and the web remote.
       ratings: this._settings.get('library.ratings') || {},
+      vrFormat,
+      scriptTags,
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can
     // race uvicorn coming up. A missed registration = empty phone/VR
     // Browse list until a manual refresh, so retry a few times instead.
+    // The returned promise (also `_registration`) says whether it landed.
+    let settle;
+    const done = new Promise((resolve) => { settle = resolve; });
     const attempt = (tryNo) => {
+      const retry = () => {
+        if (tryNo < 5) setTimeout(() => attempt(tryNo + 1), 2000);
+        else settle(false);
+      };
       try {
         fetch(`http://127.0.0.1:${port}/api/media/register`, {
           method: 'POST',
@@ -6787,15 +6822,66 @@ export class Library {
           body: JSON.stringify(payload),
         }).then((res) => {
           if (!res.ok) throw new Error(`register ${res.status}`);
-        }).catch(() => {
-          if (tryNo < 5) setTimeout(() => attempt(tryNo + 1), 2000);
-        });
-      } catch { /* ignore */ }
+          settle(true);
+        }).catch(retry);
+      } catch { retry(); }
     };
     this._customThumbsDirReady.then((dir) => {
       payload.customThumbsDir = dir;
       attempt(0);
     });
+    this._registration = done;
+    return done;
+  }
+
+  /**
+   * VR as the backend decides it for every registered video (VR Format
+   * projection, Mark as VR/Flat, filename markers, then the frame shape),
+   * fetched once the latest registration has landed. Feeds the desktop VR
+   * filter and kebab (vr-detect) and the VR category. Videos whose frame
+   * size the backend is still probing are left out (`pending`), so it asks
+   * again later, up to `VR_FLAGS_RETRIES` times per scan.
+   *
+   * @param {{fresh?: boolean}} [opts] `fresh`: a new scan, restart the retries
+   */
+  async _syncVRFromBackend({ fresh = false } = {}) {
+    clearTimeout(this._vrFlagsTimer);
+    if (fresh) this._vrFlagsRetries = 0;
+    if (!(await this._registration)) return;
+    const port = this._settings.get('backend.port') || 5123;
+    const res = await fetch(`http://127.0.0.1:${port}/api/media/vr-flags`);
+    if (!res.ok) throw new Error(`vr-flags ${res.status}`);
+    const { flags = {}, pending = 0 } = await res.json();
+    setDetectedVRFlags(flags);
+    if (this._vrFilter && this._vrFilter !== 'all' && !this._scanning) this._applyFilters();
+    const r = applyVRCategory(this._settings, flags);
+    if (r.added || r.removed) {
+      console.log('[Library] VR category from the videos:', r);
+      this._repaintAllCategoryDots();
+      this._registerWithBackend();
+    }
+    if (pending > 0 && (this._vrFlagsRetries || 0) < VR_FLAGS_RETRIES) {
+      this._vrFlagsRetries = (this._vrFlagsRetries || 0) + 1;
+      this._vrFlagsTimer = setTimeout(() => {
+        this._syncVRFromBackend()
+          .catch((err) => console.warn('[Library] VR from the backend not applied:', err?.message || err));
+      }, VR_FLAGS_RETRY_MS);
+    }
+  }
+
+  /**
+   * A Mark as VR/Flat change: the backend's decision for those videos was
+   * made with the old override, so drop it (the filename heuristic stands in)
+   * and send the library again to get a fresh one.
+   */
+  _resyncVRAfterOverride(paths) {
+    forgetDetectedVRFlags(paths);
+    clearTimeout(this._vrResyncTimer);
+    this._vrResyncTimer = setTimeout(() => {
+      this._registerWithBackend();
+      this._syncVRFromBackend({ fresh: true })
+        .catch((err) => console.warn('[Library] VR from the backend not applied:', err?.message || err));
+    }, 1500);
   }
 
   _escapeHtml(str) {
