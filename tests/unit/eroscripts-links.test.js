@@ -114,6 +114,20 @@ describe('mergeScoutPosts', () => {
     const post = mergeScoutPosts(first, [{ ...scene('/a.mp4', '11'), ...video('/a.mp4', 3) }], NOW + 1);
     expect(post.map['/a.mp4']).toMatchObject({ topicId: 3, source: SCOUT_SOURCE });
   });
+
+  it("carries FapTap's thumbnail as previewUrl and follows a changed URL", () => {
+    const thumb = (url) => ({ path: '/a.mp4', faptap: { ...scene('/a.mp4', '11').faptap, thumbnailUrl: url } });
+    const webp = 'https://faptap.net/api/assets/thumbnails/11.webp';
+    const bunny = 'https://vz-abc123.b-cdn.net/0f1e/thumbnail.jpg';
+    const first = mergeScoutPosts({}, [thumb(webp)], NOW).map;
+    expect(first['/a.mp4']).toMatchObject({ faptapId: '11', previewUrl: webp, source: FAPTAP_SOURCE });
+    expect(mergeScoutPosts(first, [thumb(webp)], NOW + 1)).toBe(null);
+    const moved = mergeScoutPosts(first, [thumb(bunny)], NOW + 1);
+    expect(moved).toMatchObject({ added: 0, updated: 1 });
+    expect(moved.map['/a.mp4'].previewUrl).toBe(bunny);
+    // An older sidecar without one: no previewUrl.
+    expect(mergeScoutPosts({}, [scene('/a.mp4', '11')], NOW).map['/a.mp4']).not.toHaveProperty('previewUrl');
+  });
 });
 
 describe('applyEroscriptsLinks', () => {

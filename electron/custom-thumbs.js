@@ -1,10 +1,10 @@
-// Custom thumbnail images (user-uploaded posters, community #217, and
-// EroScripts post previews). Image I/O stays in the main process (the
-// renderer is sandboxed). Every import goes through `importThumbnail`: the
-// image is decoded, downscaled to tile width, re-encoded as JPEG and stored
-// under userData/custom-thumbs keyed by a hash of the video path. The
-// renderer displays thumbnails as data URLs (CSP img-src allows data:, not
-// file:), so the import returns one.
+// Custom thumbnail images (user-uploaded posters, community #217,
+// EroScripts post previews and FapTap thumbnails). Image I/O stays in the
+// main process (the renderer is sandboxed). Every import goes through
+// `importThumbnail`: the image is decoded, downscaled to tile width,
+// re-encoded as JPEG and stored under userData/custom-thumbs keyed by a
+// hash of the video path. The renderer displays thumbnails as data URLs
+// (CSP img-src allows data:, not file:), so the import returns one.
 
 const fs = require('fs');
 const path = require('path');
@@ -78,16 +78,16 @@ function runInDecoder(script) {
 runInDecoder.TIMEOUT = Symbol('timeout');
 
 /**
- * Cache file stem for a video. User uploads and EroScripts previews use
- * separate files, so a preview download that finishes late can never
- * overwrite a poster the user picked in the meantime.
+ * Cache file stem for a video. User uploads, EroScripts previews and FapTap
+ * thumbnails use separate files, so an automatic download that finishes
+ * late can never overwrite a poster the user picked in the meantime.
  *
  * @param {string} videoPath
- * @param {'user'|'eroscripts'} [source]
+ * @param {'user'|'eroscripts'|'faptap'} [source]
  */
 function thumbStem(videoPath, source = 'user') {
   const hash = crypto.createHash('md5').update(String(videoPath)).digest('hex');
-  return source === 'eroscripts' ? `${hash}-eroscripts` : hash;
+  return source === 'eroscripts' || source === 'faptap' ? `${hash}-${source}` : hash;
 }
 
 /**

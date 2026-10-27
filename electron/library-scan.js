@@ -8,6 +8,7 @@
 const path = require('path');
 const fs = require('fs');
 const { underscoreVariant } = require('./script-variant');
+const { isFaptapThumbnailUrl } = require('./faptap-thumbnail');
 
 // macOS Finder AppleDouble resource-fork sidecars (`._Video.mp4`).
 // Leading basename prefix only — `foo._bar.mp4` is a real file and is kept.
@@ -414,6 +415,8 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
           v.eroscripts = { topicId: rec.topicId, url, tags: cleanTags(rec.tags) };
         } else if (name === FAPTAP_SIDECAR && rec?.faptapId != null && rec.faptapId !== '') {
           v.faptap = { faptapId: String(rec.faptapId), url, tags: cleanTags(rec.tags) };
+          // FapTap's thumbnail (renderer/js/eroscripts-preview.js), FapTap hosts only.
+          if (isFaptapThumbnailUrl(rec.thumbnailUrl)) v.faptap.thumbnailUrl = rec.thumbnailUrl;
         }
       } catch { /* unreadable sidecar: no source for this video */ }
     }));

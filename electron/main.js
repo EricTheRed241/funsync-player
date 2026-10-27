@@ -60,6 +60,7 @@ const { EroScriptsAPI } = require('./eroscripts-api');
 const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames, closeDecoder } = require('./custom-thumbs');
 const { createPreviewValidator } = require('./preview-validator');
 const { MATCH_THRESHOLD } = require('./preview-match');
+const { matchFaptapThumbnail } = require('./faptap-thumbnail');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
@@ -1329,17 +1330,35 @@ ipcMain.handle('eroscripts-validate-poster', async (_event, videoPath, imagePath
   }
 });
 
-// Delete an EroScripts poster file that failed validation. Only
-// `*-eroscripts.*` files in custom-thumbs: user uploads are never removed.
+// Delete an automatic poster file that failed validation. Only
+// `*-eroscripts.*` / `*-faptap.*` files in custom-thumbs: user uploads are
+// never removed.
 ipcMain.handle('delete-eroscripts-thumbnail', async (_event, imagePath) => {
   const resolved = path.resolve(String(imagePath));
   if (!resolved.startsWith(path.resolve(customThumbsDir()) + path.sep)) return false;
-  if (!/-eroscripts\.[a-z]+$/i.test(path.basename(resolved))) return false;
+  if (!/-(eroscripts|faptap)\.[a-z]+$/i.test(path.basename(resolved))) return false;
   try {
     await fs.promises.unlink(resolved);
     return true;
   } catch {
     return false;
+  }
+});
+
+// FapTap's thumbnail of a Discovery scene (electron/faptap-thumbnail.js):
+// FapTap hosts only, checked against the video like an EroScripts preview
+// and imported as `<hash>-faptap.jpg` only when it shows the video.
+ipcMain.handle('faptap-import-thumbnail', async (_event, videoPath, url) => {
+  try {
+    const res = await matchFaptapThumbnail(String(videoPath), String(url), {
+      scoreCandidates: (...args) => previewValidator().scoreCandidates(...args),
+      importBytes: (bytes) => importCustomThumbBytes(bytes, String(videoPath), 'faptap'),
+    });
+    if (res.status === 'failed') log.warn('[FapTap] Thumbnail import failed:', res.error);
+    return res;
+  } catch (err) {
+    log.warn('[FapTap] Thumbnail import failed:', err.message);
+    return { status: 'failed', error: err.message };
   }
 });
 
