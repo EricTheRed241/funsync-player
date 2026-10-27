@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { addToDiscovery, coreName, DISCOVERY_NAME, isVideoName, normName } from './eroscripts-scout-lib.mjs';
+import { addToDiscovery, coreName, DISCOVERY_NAME, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
 
 const configPath = (userData) => path.join(userData, 'config.json');
 export const readConfig = (userData) => JSON.parse(fs.readFileSync(configPath(userData), 'utf8'));
@@ -61,20 +61,82 @@ export function walk(dir, depth, visit) {
   }
 }
 
-/** What the library already has: creators, scene folder names, video names. */
+/** What the library already has: creators (lower case, and as spelled), scene folder names, video names. */
 export function libraryState(roots) {
   const creators = new Set();
+  const creatorNames = new Map();
   const sceneNames = [];
   const videos = [];
   for (const root of roots) {
     walk(root, 0, (full, e, depth) => {
       if (e.isDirectory()) {
-        if (depth === 0) creators.add(e.name.toLowerCase());
+        if (depth === 0) {
+          creators.add(e.name.toLowerCase());
+          if (!creatorNames.has(e.name.toLowerCase())) creatorNames.set(e.name.toLowerCase(), e.name.normalize('NFC'));
+        }
         if (depth === 1) sceneNames.push(normName(e.name));
       } else if (isVideoName(e.name)) videos.push(coreName(e.name));
     });
   }
-  return { creators, sceneNames, videos };
+  return { creators, creatorNames: [...creatorNames.values()], sceneNames, videos };
+}
+
+/** Rename `from` to `to`, with its AppleDouble `._` sidecar if the volume keeps one. */
+function renameWithSidecar(from, to) {
+  fs.renameSync(from, to);
+  const side = (p) => path.join(path.dirname(p), `._${path.basename(p)}`);
+  if (fs.existsSync(side(from)) && !fs.existsSync(side(to))) fs.renameSync(side(from), side(to));
+}
+
+/**
+ * Carry out `retitlePlan` moves: rename each scene's files and folder (a
+ * scene that fails is put back), point its sidecar's `file` at the new video
+ * name, and rewrite every path config.json and the pending playlist adds
+ * keep for it. The app must be closed (config.json).
+ *
+ * @param {object[]} moves retitlePlan's result
+ * @param {{userData: string, incoming: string, sidecar: string}} o sidecar: `eroscripts.json` / `faptap.json`
+ * @returns {number} exit code: 0, or 1 when a scene could not be renamed
+ */
+export function applyMoves(moves, { userData, incoming, sidecar }) {
+  const rel = (p) => path.relative(incoming, p);
+  const done = [];
+  let failed = 0;
+  for (const m of moves) {
+    const renamed = [];
+    try {
+      for (const f of m.files) {
+        renameWithSidecar(path.join(m.from, f.from), path.join(m.from, f.to));
+        renamed.push(f);
+      }
+      if (path.resolve(m.to) !== path.resolve(m.from)) {
+        fs.mkdirSync(path.dirname(m.to), { recursive: true });
+        renameWithSidecar(m.from, m.to);
+      }
+    } catch (err) {
+      for (const f of renamed.reverse()) {
+        try { renameWithSidecar(path.join(m.from, f.to), path.join(m.from, f.from)); } catch { /* reported below */ }
+      }
+      console.log(`✗ ${rel(m.from)}: ${err.message}`);
+      failed++;
+      continue;
+    }
+    const file = path.join(m.to, sidecar);
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), file: m.video }, null, 1));
+    removeIfEmpty(path.dirname(m.from));
+    const to = onDiskPath(m.to);
+    done.push({ from: m.from, to, files: m.files.map((f) => ({ from: f.from, to: path.basename(onDiskPath(path.join(to, f.to))) })) });
+  }
+  if (done.length) {
+    const { value, changed } = remapPaths(readConfig(userData), done);
+    writeConfig(userData, value);
+    const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
+    if (fs.existsSync(pendingFile)) {
+      fs.writeFileSync(pendingFile, JSON.stringify(remapPaths(JSON.parse(fs.readFileSync(pendingFile, 'utf8')), done).value, null, 1));
+    }
+    console.log(`Renamed ${done.length} scenes; ${changed} paths updated in config.json`);
+  }
+  return failed ? 1 : 0;
 }
 
 /**

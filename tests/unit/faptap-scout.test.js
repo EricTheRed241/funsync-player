@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   tagSlug, videoTags, screenVideo, pickSource, csvToFunscript, vrSuffix, toCandidate, mergeCandidates, fetchedKey, FAPTAP_RULES_VERSION,
-  livePerformerNames, hasLivePerformer, mergeCookies, withPerformers,
+  livePerformerNames, hasLivePerformer, mergeCookies, withPerformers, faptapArtist, faptapSceneName, thumbnailUrl,
 } from '../../scripts/faptap-scout-lib.mjs';
 import { emptyScoutState, listFeed, markTopic, seenTopic, RULES_VERSION } from '../../scripts/eroscripts-scout-lib.mjs';
 
@@ -19,6 +19,49 @@ const video = (tagNames, extra = {}) => ({
 });
 // Two focus themes, so tests about other rules aren't turned down as off-focus.
 const FOCUS2 = ['Creampie', 'HMV'];
+
+describe('naming: Artist - Title (metadata)', () => {
+  const ctx = { favourites: ['ScyllaHMV', 'Noodledude', 'Candy Love'], creatorNames: ['Zoot'] };
+  const name = (title, extra = {}) => faptapSceneName({ title, uploader: 'Scripter42', ...extra }, ctx);
+
+  it('files a scene under the artist, not the scripter who uploaded it', () => {
+    expect(name('MAI MASHER (ScyllaHMV)')).toEqual({ artist: 'ScyllaHMV', creator: 'ScyllaHMV', stem: 'ScyllaHMV - MAI MASHER' });
+    expect(name('Cute Faces & Goated Throats (by ScyllaHMV)').stem).toBe('ScyllaHMV - Cute Faces & Goated Throats');
+    expect(name('Scylla Compilation HMV (Godlike)').artist).toBe('ScyllaHMV');
+    expect(name('Fit babe rides', { performers: ['Candy Love'] }).stem).toBe('Candy Love - Fit babe rides');
+  });
+
+  it('falls back to the title\'s own artist, a library creator, a model or pornstar, then the uploader', () => {
+    expect(name('[Kinzq] Black Cat RCG - Extended').stem).toBe('Kinzq - Black Cat RCG - Extended');
+    expect(faptapArtist({ title: 'Ride with Zoot tonight', uploader: 'u' }, ctx)).toBe('Zoot');
+    expect(faptapArtist({ title: 'Fap Hero Era R5', uploader: 'u', performers: [{ name: 'zoot', category: '' }] }, ctx)).toBe('Zoot');
+    expect(faptapArtist({ title: 'Late night', uploader: 'u', performers: [{ name: 'Some Model', category: 'model' }] }, ctx)).toBe('Some Model');
+    expect(faptapArtist({ title: 'Eternum - Alex Scene', uploader: 'plvg', performers: [{ name: 'Alex Bardot', category: '' }] }, ctx)).toBe('plvg');
+    expect(name('Fap Hero - The Spire').stem).toBe('Scripter42 - Fap Hero - The Spire');
+  });
+
+  it('keeps a title that is only the artist and a bracket readable', () => {
+    expect(faptapSceneName({ title: 'THEOBROBINE (Fap Hero)', uploader: 'u' }, { creatorNames: ['Theobrobine'] }).stem).toBe('Theobrobine - Fap Hero');
+  });
+
+  it('does not take an upload label for an artist, and keeps another leading name as metadata', () => {
+    expect(name('[Script Overhaul] Cock Hero / Clench Trainer SX Tapes', { tags: ['noodledude'] }).artist).toBe('Noodledude');
+    expect(name('[Poppet] I Want Your Cum HMV', { tags: ['noodledude'] }).stem).toBe('Noodledude - I Want Your Cum HMV (Poppet)');
+  });
+
+  it('ends a VR scene with the projection the headset reads', () => {
+    expect(name('Kiriko rides (ScyllaHMV)', { vr: true, projection: 'STEREO_180_LR' }).stem).toBe('ScyllaHMV - Kiriko rides_180_LR');
+  });
+});
+
+describe('thumbnailUrl', () => {
+  it('makes FapTap thumbnails absolute and refuses anything else', () => {
+    expect(thumbnailUrl({ thumbnail_url: 'thumbnails/17692.webp' })).toBe('https://faptap.net/api/assets/thumbnails/17692.webp');
+    expect(thumbnailUrl({ thumbnail_url: 'https://vz-1.b-cdn.net/abc/thumbnail.jpg' })).toBe('https://vz-1.b-cdn.net/abc/thumbnail.jpg');
+    expect(thumbnailUrl({ thumbnail_url: '../secrets' })).toBeNull();
+    expect(thumbnailUrl({})).toBeNull();
+  });
+});
 
 describe('tagSlug', () => {
   it('spells FapTap tags like EroScripts tags', () => {

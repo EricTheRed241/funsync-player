@@ -38,7 +38,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 
 const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
-const { flushPlaylist, incomingDir, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const require = createRequire(import.meta.url);
@@ -61,7 +61,11 @@ Download (needs ffmpeg and ffprobe on PATH):
                          (live action by non-favourites waits for the live quota: one in every 20 downloads)
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
-  --dry-run              list what would be downloaded
+  --dry-run              list what would be downloaded (or, with --retitle, renamed)
+Rename:
+  --retitle              rename fetched FapTap scenes to "Artist - Title (metadata)" (artist: favourite, the
+                         title's own artist, a library creator, the performer, else the uploader), filling in
+                         performers and the thumbnail URL from faptap.net; moves config.json's paths (app closed)
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default: the Discovery source, else <library parent>/_incoming)`;
@@ -77,6 +81,7 @@ function parseArgs(argv) {
     switch (a) {
       case '--fetch': opts.fetch = true; break;
       case '--dry-run': opts.dryRun = true; break;
+      case '--retitle': opts.retitle = true; break;
       case '--pages': opts.pages = Number(value(i, a)); i++; break;
       case '--backfill': opts.backfill = Number(value(i, a)); i++; break;
       case '--full': opts.full = true; break;
@@ -221,6 +226,12 @@ async function screenContext(config, userData, incoming) {
     livePerformers: await livePerformers(),
     favourites: live.readFavourites(userData),
   };
+}
+
+/** What naming needs: favourites and the library's creator folders as spelled (no network). */
+function namingContext(config, userData, incoming) {
+  const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
+  return { favourites: live.readFavourites(userData), creatorNames: libraryState(roots).creatorNames };
 }
 
 /** Save the merged list and print it. */
@@ -378,21 +389,24 @@ function sceneDir(parent, stem, id) {
   }
 }
 
-async function fetchPass(queue, { userData, incoming, staging }) {
+async function fetchPass(queue, { userData, incoming, staging, naming }) {
   const done = doneScenes(incoming, userData);
   let ok = 0; let failed = 0; let short = 0; let waiting = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     if (done.has(lib.fetchedKey(c.id))) continue;
     if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
-    const creator = scout.creatorFolder(c.title, c.author);
-    const stem0 = scout.sceneTitle({ title: c.title, author: c.author, video: `${c.title}${c.vr ? lib.vrSuffix(c.projection) : ''}.mp4` });
-    const dir = sceneDir(path.join(incoming, creator), stem0, c.id);
-    const stem = path.basename(dir);
-    const video = path.join(dir, `${stem}.mp4`);
+    let creator = c.author;
+    let stem = c.title;
     try {
       const plan = await videoPlan(c.id, c.vr);
       if (plan.reason) throw new Error(plan.reason);
+      const performers = (plan.detail?.performers || []).filter((p) => p?.name).map((p) => ({ name: p.name, category: p.category || '' }));
+      const name = lib.faptapSceneName({ title: c.title, uploader: c.author, performers, tags: c.tags, vr: c.vr, projection: c.projection }, naming);
+      creator = name.creator;
+      const dir = sceneDir(path.join(incoming, creator), name.stem, c.id);
+      stem = path.basename(dir);
+      const video = path.join(dir, `${stem}.mp4`);
       const script = lib.csvToFunscript(await faptap(`/assets/${plan.script}`, { text: true }));
       const lengthMs = scout.scriptDurationMs(script);
       if (lengthMs < scout.MIN_VIDEO_MS) {
@@ -408,7 +422,8 @@ async function fetchPass(queue, { userData, incoming, staging }) {
       await downloadStream(plan.source.url, video, staging, c.duration);
       fs.writeFileSync(path.join(dir, scout.scriptFileName(stem, '')), JSON.stringify(script));
       fs.writeFileSync(path.join(dir, lib.SIDECAR), JSON.stringify({
-        faptapId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
+        faptapId: c.id, url: c.url, title: c.title, author: c.author, artist: name.artist, performers, tags: c.tags,
+        thumbnailUrl: lib.thumbnailUrl(plan.detail), vr: !!c.vr, projection: c.projection || null,
         file: path.basename(video), quality: plan.source.height, at: new Date().toISOString(),
       }, null, 1));
       const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
@@ -427,7 +442,7 @@ async function fetchPass(queue, { userData, incoming, staging }) {
   return { ok, failed, short, waiting };
 }
 
-async function fetchAll(opts, { userData, incoming }) {
+async function fetchAll(opts, { userData, config, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(listPath(userData), 'utf8'));
   // Live action on the quota goes last, so this run's downloads can earn it a slot.
@@ -445,7 +460,7 @@ async function fetchAll(opts, { userData, incoming }) {
   const staging = path.join(path.dirname(incoming), '_staging');
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
-    const r = await fetchPass(queue, { userData, incoming, staging });
+    const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming) });
     console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under a minute, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
     if (!r.failed) return 0;
     if (pass < opts.passes) {
@@ -455,6 +470,56 @@ async function fetchAll(opts, { userData, incoming }) {
   }
   flushPlaylist(userData, incoming, []);
   return 2;
+}
+
+// ── Retitle ─────────────────────────────────────────────────────────────
+
+/**
+ * Rename fetched FapTap scenes to the current naming, after filling in what
+ * older sidecars lack (performers, thumbnail URL, VR projection) from
+ * faptap.net. config.json's paths move with them, so the app must be closed.
+ */
+async function retitle(opts, { userData, config, incoming }) {
+  if (!opts.dryRun && appRunning(userData)) {
+    console.error('FunSync is running. Close it, then re-run --retitle: config.json holds the scene paths.');
+    return 2;
+  }
+  const scenes = [];
+  walk(incoming, 0, (full, e) => {
+    if (e.name !== lib.SIDECAR) return;
+    const dir = path.dirname(full);
+    try {
+      scenes.push({ dir, file: full, rec: JSON.parse(fs.readFileSync(full, 'utf8')), files: fs.readdirSync(dir).filter((n) => !n.startsWith('._')) });
+    } catch { process.stderr.write(`! unreadable ${full}\n`); }
+  });
+  let filled = 0;
+  for (const s of scenes) {
+    if (Array.isArray(s.rec.performers) && s.rec.thumbnailUrl && 'projection' in s.rec) continue;
+    try {
+      const d = await faptap(`/videos/${s.rec.faptapId}`);
+      s.rec = {
+        ...s.rec, performers: (d?.performers || []).filter((p) => p?.name).map((p) => ({ name: p.name, category: p.category || '' })), thumbnailUrl: lib.thumbnailUrl(d),
+        vr: !!d?.vr, projection: d?.projection || null,
+      };
+      filled++;
+      if (!opts.dryRun) fs.writeFileSync(s.file, JSON.stringify(s.rec, null, 1));
+    } catch (err) {
+      if (err instanceof RateLimitedError) throw err;
+      process.stderr.write(`! ${s.rec.faptapId} ${err.message}\n`);
+    }
+  }
+  const naming = namingContext(config, userData, incoming);
+  const nameOf = (s) => {
+    const n = lib.faptapSceneName({ title: s.rec.title, uploader: s.rec.author, performers: s.rec.performers, tags: s.rec.tags, vr: s.rec.vr, projection: s.rec.projection }, naming);
+    if (!opts.dryRun && s.rec.artist !== n.artist) fs.writeFileSync(s.file, JSON.stringify({ ...s.rec, artist: n.artist }, null, 1));
+    return { creator: n.creator, stem: n.stem };
+  };
+  const moves = scout.retitlePlan(scenes, incoming, (p) => fs.existsSync(p), nameOf);
+  const rel = (p) => path.relative(incoming, p);
+  for (const m of moves) console.log(`${rel(m.from)}\n  → ${rel(m.to)}`);
+  console.log(`${filled} sidecars ${opts.dryRun ? 'would get' : 'got'} performers / thumbnail from faptap.net; ${moves.length} of ${scenes.length} scenes ${opts.dryRun ? 'would be renamed' : 'to rename'}`);
+  if (opts.dryRun || !moves.length) return 0;
+  return applyMoves(moves, { userData, incoming, sidecar: lib.SIDECAR });
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
@@ -467,7 +532,8 @@ async function main() {
   const incoming = incomingDir(config, opts.incoming);
   try {
     if (opts.add) return await addPicked(opts, { userData, config, incoming });
-    return opts.fetch ? await fetchAll(opts, { userData, incoming }) : await scan(opts, { userData, config, incoming });
+    if (opts.retitle) return await retitle(opts, { userData, config, incoming });
+    return opts.fetch ? await fetchAll(opts, { userData, config, incoming }) : await scan(opts, { userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
     throw err;

@@ -24,7 +24,9 @@ const squash = (s) => normName(s).replace(/ /g, '');
 /**
  * The favourite a text names (a title, uploader, performer or tag), or null.
  * Whole words (`Candy Love`, not `Candy Lovers`), and run together
- * (`ScyllaHMV` matches `Scylla HMV`, `NoFaceGirl` matches `no face girl`).
+ * (`ScyllaHMV` matches `Scylla HMV`, `NoFaceGirl` matches `no face girl`). A
+ * one-word CamelCase name also matches its first part when that part is
+ * long enough to be distinctive (`ScyllaHMV` matches `Scylla Compilation`).
  *
  * @param {string[]} texts
  * @param {string[]} favourites
@@ -40,7 +42,8 @@ export function favouriteIn(texts, favourites) {
   for (const fav of favourites || []) {
     const spaced = normName(fav);
     if (!spaced) continue;
-    if (names.some((w) => ` ${w.join(' ')} `.includes(` ${spaced} `) || runs(w, squash(fav)))) return fav;
+    const head = /\s/.test(fav.trim()) ? '' : (fav.match(/^\p{Lu}?\p{Ll}+(?=\p{Lu})/u)?.[0] || '').toLowerCase();
+    if (names.some((w) => ` ${w.join(' ')} `.includes(` ${spaced} `) || runs(w, squash(fav)) || (head.length >= 6 && w.includes(head)))) return fav;
   }
   return null;
 }

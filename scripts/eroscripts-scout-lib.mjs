@@ -431,6 +431,11 @@ export function creatorFolder(title, author) {
   return safeName(parseName(title, author).artist) || 'unknown';
 }
 
+/** The artist a title names itself (leading `[Name]` / `(Name)`, trailing `by Name`), or ''. */
+export function titleArtist(title) {
+  return parseName(title, '').artist;
+}
+
 /**
  * Scene folder and file stem, which the library shows as the title:
  * `Artist - Title (metadata)`. The title comes from the post; a post with
@@ -491,12 +496,14 @@ const pathKey = (p) => fold(path.resolve(p));
  * named right are left out, so a second run plans nothing.
  *
  * @param {{dir: string, files: string[], rec: object}[]} scenes scene folder,
- *   its file names (no `._*`), and its `eroscripts.json`
+ *   its file names (no `._*`), and its sidecar record
  * @param {string} incoming the Discovery folder
  * @param {(dir: string) => boolean} [exists] whether a folder is already on disk
+ * @param {(scene: object, video: string, shared: boolean) => {creator: string, stem: string}} [nameOf]
+ *   the scene's name; default: the EroScripts post's (`eroscripts.json`)
  * @returns {{from: string, to: string, video: string, files: {from: string, to: string}[]}[]}
  */
-export function retitlePlan(scenes, incoming, exists = () => false) {
+export function retitlePlan(scenes, incoming, exists = () => false, nameOf = postSceneName) {
   const perTopic = new Map();
   for (const s of scenes) perTopic.set(s.rec.topicId, (perTopic.get(s.rec.topicId) || 0) + 1);
   const taken = new Set(scenes.map((s) => pathKey(s.dir)));
@@ -506,9 +513,8 @@ export function retitlePlan(scenes, incoming, exists = () => false) {
     if (!video) continue;
     const ext = path.extname(video);
     const oldStem = video.slice(0, -ext.length);
-    const { title, author } = s.rec;
-    const stem = sceneTitle({ title, author, video: s.rec.video || video, shared: (s.rec.scenes ?? perTopic.get(s.rec.topicId)) > 1 });
-    const parent = path.join(incoming, creatorFolder(title, author));
+    const { creator, stem } = nameOf(s, video, (s.rec.scenes ?? perTopic.get(s.rec.topicId)) > 1);
+    const parent = path.join(incoming, creator);
     taken.delete(pathKey(s.dir));
     const clash = (p) => taken.has(pathKey(p)) || (pathKey(p) !== pathKey(s.dir) && exists(p));
     let to = path.join(parent, stem);
@@ -520,6 +526,12 @@ export function retitlePlan(scenes, incoming, exists = () => false) {
     moves.push({ from: s.dir, to, video: newStem + ext, files });
   }
   return moves;
+}
+
+/** An EroScripts scene's name from its post (`eroscripts.json`). */
+function postSceneName(s, video, shared) {
+  const { title, author } = s.rec;
+  return { creator: creatorFolder(title, author), stem: sceneTitle({ title, author, video: s.rec.video || video, shared }) };
 }
 
 /**
