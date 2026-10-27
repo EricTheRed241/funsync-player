@@ -7,9 +7,9 @@
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --recheck    judge saved candidates' sex by their first post (one-off)
 //
-// Rules and ranking: scripts/eroscripts-scout-lib.mjs (no monsters, no feet
-// and sex required for every post, favourites and picks too; 2D hentai
-// ranks lower). Scenes land in
+// Rules and ranking: scripts/eroscripts-scout-lib.mjs (sex required for
+// every post, favourites and picks too; monster, feet and 2D hentai posts
+// rank lower). Scenes land in
 // `<library parent>/_incoming/<creator>/<Artist - Title (metadata)>/` with an
 // `eroscripts.json` sidecar. Single-axis scenes get generated twist / roll / pitch companions
 // (scripts/upgrade-multi-axis.mjs). Each finished video joins the Discovery
@@ -59,10 +59,9 @@ Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.
   --full                 judge every listed post again, not only new ones
   --top N                candidates to print (default 40)
 Pick:
-  --add 1,2,3            judge these post ids and put them on the list: only the exclusions, the content
-                         rules (no monsters, no feet, sex), posts the library has or the user turned down,
-                         and library duplicates count (the animation and multi-axis rules don't;
-                         single-axis scenes get generated axes)
+  --add 1,2,3            judge these post ids and put them on the list: only the exclusions, the sex rule,
+                         posts the library has or the user turned down, and library duplicates count (the
+                         animation and multi-axis rules don't; single-axis scenes get generated axes)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
@@ -76,8 +75,8 @@ Rename:
                          and the paths config.json keeps for them (app must be closed)
 Recheck (one-off):
   --recheck              for saved candidates that fail only the sex rule and were saved without its
-                         evidence, read the first post: sex there keeps them (sexual: text), monster /
-                         feet / excluded words there drop them for good; the rest stay skipped
+                         evidence, read the first post: sex there keeps them (sexual: text; monster / feet
+                         there rank lower), excluded words there drop them for good; the rest stay skipped
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default <library parent>/_incoming)`;
@@ -219,13 +218,14 @@ function scoutContext(config, userData, incoming) {
 }
 
 /** A judged post as a saved candidate. */
-function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, sexual, picked = false }) {
+function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first, picked = false }) {
   const preferred = t.tags.filter((x) => prefs.PREFERRED_TAGS.has(x));
   const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
   const c = {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
-    vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, sexual, ...(picked ? { picked } : {}),
+    vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, sexual: first.sexual,
+    ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
   return { ...c, score: lib.candidateScore(c) };
@@ -287,7 +287,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
       const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, sexual: first.sexual }));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }));
       verdict('candidate');
       process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
     }
@@ -360,7 +360,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, sexual: first.sexual, picked: true }));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, first, picked: true }));
       lib.markTopic(state, id, 'candidate');
       console.log(`✓ ${id} ${t.title} (${plan.scenes.length} video${plan.scenes.length > 1 ? 's' : ''}, ${plan.scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis'})`);
     }
@@ -419,7 +419,10 @@ async function recheck({ api, userData }) {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
       saved.candidates = (saved.candidates || []).map((c) => {
         const r = changed.get(c.id);
-        return r ? { ...c, ...(r.sexual ? { sexual: r.sexual } : {}), ...(r.contentBreak ? { contentBreak: r.contentBreak } : {}) } : c;
+        if (!r) return c;
+        const { contentBreak, ...rest } = c;
+        const judged = Object.fromEntries(['sexual', 'contentBreak', 'monster', 'feet'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+        return { ...rest, ...judged };
       });
       writeAtomic(file, JSON.stringify(saved, null, 1));
     }

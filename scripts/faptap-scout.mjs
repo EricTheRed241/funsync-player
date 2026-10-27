@@ -5,8 +5,8 @@
 //   npm run faptap:scout                 scan new videos (+ some backfill) → <userData>/faptap-scout.json
 //   npm run faptap:scout -- --fetch      download the saved list
 //
-// Rules: scripts/faptap-scout-lib.mjs (no monsters, no feet and sex required
-// for every video, favourites and picks too; 2D hentai ranks lower). Scenes
+// Rules: scripts/faptap-scout-lib.mjs (sex required for every video,
+// favourites and picks too; monster, feet and 2D hentai videos rank lower). Scenes
 // land in `<library parent>/_incoming/<creator>/<Artist - Title>/` with a
 // `faptap.json` sidecar. FapTap
 // scripts are single-axis, so every scene gets generated twist / roll /
@@ -58,8 +58,7 @@ Scan (default; only videos not judged before, see <userData>/faptap-scout-state.
   --top N                candidates to print (default 40)
 Pick:
   --add a,b,c            add these FapTap video ids to the list, skipping the animation and focus rules
-                         (exclusions, no monsters / feet, sex, audio roleplays, length and library
-                         duplicates still apply)
+                         (exclusions, sex, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, add each scene to Discovery;
                          skips scripts under ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
@@ -460,7 +459,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(listPath(userData), 'utf8'));
   // Live action on the quota goes last, so this run's downloads can earn it a slot.
-  const byScore = (a, b) => b.score - a.score;
+  const byScore = (a, b) => scout.candidateScore(b) - scout.candidateScore(a);
   const breaks = {};
   for (const c of candidates) {
     const rule = scout.contentRuleBreak(c);

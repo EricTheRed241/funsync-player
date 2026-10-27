@@ -10,8 +10,8 @@
 //   • Free Scripts only (the CLI lists that category).
 //   • Never excluded content (tags, title or first post). Scenes already in
 //     the library stay.
-//   • Never monsters nor feet (tags, title words or first post), favourites
-//     and posts picked by id (`--add`) included.
+//   • Monsters and feet (tags, title words or first post) aren't preferred:
+//     they come in, ranked lower (lessPreferred, RANKING.monster / feet).
 //   • Animated: an animation tag and no `real` tag. A music post by a
 //     creator already in the library is accepted as well. Live action by a
 //     favourite (title, tags or poster; scripts/scout-live.mjs) is taken;
@@ -28,8 +28,8 @@
 //   • Multi-axis scenes only, except the single-axis cases `takesSingleAxis`
 //     allows.
 //   • Ranking: RANKING weights (VR, music, library creator, preferred acts,
-//     multi-axis, likes; 2D hentai only ranks lower). There's no hentai
-//     feed; hentai comes in through the other feeds.
+//     multi-axis, likes; 2D hentai only, monsters and feet rank lower).
+//     There's no hentai feed; hentai comes in through the other feeds.
 //   • Skip posts the library already links and scenes whose video is
 //     already in the library.
 //   • Video variant: within the VR caps, low bitrate when offered; flat
@@ -137,28 +137,36 @@ export function hasFeet({ tags = [], title = '' }) {
   return tags.some((t) => FEET_TAGS.has(t)) || FEET_TITLE.test(title);
 }
 
-/** `monster` or `feet` when a first post's text names one (the title words, whole words), else null. */
-export function textRuleBreak(text) {
+/**
+ * The not-preferred themes a post names, by tags, title words and (when
+ * given) its first post: a monster, feet. Neither keeps a post out; each
+ * ranks it lower (RANKING.monster, RANKING.feet).
+ *
+ * @param {{tags?: string[], title?: string, text?: string}} post
+ */
+export function lessPreferred({ tags = [], title = '', text = '' }) {
   const s = String(text || '');
-  if (MONSTER_TITLE.test(s) || WEREWOLF_TOKEN.test(s)) return 'monster';
-  if (FEET_TITLE.test(s)) return 'feet';
-  return null;
+  return {
+    monster: hasMonster({ tags, title }) || MONSTER_TITLE.test(s) || WEREWOLF_TOKEN.test(s),
+    feet: hasFeet({ tags, title }) || FEET_TITLE.test(s),
+  };
 }
+
+// `contentBreak` values an older `--recheck` saved for monster / feet text, which no longer keep a post out.
+const RETIRED_BREAKS = new Set(['monster', 'feet']);
 
 /**
  * Why a post or video breaks the content rules every scout list obeys
  * (favourites and picks included), judged by its tags and title, so a
- * saved candidate can be checked again: `monster`, `feet`, `not-sexual`
- * (see isSexual), or null when it doesn't. A candidate whose first post
- * showed the sex (`sexual: 'text'`) passes the sex rule; one marked
- * `contentBreak` (by `--recheck`) breaks that rule for good.
+ * saved candidate can be checked again: `not-sexual` (see isSexual), a
+ * `contentBreak` `--recheck` saved, or null when it doesn't. A candidate
+ * whose first post showed the sex (`sexual: 'text'`) passes the sex rule.
+ * Monsters and feet only rank lower (lessPreferred).
  *
  * @param {{tags?: string[], title?: string, sexual?: string, contentBreak?: string}} post
  */
 export function contentRuleBreak({ tags = [], title = '', sexual, contentBreak }) {
-  if (contentBreak) return contentBreak;
-  if (hasMonster({ tags, title })) return 'monster';
-  if (hasFeet({ tags, title })) return 'feet';
+  if (contentBreak && !RETIRED_BREAKS.has(contentBreak)) return contentBreak;
   if (!isSexual({ tags, title }) && !(sexual === 'text' && !tags.some((t) => SFW_TAGS.has(t)))) return 'not-sexual';
   return null;
 }
@@ -176,13 +184,12 @@ export function contentRuleBreak({ tags = [], title = '', sexual, contentBreak }
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
  * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null,
  *   live: boolean, favourite: string|null, liveQuota: boolean, hentaiOnly: boolean}}
- *   reasons: known, excluded (also monsters and feet), not-sexual, in-library
+ *   reasons: known, excluded, not-sexual, in-library
  */
 export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [] } = {}) {
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
   if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
-  if (hasMonster({ tags, title: topic.title }) || hasFeet({ tags, title: topic.title })) return { ok: false, reason: 'excluded' };
   if (tags.some((t) => SFW_TAGS.has(t))) return { ok: false, reason: 'not-sexual' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
@@ -197,37 +204,43 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
 }
 
 /**
- * Second pass, on the first post's text (tags stripped): the exclusions and
- * monster / feet words in the text, then the sex rule with the text as a
- * last resort. `sexual` says where the sex showed (saved on the candidate).
+ * Second pass, on the first post's text (tags stripped): the exclusions in
+ * the text, then the sex rule with the text as a last resort. `sexual` says
+ * where the sex showed, `monster` / `feet` what it names that ranks lower
+ * (lessPreferred); all are saved on the candidate.
  *
  * @param {{tags?: string[], title?: string}} topic
  * @param {string} text
- * @returns {{ok: false, reason: 'excluded' | 'not-sexual'} | {ok: true, sexual: 'tags' | 'title' | 'text'}}
+ * @returns {{ok: false, reason: 'excluded' | 'not-sexual'} | {ok: true, sexual: 'tags' | 'title' | 'text', monster: boolean, feet: boolean}}
  */
 export function judgeFirstPost({ tags = [], title = '' }, text) {
-  if (hasExcludedText(text) || textRuleBreak(text)) return { ok: false, reason: 'excluded' };
+  if (hasExcludedText(text)) return { ok: false, reason: 'excluded' };
   const sexual = sexEvidence({ tags, title, text });
-  return sexual ? { ok: true, sexual } : { ok: false, reason: 'not-sexual' };
+  return sexual ? { ok: true, sexual, ...lessPreferred({ tags, title, text }) } : { ok: false, reason: 'not-sexual' };
 }
 
 /** True for a waiting candidate `--recheck` reads the first post of: it breaks only the sex rule and has no evidence saved. */
 export function needsSexRecheck(c) {
-  return !c.sexual && !c.contentBreak && contentRuleBreak(c) === 'not-sexual';
+  return !c.sexual && contentRuleBreak(c) === 'not-sexual';
 }
 
 /**
  * A waiting candidate judged again with its first post's text (`--recheck`):
- * excluded words in the text mark it `contentBreak` for good, sex in the
- * text saves `sexual: 'text'`, anything else leaves it as it was (skipped).
+ * excluded words in the text mark it `contentBreak: 'excluded'` for good,
+ * sex in the text saves `sexual: 'text'` (and `monster` / `feet`, which rank
+ * lower), anything else leaves it as it was (skipped). A retired monster /
+ * feet `contentBreak` goes.
  *
  * @returns {{outcome: 'excluded' | 'text' | 'not-sexual', candidate: object}}
  */
 export function recheckWithText(c, text) {
-  const rule = textRuleBreak(text) || (hasExcludedText(text) ? 'excluded' : null);
-  if (rule) return { outcome: 'excluded', candidate: { ...c, contentBreak: rule } };
-  if (sexEvidence({ tags: c.tags, title: c.title, text })) return { outcome: 'text', candidate: { ...c, sexual: 'text' } };
-  return { outcome: 'not-sexual', candidate: c };
+  const { contentBreak, ...rest } = c;
+  const base = contentBreak && !RETIRED_BREAKS.has(contentBreak) ? c : rest;
+  if (hasExcludedText(text)) return { outcome: 'excluded', candidate: { ...base, contentBreak: 'excluded' } };
+  if (sexEvidence({ tags: c.tags, title: c.title, text })) {
+    return { outcome: 'text', candidate: { ...base, sexual: 'text', ...lessPreferred({ tags: c.tags, title: c.title, text }) } };
+  }
+  return { outcome: 'not-sexual', candidate: base };
 }
 
 /** Discourse category of Free Scripts (Paid Scripts posts link to a store instead of files). */
@@ -325,24 +338,30 @@ export function scriptDurationMs(script) {
 }
 
 /** Ranking score; higher downloads first. */
-export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false }) {
+export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false, monster = false, feet = false }) {
   return (vr ? RANKING.vr : 0)
     + (music ? RANKING.music : 0)
     + (artistInLibrary ? RANKING.artistInLibrary : 0)
     + (preferred.length ? RANKING.preferred + RANKING.preferredExtra * (preferred.length - 1) : 0)
     + (multiAxis ? RANKING.multiAxis : 0)
     + Math.min(RANKING.likesMax, likes / RANKING.likesPer)
-    - (hentaiOnly ? RANKING.hentaiOnly : 0);
+    - (hentaiOnly ? RANKING.hentaiOnly : 0)
+    - (monster ? RANKING.monster : 0)
+    - (feet ? RANKING.feet : 0);
 }
 
 /**
- * Score of a saved candidate under the current RANKING, from what the list
- * keeps, so a weight change reorders lists saved before it.
+ * Score of a saved candidate (either scout) under the current RANKING, from
+ * what the list keeps, so a weight change reorders lists saved before it.
+ * Monster / feet come from its tags and title, the first-post flags saved
+ * with it (`monster`, `feet`), or an older `--recheck` mark.
  */
 export function candidateScore(c) {
+  const named = lessPreferred(c);
   return +scoreCandidate({
     vr: !!c.vr, music: !!c.music, artistInLibrary: !!(c.artistInLibrary || c.favourite), preferred: c.preferred || [],
     multiAxis: c.axisType === 'multi', likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
+    monster: named.monster || !!c.monster || c.contentBreak === 'monster', feet: named.feet || !!c.feet || c.contentBreak === 'feet',
   }).toFixed(2);
 }
 
@@ -727,7 +746,7 @@ export function remapPaths(value, moves) {
 // `single-axis` post with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 5;
+export const RULES_VERSION = 6;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };

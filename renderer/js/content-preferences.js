@@ -25,7 +25,7 @@ export const FURRY_TAGS = new Set([
   'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
   'renamon-digimon', 'five-nights-at-freddy-s', 'roxanne-wolf-five-nights-at-freddy-s',
 ]);
-/** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post), favourites and picks included. Succubi, demon girls and elves aren't monsters. */
+/** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post): not preferred, they rank lower (RANKING.monster) but still come in. Succubi, demon girls and elves aren't monsters. */
 export const MONSTER_TAGS = new Set([
   'monster', 'monsters', 'monstergirls', 'monstergirl', 'monster-girl', 'monster-girls', 'tentacle', 'tentacles', 'tentacle-sex',
   'tentacle-monster', 'werewolf', 'werewolves', 'horse', 'horse-cock', 'horsecock', 'bestiality', 'animated-bestiality', 'zoophilia',
@@ -34,7 +34,7 @@ export const MONSTER_TAGS = new Set([
 export const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
 /** `Mercy X WW`: Solace2K and Rekin3D's short for werewolf, a standalone capital token. */
 export const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
-/** Feet, by tag or title word (EroScripts also in the first post): never. */
+/** Feet, by tag or title word (EroScripts also in the first post): not preferred, they rank lower (RANKING.feet) but still come in. */
 export const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
 export const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
 /** Tags that say a post has no porn in it: never taken. */
@@ -121,10 +121,11 @@ export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-b
 export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
 /**
  * Candidate score; higher downloads first. Likes add likes / likesPer, up to
- * likesMax; 2D hentai only loses hentaiOnly. multiAxis applies to EroScripts
- * only (FapTap has no multi-axis scripts).
+ * likesMax; 2D hentai only loses hentaiOnly, a monster post loses monster
+ * and a feet post loses feet (both for one with both). multiAxis applies to
+ * EroScripts only (FapTap has no multi-axis scripts).
  */
-export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
+export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3, monster: 0.5, feet: 0.5 };
 /** 2D hentai only: animation tags among these, no THREE_D_TAGS and no THREE_D_TITLE. */
 export const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
 export const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);

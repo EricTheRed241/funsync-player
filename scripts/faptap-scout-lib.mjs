@@ -16,8 +16,8 @@
 // except the multi-axis one, narrowed to what the user wants from FapTap.
 // The values are in renderer/js/content-preferences.js.
 //   • Never excluded content (tags, title or description), nor FURRY_TAGS.
-//     Never monsters or feet (tags or title, as on EroScripts), favourites
-//     and picks included.
+//     Monsters and feet (tags or title, as on EroScripts) come in, ranked
+//     lower.
 //   • Animated, unless a favourite: an animation tag, no live-action tag,
 //     and no FapTap model / pornstar named in the title or listed as the
 //     video's performer (FapTap tags are free text; live videos get
@@ -35,7 +35,8 @@
 //   • Sex required (as on EroScripts; picks too), at least MIN_VIDEO_MS
 //     long. `--fetch` and every scan drop saved candidates that now break
 //     the content rules (stillWanted).
-//   • Ranking as on EroScripts.
+//   • Ranking as on EroScripts (candidateScore; monsters, feet and 2D
+//     hentai only rank lower), saved lists scored again under it.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream within the flat / VR height cap;
 //     none below MIN_STREAM_HEIGHT.
@@ -47,8 +48,8 @@
 // `overwatch`.
 
 import {
-  contentRuleBreak, hasExcludedText, hasFeet, hasMonster, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
-  scoreCandidate, titleArtist,
+  candidateScore, contentRuleBreak, hasExcludedText, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
+  titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import {
   ANIMATION_TAGS, AUDIO_TITLE, FAPTAP_ANIMATION_TAGS, FAPTAP_FOCUS, FAPTAP_FOCUS_MIN, FLAT_MAX_HEIGHT, FURRY_TAGS, LIVE_TAGS,
@@ -60,7 +61,7 @@ import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 5;
+export const FAPTAP_RULES_VERSION = 6;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -247,14 +248,13 @@ export function faptapSceneName(video, ctx = {}) {
  * @param {boolean} [ctx.picked] the user asked for this video by id
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
  *   focus: string[], preferred: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean, hentaiOnly: boolean}}
- *   reasons: excluded (also monsters and feet), audio-only, off-focus, not-sexual, short, in-library
+ *   reasons: excluded, audio-only, off-focus, not-sexual, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
   const tags = videoTags(video);
   const title = String(video.name || '');
   const text = htmlText(video.description);
-  if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)
-    || hasMonster({ tags, title }) || hasFeet({ tags, title })) {
+  if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)) {
     return { ok: false, reason: 'excluded' };
   }
   const name = normName(title);
@@ -352,14 +352,13 @@ export function csvToFunscript(text) {
 
 /** A screened video as a saved candidate. */
 export function toCandidate(video, screen) {
-  const likes = Number(video.rating?.likes) || 0;
-  return {
+  const c = {
     id: String(video.id),
     title: String(video.name || '').trim(),
     url: `${FAPTAP_ORIGIN}/v/${video.id}`,
     author: video.user?.username || 'unknown',
     tags: screen.tags,
-    likes,
+    likes: Number(video.rating?.likes) || 0,
     duration: Number(video.duration) || 0,
     vr: screen.vr,
     projection: video.projection || 'MONO_FLAT',
@@ -371,10 +370,8 @@ export function toCandidate(video, screen) {
     favourite: screen.favourite || null,
     liveQuota: !!screen.liveQuota,
     picked: !!screen.picked,
-    score: +scoreCandidate({
-      vr: screen.vr, music: screen.music, artistInLibrary: !!(screen.artist || screen.favourite), preferred: screen.preferred, likes, hentaiOnly: screen.hentaiOnly,
-    }).toFixed(2),
   };
+  return { ...c, score: candidateScore(c) };
 }
 
 /** Key of a fetched or rejected FapTap scene; the same as electron/rejected-videos.js `faptapRejectionKey`. */
@@ -406,7 +403,7 @@ export function mergeCookies(jar, setCookies) {
 // The focus rule on a saved candidate (lists saved under older rules may miss it); picks and favourites need none.
 const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FAPTAP_FOCUS_MIN;
 
-/** True when a saved candidate may still be downloaded: in focus, and within the content rules (no monsters, no feet, sex; picks too). */
+/** True when a saved candidate may still be downloaded: in focus, and within the content rules (sex; picks too). */
 export const stillWanted = (c) => inFocus(c) && !contentRuleBreak(c);
 
 /**
@@ -430,7 +427,8 @@ export function dropDuplicateCandidates(candidates) {
 /**
  * The saved list after a scan: candidates found now plus earlier ones not
  * yet fetched or rejected and still wanted (`stillWanted`), one per video
- * (`dropDuplicateCandidates`), best score first.
+ * (`dropDuplicateCandidates`), best score first, each scored again under
+ * the current RANKING (candidateScore).
  *
  * @param {object[]} previous
  * @param {object[]} fresh
@@ -439,6 +437,6 @@ export function dropDuplicateCandidates(candidates) {
 export function mergeCandidates(previous, fresh, isDone) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(String(c.id), c);
-  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && stillWanted(c));
+  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && stillWanted(c)).map((c) => ({ ...c, score: candidateScore(c) }));
   return dropDuplicateCandidates(open).kept.sort((a, b) => b.score - a.score);
 }
