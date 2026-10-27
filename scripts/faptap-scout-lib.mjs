@@ -49,6 +49,7 @@ import {
   scoreCandidate, titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import { favouriteIn } from './scout-live.mjs';
+import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
@@ -426,8 +427,27 @@ export function mergeCookies(jar, setCookies) {
 export const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FOCUS_MIN;
 
 /**
+ * FapTap often holds one video uploaded several times, with other scripts.
+ * Of candidates with the same title and length (scripts/scene-dedupe-lib.mjs)
+ * the best stream stays, then the most liked.
+ *
+ * @returns {{kept: object[], dropped: object[]}}
+ */
+export function dropDuplicateCandidates(candidates) {
+  const item = (c) => ({ words: titleWords(c.title || ''), duration: Number(c.duration) || 0, vr: !!c.vr });
+  const kept = [];
+  const dropped = [];
+  for (const c of [...candidates].sort((a, b) => (b.quality || 0) - (a.quality || 0) || (b.likes || 0) - (a.likes || 0))) {
+    if (firstDuplicate(item(c), kept.map(item))) dropped.push(c);
+    else kept.push(c);
+  }
+  return { kept, dropped };
+}
+
+/**
  * The saved list after a scan: candidates found now plus earlier ones not
- * yet fetched or rejected and still in focus, best score first.
+ * yet fetched or rejected and still in focus, one per video
+ * (`dropDuplicateCandidates`), best score first.
  *
  * @param {object[]} previous
  * @param {object[]} fresh
@@ -436,5 +456,6 @@ export const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >
 export function mergeCandidates(previous, fresh, isDone) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(String(c.id), c);
-  return [...byId.values()].filter((c) => !isDone(String(c.id)) && inFocus(c)).sort((a, b) => b.score - a.score);
+  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && inFocus(c));
+  return dropDuplicateCandidates(open).kept.sort((a, b) => b.score - a.score);
 }

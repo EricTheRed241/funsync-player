@@ -37,7 +37,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const require = createRequire(import.meta.url);
@@ -191,8 +191,9 @@ async function scan(opts, { api, userData, config, incoming }) {
     for (const l of Object.values(links?.links || {})) if (l.topicId != null) knownTopics.add(l.topicId);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
-  // Posts the user turned down in the app (No thank you, 2 stars or lower).
-  const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.topicId != null).map((e) => e.topicId));
+  // Posts the user turned down in the app (No thank you, 2 stars or lower);
+  // a short video or an extra copy of one (dedupe) doesn't turn down the post.
+  const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.reason !== 'duplicate' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);
 
   const state = readScoutState(userData);
@@ -434,6 +435,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { api, userData, incoming, staging });
     console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under a minute, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    if (r.ok) dedupeAfterFetch(userData);
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min for host quotas`);

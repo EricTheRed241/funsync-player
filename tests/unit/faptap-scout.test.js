@@ -228,6 +228,12 @@ describe('mergeCandidates', () => {
     expect(list.map((x) => [x.id, x.score])).toEqual([['1', 4], ['3', 3]]);
   });
 
+  it('keeps one of several uploads of the same video: the best stream, then the most liked', () => {
+    const c = (id, quality, likes, title = 'Agapilord - HMV - SEXUAL') => ({ id, score: 5, tags: ['creampie', 'hmv'], title, duration: 190, vr: false, quality, likes });
+    const list = mergeCandidates([c('1', 720, 50)], [c('2', 1080, 3), c('3', 1080, 9), c('4', 1080, 1, 'Something Else')], () => false);
+    expect(list.map((x) => x.id).sort()).toEqual(['3', '4']);
+  });
+
   it('ranks VR and preferred tags above plain videos', () => {
     const plain = toCandidate(video(['Animated', 'HMV', 'PMV']), screenVideo(video(['Animated', 'HMV', 'Reverse Cowgirl'])));
     const vr = toCandidate(video(['Animated', 'Creampie'], { vr: true }), screenVideo(video(['Animated', 'Creampie'], { vr: true })));

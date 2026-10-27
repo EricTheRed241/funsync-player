@@ -193,6 +193,18 @@ describe('planScenes', () => {
     expect(scenes[0].video.name).toBe('VaM - Chocolate Cream VR 8K60FPS low-bitrate.mp4');
   });
 
+  it('makes one scene of identical script sets named per encode, with the best video', () => {
+    const sized = (size, ...names) => files(...names).map((f) => ({ ...f, size }));
+    const { scenes } = planScenes({
+      scripts: [
+        ...sized(500, 'Portfolio Part 1 - 1080p60fps.funscript', 'Portfolio Part 1 - 4k120fps.funscript'),
+        ...sized(80, 'Portfolio Part 1 - 1080p60fps.twist.funscript', 'Portfolio Part 1 - 4k120fps.twist.funscript'),
+      ],
+      videos: vids('Portfolio Part 1 - 1080p60fps.mp4', 'Portfolio Part 1 - 4k120fps.mp4'),
+    });
+    expect(scenes.map((s) => s.video.name)).toEqual(['Portfolio Part 1 - 4k120fps.mp4']);
+  });
+
   it('skips scenes whose video is already in the library', () => {
     const r = planScenes({
       scripts: files('Anjbgo - 01 Remake Hello venus First Edition.funscript'),
@@ -204,9 +216,11 @@ describe('planScenes', () => {
 });
 
 describe('videoPreference', () => {
-  it('never prefers a preview, and keeps flat posts at ≤ 4K', () => {
+  it('never prefers a preview, keeps flat posts at ≤ 4K, and takes more fps for flat but not for VR', () => {
     expect(videoPreference('scene 4K preview.mp4', 1, false)).toBeLessThan(videoPreference('scene 1080p.mp4', 1, false));
     expect(videoPreference('scene 4K.mp4', 1, false)).toBeGreaterThan(videoPreference('scene 8K.mp4', 1, false));
+    expect(videoPreference('scene 4K 120fps.mp4', 1, false)).toBeGreaterThan(videoPreference('scene 4K 60fps.mp4', 1, false));
+    expect(videoPreference('scene VR 8K 120fps.mp4', 1, true)).toBeLessThan(videoPreference('scene VR 8K 60fps.mp4', 1, true));
   });
 });
 
