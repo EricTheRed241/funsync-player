@@ -39,6 +39,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 const lib = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, flushPlaylist, incomingDir, librarySources, libraryState, onDiskPath, readConfig, removeIfEmpty, walk, writeConfig } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
+const live = await import('./scout-live.mjs');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -204,7 +205,8 @@ async function scan(opts, { api, userData, config, incoming }) {
   for (const id of turnedDown) knownTopics.add(id);
 
   const state = readScoutState(userData);
-  const rejected = { known: 0, excluded: 0, 'not-animated': 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
+  const favourites = live.readFavourites(userData);
+  const rejected = { known: 0, excluded: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
   let listed = 0;
   let judged = 0;
@@ -227,7 +229,7 @@ async function scan(opts, { api, userData, config, incoming }) {
     const creators = [...library.creators];
     for (const t of todo) {
       const verdict = (v) => { lib.markTopic(state, t.id, v); judged++; if (v !== 'candidate') rejected[v]++; };
-      const s = lib.screenTopic(t, { knownTopics, creators, sceneNames: library.sceneNames });
+      const s = lib.screenTopic(t, { knownTopics, creators, sceneNames: library.sceneNames, favourites });
       if (!s.ok) { verdict(s.reason); continue; }
       await pacer.wait();
       const data = await api.getTopicData(t.id);
@@ -252,6 +254,8 @@ async function scan(opts, { api, userData, config, incoming }) {
       if (!plan.scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
+      const favourite = s.favourite || live.favouriteIn([author], favourites);
+      const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
       const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
       const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
@@ -259,8 +263,8 @@ async function scan(opts, { api, userData, config, incoming }) {
       fresh.push({
         id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
         tags: t.tags, likes: t.likes,
-        vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts,
-        score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!artistInLibrary, preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
+        vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota,
+        score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
         scenes,
       });
       verdict('candidate');
@@ -285,7 +289,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   console.log('\n| # | New | Post | Axis | Tags | Videos | GB | Host |\n|---|---|---|---|---|---|---|---|');
   candidates.slice(0, opts.top).forEach((c, i) => {
     const axis = c.axisType === 'multi' ? `Multi (${1 + new Set(c.scenes.flatMap((sc) => sc.axes)).size})` : 'Single';
-    const tags = [c.vr && 'VR', ...c.preferred, c.music && 'music'].filter(Boolean).join(', ');
+    const tags = [c.vr && 'VR', ...c.preferred, c.music && 'music', c.favourite && `favourite: ${c.favourite}`, c.liveQuota && 'live (quota)'].filter(Boolean).join(', ');
     console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
   });
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
@@ -373,11 +377,13 @@ function fetchedScenes(incoming, userData) {
 
 async function fetchPass(queue, { api, userData, incoming, staging }) {
   const done = fetchedScenes(incoming, userData);
-  let ok = 0; let failed = 0; let generated = 0; let short = 0;
+  let ok = 0; let failed = 0; let generated = 0; let short = 0; let waiting = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     for (const sc of c.scenes) {
       if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
+      // Live action by a non-favourite: one in every LIVE_QUOTA_EVERY downloads (both scouts).
+      if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
       const creator = lib.creatorFolder(c.title, c.author);
       const stem = lib.sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 });
       const dir = path.join(incoming, creator, stem);
@@ -408,7 +414,9 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
           if (up.status === 0) { generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
         }
         const listed = flushPlaylist(userData, incoming, [video]);
-        console.log(`${now()} ✓ ${creator}/${stem}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
+        live.recordDownload(userData, !!c.liveQuota);
+        const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
+        console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
         ok++;
       } catch (err) {
         console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
@@ -416,7 +424,7 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
       }
     }
   }
-  return { ok, failed, generated, short };
+  return { ok, failed, generated, short, waiting };
 }
 
 async function fetchAll(opts, { api, userData, incoming }) {
@@ -434,7 +442,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { api, userData, incoming, staging });
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under a minute, ${r.failed} failed`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under a minute, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min for host quotas`);

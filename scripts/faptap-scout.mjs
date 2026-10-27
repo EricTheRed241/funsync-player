@@ -40,6 +40,7 @@ const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
 const { flushPlaylist, incomingDir, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
+const live = await import('./scout-live.mjs');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -50,10 +51,14 @@ Scan (default; only videos not judged before, see <userData>/faptap-scout-state.
   --backfill N           older pages to read, continuing from the last run (default 10; 0 = none)
   --full                 judge every listed video again, not only new ones
   --top N                candidates to print (default 40)
+Pick:
+  --add a,b,c            add these FapTap video ids to the list, skipping the animation, focus and sex
+                         rules (exclusions, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, add each scene to Discovery;
                          skips scripts under a minute and scenes rejected in the app (No thank you)
   --ids a,b,c            only these FapTap video ids
+                         (live action by non-favourites waits for the live quota: one in every 20 downloads)
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded
@@ -79,6 +84,7 @@ function parseArgs(argv) {
       case '--passes': opts.passes = Number(value(i, a)); i++; break;
       case '--wait': opts.wait = parseInterval(value(i, a)); i++; break;
       case '--ids': opts.ids = new Set(value(i, a).split(',').map((s) => s.trim()).filter(Boolean)); i++; break;
+      case '--add': opts.add = [...new Set(value(i, a).split(',').map((s) => s.trim()).filter(Boolean))]; i++; break;
       case '--user-data': opts.userData = path.resolve(value(i, a)); i++; break;
       case '--incoming': opts.incoming = path.resolve(value(i, a)); i++; break;
       case '-h': case '--help': opts.help = true; break;
@@ -150,16 +156,15 @@ async function livePerformers() {
   return lib.livePerformerNames(all);
 }
 
-/** The video's script url and best stream; a reason instead when there is none worth taking. */
+/** The video's details, script url and best stream; a reason instead when there is none worth taking. */
 async function videoPlan(id, vr) {
   const detail = await faptap(`/videos/${id}`);
-  if (lib.hasLivePerformer(detail)) return { reason: 'not-animated' };
-  if (!detail?.script?.url) return { reason: 'no-script' };
+  if (!detail?.script?.url) return { detail, reason: 'no-script' };
   // Videos only linked from another site have no FapTap stream.
-  if (!detail.stream_url_selfhosted) return { reason: 'no-stream' };
+  if (!detail.stream_url_selfhosted) return { detail, reason: 'no-stream' };
   const source = lib.pickSource(await faptap(`/videos/${id}/bunny-sources`), vr);
-  if (!source) return { reason: 'low-quality' };
-  return { script: detail.script.url, source };
+  if (!source) return { detail, reason: 'low-quality' };
+  return { detail, script: detail.script.url, source };
 }
 
 // ── Scan ────────────────────────────────────────────────────────────────
@@ -202,19 +207,48 @@ function knownTitles(userData, library) {
   return titles.filter(Boolean);
 }
 
-async function scan(opts, { userData, config, incoming }) {
+/** What screening needs to know about the library. */
+async function screenContext(config, userData, incoming) {
   const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
   const library = libraryState(roots);
   try {
     const links = require('../electron/eroscripts-links.js').readLinksFile(userData);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
   } catch { /* no links file yet */ }
-  const ctx = { creators: [...library.creators], knownTitles: knownTitles(userData, library), livePerformers: await livePerformers() };
+  return {
+    creators: [...library.creators],
+    knownTitles: knownTitles(userData, library),
+    livePerformers: await livePerformers(),
+    favourites: live.readFavourites(userData),
+  };
+}
+
+/** Save the merged list and print it. */
+function saveList(userData, fresh, done, { top, listed = 0, judged = 0, rejected = {} }) {
+  let previous = [];
+  try { previous = JSON.parse(fs.readFileSync(listPath(userData), 'utf8')).candidates || []; } catch { /* first scan */ }
+  const candidates = lib.mergeCandidates(previous, fresh, (id) => done.has(lib.fetchedKey(id)));
+  fs.writeFileSync(listPath(userData), JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
+  const freshIds = new Set(fresh.map((c) => c.id));
+  const mins = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  console.log('\n| # | New | Video | Axis | Length | Focus | Quality |\n|---|---|---|---|---|---|---|');
+  candidates.slice(0, top).forEach((c, i) => {
+    const why = [
+      ...lib.focusOf(c), c.favourite && `favourite: ${c.favourite}`, c.picked && 'picked', c.liveQuota && 'live (quota)',
+      c.artistInLibrary && `artist: ${c.artistInLibrary}`,
+    ].filter(Boolean).join(', ');
+    console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | Single | ${mins(c.duration)} | ${why} | ${c.quality}p |`);
+  });
+  return candidates;
+}
+
+async function scan(opts, { userData, config, incoming }) {
+  const ctx = await screenContext(config, userData, incoming);
   const done = doneScenes(incoming, userData);
 
   const state = readState(userData);
   const rejected = {
-    known: 0, excluded: 0, 'not-animated': 0, 'audio-only': 0, 'off-focus': 0, 'not-sexual': 0, short: 0, 'in-library': 0,
+    known: 0, excluded: 0, 'audio-only': 0, 'off-focus': 0, 'not-sexual': 0, short: 0, 'in-library': 0,
     'no-script': 0, 'no-stream': 0, 'low-quality': 0,
   };
   const fresh = [];
@@ -245,7 +279,7 @@ async function scan(opts, { userData, config, incoming }) {
         continue;
       }
       if (plan.reason) { verdict(plan.reason); continue; }
-      fresh.push({ ...lib.toCandidate(v, s), quality: plan.source.height });
+      fresh.push({ ...lib.toCandidate(v, lib.withPerformers(s, plan.detail?.performers, ctx.favourites)), quality: plan.source.height });
       verdict('candidate');
       process.stderr.write(`✓ ${v.id} ${v.name.slice(0, 70)}\n`);
     }
@@ -255,22 +289,34 @@ async function scan(opts, { userData, config, incoming }) {
     writeState(userData, state);
   }
 
-  let previous = [];
-  try { previous = JSON.parse(fs.readFileSync(listPath(userData), 'utf8')).candidates || []; } catch { /* first scan */ }
-  const candidates = lib.mergeCandidates(previous, fresh, (id) => done.has(lib.fetchedKey(id)));
-  fs.writeFileSync(listPath(userData), JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
-
-  const freshIds = new Set(fresh.map((c) => c.id));
-  const mins = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-  console.log('\n| # | New | Video | Axis | Length | Focus | Quality |\n|---|---|---|---|---|---|---|');
-  candidates.slice(0, opts.top).forEach((c, i) => {
-    const focus = [...lib.focusOf(c), c.artistInLibrary && `artist: ${c.artistInLibrary}`].filter(Boolean).join(', ');
-    console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | Single | ${mins(c.duration)} | ${focus} | ${c.quality}p |`);
-  });
+  const candidates = saveList(userData, fresh, done, { top: opts.top, listed, judged, rejected });
   const feed = state.feeds[lib.FEED];
-  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length}`);
+  const quota = candidates.filter((c) => c.liveQuota).length;
+  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${quota} live on the quota)`);
   console.log(`Backfill: ${feed?.exhausted ? 'done' : `page ${feed?.backfillPage ?? 0}`} · ${Object.keys(state.topics).length} videos judged so far`);
   console.log(`Saved: ${listPath(userData)}`);
+  return 0;
+}
+
+/** `--add`: put videos the user picked on the list, past the animation, focus and sex rules. */
+async function addPicked(opts, { userData, config, incoming }) {
+  const ctx = await screenContext(config, userData, incoming);
+  const done = doneScenes(incoming, userData);
+  const fresh = [];
+  for (const id of opts.add) {
+    if (done.has(lib.fetchedKey(id))) { console.log(`– ${id}: already fetched or turned down`); continue; }
+    const plan = await videoPlan(id, false);
+    const v = plan.detail;
+    if (!v) { console.log(`✗ ${id}: not found`); continue; }
+    const s = lib.screenVideo({ ...v, id: String(v.id) }, { ...ctx, picked: true });
+    if (!s.ok) { console.log(`✗ ${id} ${v.name}: ${s.reason}`); continue; }
+    const p = s.vr ? await videoPlan(id, true) : plan;
+    if (p.reason) { console.log(`✗ ${id} ${v.name}: ${p.reason}`); continue; }
+    fresh.push({ ...lib.toCandidate({ ...v, id: String(v.id) }, lib.withPerformers(s, v.performers, ctx.favourites)), quality: p.source.height });
+    console.log(`✓ ${id} ${v.name}`);
+  }
+  saveList(userData, fresh, done, { top: fresh.length });
+  console.log(`\nAdded ${fresh.length} of ${opts.add.length}. Download them with: npm run faptap:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}`);
   return 0;
 }
 
@@ -334,10 +380,11 @@ function sceneDir(parent, stem, id) {
 
 async function fetchPass(queue, { userData, incoming, staging }) {
   const done = doneScenes(incoming, userData);
-  let ok = 0; let failed = 0; let short = 0;
+  let ok = 0; let failed = 0; let short = 0; let waiting = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     if (done.has(lib.fetchedKey(c.id))) continue;
+    if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
     const creator = scout.creatorFolder(c.title, c.author);
     const stem0 = scout.sceneTitle({ title: c.title, author: c.author, video: `${c.title}${c.vr ? lib.vrSuffix(c.projection) : ''}.mp4` });
     const dir = sceneDir(path.join(incoming, creator), stem0, c.id);
@@ -367,7 +414,9 @@ async function fetchPass(queue, { userData, incoming, staging }) {
       const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
       const note = up.status === 0 ? ' + generated axes' : ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
       const listed = flushPlaylist(userData, incoming, [video]);
-      console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${note}${listed ? '' : ' (playlist pending: app is open)'}`);
+      live.recordDownload(userData, !!c.liveQuota);
+      const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
+      console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
       ok++;
     } catch (err) {
       if (err instanceof RateLimitedError) throw err;
@@ -375,13 +424,16 @@ async function fetchPass(queue, { userData, incoming, staging }) {
       failed++;
     }
   }
-  return { ok, failed, short };
+  return { ok, failed, short, waiting };
 }
 
 async function fetchAll(opts, { userData, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(listPath(userData), 'utf8'));
-  const queue = [...candidates].filter(lib.inFocus).sort((a, b) => b.score - a.score).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
+  // Live action on the quota goes last, so this run's downloads can earn it a slot.
+  const byScore = (a, b) => b.score - a.score;
+  const wanted = candidates.filter(lib.inFocus).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
+  const queue = [...wanted.filter((c) => !c.liveQuota).sort(byScore), ...wanted.filter((c) => c.liveQuota).sort(byScore)];
   console.log(`Queue: ${queue.length} videos → ${incoming}`);
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.id} ${c.quality}p ${c.title}`);
@@ -394,7 +446,7 @@ async function fetchAll(opts, { userData, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { userData, incoming, staging });
-    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under a minute, ${r.failed} failed`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under a minute, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min before the next pass`);
@@ -414,6 +466,7 @@ async function main() {
   const config = readConfig(userData);
   const incoming = incomingDir(config, opts.incoming);
   try {
+    if (opts.add) return await addPicked(opts, { userData, config, incoming });
     return opts.fetch ? await fetchAll(opts, { userData, incoming }) : await scan(opts, { userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }

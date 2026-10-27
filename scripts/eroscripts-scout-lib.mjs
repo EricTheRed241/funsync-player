@@ -9,9 +9,12 @@
 //   • Free Scripts only (the CLI lists that category).
 //   • Never: loli, shota, furry / anthro / yiff, futa / futanari (tags, title
 //     or first post). Scenes already in the library stay.
-//   • Animated only: a tag like animation / 3d / hentai / vam / sfm / mmd and
-//     no `real` tag. AI-generated video counts. A music post (PMV / HMV /
-//     Cock Hero …) by a creator already in the library is accepted as well.
+//   • Animated: a tag like animation / 3d / hentai / vam / sfm / mmd and no
+//     `real` tag. AI-generated video counts. A music post (PMV / HMV / Cock
+//     Hero …) by a creator already in the library is accepted as well. Live
+//     action by a favourite creator or actress (title, tags or poster;
+//     scripts/scout-live.mjs) is taken; other live action waits for the
+//     live quota (one in every 20 Discovery downloads, both scouts).
 //   • Sex only: a sex-act tag (vaginal, blowjob, riding …) or word in the
 //     title or first post, or a porn music tag (HMV / PMV / Cock Hero) on a
 //     post that isn't a dance. Never a post tagged sfw / non-porn.
@@ -29,6 +32,7 @@
 //     download (scripts/upgrade-multi-axis.mjs); hand-made axes always win.
 
 import path from 'node:path';
+import { favouriteIn } from './scout-live.mjs';
 
 export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
 export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
@@ -143,20 +147,27 @@ export function hasExcludedText(text) {
  * @param {Set<number>} ctx.knownTopics posts the library already links
  * @param {string[]} ctx.creators creator names in the library (lower case)
  * @param {string[]} ctx.sceneNames normName of every library scene folder
- * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null}}
+ * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
+ * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null,
+ *   live: boolean, favourite: string|null, liveQuota: boolean}}
  */
-export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [] } = {}) {
+export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [] } = {}) {
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
   if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
   if (tags.some((t) => SFW_TAGS.has(t))) return { ok: false, reason: 'not-sexual' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
-  const animated = tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real');
+  const live = !(tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real'));
   const music = tags.some((t) => MUSIC_TAGS.has(t));
-  if (!animated && !(music && artist)) return { ok: false, reason: 'not-animated' };
+  const favourite = favouriteIn([topic.title, ...tags], favourites);
   if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
-  return { ok: true, music, vr: tags.includes('vr'), artist };
+  return { ok: true, music, vr: tags.includes('vr'), artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }) };
+}
+
+/** True when a live post isn't a favourite's nor a library creator's music video, so it waits for the live quota. */
+export function liveOnQuota({ live, favourite, music, artist }) {
+  return !!live && !favourite && !(music && artist);
 }
 
 // Music videos that let a single-axis VR creampie post in.
@@ -567,7 +578,7 @@ export function remapPaths(value, moves) {
 // `single-axis` post with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
@@ -708,14 +719,20 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 
 /**
  * Download order: multi-axis posts first, then single-axis; each by score.
- * Scenes a saved list holds but the rules no longer want are dropped.
+ * Live action on the quota comes last, so the run's other downloads can earn
+ * it a slot. Scenes a saved list holds but the rules no longer want are
+ * dropped.
  */
 export function downloadQueue(candidates) {
   const ok = candidates
     .map((c) => ({ ...c, scenes: wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
     .filter((c) => c.scenes.length);
   const byScore = (a, b) => b.score - a.score;
-  return [...ok.filter((c) => c.axisType === 'multi').sort(byScore), ...ok.filter((c) => c.axisType !== 'multi').sort(byScore)];
+  const own = ok.filter((c) => !c.liveQuota);
+  return [
+    ...own.filter((c) => c.axisType === 'multi').sort(byScore), ...own.filter((c) => c.axisType !== 'multi').sort(byScore),
+    ...ok.filter((c) => c.liveQuota).sort(byScore),
+  ];
 }
 
 /**
