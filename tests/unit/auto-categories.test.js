@@ -7,8 +7,9 @@
 // what gets created and assigned, and that the user's own edits stick.
 import { describe, it, expect } from 'vitest';
 import {
-  planAutoCategories, applyAutoCategories, planVRCategory, applyVRCategory, AUTO_CATEGORIES, AUTO_CATEGORIES_KEY,
+  planAutoCategories, applyAutoCategories, planVRCategory, applyVRCategory, AUTO_CATEGORIES_KEY,
 } from '../../renderer/js/auto-categories.js';
+import { AUTO_CATEGORIES } from '../../renderer/js/content-preferences.js';
 import { SCRIPT_TAGS_KEY } from '../../renderer/js/script-tags.js';
 
 const ALL = AUTO_CATEGORIES.length;

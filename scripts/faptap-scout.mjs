@@ -45,6 +45,7 @@ const dedupe = await import('./scene-dedupe-lib.mjs');
 const { libraryVideos, readProbeCache, writeProbeCache } = await import('./scene-probe.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
+const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -61,10 +62,10 @@ Pick:
                          duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, add each scene to Discovery;
-                         skips scripts under 2 minutes, scenes rejected in the app (2 stars or lower)
+                         skips scripts under ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting videos now off focus or breaking the content rules
   --ids a,b,c            only these FapTap video ids
-                         (live action by non-favourites waits for the live quota: one in every 20 downloads)
+                         (live action by non-favourites waits for the live quota: one in every ${prefs.LIVE_QUOTA_EVERY} downloads)
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -230,14 +231,14 @@ async function screenContext(config, userData, incoming) {
     creators: [...library.creators],
     knownTitles: knownTitles(userData, library),
     livePerformers: await livePerformers(),
-    favourites: live.readFavourites(userData),
+    favourites: prefs.FAVOURITES,
   };
 }
 
 /** What naming needs: favourites and the library's creator folders as spelled (no network). */
 function namingContext(config, userData, incoming) {
   const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
-  return { favourites: live.readFavourites(userData), creatorNames: libraryState(roots).creatorNames };
+  return { favourites: prefs.FAVOURITES, creatorNames: libraryState(roots).creatorNames };
 }
 
 /** Save the merged list and print it. */
@@ -422,7 +423,7 @@ async function fetchPass(queue, { userData, incoming, staging, naming }) {
       const video = path.join(dir, `${stem}.mp4`);
       const script = lib.csvToFunscript(await faptap(`/assets/${plan.script}`, { text: true }));
       const lengthMs = scout.scriptDurationMs(script);
-      if (lengthMs < scout.MIN_VIDEO_MS) {
+      if (lengthMs < prefs.MIN_VIDEO_MS) {
         rejectedVideos.recordRejection(userData, {
           source: 'faptap', faptapId: c.id, title: c.title, url: c.url, reason: 'short', lengthMs, at: new Date().toISOString(),
         });
@@ -481,7 +482,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming) });
-    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (!r.failed) return 0;
     if (pass < opts.passes) {

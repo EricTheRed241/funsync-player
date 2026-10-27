@@ -54,7 +54,7 @@ SECTION_TOP_RATED = 'Top Rated'
 SECTION_UNRATED = 'Unrated'
 PLAYLIST_SECTION_PREFIX = 'Playlist: '
 
-# Same threshold as the desktop (renderer/js/ratings.js TOP_RATED_MIN).
+# Same threshold as the desktop (TOP_RATED_MIN in renderer/js/content-preferences.js).
 TOP_RATED_MIN = 4
 
 # Display order; empty sections are dropped.

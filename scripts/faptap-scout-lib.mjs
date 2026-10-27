@@ -14,35 +14,31 @@
 //
 // Rules: those of the EroScripts scout (scripts/eroscripts-scout-lib.mjs)
 // except the multi-axis one, narrowed to what the user wants from FapTap.
-//   • Never loli, shota, furry / anthro / yiff, futa / futanari (tags, title
-//     or description), nor FapTap's furry tags that don't say so (scalie,
-//     knot, Krystal, Renamon …). Never monsters or feet (tags or title, as
-//     on EroScripts), favourites and picks included.
-//   • Animated, unless a favourite: an animation tag (animated, hentai,
-//     cgi, sfm, mmd …), no live-action tag (amateur, homemade, pornstar,
-//     onlyfans …), and no FapTap model / pornstar named in the title or
-//     listed as the video's performer (FapTap tags are free text; live
-//     videos get animation tags too). AI video counts. A music video (PMV /
-//     HMV / Cock Hero …) by a creator already in the library is taken too;
-//     a library folder named after a genre (`Cock Hero`, `PMV`) is no
-//     creator. Live action by a favourite creator or actress (title,
+// The values are in renderer/js/content-preferences.js.
+//   • Never excluded content (tags, title or description), nor FURRY_TAGS.
+//     Never monsters or feet (tags or title, as on EroScripts), favourites
+//     and picks included.
+//   • Animated, unless a favourite: an animation tag, no live-action tag,
+//     and no FapTap model / pornstar named in the title or listed as the
+//     video's performer (FapTap tags are free text; live videos get
+//     animation tags too). A music video by a creator already in the
+//     library is taken too; a library folder named after a genre (`Cock
+//     Hero`, `PMV`) is no creator. Live action by a favourite (title,
 //     uploader, performer or tag; scripts/scout-live.mjs) is taken; other
-//     live action waits for the live quota (one in every 20 downloads).
-//   • No audio roleplays (erotic audio / ASMR over a still or a loop).
-//   • Focus, except for favourites: at least two of PMV / HMV (Cock Hero
-//     and Fap Hero included), creampie, reverse cowgirl and VR, each by tag
-//     or title (VR also by FapTap's VR flag).
+//     live action waits for the live quota.
+//   • No audio roleplays.
+//   • Focus, except for favourites: at least FAPTAP_FOCUS_MIN of the
+//     FAPTAP_FOCUS themes.
 //   • Videos the user picks by id (`--add`) skip the animation and focus
 //     rules; the exclusions, content rules, audio, length and library
 //     checks stay.
-//   • Sex required (as on EroScripts: penetrative sex by tag or title, a
-//     blowjob / handjob / titjob alone isn't; picks too), at least two
-//     minutes long. `--fetch` and every scan drop saved candidates that now
-//     break the content rules (stillWanted).
-//   • Ranking as on EroScripts; 2D hentai only ranks 3 lower.
+//   • Sex required (as on EroScripts; picks too), at least MIN_VIDEO_MS
+//     long. `--fetch` and every scan drop saved candidates that now break
+//     the content rules (stillWanted).
+//   • Ranking as on EroScripts.
 //   • Skip videos the library or the EroScripts scout list already has.
-//   • Stream: the best Bunny HLS stream up to 4K (8K for VR); none below
-//     720p (1080p for VR).
+//   • Stream: the best Bunny HLS stream within the flat / VR height cap;
+//     none below MIN_STREAM_HEIGHT.
 //
 // Tags: FapTap's free-text tags become the tags the library already uses
 // (EroScripts slugs, which the auto categories and collections match):
@@ -51,9 +47,13 @@
 // `overwatch`.
 
 import {
-  ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, contentRuleBreak, hasExcludedText, hasFeet, hasMonster, isCreatorLabel, isHentaiOnly,
-  isSexual, normName, sameVideo, sceneTitle, scoreCandidate, titleArtist,
+  contentRuleBreak, hasExcludedText, hasFeet, hasMonster, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
+  scoreCandidate, titleArtist,
 } from './eroscripts-scout-lib.mjs';
+import {
+  ANIMATION_TAGS, AUDIO_TITLE, FAPTAP_ANIMATION_TAGS, FAPTAP_FOCUS, FAPTAP_FOCUS_MIN, FLAT_MAX_HEIGHT, FURRY_TAGS, LIVE_TAGS,
+  MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
+} from '../renderer/js/content-preferences.js';
 import { favouriteIn } from './scout-live.mjs';
 import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 
@@ -64,8 +64,6 @@ export const FAPTAP_RULES_VERSION = 5;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
-// Animation tags (after aliasing) the EroScripts list doesn't have.
-const FAPTAP_ANIMATION_TAGS = new Set(['2d', 'ai-video', 'iwara']);
 // FapTap spelling → the tag the library already uses.
 const TAG_ALIASES = Object.fromEntries(Object.entries({
   animation: ['animated', 'animated-cartoon', 'animated-porn', 'animation-sex', 'animation-w-sound'],
@@ -104,20 +102,6 @@ const TAG_ALIASES = Object.fromEntries(Object.entries({
   anal: ['anal-sex', 'ass-fuck', 'deep-anal'],
   cumshot: ['cumshots', 'big-cumshot', 'huge-cumshot', 'multiple-cumshots'],
 }).flatMap(([tag, spellings]) => spellings.map((s) => [s, tag])));
-// Audio roleplays: erotic audio / ASMR tags (`asmr-audio-roleplay`,
-// `erotic-audio-for-men`, `lewdlexiaudio`) and titles.
-const isAudioTag = (t) => t.includes('asmr') || t.includes('audio-roleplay') || (t.endsWith('audio') && t !== 'audio');
-const AUDIO_TITLE = /(?<![\p{L}\p{N}])(erotic audio|asmr|audio role ?play|f4m)(?![\p{L}\p{N}])/iu;
-// What the user wants from FapTap: two of PMV / HMV, creampie, reverse
-// cowgirl and VR.
-const FOCUS = [
-  { name: 'PMV / HMV', tags: ['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video'], title: /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu },
-  { name: 'creampie', tags: ['creampie', 'anal-creampie', 'oral-creampie'], title: /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])/iu },
-  { name: 'reverse cowgirl', tags: ['reverse-cowgirl'], title: /(?<![\p{L}\p{N}])reverse[ -]cowgirl(?![\p{L}\p{N}])/iu },
-  { name: 'VR', tags: ['vr'], title: /(?<![\p{L}\p{N}])vr(?![\p{L}\p{N}])/iu },
-];
-/** How many focus themes a video needs. */
-export const FOCUS_MIN = 2;
 
 /**
  * The focus themes a video has (`PMV / HMV`, `creampie`, `reverse cowgirl`,
@@ -126,24 +110,10 @@ export const FOCUS_MIN = 2;
  * @param {{tags?: string[], title?: string, vr?: boolean}} video
  */
 export function focusOf({ tags = [], title = '', vr = false }) {
-  return FOCUS.filter((f) => f.tags.some((t) => tags.includes(t)) || f.title.test(title) || (f.name === 'VR' && vr)).map((f) => f.name);
+  return FAPTAP_FOCUS.filter((f) => f.tags.some((t) => tags.includes(t)) || f.title.test(title) || (f.name === 'VR' && vr)).map((f) => f.name);
 }
 
-// Tags that say the video is live action.
-const LIVE_TAGS = new Set([
-  'real', 'real-sex', 'real-couple-homemade', 'real-orgasm', 'reality', 'homemade', 'pornstar', 'onlyfans', 'brazzers',
-  'blacked', 'chaturbate', 'webcam', 'verified-amateurs', 'jav', 'celebrity', 'tiktok', 'cosplay', 'anime-cosplay', 'kbj',
-  'egirl', 'sislovesme', 'dadcrush',
-]);
-// Furry content under tags that don't say furry / anthro / yiff.
-const FURRY_TAGS = new Set([
-  'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
-  'renamon-digimon', 'five-nights-at-freddy-s', 'roxanne-wolf-five-nights-at-freddy-s',
-]);
-// Bunny stream heights: the cap keeps files playable, the floor drops
-// preview-only uploads.
-const MAX_HEIGHT = { flat: 2160, vr: 4320 };
-const MIN_HEIGHT = { flat: 720, vr: 1080 };
+const MAX_HEIGHT = { flat: FLAT_MAX_HEIGHT, vr: VR_MAX_HEIGHT };
 // FapTap projection → the file-name suffix HereSphere / DeoVR (and the
 // backend's detect_vr_format) read. Flat and flat 3D get none.
 const PROJECTION_SUFFIX = {
@@ -296,10 +266,10 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   const live = !(tags.some((t) => ANIMATION_TAGS.has(t) || FAPTAP_ANIMATION_TAGS.has(t)) && !tags.some(isLive)
     && !livePerformers.some((p) => words.includes(` ${p} `)));
   const music = tags.some((t) => MUSIC_TAGS.has(t));
-  if (tags.some(isAudioTag) || AUDIO_TITLE.test(title)) return { ok: false, reason: 'audio-only' };
+  if (tags.some(isAudioRoleplayTag) || AUDIO_TITLE.test(title)) return { ok: false, reason: 'audio-only' };
   const vr = !!video.vr || tags.includes('vr');
   const focus = focusOf({ tags, title, vr });
-  if (!picked && !favourite && focus.length < FOCUS_MIN) return { ok: false, reason: 'off-focus' };
+  if (!picked && !favourite && focus.length < FAPTAP_FOCUS_MIN) return { ok: false, reason: 'off-focus' };
   if (!isSexual({ tags, title })) return { ok: false, reason: 'not-sexual' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
@@ -361,7 +331,7 @@ export function pickSource(sources, vr) {
     .map((s) => ({ ...s, height: parseInt(s?.quality, 10) }))
     .filter((s) => s.url && ['hls', 'mp4'].includes(String(s.format || 'hls').toLowerCase()) && s.height > 0 && s.height <= MAX_HEIGHT[kind])
     .sort((a, b) => b.height - a.height);
-  return usable[0] && usable[0].height >= MIN_HEIGHT[kind] ? usable[0] : null;
+  return usable[0] && usable[0].height >= MIN_STREAM_HEIGHT[kind] ? usable[0] : null;
 }
 
 /**
@@ -434,7 +404,7 @@ export function mergeCookies(jar, setCookies) {
 }
 
 // The focus rule on a saved candidate (lists saved under older rules may miss it); picks and favourites need none.
-const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FOCUS_MIN;
+const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FAPTAP_FOCUS_MIN;
 
 /** True when a saved candidate may still be downloaded: in focus, and within the content rules (no monsters, no feet, sex; picks too). */
 export const stillWanted = (c) => inFocus(c) && !contentRuleBreak(c);

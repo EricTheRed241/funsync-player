@@ -9,8 +9,9 @@
 // and that the user's own edits stick.
 import { describe, it, expect } from 'vitest';
 import {
-  artistOf, planArtistPlaylists, applyArtistPlaylists, ARTIST_PLAYLISTS_KEY, MIN_ARTIST_VIDEOS, FAVOURITES_PLAYLIST, FAVOURITES_STATE_KEY,
+  artistOf, planArtistPlaylists, applyArtistPlaylists, ARTIST_PLAYLISTS_KEY, FAVOURITES_STATE_KEY,
 } from '../../renderer/js/artist-playlists.js';
+import { MIN_ARTIST_VIDEOS, FAVOURITES_PLAYLIST } from '../../renderer/js/content-preferences.js';
 
 const SOURCES = ['/GVP/Multi-Axis', '/GVP/Multi Generated/', '/GVP/_incoming'];
 const vids = (root, artist, n, from = 1) => Array.from({ length: n }, (_, i) => `${root}/${artist}/Scene ${i + from}/Scene ${i + from}.mp4`);

@@ -26,6 +26,7 @@ Invariants:
 - Axis files are `<stem>.<axis>.funscript` (`AXIS_SUFFIXES` in `library-scan.js`). Generated companions are `<stem>.generated.<axis>.funscript`. **Hand-made axes always win**: generators skip folders with hand-made axes.
 - Paths stored in config must use the filesystem's own spelling (Unicode NFC/NFD), because playlists and the headset match scan paths byte for byte.
 - Skip AppleDouble sidecars (`._*`, see `isAppleDoubleSidecar`) in any directory walk.
+- **Video and script preferences live in `renderer/js/content-preferences.js` only** (exclusions, animated / live / sex rules, minimum length, feeds, single-axis exceptions, FapTap focus, favourites, live quota, ranking, quality caps, dedupe keep order, rating thresholds, artist-playlist threshold, auto categories and collections). Libraries import values from it; don't add rule constants elsewhere. Bump `RULES_VERSION` / `FAPTAP_RULES_VERSION` when a screening value changes. The one non-JS copy is `TOP_RATED_MIN` in `backend/services/vr_sections.py`.
 
 ## CLI pattern
 - Logic goes in `scripts/<name>-lib.mjs` (pure, injectable, tested). The CLI in `scripts/<name>.mjs` does IO only, parses flags, prints usage on `--help`, and uses exit codes 0 / 1 / 2 (rate limited or work left) / 3 (not logged in).

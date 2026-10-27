@@ -1,29 +1,26 @@
-// Triage rules, renderer side.
+// Triage rules, renderer side (thresholds in content-preferences.js).
 //
-// • Rated 2 stars or lower (a favourite never is): deleted from disk
-//   (electron/rejected-videos.js, through the `delete-rejected-video` IPC)
-//   and taken out of every playlist.
-// • Rated 2½–3½ stars: put in the Review playlist (made when needed).
-// • Rated 4 stars or more: taken out of Review.
+// • Rated DELETE_AT_OR_BELOW or lower (a favourite never is): deleted from
+//   disk (electron/rejected-videos.js, through the `delete-rejected-video`
+//   IPC) and taken out of every playlist.
+// • Rated between that and KEEP_FROM: put in the REVIEW_PLAYLIST (made when
+//   needed).
+// • Rated KEEP_FROM or more: taken out of Review.
 //
 // Runs at startup and whenever a rating changes, from the desktop, the web
 // remote or HereSphere (all go through the data service).
 
 import { getRatingEntry } from './ratings.js';
+import { DELETE_AT_OR_BELOW, KEEP_FROM, REVIEW_PLAYLIST } from './content-preferences.js';
 
-export const REVIEW_PLAYLIST = 'Review';
-/** Ratings at or below this are deleted. */
-export const DELETE_AT_OR_BELOW = 2;
-/** Ratings at or above this are kept (out of Review). */
-export const KEEP_FROM = 4;
 // Videos the startup sweep already put in Review, so taking one out by hand sticks.
 export const REVIEW_HISTORY_KEY = 'library.reviewAdded';
 
 const sameName = (a, b) => String(a || '').trim().toLocaleLowerCase() === b.toLocaleLowerCase();
 
 /**
- * What a rating means: 'delete' (rated, ≤ 2, not a favourite), 'review'
- * (between 2 and 4), 'keep' (≥ 4), or null (unrated).
+ * What a rating means: 'delete' (rated, ≤ DELETE_AT_OR_BELOW, not a
+ * favourite), 'review' (in between), 'keep' (≥ KEEP_FROM), or null (unrated).
  *
  * @param {{rating?: number, favorite?: boolean}|null} entry
  */

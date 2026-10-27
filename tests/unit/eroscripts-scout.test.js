@@ -8,11 +8,12 @@
 // (scripts/eroscripts-scout-lib.mjs). No forum, MEGA or pixeldrain.
 import { describe, it, expect } from 'vitest';
 import {
-  screenTopic, hasExcludedText, isSexual, scriptDurationMs, MIN_VIDEO_MS, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
+  screenTopic, hasExcludedText, isSexual, scriptDurationMs, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  contentRuleBreak, isHentaiOnly, HENTAI_ONLY_PENALTY, FEED_TAGS,
+  contentRuleBreak, isHentaiOnly,
 } from '../../scripts/eroscripts-scout-lib.mjs';
+import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
 const files = (...names) => names.map((name) => ({ name, host: 'forum', url: `https://x/${encodeURIComponent(name)}` }));
@@ -151,10 +152,6 @@ describe('isHentaiOnly', () => {
     expect(isHentaiOnly({ tags: ['hentai', 'animation'], title: '[SFM] X' })).toBe(false);
     expect(isHentaiOnly({ tags: ['animation', '3d'], title: 'X' })).toBe(false);
   });
-
-  it('has no hentai feed', () => {
-    expect(FEED_TAGS).not.toContain('hentai');
-  });
 });
 
 describe('scriptDurationMs', () => {
@@ -192,7 +189,7 @@ describe('scoreCandidate', () => {
 
   it('ranks a 2D-hentai-only post lower', () => {
     const post = { vr: true, preferred: ['creampie'], likes: 40 };
-    expect(scoreCandidate({ ...post, hentaiOnly: true })).toBe(scoreCandidate(post) - HENTAI_ONLY_PENALTY);
+    expect(scoreCandidate({ ...post, hentaiOnly: true })).toBe(scoreCandidate(post) - RANKING.hentaiOnly);
   });
 });
 

@@ -31,6 +31,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./scene-dedupe-lib.mjs');
+const { DEDUPE_KEEP_ORDER } = await import('../renderer/js/content-preferences.js');
 const { appRunning, readConfig, writeConfig } = await import('./discovery-io.mjs');
 const { defaultUserDataDir } = await import('./eroscripts-sync-lib.mjs');
 const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes, actionsHash, isStrokeScriptName } = await import('./handmade-scenes.mjs');
@@ -41,8 +42,7 @@ const run = promisify(execFile);
 
 const USAGE = `Usage: npm run dedupe:scenes -- [options]
 Find videos the library holds more than once (same length, same title, same picture or
-identical script) and keep one: EroScripts over FapTap, hand-made axes over generated,
-passthrough, within VR caps (8K, 60 fps), resolution, fps, faster script, bitrate.
+identical script) and keep one, by: ${DEDUPE_KEEP_ORDER.join(', ')}.
   --apply                delete the extra copies (default: only list them)
   --quiet                print only the summary line (used after scout downloads)
   --user-data <dir>      app data folder (default: the desktop app's)`;

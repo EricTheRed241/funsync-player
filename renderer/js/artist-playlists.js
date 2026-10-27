@@ -1,15 +1,15 @@
-// One playlist per artist with more than six videos, and per favourite
-// artist from the first video, plus one "Favourite artists" playlist.
+// One playlist per artist with at least MIN_ARTIST_VIDEOS videos, and per
+// favourite artist from the first video, plus one FAVOURITES_PLAYLIST (the
+// values are in content-preferences.js).
 //
 // The library is laid out `<source>/<artist>/<scene>/<video>` (the scout
 // names Discovery's artist folders the same way), so a video's artist is the
 // first folder under its source. After each library scan every artist folder
 // holding at least MIN_ARTIST_VIDEOS videos, across all sources, gets a
 // playlist named after it, and new videos of that artist join it. A
-// favourite (a name in `<userData>/scout-favourites.json`, the scouts' list,
-// matched to the folder name whatever its case or Unicode form) gets its
-// playlist from one video, and every favourite's videos also go into
-// FAVOURITES_PLAYLIST, grouped by artist.
+// favourite (FAVOURITES, matched to the folder name whatever its case or
+// Unicode form) gets its playlist from one video, and every favourite's
+// videos also go into FAVOURITES_PLAYLIST, grouped by artist.
 //
 // The user stays in charge, as with the EroScripts categories: an existing
 // playlist of the same name is reused, a playlist is made once (a deleted
@@ -18,13 +18,10 @@
 // [artistKey], added: {videoPath: [artistKey]}}`, where the combined
 // playlist's key is FAVOURITES_STATE_KEY (a colon can't be in a folder name).
 
+import { FAVOURITES_PLAYLIST, MIN_ARTIST_VIDEOS, NOT_AN_ARTIST } from './content-preferences.js';
+
 export const ARTIST_PLAYLISTS_KEY = 'library.artistPlaylists';
-/** "More than six videos". */
-export const MIN_ARTIST_VIDEOS = 7;
-export const FAVOURITES_PLAYLIST = 'Favourite artists';
 export const FAVOURITES_STATE_KEY = ':favourites';
-// Folders that hold videos of many artists.
-const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'others', 'new folder', 'cock hero', 'fap hero', 'pmv', 'hmv', 'compilation', 'compilations']);
 
 const fold = (s) => String(s || '').normalize('NFC').trim().toLocaleLowerCase();
 const baseName = (p) => p.split(/[\\/]/).pop() || p;
@@ -112,7 +109,7 @@ export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlis
  *
  * @param {object} data DataService (get, set, getPlaylists, addPlaylist, addVideosToPlaylist)
  * @param {string[]} videoPaths
- * @param {string[]} [favourites] favourite artist names (`get-scout-favourites` IPC)
+ * @param {string[]} [favourites] favourite artist names (FAVOURITES in content-preferences.js)
  * @returns {Promise<{created: string[], extended: number}>} names of new playlists, count of grown ones
  */
 export async function applyArtistPlaylists(data, videoPaths, favourites = []) {

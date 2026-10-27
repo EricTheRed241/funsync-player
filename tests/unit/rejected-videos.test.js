@@ -11,7 +11,8 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sweepRejected, syncReview, ratingVerdict, REVIEW_PLAYLIST } from '../../renderer/js/reject-rule.js';
+import { sweepRejected, syncReview, ratingVerdict } from '../../renderer/js/reject-rule.js';
+import { REVIEW_PLAYLIST } from '../../renderer/js/content-preferences.js';
 
 const require = createRequire(import.meta.url);
 const { deleteRejectedVideo, readRejected, recordRejection, faptapRejectionKey } = require('../../electron/rejected-videos.js');
