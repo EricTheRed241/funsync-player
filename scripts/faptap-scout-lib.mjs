@@ -45,7 +45,8 @@
 // `overwatch`.
 
 import {
-  ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, hasExcludedText, isCreatorLabel, isSexual, normName, sameVideo, scoreCandidate,
+  ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, hasExcludedText, isCreatorLabel, isSexual, normName, sameVideo, sceneTitle,
+  scoreCandidate, titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import { favouriteIn } from './scout-live.mjs';
 
@@ -176,6 +177,83 @@ const isLive = (t) => LIVE_TAGS.has(t) || t === 'amateur' || t.startsWith('amate
 /** HereSphere / DeoVR suffix for a FapTap projection; '' for flat video. */
 export function vrSuffix(projection) {
   return PROJECTION_SUFFIX[projection] || '';
+}
+
+/**
+ * FapTap's thumbnail for a video as an absolute URL: Bunny's frame
+ * (`https://vz-….b-cdn.net/…/thumbnail.jpg`) or an uploaded one
+ * (`thumbnails/<id>.webp`, served under `/api/assets/`). null when none.
+ */
+export function thumbnailUrl(video) {
+  const t = String(video?.thumbnail_url || '').trim();
+  if (!t) return null;
+  if (/^https:\/\//i.test(t)) return t;
+  return /^[\w./-]+$/.test(t) && !t.includes('..') ? `${FAPTAP_ORIGIN}/api/assets/${t.replace(/^\/+/, '')}` : null;
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Performers as `{name, category}` (a bare name counts as unknown category).
+const people = (performers) => (performers || [])
+  .map((p) => (typeof p === 'string' ? { name: p.trim(), category: '' } : { name: String(p?.name ?? '').trim(), category: String(p?.category ?? '') }))
+  .filter((p) => p.name);
+
+/**
+ * Who a FapTap scene is filed under (`<artist>/<Artist - Title>`): the
+ * person who made or stars in the video, not the scripter who uploaded it.
+ * In order: a favourite named in the title, performers or tags; the title's
+ * own artist (leading `[Name]`, `(by Name)`, trailing `by Name`); a library
+ * creator named in the title or listed as performer; a performer FapTap
+ * calls a model or pornstar (other performers are often characters); the
+ * uploader.
+ *
+ * @param {{title: string, uploader?: string, performers?: ({name: string, category?: string}|string)[], tags?: string[]}} video
+ * @param {{favourites?: string[], creatorNames?: string[]}} [ctx] creatorNames: library creator folders as spelled
+ */
+export function faptapArtist({ title, uploader, performers, tags = [] }, { favourites = [], creatorNames = [] } = {}) {
+  const cast = people(performers);
+  const favourite = favouriteIn([title, ...cast.map((p) => p.name), ...tags], favourites);
+  if (favourite) return favourite;
+  const by = String(title || '').match(/\(\s*by\s+([^()]+?)\s*\)/i)?.[1];
+  // `[Script Overhaul]`, `[Extended]` … label the upload, not a person.
+  const own = [titleArtist(title), by].find((a) => a && !/script|overhaul|remake|remaster|edit|version|extended|update|request/i.test(a));
+  if (own) return own;
+  const creators = creatorNames.filter((c) => c.length > 3 && !isCreatorLabel(c));
+  const words = ` ${normName(title)} `;
+  const known = creators.find((c) => words.includes(` ${normName(c)} `))
+    || creators.find((c) => cast.some((p) => normName(p.name) === normName(c)));
+  return known || cast.find((p) => LIVE_CATEGORIES.has(p.category))?.name || String(uploader || '').trim() || 'unknown';
+}
+
+/**
+ * The scene's creator folder and file stem, `Artist - Title (metadata)` as
+ * for EroScripts posts: the artist (faptapArtist) leads, its mentions leave
+ * the title, a leading bracket naming someone else becomes metadata, and a
+ * VR projection suffix ends the stem.
+ *
+ * @param {{title: string, uploader?: string, performers?: object[], tags?: string[], vr?: boolean, projection?: string}} video
+ * @param {{favourites?: string[], creatorNames?: string[]}} [ctx]
+ * @returns {{artist: string, creator: string, stem: string}}
+ */
+export function faptapSceneName(video, ctx = {}) {
+  const artist = faptapArtist(video, ctx);
+  const a = escapeRe(artist);
+  let title = String(video.title || '')
+    .replace(new RegExp(`[\\[(（【]\\s*(?:by\\s+)?${a}\\s*[\\])）】]`, 'giu'), ' ')
+    .replace(new RegExp(`(?<![\\p{L}\\p{N}])(?:by\\s+)?${a}(?![\\p{L}\\p{N}])`, 'giu'), ' ')
+    .replace(/\s+/g, ' ').trim();
+  // A leading `[Someone]` that isn't the artist moves to the metadata.
+  const lead = title.match(/^[\[(（【]([^\])）】]+)[\])）】]\s*/);
+  if (lead) title = `${title.slice(lead[0].length)} (${lead[1].trim()})`;
+  title = title.replace(/^[\s\-–—|:,]+|[\s\-–—|:,]+$/g, '');
+  // Nothing left but brackets (`THEOBROBINE (Fap Hero)`): their text is the title.
+  if (!title.replace(/[\[(（【][^\])）】]*[\])）】]/g, '').replace(/[^\p{L}\p{N}]/gu, '')) {
+    title = title.replace(/[\[(（【\])）】]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  title ||= String(video.title || '');
+  const suffix = video.vr ? vrSuffix(video.projection) : '';
+  const stem = sceneTitle({ title: `[${artist}] ${title}`, author: artist, video: `${title}${suffix}.mp4` });
+  const creator = artist.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim() || 'unknown';
+  return { artist, creator, stem };
 }
 
 /**

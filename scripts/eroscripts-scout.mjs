@@ -37,7 +37,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, flushPlaylist, incomingDir, librarySources, libraryState, onDiskPath, readConfig, removeIfEmpty, walk, writeConfig } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const require = createRequire(import.meta.url);
@@ -103,15 +103,6 @@ function parseArgs(argv) {
   if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   return opts;
-}
-
-// ── App state ───────────────────────────────────────────────────────────
-
-/** Rename `from` to `to`, with its AppleDouble `._` sidecar if the volume keeps one. */
-function renameWithSidecar(from, to) {
-  fs.renameSync(from, to);
-  const side = (p) => path.join(path.dirname(p), `._${path.basename(p)}`);
-  if (fs.existsSync(side(from)) && !fs.existsSync(side(to))) fs.renameSync(side(from), side(to));
 }
 
 // ── Hosts ───────────────────────────────────────────────────────────────
@@ -474,45 +465,7 @@ function retitle(opts, { userData, incoming }) {
   for (const m of moves) console.log(`${rel(m.from)}\n  → ${rel(m.to)}`);
   console.log(`${moves.length} of ${scenes.length} scenes ${opts.dryRun ? 'would be renamed' : 'to rename'}`);
   if (opts.dryRun || !moves.length) return 0;
-
-  const done = [];
-  let failed = 0;
-  for (const m of moves) {
-    const renamed = [];
-    try {
-      for (const f of m.files) {
-        renameWithSidecar(path.join(m.from, f.from), path.join(m.from, f.to));
-        renamed.push(f);
-      }
-      if (path.resolve(m.to) !== path.resolve(m.from)) {
-        fs.mkdirSync(path.dirname(m.to), { recursive: true });
-        renameWithSidecar(m.from, m.to);
-      }
-    } catch (err) {
-      for (const f of renamed.reverse()) {
-        try { renameWithSidecar(path.join(m.from, f.to), path.join(m.from, f.from)); } catch { /* reported below */ }
-      }
-      console.log(`✗ ${rel(m.from)}: ${err.message}`);
-      failed++;
-      continue;
-    }
-    const sidecar = path.join(m.to, 'eroscripts.json');
-    fs.writeFileSync(sidecar, JSON.stringify({ ...JSON.parse(fs.readFileSync(sidecar, 'utf8')), file: m.video }, null, 1));
-    removeIfEmpty(path.dirname(m.from));
-    const to = onDiskPath(m.to);
-    done.push({ from: m.from, to, files: m.files.map((f) => ({ from: f.from, to: path.basename(onDiskPath(path.join(to, f.to))) })) });
-  }
-
-  if (done.length) {
-    const { value, changed } = lib.remapPaths(readConfig(userData), done);
-    writeConfig(userData, value);
-    const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
-    if (fs.existsSync(pendingFile)) {
-      fs.writeFileSync(pendingFile, JSON.stringify(lib.remapPaths(JSON.parse(fs.readFileSync(pendingFile, 'utf8')), done).value, null, 1));
-    }
-    console.log(`Renamed ${done.length} scenes; ${changed} paths updated in config.json`);
-  }
-  return failed ? 1 : 0;
+  return applyMoves(moves, { userData, incoming, sidecar: 'eroscripts.json' });
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
