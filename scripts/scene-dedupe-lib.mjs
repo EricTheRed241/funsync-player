@@ -10,20 +10,14 @@
 // title's words all appear in the longer one, so `Rina` never matches
 // `Yixuan`), and either their main scripts are identical or their frames are.
 //
-// Which one stays (the first difference decides):
-//   1. EroScripts or a hand-made library scene over FapTap
-//   2. hand-made axes over generated ones
-//   3. passthrough over no passthrough
-//   4. fewer breaches of the VR playback caps (≤ 8K, ≤ 60 fps)
-//   5. more pixels, then more fps
-//   6. the faster main script (average speed)
-//   7. the higher bitrate
+// Which one stays: DEDUPE_KEEP_ORDER in renderer/js/content-preferences.js
+// (the first difference decides).
+
+import { DEDUPE_KEEP_ORDER, VR_MAX_FPS, VR_MAX_HEIGHT } from '../renderer/js/content-preferences.js';
 
 export const DURATION_TOLERANCE_S = 1.5;
 /** Mean grey-level difference (0–255) under which two videos' frames are the same picture. */
 export const SAME_FRAMES_MAX = 10;
-export const VR_MAX_HEIGHT = 4320;
-export const VR_MAX_FPS = 60;
 
 // Words that describe an encode or a cut, not what the video shows.
 const QUALITY_WORDS = new Set([
@@ -87,17 +81,22 @@ export function scriptSpeed(actions) {
 // How many VR playback caps a video breaks (flat videos have none).
 const capBreaches = (s) => (projectionOf(s).vr ? ((s.height || 0) > VR_MAX_HEIGHT) + (Math.round(s.fps || 0) > VR_MAX_FPS) : 0);
 
-// Keep order: earlier keys decide first; higher is better.
-const KEYS = [
-  ['EroScripts over FapTap', (s) => (s.source === 'faptap' ? 0 : 1)],
-  ['hand-made axes', (s) => (s.handmadeAxes > 0 ? 1 : 0)],
-  ['passthrough', (s) => (s.passthrough ? 1 : 0)],
-  ['within VR caps', (s) => -capBreaches(s)],
-  ['higher resolution', (s) => (s.width || 0) * (s.height || 0)],
-  ['higher fps', (s) => Math.round(s.fps || 0)],
-  ['faster script', (s) => Math.round((s.speed || 0) * 10) / 10],
-  ['higher bitrate', (s) => s.bitrate || 0],
-];
+// Each keep-order rule as a key; higher is better.
+const KEY_OF = {
+  'EroScripts over FapTap': (s) => (s.source === 'faptap' ? 0 : 1),
+  'hand-made axes': (s) => (s.handmadeAxes > 0 ? 1 : 0),
+  passthrough: (s) => (s.passthrough ? 1 : 0),
+  'within VR caps': (s) => -capBreaches(s),
+  'higher resolution': (s) => (s.width || 0) * (s.height || 0),
+  'higher fps': (s) => Math.round(s.fps || 0),
+  'faster script': (s) => Math.round((s.speed || 0) * 10) / 10,
+  'higher bitrate': (s) => s.bitrate || 0,
+};
+// Keep order: earlier keys decide first.
+const KEYS = DEDUPE_KEEP_ORDER.map((reason) => {
+  if (!KEY_OF[reason]) throw new Error(`DEDUPE_KEEP_ORDER: unknown rule "${reason}"`);
+  return [reason, KEY_OF[reason]];
+});
 
 /**
  * Order two scenes: negative when `a` should stay. Also returns why.

@@ -2,19 +2,15 @@
 // scripts/faptap-scout.mjs).
 //
 // The scouts take animated scenes. Live action gets in two ways:
-//   • by a favourite: a creator or actress the user likes and already has in
-//     the library, listed in `<userData>/scout-favourites.json`
-//     (`{ "favourites": ["Noodledude", "Candy Love", …] }`, created with
-//     DEFAULT_FAVOURITES on first use and edited by hand);
+//   • by a favourite: a creator or actress the user likes (FAVOURITES in
+//     renderer/js/content-preferences.js);
 //   • on the quota: anyone else, one in every LIVE_QUOTA_EVERY downloads,
 //     to discover new live action. Every scene either scout downloads counts;
 //     `<userData>/scout-live-quota.json` holds `{ downloads, live }`.
 
 import fs from 'node:fs';
 import path from 'node:path';
-
-export const LIVE_QUOTA_EVERY = 20;
-export const DEFAULT_FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle Mocap', 'Noodledude', 'NoFaceGirl', 'Candy Love'];
+import { LIVE_QUOTA_EVERY } from '../renderer/js/content-preferences.js';
 
 // Letters and digits, single-spaced, like eroscripts-scout-lib's normName
 // (that module imports this one).
@@ -61,25 +57,12 @@ export function countDownload(quota, quotaLive) {
 
 // ── Files ───────────────────────────────────────────────────────────────
 
-const favouritesPath = (userData) => path.join(userData, 'scout-favourites.json');
 const quotaPath = (userData) => path.join(userData, 'scout-live-quota.json');
 
 function writeJson(file, value) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 1)}\n`);
   fs.renameSync(tmp, file);
-}
-
-/** The favourites list; written with the defaults when missing. */
-export function readFavourites(userData) {
-  try {
-    const list = JSON.parse(fs.readFileSync(favouritesPath(userData), 'utf8'))?.favourites;
-    if (Array.isArray(list)) return list.filter((s) => typeof s === 'string' && s.trim());
-  } catch (err) {
-    if (err.code !== 'ENOENT') throw new Error(`${favouritesPath(userData)}: ${err.message}`);
-  }
-  writeJson(favouritesPath(userData), { favourites: DEFAULT_FAVOURITES });
-  return [...DEFAULT_FAVOURITES];
 }
 
 export function readQuota(userData) {

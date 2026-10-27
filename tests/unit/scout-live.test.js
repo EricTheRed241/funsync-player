@@ -9,9 +9,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
-import {
-  favouriteIn, liveAllowed, countDownload, readFavourites, readQuota, recordDownload, LIVE_QUOTA_EVERY, DEFAULT_FAVOURITES,
-} from '../../scripts/scout-live.mjs';
+import { favouriteIn, liveAllowed, countDownload, readQuota, recordDownload } from '../../scripts/scout-live.mjs';
+import { LIVE_QUOTA_EVERY } from '../../renderer/js/content-preferences.js';
 
 describe('favouriteIn', () => {
   const favourites = ['Candy Love', 'NoFaceGirl', 'ScyllaHMV', 'Noodledude'];
@@ -52,12 +51,6 @@ describe('files', () => {
   let dir;
   beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-live-')); });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
-
-  it('creates the favourites file with the defaults, then reads what the user wrote', () => {
-    expect(readFavourites(dir)).toEqual(DEFAULT_FAVOURITES);
-    fs.writeFileSync(path.join(dir, 'scout-favourites.json'), JSON.stringify({ favourites: ['Only Her', ''] }));
-    expect(readFavourites(dir)).toEqual(['Only Her']);
-  });
 
   it('counts downloads from both scouts in one file', () => {
     recordDownload(dir, false);

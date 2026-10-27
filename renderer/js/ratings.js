@@ -15,11 +15,10 @@
 // testable on their own.
 
 import { planAssociationRehome } from './association-rehome.js';
+import { TOP_RATED_MIN } from './content-preferences.js';
 
 export const RATING_MAX = 5;
 export const RATING_STEP = 0.5;
-/** "Top rated" threshold shared with the headset section (vr_sections.py). */
-export const TOP_RATED_MIN = 4;
 
 /**
  * `value` as a valid rating, or null when it isn't one.

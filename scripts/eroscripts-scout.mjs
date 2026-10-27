@@ -42,6 +42,7 @@ const lib = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, applyMoves, dedupeAfterFetch, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
+const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -49,9 +50,9 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
 Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.json):
   --pages N              most pages of new posts on the multi-axis feed (30 posts each, default 6)
-  --anim-pages N         most pages of new posts on each animation feed (animation, 3d, vam, sfm, mmd; default 3)
+  --anim-pages N         most pages of new posts on each animation feed (${prefs.FEED_TAGS.filter((f) => f !== 'multi-axis').join(', ')}; default 3)
   --backfill N           older pages to read per feed, continuing from the last run (default 2; 0 = none)
-  --feeds a,b            only these feeds (multi-axis, animation, 3d, vam, sfm, mmd; default all)
+  --feeds a,b            only these feeds (${prefs.FEED_TAGS.join(', ')}; default all)
   --since YYYY-MM-DD     backfill only down to posts last active on that date; a feed that gets there
                          isn't backfilled again unless a later run passes an earlier date
   --full                 judge every listed post again, not only new ones
@@ -63,7 +64,7 @@ Pick:
                          single-axis scenes get generated axes)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
-                         skips videos under 2 minutes, scenes rejected in the app (2 stars or lower)
+                         skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids
   --passes N             repeat the queue until no failures, at most N times (default 1)
@@ -106,8 +107,8 @@ function parseArgs(argv) {
     }
   }
   for (const k of ['pages', 'animPages', 'backfill', 'top', 'passes']) if (!(opts[k] >= 0)) throw new Error(`--${k} must be 0 or more`);
-  const unknownFeed = opts.feeds?.find((f) => !lib.FEED_TAGS.includes(f));
-  if (unknownFeed !== undefined) throw new Error(`Unknown feed "${unknownFeed}" (feeds: ${lib.FEED_TAGS.join(', ')})`);
+  const unknownFeed = opts.feeds?.find((f) => !prefs.FEED_TAGS.includes(f));
+  if (unknownFeed !== undefined) throw new Error(`Unknown feed "${unknownFeed}" (feeds: ${prefs.FEED_TAGS.join(', ')})`);
   if (opts.feeds && !opts.feeds.length) throw new Error('--feeds needs at least one feed');
   if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
@@ -204,12 +205,12 @@ function scoutContext(config, userData, incoming) {
   // a short video or an extra copy of one (dedupe) doesn't turn down the post.
   const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.reason !== 'duplicate' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);
-  return { library, knownTopics, turnedDown, favourites: live.readFavourites(userData) };
+  return { library, knownTopics, turnedDown, favourites: prefs.FAVOURITES };
 }
 
 /** A judged post as a saved candidate. */
 function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, picked = false }) {
-  const preferred = t.tags.filter((x) => lib.PREFERRED_TAGS.has(x));
+  const preferred = t.tags.filter((x) => prefs.PREFERRED_TAGS.has(x));
   const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
   return {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
@@ -232,7 +233,7 @@ async function scan(opts, { api, userData, config, incoming }) {
     const topics = new Map();
     let pages = 0;
     const carried = lib.pendingTopics(state).length;
-    for (const tag of opts.feeds || lib.FEED_TAGS) {
+    for (const tag of opts.feeds || prefs.FEED_TAGS) {
       const maxNew = tag === 'multi-axis' ? opts.pages : opts.animPages;
       const r = await lib.listFeed(state, tag, feedPage(api, pacer), { maxNew, backfill: opts.backfill, full: opts.full, since: opts.since, keepPending: true });
       pages += r.pagesRead;
@@ -303,7 +304,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   });
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
   const feedStatus = (f) => (f?.exhausted ? 'done' : f?.doneSince ? `done to ${f.doneSince} (p${f.backfillPage})` : `p${f?.backfillPage ?? 0}`);
-  const backfill = lib.FEED_TAGS.map((tag) => `${tag} ${feedStatus(state.feeds[tag])}`).join(', ');
+  const backfill = prefs.FEED_TAGS.map((tag) => `${tag} ${feedStatus(state.feeds[tag])}`).join(', ');
   const left = Object.keys(state.pending || {}).length;
   console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${multi} multi-axis, ${candidates.length - multi} single-axis), ${candidates.reduce((n, c) => n + c.scenes.length, 0)} videos, ${candidates.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
   console.log(`Backfill: ${backfill} · ${Object.keys(state.topics).length} posts judged so far${left ? ` · ${left} listed, not judged yet (next run goes on with them)` : ''}`);
@@ -458,7 +459,7 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging);
         let lengthMs = null;
         try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
-        if (lengthMs !== null && lengthMs < lib.MIN_VIDEO_MS) {
+        if (lengthMs !== null && lengthMs < prefs.MIN_VIDEO_MS) {
           for (const f of sc.scripts) fs.rmSync(path.join(dir, lib.scriptFileName(stem, f.axis)), { force: true });
           removeIfEmpty(dir);
           removeIfEmpty(path.dirname(dir));
@@ -515,7 +516,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
     const r = await fetchPass(queue, { api, userData, incoming, staging });
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${live.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (!r.failed) return 0;
     if (pass < opts.passes) {

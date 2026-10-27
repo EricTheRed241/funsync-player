@@ -5,98 +5,49 @@
 // Logic for `npm run eroscripts:scout` (scripts/eroscripts-scout.mjs), kept
 // apart from the CLI so it can be tested without a forum, MEGA or pixeldrain.
 //
-// Rules
+// Rules (the tags, words, lengths, caps and weights are in
+// renderer/js/content-preferences.js; this module applies them)
 //   • Free Scripts only (the CLI lists that category).
-//   • Never: loli, shota, furry / anthro / yiff, futa / futanari (tags, title
-//     or first post). Scenes already in the library stay.
-//   • Never monsters (monster / tentacle / werewolf / horse / orc / goblin /
-//     alien … tags, those words in the title, `X WW` for werewolf) nor feet
-//     (footjob / feet / soles / toes … tags or title words), favourites and
-//     posts picked by id (`--add`) included. Succubi, demons and elves stay.
-//   • Animated: a tag like animation / 3d / hentai / vam / sfm / mmd and no
-//     `real` tag. AI-generated video counts. A music post (PMV / HMV / Cock
-//     Hero …) by a creator already in the library is accepted as well. Live
-//     action by a favourite creator or actress (title, tags or poster;
-//     scripts/scout-live.mjs) is taken; other live action waits for the
-//     live quota (one in every 20 Discovery downloads, both scouts).
-//   • Sex required, picks included: a penetrative sex tag (vaginal, anal,
-//     riding, doggy, missionary, creampie, threesome …) or sex word in the
-//     title. Blowjob / handjob / titjob / paizuri alone don't count. A music
-//     video (PMV / HMV / Cock Hero / Fap Hero) counts unless it's a dance or
-//     its title is about a non-sex act (`Blowjob PMV`, `JOI`). Never a post
-//     tagged sfw / non-porn. `--fetch` and every scan drop saved candidates
-//     that now break these content rules (contentRuleBreak).
-//   • Videos shorter than two minutes (by the main script) aren't downloaded;
-//     shorter scenes fetched under the old one-minute rule stay.
-//   • Multi-axis scenes only. A single-axis scene is taken only when the post
-//     is VR, has creampie, and is by a creator already in the library or a
-//     PMV / HMV / Cock Hero / Fap Hero.
-//   • Ranking: VR +3, music +2, creator already in the library +2,
-//     creampie / riding +2 (+0.5 for both), multi-axis +1, likes up to +3;
-//     2D hentai only (hentai / 2d / anime, nothing 3D) −3. There's no
-//     hentai feed; hentai comes in through the other feeds.
+//   • Never excluded content (tags, title or first post). Scenes already in
+//     the library stay.
+//   • Never monsters nor feet (tags or title words), favourites and posts
+//     picked by id (`--add`) included.
+//   • Animated: an animation tag and no `real` tag. A music post by a
+//     creator already in the library is accepted as well. Live action by a
+//     favourite (title, tags or poster; scripts/scout-live.mjs) is taken;
+//     other live action waits for the live quota (both scouts).
+//   • Sex required, picks included: a penetrative sex tag or sex word in the
+//     title. A music video counts unless it's a dance or its title is about
+//     a non-sex act. Never a post tagged sfw / non-porn. `--fetch` and every
+//     scan drop saved candidates that now break these content rules
+//     (contentRuleBreak).
+//   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
+//     downloaded; shorter scenes fetched under older rules stay.
+//   • Multi-axis scenes only, except the single-axis cases `takesSingleAxis`
+//     allows.
+//   • Ranking: RANKING weights (VR, music, library creator, preferred acts,
+//     multi-axis, likes; 2D hentai only ranks lower). There's no hentai
+//     feed; hentai comes in through the other feeds.
 //   • Skip posts the library already links and scenes whose video is
 //     already in the library.
-//   • Video variant: VR ≤ 8K and ≤ 60 fps, low bitrate when offered;
-//     flat ≤ 4K. Previews and trailers never.
+//   • Video variant: within the VR caps, low bitrate when offered; flat
+//     within its cap. Previews and trailers never.
 //   • Single-axis scenes get generated twist / roll / pitch companions after
 //     download (scripts/upgrade-multi-axis.mjs); hand-made axes always win.
 
 import path from 'node:path';
 import { favouriteIn } from './scout-live.mjs';
 import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
+import {
+  ANIMATION_TAGS, DANCE_TITLE, EXCLUDED_TEXT, FEET_TAGS, FEET_TITLE, FLAT_HENTAI_TAGS, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MONSTER_TAGS,
+  MONSTER_TITLE, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, RANKING, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK,
+  SFW_TAGS, SINGLE_AXIS_CREAMPIE_TITLE, THREE_D_TAGS, THREE_D_TITLE, VR_MAX_FPS, VR_MAX_HEIGHT, WEREWOLF_TOKEN,
+} from '../renderer/js/content-preferences.js';
 
-export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
-export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
-export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
-// Matched against tags, titles and first posts as whole words, so hyphenated
-// tags (`futa-on-male`) match and `Futaba` doesn't.
-const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
-// Tags that say a post has no porn in it.
-const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 'non-nude']);
-// Monsters (tags and title words): never, favourites and picks included.
-// Succubi, demon girls and elves aren't monsters.
-const MONSTER_TAGS = new Set([
-  'monster', 'monsters', 'monstergirls', 'monstergirl', 'monster-girl', 'monster-girls', 'tentacle', 'tentacles', 'tentacle-sex',
-  'tentacle-monster', 'werewolf', 'werewolves', 'horse', 'horse-cock', 'horsecock', 'bestiality', 'animated-bestiality', 'zoophilia',
-  'orc', 'orcs', 'goblin', 'goblins', 'minotaur', 'ogre', 'troll', 'alien', 'aliens', 'beast', 'slime-girl', 'knot', 'knotted', 'knotting',
-]);
-const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
-// `Mercy X WW`: Solace2K and Rekin3D's short for werewolf, a standalone capital token.
-const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
-// Feet (tags and title words): never.
-const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
-const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
-// Tags that name penetrative sex. Blowjob, handjob and titjob don't count alone.
-const SEX_TAGS = new Set([
-  'sex', 'vaginal', 'vaginal-sex', 'anal', 'anal-sex', 'riding', 'cowgirl', 'reverse-cowgirl', 'doggy', 'doggystyle', 'doggy-style',
-  'standing-doggy', 'missionary', 'mating-press', 'pronebone', 'prone-bone', 'spooning', 'creampie', 'anal-creampie', 'cum-inside',
-  'cum-in-pussy', 'cum-in-ass', 'double-penetration', 'penetration', 'intercourse', 'threesome', 'foursome', 'fivesome', 'gangbang',
-  'orgy', 'group-sex', 'breeding', 'nakadashi',
-]);
-// Acts on their own that aren't sex (`Face Fuck PMV`, `Titjob HMV`, `JOI`);
-// NON_SEX_PHRASES go before sex words are looked for.
-const NON_SEX_PHRASES = /(?<![\p{L}\p{N}])(?:(?:face|throat|mouth|skull|tit|titty|boob|thigh|armpit|hand|foot|feet)[ -]?fuck\w*|oral[ -]?sex)/giu;
-const NON_SEX_ACT_TITLE = /(?<![\p{L}\p{N}])(blowjobs?|blow ?job|bj|handjobs?|hand ?job|hj|titjobs?|tit ?job|titfuck\w*|tittyfuck\w*|boobjobs?|paizuri|joi|deepthroat\w*|(?:face|throat|mouth|skull) ?fuck\w*|fellatio|oral)(?![\p{L}\p{N}])|フェラ|パイズリ|手コキ|口交|乳交/iu;
-const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck|fucks|fucked|fucking|riding|rides?|cowgirl|doggy\w*|missionary|creampies?|anal|vaginal|mating ?press|prone ?bone|intercourse|penetration|gangbang\w*|threesome|foursome|orgy|orgies|nakadashi|breeding|cum ?inside)(?![\p{L}\p{N}])/iu;
-// Scripts without spaces between words.
-const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|正常位|做爱|性爱|骑乘|后入|中出|内射|섹스|내사/u;
-// A title that says the video is a dance counts like the `dance` tag.
-const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダンス|踊り|舞蹈|跳舞|댄스/iu;
-// 2D hentai ranks lower: a post whose animation tags are only these, with no
-// 3D tag and no 3D / SFM / VaM / MMD in its title.
-const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
-const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);
-const THREE_D_TITLE = /(?<![\p{L}\p{N}])(3d|sfm|vam|mmd)(?![\p{L}\p{N}])/iu;
-/** Score taken off a 2D-hentai-only post. */
-export const HENTAI_ONLY_PENALTY = 3;
-// Shortest video worth downloading, by its main script's last action.
-export const MIN_VIDEO_MS = 120_000;
 /** The minimum as words for messages: `2 min`. */
 export const MIN_VIDEO_LABEL = `${MIN_VIDEO_MS / 60_000} min`;
 
 export const DISCOVERY_NAME = 'Discovery';
-export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm', 'mmd'];
 
 const VIDEO_EXT_RE = /\.(mp4|m4v|mkv|webm|mov)$/i;
 const SCRIPT_AXES = new Set(['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve']);
@@ -250,8 +201,6 @@ export function liveOnQuota({ live, favourite, music, artist }) {
   return !!live && !favourite && !(music && artist);
 }
 
-const CREAMPIE_TITLE = /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])|中出し|内射/iu;
-
 /**
  * Whether a post's single-axis scenes may be downloaded: only VR + creampie
  * + (a creator already in the library, or a PMV / HMV). Multi-axis scenes
@@ -260,7 +209,7 @@ const CREAMPIE_TITLE = /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])|中出し|�
  * @param {{tags?: string[], title?: string, vr?: boolean, artistInLibrary?: boolean}} post
  */
 export function takesSingleAxis({ tags = [], title = '', vr = false, artistInLibrary = false }) {
-  const creampie = tags.some((t) => t === 'creampie' || t.endsWith('-creampie')) || CREAMPIE_TITLE.test(title);
+  const creampie = tags.some((t) => t === 'creampie' || t.endsWith('-creampie')) || SINGLE_AXIS_CREAMPIE_TITLE.test(title);
   const pmv = tags.some((t) => PMV_TAGS.has(t)) || PMV_TITLE.test(title);
   return vr && creampie && (artistInLibrary || pmv);
 }
@@ -274,10 +223,6 @@ export function takesSingleAxis({ tags = [], title = '', vr = false, artistInLib
 export function wantedScenes(post) {
   return takesSingleAxis(post) ? post.scenes : post.scenes.filter((sc) => sc.axes.length);
 }
-
-// Music videos: the single-axis exception below, and sex unless a dance or a non-sex act.
-const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
-const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu;
 
 /**
  * True when a post shows penetrative sex, by its tags and title: a sex tag
@@ -303,7 +248,7 @@ export function isSexual({ tags = [], title = '' }) {
 /**
  * True for 2D hentai: animation tags only hentai / 2d / anime, no 3D tag
  * (3d, sfm, vam, mmd, cgi, blender, koikatsu …) and no 3D / SFM / VaM / MMD
- * in the title. Such posts rank lower (HENTAI_ONLY_PENALTY).
+ * in the title. Such posts rank lower (RANKING.hentaiOnly).
  *
  * @param {{tags?: string[], title?: string}} post
  */
@@ -319,16 +264,19 @@ export function scriptDurationMs(script) {
 
 /** Ranking score; higher downloads first. */
 export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false }) {
-  return (vr ? 3 : 0)
-    + (music ? 2 : 0)
-    + (artistInLibrary ? 2 : 0)
-    + (preferred.length ? 2 + 0.5 * (preferred.length - 1) : 0)
-    + (multiAxis ? 1 : 0)
-    + Math.min(3, likes / 20)
-    - (hentaiOnly ? HENTAI_ONLY_PENALTY : 0);
+  return (vr ? RANKING.vr : 0)
+    + (music ? RANKING.music : 0)
+    + (artistInLibrary ? RANKING.artistInLibrary : 0)
+    + (preferred.length ? RANKING.preferred + RANKING.preferredExtra * (preferred.length - 1) : 0)
+    + (multiAxis ? RANKING.multiAxis : 0)
+    + Math.min(RANKING.likesMax, likes / RANKING.likesPer)
+    - (hentaiOnly ? RANKING.hentaiOnly : 0);
 }
 
 // ── Video variant ───────────────────────────────────────────────────────
+
+// "K" of a file name (8K = 4320 lines, 4K = 2160); a height cap in the same unit.
+const kOf = (height) => height / 540;
 
 function resolutionOf(n) {
   if (/16k/.test(n)) return 16;
@@ -343,9 +291,10 @@ function resolutionOf(n) {
 }
 
 /**
- * Preference among a scene's video files; the highest wins. VR: ≤ 8K, ≤ 60
- * fps, low bitrate (heavier files stutter in the headset). Flat: ≤ 4K, and
- * otherwise the highest quality (more fps is better).
+ * Preference among a scene's video files; the highest wins. VR: within
+ * VR_MAX_HEIGHT and VR_MAX_FPS, low bitrate (heavier files stutter in the
+ * headset). Flat: within FLAT_MAX_HEIGHT, and otherwise the highest quality
+ * (more fps is better).
  */
 export function videoPreference(name, size, vr) {
   const n = String(name).toLowerCase();
@@ -354,12 +303,12 @@ export function videoPreference(name, size, vr) {
   const isVr = /(^|[^a-z])(vr|sbs|180|fisheye)([^a-z]|$)/.test(n);
   let score = 0;
   if (vr) {
-    score += (isVr ? 100 : 0) + (res <= 8 ? res * 5 : -50);
-    if (fps > 60) score -= 40;
+    score += (isVr ? 100 : 0) + (res <= kOf(VR_MAX_HEIGHT) ? res * 5 : -50);
+    if (fps > VR_MAX_FPS) score -= 40;
     if (/low[- _]?bitrate|lowbit/.test(n)) score += 8;
     if (/high[- _]?bitrate/.test(n)) score -= 8;
   } else {
-    score += (isVr ? -30 : 0) + (res <= 4 ? res * 5 : -20) + Math.min(fps, 240) / 60;
+    score += (isVr ? -30 : 0) + (res <= kOf(FLAT_MAX_HEIGHT) ? res * 5 : -20) + Math.min(fps, 240) / 60;
   }
   if (/preview|trailer|sample/.test(n)) score -= 200;
   return score + Math.min((size || 0) / 1e10, 1);

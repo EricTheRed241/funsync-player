@@ -21,27 +21,9 @@
 // already in the category when found to be VR (never taken out by the app).
 
 import { SCRIPT_TAGS_KEY } from './script-tags.js';
+import { AUTO_CATEGORIES } from './content-preferences.js';
 
 export const AUTO_CATEGORIES_KEY = 'library.autoCategories';
-
-/** Category definitions: EroScripts tags that put a video in each. */
-export const AUTO_CATEGORIES = [
-  { key: 'creampie', name: 'Creampie', color: '#e94560', tags: ['creampie', 'anal-creampie', 'oral-creampie'] },
-  { key: 'riding', name: 'Riding', color: '#f39c12', tags: ['riding', 'cowgirl', 'reverse-cowgirl'] },
-  { key: 'blowjob', name: 'Blowjob', color: '#ff6b81', tags: ['blowjob', 'bj', 'deepthroat', 'facefuck', 'throatpie', 'cum-in-mouth'] },
-  { key: 'handjob', name: 'Handjob', color: '#fd79a8', tags: ['handjob', 'milking'] },
-  { key: 'titjob', name: 'Titjob', color: '#e74c3c', tags: ['titfuck', 'titjob', 'paizuri', 'boobjob'] },
-  { key: 'footjob', name: 'Footjob', color: '#1abc9c', tags: ['footjob'] },
-  { key: 'anal', name: 'Anal', color: '#9b59b6', tags: ['anal', 'anal-creampie'] },
-  { key: 'doggy', name: 'Doggy', color: '#3498db', tags: ['doggy', 'doggy-style', 'doggystyle', 'standing-doggy', 'pronebone'] },
-  { key: 'missionary', name: 'Missionary', color: '#00cec9', tags: ['missionary'] },
-  { key: 'group', name: 'Group', color: '#2ecc71', tags: ['gangbang', 'threesome', 'foursome', 'fivesome', 'orgy', 'double-penetration', 'harem'] },
-  { key: 'monster', name: 'Monster', color: '#9b59b6', tags: ['monster', 'monstergirls', 'tentacle', 'werewolf'] },
-  { key: 'pmv', name: 'PMV / HMV', color: '#f39c12', tags: ['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video'] },
-  // Filled from the backend's VR decision, never from tags (planVRCategory).
-  { key: 'vr', name: 'VR', color: '#3498db', tags: [] },
-  { key: 'pov', name: 'POV', color: '#00cec9', tags: ['pov', 'male-pov'] },
-];
 
 const nameKey = (s) => String(s || '').trim().toLocaleLowerCase();
 

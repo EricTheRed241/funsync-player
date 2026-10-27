@@ -1,12 +1,8 @@
 // Collections made from what the library already knows about each video:
 // the EroScripts post tags (`library.scriptTags`), the duration
 // (`library.durationCache`) and the video's title (its file name). After
-// each library scan five themes are kept up to date: medium (Hentai, SFM,
-// VaM …), session length (Quick, Sessions, Marathons), franchise (Overwatch,
-// Genshin Impact, NieR …: a tag or a franchise / character name in the
-// title), script style (Music / beat, Action, Cock Hero / Fap Hero) and
-// source (FapTap: scenes `npm run faptap:scout` brought in, by their
-// scriptTags record).
+// each library scan the AUTO_COLLECTIONS of content-preferences.js (medium,
+// session length, franchise, script style, source) are kept up to date.
 //
 // The user stays in charge, as with the EroScripts categories and the
 // artist playlists: a collection of the same name is reused, a collection
@@ -17,20 +13,30 @@
 
 import { FAPTAP_SOURCE } from './eroscripts-links.js';
 import { SCRIPT_TAGS_KEY } from './script-tags.js';
+import { AUTO_COLLECTIONS } from './content-preferences.js';
 
 export const AUTO_COLLECTIONS_KEY = 'library.autoCollections';
 export const COLLECTIONS_KEY = 'library.collections';
 const DURATION_KEY = 'library.durationCache';
 
-const anyTag = (...tags) => (v) => tags.some((t) => v.tags.has(t));
-// Title patterns match whole words only (`\b…\b` around the alternatives),
-// so a short name doesn't hit inside another word.
-const tagsOrTitle = (tags, words) => {
-  const re = new RegExp(`\\b(?:${words})\\b`);
-  return (v) => anyTag(...tags)(v) || re.test(v.title || '');
-};
-// Duration when known (seconds), else the post's `len-*` bucket.
-const byLength = (test, tags) => (v) => (v.duration > 0 ? test(v.duration) : anyTag(...tags)(v));
+/**
+ * A collection definition as a test on a video: any of its tags; its title
+ * pattern as whole words; its length (the post's `len-*` tags while the
+ * duration isn't known); or FapTap as the source.
+ */
+function matcher({ tags = [], title, length, lengthTags = [], fapTap }) {
+  const titleRe = title ? new RegExp(`\\b(?:${title})\\b`) : null;
+  return (v) => {
+    if (fapTap) return v.source === FAPTAP_SOURCE;
+    if (length) {
+      if (!(v.duration > 0)) return lengthTags.some((t) => v.tags.has(t));
+      return length.under !== undefined ? v.duration < length.under : v.duration >= length.atLeast;
+    }
+    return tags.some((t) => v.tags.has(t)) || !!titleRe?.test(v.title || '');
+  };
+}
+
+const DEFINITIONS = AUTO_COLLECTIONS.map((def) => ({ key: def.key, name: def.name, match: matcher(def) }));
 
 /**
  * A video's title as the collections match it: the file name without its
@@ -43,37 +49,6 @@ export function titleOf(videoPath) {
   const dot = name.lastIndexOf('.');
   return (dot > 0 ? name.slice(0, dot) : name).normalize('NFC').toLocaleLowerCase().replace(/_+/g, ' ');
 }
-
-/** Collection definitions, in the order they appear. */
-export const AUTO_COLLECTIONS = [
-  // Medium
-  { key: 'hentai', name: 'Hentai', match: anyTag('hentai', '2d') },
-  { key: 'sfm', name: 'SFM', match: anyTag('sfm') },
-  { key: 'vam', name: 'VaM', match: anyTag('vam') },
-  { key: 'mmd', name: 'MMD', match: anyTag('mmd') },
-  { key: 'cgi', name: 'CGI / 3D', match: anyTag('cgi', '3d', 'blender', 'koikatsu', 'honey-select') },
-  { key: 'ai', name: 'AI video', match: anyTag('ai-video', 'ai-assisted', 'ai', 'ai-generated') },
-  // Session length
-  { key: 'quick', name: 'Quick (under 5 min)', match: byLength((s) => s < 300, ['len-0-2', 'len-2-5']) },
-  { key: 'sessions', name: 'Sessions (15 min+)', match: byLength((s) => s >= 900, ['len-25-60', 'len-60-plus']) },
-  { key: 'marathons', name: 'Marathons (1 hr+)', match: byLength((s) => s >= 3600, ['len-60-plus']) },
-  // Franchise
-  { key: 'overwatch', name: 'Overwatch', match: tagsOrTitle(['overwatch'], 'overwatch|widowmaker|tracer|mercy|d\\.? ?va|kiriko|sombra|brigitte|pharah|symmetra|juno') },
-  { key: 'genshin', name: 'Genshin Impact', match: tagsOrTitle(['genshin-impact', 'genshin'], 'genshin|raiden shogun|ganyu|yae miko|furina|hu tao|keqing|lumine|nilou|eula|yelan|shenhe|arlecchino|navia|ayaka|fischl') },
-  { key: 'zzz', name: 'Zenless Zone Zero', match: tagsOrTitle(['zenless-zone-zero'], 'zenless|zzz|ellen joe|yixuan|qingyi|zhu yuan|burnice|miyabi|jane doe|nicole demara|anby|astra yao') },
-  { key: 'final-fantasy', name: 'Final Fantasy', match: tagsOrTitle(['final-fantasy', 'ff7', 'final-fantasy-7'], 'final fantasy|tifa|aerith|yuna|ff ?(?:7|vii|10|x|14|xiv)') },
-  { key: 'nier', name: 'NieR (2B)', match: tagsOrTitle(['nier', 'nier-automata', '2b'], 'nier|2b|yorha|a2') },
-  { key: 'hsr', name: 'Honkai: Star Rail', match: tagsOrTitle(['honkai-star-rail', 'honkai'], 'honkai|star rail|silver wolf|kafka|black swan|firefly|acheron|march 7th|stelle') },
-  { key: 'lol', name: 'League of Legends', match: tagsOrTitle(['league-of-legends', 'lol'], 'league of legends|ahri|akali|k[/-]?da|evelynn|miss fortune|caitlyn|seraphine') },
-  { key: 'street-fighter', name: 'Street Fighter', match: tagsOrTitle(['street-fighter'], 'street fighter|chun[- ]?li|cammy|juri|kimberly jackson') },
-  { key: 'marvel-rivals', name: 'Marvel Rivals', match: tagsOrTitle(['marvel-rivals'], 'marvel rivals|psylocke|black widow|scarlet witch|invisible woman|emma frost|luna snow') },
-  // Script style
-  { key: 'music', name: 'Music / beat', match: anyTag('music', 'beat-based', 'music-based', 'music-video', 'hybrid-based', 'pmv', 'hmv', 'cock-hero', 'fap-hero') },
-  { key: 'action', name: 'Action', match: anyTag('action-based', 'hybrid-based') },
-  { key: 'cock-hero', name: 'Cock Hero / Fap Hero', match: tagsOrTitle(['cock-hero', 'fap-hero'], 'cock ?hero|fap ?hero') },
-  // Source
-  { key: 'faptap', name: 'FapTap', match: (v) => v.source === FAPTAP_SOURCE },
-];
 
 const nameKey = (s) => String(s || '').trim().toLocaleLowerCase();
 
@@ -93,7 +68,7 @@ export function planAutoCollections({ collections = [], videos = [], state = {} 
   const added = { ...(state.added || {}) };
   const create = [];
   const extend = [];
-  for (const def of AUTO_COLLECTIONS) {
+  for (const def of DEFINITIONS) {
     const existing = byName.get(nameKey(def.name));
     if (!existing && created.has(def.key)) continue;
     const inList = new Set(existing?.videoPaths || []);

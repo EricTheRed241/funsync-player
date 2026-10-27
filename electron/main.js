@@ -1142,18 +1142,6 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 // Read on every library scan; the renderer merges them into scriptTags.
 ipcMain.handle('eroscripts-read-links', () => readLinksFile(app.getPath('userData')));
 
-// Favourite artists, from the scouts' `scout-favourites.json` (edited by
-// hand). Read on every library scan for the artist playlists; missing or
-// unreadable reads as none, and the app never creates the file.
-ipcMain.handle('get-scout-favourites', () => {
-  try {
-    const list = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'scout-favourites.json'), 'utf8'))?.favourites;
-    return Array.isArray(list) ? list.filter((s) => typeof s === 'string' && s.trim()) : [];
-  } catch {
-    return [];
-  }
-});
-
 ipcMain.handle('select-funscript', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
