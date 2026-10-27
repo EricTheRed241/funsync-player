@@ -31,16 +31,23 @@ describe('screenTopic', () => {
     expect(screenTopic(t)).toEqual({ ok: false, reason: 'excluded' });
   });
 
-  it('takes animated posts, including AI-generated video, but not live action', () => {
-    expect(screenTopic(topic(['animation', 'ai-video'])).ok).toBe(true);
-    expect(screenTopic(topic(['animation', 'real'])).reason).toBe('not-animated');
-    expect(screenTopic(topic(['pov', 'blowjob'])).reason).toBe('not-animated');
+  it('takes animated posts, including AI-generated video; live action only waits for the live quota', () => {
+    expect(screenTopic(topic(['animation', 'ai-video']))).toMatchObject({ ok: true, live: false, liveQuota: false });
+    expect(screenTopic(topic(['animation', 'real']))).toMatchObject({ ok: true, live: true, liveQuota: true });
+    expect(screenTopic(topic(['pov', 'blowjob']))).toMatchObject({ ok: true, live: true, liveQuota: true });
+  });
+
+  it('takes live action by a favourite, named in the title or a tag, without the quota', () => {
+    const favourites = ['Candy Love', 'NoFaceGirl'];
+    expect(screenTopic(topic(['real', 'pov'], 'Candy Love rides POV'), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Candy Love', liveQuota: false });
+    expect(screenTopic(topic(['real', 'nofacegirl'], 'Reverse cowgirl'), { favourites })).toMatchObject({ favourite: 'NoFaceGirl', liveQuota: false });
+    expect(screenTopic(topic(['real'], 'Candy Lovers'), { favourites })).toMatchObject({ favourite: null, liveQuota: true });
   });
 
   it('takes a music post by a creator already in the library even without an animation tag', () => {
     const t = topic(['pmv', 'real'], '[Multi-axis] [Bastati] Yuria Boss Battle 1');
-    expect(screenTopic(t, { creators: ['bastati'] })).toEqual({ ok: true, music: true, vr: false, artist: 'bastati' });
-    expect(screenTopic(t, { creators: [] }).reason).toBe('not-animated');
+    expect(screenTopic(t, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, vr: false, artist: 'bastati', liveQuota: false });
+    expect(screenTopic(t, { creators: [] })).toMatchObject({ ok: true, liveQuota: true });
   });
 
   it('skips posts the library already links or whose scene folder it has', () => {

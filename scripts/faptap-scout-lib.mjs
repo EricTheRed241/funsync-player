@@ -17,17 +17,22 @@
 //   • Never loli, shota, furry / anthro / yiff, futa / futanari (tags, title
 //     or description), nor FapTap's furry tags that don't say so (scalie,
 //     knot, Krystal, Renamon …).
-//   • Animated only: an animation tag (animated, hentai, cgi, sfm, mmd …),
-//     no live-action tag (amateur, homemade, pornstar, onlyfans …), and no
-//     FapTap model / pornstar named in the title or listed as the video's
-//     performer (FapTap tags are free text; live videos get animation tags
-//     too). AI video counts. A music video (PMV / HMV / Cock Hero …) by a
-//     creator already in the library is taken too; a library folder named
-//     after a genre (`Cock Hero`, `PMV`) is no creator.
+//   • Animated, unless a favourite: an animation tag (animated, hentai,
+//     cgi, sfm, mmd …), no live-action tag (amateur, homemade, pornstar,
+//     onlyfans …), and no FapTap model / pornstar named in the title or
+//     listed as the video's performer (FapTap tags are free text; live
+//     videos get animation tags too). AI video counts. A music video (PMV /
+//     HMV / Cock Hero …) by a creator already in the library is taken too;
+//     a library folder named after a genre (`Cock Hero`, `PMV`) is no
+//     creator. Live action by a favourite creator or actress (title,
+//     uploader, performer or tag; scripts/scout-live.mjs) is taken; other
+//     live action waits for the live quota (one in every 20 downloads).
 //   • No audio roleplays (erotic audio / ASMR over a still or a loop).
-//   • Focus: at least two of PMV / HMV (Cock Hero and Fap Hero included),
-//     creampie, reverse cowgirl and VR, each by tag or title (VR also by
-//     FapTap's VR flag).
+//   • Focus, except for favourites: at least two of PMV / HMV (Cock Hero
+//     and Fap Hero included), creampie, reverse cowgirl and VR, each by tag
+//     or title (VR also by FapTap's VR flag).
+//   • Videos the user picks by id (`--add`) skip the animation, focus and
+//     sex rules; the exclusions, audio, length and library checks stay.
 //   • Sex only (as on EroScripts), at least a minute long.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream up to 4K (8K for VR); none below
@@ -42,11 +47,12 @@
 import {
   ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, hasExcludedText, isCreatorLabel, isSexual, normName, sameVideo, scoreCandidate,
 } from './eroscripts-scout-lib.mjs';
+import { favouriteIn } from './scout-live.mjs';
 
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 3;
+export const FAPTAP_RULES_VERSION = 4;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -173,18 +179,22 @@ export function vrSuffix(projection) {
 }
 
 /**
- * Judge a listed video before any further request.
+ * Judge a video before any further request (a listed one, or one the user
+ * picked by id).
  *
  * @param {{id: string, name: string, description?: string, duration?: number, tags?: {name: string}[],
- *   vr?: boolean, projection?: string, user?: {username?: string}}} video
+ *   vr?: boolean, projection?: string, user?: {username?: string}, performers?: {name: string}[]}} video
  * @param {object} ctx
  * @param {string[]} ctx.creators creator names in the library (lower case)
  * @param {string[]} ctx.knownTitles normName of every library scene folder and video, and of the EroScripts scout's waiting posts
  * @param {string[]} [ctx.livePerformers] normName of FapTap's models and pornstars (see livePerformerNames)
- * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null, preferred: string[]}}
- *   reasons: excluded, not-animated, audio-only, off-focus, not-sexual, short, in-library
+ * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
+ * @param {boolean} [ctx.picked] the user asked for this video by id
+ * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
+ *   focus: string[], preferred: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean}}
+ *   reasons: excluded, audio-only, off-focus, not-sexual, short, in-library
  */
-export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [] } = {}) {
+export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
   const tags = videoTags(video);
   const title = String(video.name || '');
   const text = htmlText(video.description);
@@ -196,19 +206,38 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   const uploader = String(video.user?.username || '').toLowerCase();
   const artists = creators.filter((c) => c.length > 3 && !isCreatorLabel(c));
   const artist = artists.find((c) => words.includes(` ${normName(c)} `)) || (artists.includes(uploader) ? uploader : null);
-  const animated = tags.some((t) => ANIMATION_TAGS.has(t) || FAPTAP_ANIMATION_TAGS.has(t)) && !tags.some(isLive)
-    && !livePerformers.some((p) => words.includes(` ${p} `));
+  const favourite = favouriteIn([title, video.user?.username, ...(video.performers || []).map((p) => p?.name), ...tags], favourites);
+  const live = !(tags.some((t) => ANIMATION_TAGS.has(t) || FAPTAP_ANIMATION_TAGS.has(t)) && !tags.some(isLive)
+    && !livePerformers.some((p) => words.includes(` ${p} `)));
   const music = tags.some((t) => MUSIC_TAGS.has(t));
-  if (!animated && !(music && artist)) return { ok: false, reason: 'not-animated' };
   if (tags.some(isAudioTag) || AUDIO_TITLE.test(title)) return { ok: false, reason: 'audio-only' };
   const vr = !!video.vr || tags.includes('vr');
   const focus = focusOf({ tags, title, vr });
-  if (focus.length < FOCUS_MIN) return { ok: false, reason: 'off-focus' };
-  if (!isSexual({ tags, title, text })) return { ok: false, reason: 'not-sexual' };
+  if (!picked) {
+    if (!favourite && focus.length < FOCUS_MIN) return { ok: false, reason: 'off-focus' };
+    if (!isSexual({ tags, title, text })) return { ok: false, reason: 'not-sexual' };
+  }
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
   if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
-  return { ok: true, tags, vr, music, artist, focus, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)) };
+  const liveQuota = live && !picked && !favourite && !(music && artist);
+  return { ok: true, tags, vr, music, artist, focus, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)), live, favourite, liveQuota, picked };
+}
+
+/**
+ * A screened video once its details are known: a model or pornstar listed
+ * as performer makes it live action, and a favourite among the performers
+ * makes it a favourite's.
+ *
+ * @param {object} screen screenVideo's ok result
+ * @param {{name: string, category?: string}[]} performers the details' performers
+ * @param {string[]} favourites
+ */
+export function withPerformers(screen, performers, favourites) {
+  const live = screen.live || hasLivePerformer({ performers });
+  const favourite = screen.favourite || favouriteIn((performers || []).map((p) => p?.name), favourites);
+  const liveQuota = live && !screen.picked && !favourite && !(screen.music && screen.artist);
+  return { ...screen, live, favourite, liveQuota };
 }
 
 /** Performer categories FapTap gives real people. */
@@ -281,7 +310,11 @@ export function toCandidate(video, screen) {
     focus: screen.focus,
     preferred: screen.preferred,
     artistInLibrary: screen.artist,
-    score: +scoreCandidate({ vr: screen.vr, music: screen.music, artistInLibrary: !!screen.artist, preferred: screen.preferred, likes }).toFixed(2),
+    live: !!screen.live,
+    favourite: screen.favourite || null,
+    liveQuota: !!screen.liveQuota,
+    picked: !!screen.picked,
+    score: +scoreCandidate({ vr: screen.vr, music: screen.music, artistInLibrary: !!(screen.artist || screen.favourite), preferred: screen.preferred, likes }).toFixed(2),
   };
 }
 
@@ -311,8 +344,8 @@ export function mergeCookies(jar, setCookies) {
   return [...cookies.values()].join('; ');
 }
 
-/** True when a saved candidate still meets the focus rule (lists saved under older rules may not). */
-export const inFocus = (c) => focusOf(c).length >= FOCUS_MIN;
+/** True when a saved candidate still meets the focus rule (lists saved under older rules may not); picks and favourites need none. */
+export const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FOCUS_MIN;
 
 /**
  * The saved list after a scan: candidates found now plus earlier ones not
