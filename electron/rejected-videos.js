@@ -1,11 +1,11 @@
 'use strict';
 
-// Triage deletions: a video the user puts in the No thank you playlist or
-// rates 2 stars or lower (desktop, web remote or HereSphere; see
-// renderer/js/reject-rule.js) is deleted from disk, together with its
-// scripts, axis companions (hand-made and generated) and subtitles. A scene
-// folder left with nothing but its scout sidecar (`eroscripts.json` or
-// `faptap.json`) goes too, and so does a creator folder it leaves empty.
+// Triage deletions: a video the user rates 2 stars or lower (desktop, web
+// remote or HereSphere; see renderer/js/reject-rule.js) is deleted from
+// disk, together with its scripts, axis companions (hand-made and
+// generated) and subtitles. A scene folder left with nothing but its scout
+// sidecar (`eroscripts.json` or `faptap.json`) goes too, and so does a
+// creator folder it leaves empty.
 //
 // Rejections are remembered in `<userData>/eroscripts-scout-rejected.json`
 // so neither `npm run eroscripts:scout` nor `npm run faptap:scout` downloads
@@ -19,23 +19,19 @@ const fs = require('fs');
 const path = require('path');
 const { AXIS_SUFFIXES, VIDEO_EXTS, SUBTITLE_EXTS, isAppleDoubleSidecar } = require('./library-scan');
 
-const REJECT_PLAYLIST = 'No thank you';
 const REJECTED_FILE = 'eroscripts-scout-rejected.json';
 const REJECTED_VERSION = 1;
-// Why a video went: the user's triage (scout never takes the post again),
-// the scout's own length check, or an extra copy of a video kept elsewhere
-// (`duplicate`; the post's other videos still come).
-const REASONS = new Set(['no-thank-you', 'low-rating', 'short', 'duplicate']);
+// Why a video went: the user's triage (`low-rating`; scout never takes the
+// post again), the scout's own length check, or an extra copy of a video
+// kept elsewhere (`duplicate`; the post's other videos still come).
+// `no-thank-you` is historic: the former No thank you playlist's deletions,
+// still in users' lists and still counting as turned down.
+const REASONS = new Set(['low-rating', 'no-thank-you', 'short', 'duplicate']);
 // What may remain in a scene folder that is then removed whole.
 const LEFTOVERS = new Set(['eroscripts.json', 'faptap.json', '.ds_store']);
 
 // exFAT and APFS compare names case- and normalization-insensitively.
 const fold = (s) => String(s).normalize('NFC').toLowerCase();
-
-/** True for the reject playlist's name, whatever its case or spacing. */
-function isRejectPlaylist(name) {
-  return fold(String(name || '').trim()) === fold(REJECT_PLAYLIST);
-}
 
 /** Key of one post video, as the scout records fetched scenes. */
 function rejectionKey(topicId, video) {
@@ -118,10 +114,10 @@ function removeDirIfOnly(dir, keep) {
  * @param {string[]} o.sources library source folders
  * @param {string} o.userDataDir where the rejection list lives
  * @param {number} [o.now]
- * @param {'no-thank-you'|'low-rating'|'duplicate'} [o.reason]
+ * @param {'low-rating'|'duplicate'|'no-thank-you'} [o.reason]
  * @returns {{deleted: string[], removedDirs: string[]}}
  */
-function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now(), reason = 'no-thank-you' }) {
+function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now(), reason = 'low-rating' }) {
   if (!REASONS.has(reason) || reason === 'short') throw new Error(`unknown reason: ${reason}`);
   const resolved = path.resolve(String(videoPath || ''));
   const roots = (sources || []).filter(Boolean).map((s) => path.resolve(s));
@@ -172,6 +168,6 @@ function deleteRejectedVideo(videoPath, { sources, userDataDir, now = Date.now()
 }
 
 module.exports = {
-  REJECT_PLAYLIST, REJECTED_FILE, isRejectPlaylist, rejectionKey, faptapRejectionKey, readRejected, recordRejection,
+  REJECTED_FILE, rejectionKey, faptapRejectionKey, readRejected, recordRejection,
   deleteRejectedVideo,
 };

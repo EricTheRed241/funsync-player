@@ -35,7 +35,7 @@ import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
-import { isRejectPlaylist, ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
+import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
@@ -843,7 +843,7 @@ class App {
         console.warn('Remote bridge unavailable:', err.message);
       }
 
-      // "No thank you" deletes from disk (reject-rule.js).
+      // Ratings of 2 stars or lower delete from disk (reject-rule.js).
       this._wireRejectRule();
 
       // AudienceBridge — fans out HSSP commands to N viewer Handys for
@@ -2415,11 +2415,11 @@ class App {
   }
 
   /**
-   * Triage rules (reject-rule.js): No thank you and ratings of 2 or lower
-   * delete from disk, 2½–3½ stars go to Review, 4+ leave it. Runs now and
-   * on every playlist add / rating change. Deletion sweeps run one after
-   * another; a finished one rescans the library so the deleted scenes leave
-   * the grid, the phone and the headset.
+   * Triage rules (reject-rule.js): ratings of 2 or lower delete from disk,
+   * 2½–3½ stars go to Review, 4+ leave it. Runs now and on every rating
+   * change. Deletion sweeps run one after another; a finished one rescans
+   * the library so the deleted scenes leave the grid, the phone and the
+   * headset.
    */
   _wireRejectRule() {
     let chain = Promise.resolve();
@@ -2440,11 +2440,6 @@ class App {
     const review = (path) => syncReview(this.settings, path)
       .then((r) => { if (r.added || r.removed) console.log('[Review]', path || 'startup', r); })
       .catch((err) => console.warn('[Review] failed:', err));
-    eventBus.on('playlist:changed', ({ action, id, playlist } = {}) => {
-      if (!['add', 'addVideo', 'addVideos', 'reorder', 'rename'].includes(action)) return;
-      const pl = playlist || this.settings.getPlaylist(id);
-      if (pl && isRejectPlaylist(pl.name)) sweep();
-    });
     eventBus.on('rating:changed', ({ path, entry } = {}) => {
       const verdict = ratingVerdict(entry);
       if (verdict === 'delete') sweep();

@@ -844,12 +844,12 @@ ipcMain.handle('remove-video-from-playlist', (_event, id, videoPath) => {
   store.removeVideoFromPlaylist(id, videoPath);
 });
 
-// Triage deletions (electron/rejected-videos.js): delete a video put in No
-// thank you or rated too low, with its scripts. Only paths inside a library source.
+// Triage deletions (electron/rejected-videos.js): delete a video rated 2
+// stars or lower, with its scripts. Only paths inside a library source.
 ipcMain.handle('delete-rejected-video', (_event, videoPath, reason) => {
   try {
     const sources = (store.getAll()?.settings?.library?.sources || []).map((s) => s?.path);
-    const result = deleteRejectedVideo(videoPath, { sources, userDataDir: app.getPath('userData'), reason: reason || 'no-thank-you' });
+    const result = deleteRejectedVideo(videoPath, { sources, userDataDir: app.getPath('userData'), reason: reason || 'low-rating' });
     log.info(`[Rejected] deleted ${result.deleted.length} file(s) for ${videoPath}${result.removedDirs.length ? `; removed ${result.removedDirs.join(', ')}` : ''}`);
     return { success: true, ...result };
   } catch (err) {
@@ -1141,6 +1141,18 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 // Video → EroScripts post links written by `npm run eroscripts:sync`.
 // Read on every library scan; the renderer merges them into scriptTags.
 ipcMain.handle('eroscripts-read-links', () => readLinksFile(app.getPath('userData')));
+
+// Favourite artists, from the scouts' `scout-favourites.json` (edited by
+// hand). Read on every library scan for the artist playlists; missing or
+// unreadable reads as none, and the app never creates the file.
+ipcMain.handle('get-scout-favourites', () => {
+  try {
+    const list = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'scout-favourites.json'), 'utf8'))?.favourites;
+    return Array.isArray(list) ? list.filter((s) => typeof s === 'string' && s.trim()) : [];
+  } catch {
+    return [];
+  }
+});
 
 ipcMain.handle('select-funscript', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

@@ -6,10 +6,10 @@
 // Collections by medium, length, franchise and script style
 // (renderer/js/auto-collections.js).
 import { describe, it, expect } from 'vitest';
-import { planAutoCollections, applyAutoCollections, AUTO_COLLECTIONS_KEY, COLLECTIONS_KEY } from '../../renderer/js/auto-collections.js';
+import { planAutoCollections, applyAutoCollections, titleOf, AUTO_COLLECTIONS_KEY, COLLECTIONS_KEY } from '../../renderer/js/auto-collections.js';
 import { SCRIPT_TAGS_KEY } from '../../renderer/js/script-tags.js';
 
-const v = (path, tags = [], duration = 0) => ({ path, tags: new Set(tags), duration });
+const v = (path, tags = [], duration = 0) => ({ path, title: titleOf(path), tags: new Set(tags), duration });
 const names = (r) => r.create.map((c) => [c.name, c.videoPaths]);
 
 describe('planAutoCollections', () => {
@@ -43,6 +43,42 @@ describe('planAutoCollections', () => {
   it('never makes a deleted collection again', () => {
     const first = planAutoCollections({ videos: [v('/a', ['mmd'])] });
     expect(planAutoCollections({ videos: [v('/a', ['mmd']), v('/b', ['mmd'])], state: first.state })).toMatchObject({ create: [], extend: [] });
+  });
+
+  it('matches franchises and Cock Hero by title words as well as tags, without hits inside other words', () => {
+    const r = planAutoCollections({
+      videos: [
+        v('/GVP/Eternal Enigma/Jane Doe/Eternal Enigma - Jane Doe.mp4'),
+        v('/GVP/Agapilord/S/Agapilord - 2B Cowgirl [4K].mp4'),
+        v('/GVP/X/S/Ahri_and_Akali_KDA.mp4'),
+        v('/GVP/X/S/D.Va Riding.mp4'),
+        v('/GVP/X/S/Silver Wolf x Kafka.mp4'),
+        v('/GVP/X/S/Chun-Li Cammy.mp4'),
+        v('/GVP/X/S/Psylocke Night.mp4'),
+        v('/GVP/X/S/Tifa Lockhart.mp4'),
+        v('/GVP/X/S/Ultimate Cock Hero 3.mp4'),
+        v('/GVP/X/S/League night.mp4', ['league-of-legends']),
+        // Near misses: no franchise.
+        v('/GVP/X/S/Vixen lol Power Robin Nami.mp4'),
+        v('/GVP/X/S/Ahrimania Tracers 12b Kafkaesque.mp4'),
+      ],
+    });
+    expect(names(r).map(([name, paths]) => [name, paths.map((p) => p.split('/').pop())])).toEqual([
+      ['Overwatch', ['D.Va Riding.mp4']],
+      ['Zenless Zone Zero', ['Eternal Enigma - Jane Doe.mp4']],
+      ['Final Fantasy', ['Tifa Lockhart.mp4']],
+      ['NieR (2B)', ['Agapilord - 2B Cowgirl [4K].mp4']],
+      ['Honkai: Star Rail', ['Silver Wolf x Kafka.mp4']],
+      ['League of Legends', ['Ahri_and_Akali_KDA.mp4', 'League night.mp4']],
+      ['Street Fighter', ['Chun-Li Cammy.mp4']],
+      ['Marvel Rivals', ['Psylocke Night.mp4']],
+      ['Cock Hero / Fap Hero', ['Ultimate Cock Hero 3.mp4']],
+    ]);
+  });
+
+  it('titles are the file name without extension, lower-cased, underscores as spaces', () => {
+    expect(titleOf('/a/b/Ahri_and_KDA.v2.MP4')).toBe('ahri and kda.v2');
+    expect(titleOf('C:\\x\\Tifa.mkv')).toBe('tifa');
   });
 });
 

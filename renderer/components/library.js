@@ -883,8 +883,12 @@ export class Library {
       })
       .catch((err) => console.warn('[Library] Categories from EroScripts tags failed:', err?.message || err));
 
-    // One playlist per artist with more than six videos (artist-playlists.js).
-    applyArtistPlaylists(this._settings, (this._videos || []).map((v) => v.path))
+    // One playlist per artist with more than six videos, per favourite
+    // artist from one video, and "Favourite artists" (artist-playlists.js).
+    // Favourites are the scouts' list, read once per scan.
+    Promise.resolve(window.funsync?.getScoutFavourites?.())
+      .catch(() => [])
+      .then((favourites) => applyArtistPlaylists(this._settings, (this._videos || []).map((v) => v.path), Array.isArray(favourites) ? favourites : []))
       .then((r) => {
         if (!r.created.length && !r.extended) return;
         console.log('[Library] Artist playlists:', r);

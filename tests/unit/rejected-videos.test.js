@@ -3,9 +3,9 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// "No thank you" rule: deleting a rejected video and its companions
+// Triage deletions: deleting a rejected video and its companions
 // (electron/rejected-videos.js), and the renderer sweep that decides which
-// videos go (renderer/js/reject-rule.js).
+// videos go (renderer/js/reject-rule.js: rated 2 stars or lower).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -48,17 +48,17 @@ describe('deleteRejectedVideo', () => {
     expect(r.deleted).toHaveLength(5);
     expect(exists('Artist')).toBe(false);
     expect(fs.existsSync(lib)).toBe(true);
-    expect(readRejected(userData).entries).toEqual([expect.objectContaining({ key: '42|3.mp4', topicId: 42, reason: 'no-thank-you' })]);
+    expect(readRejected(userData).entries).toEqual([expect.objectContaining({ key: '42|3.mp4', topicId: 42, reason: 'low-rating' })]);
   });
 
-  it('records a low rating and a duplicate as their own reasons, and refuses an unknown one', () => {
+  it('records a duplicate and the historic no-thank-you as their own reasons, and refuses an unknown one', () => {
     const video = touch('A/S/S.mp4');
     touch('A/S/eroscripts.json', JSON.stringify({ topicId: 7, video: 'v.mp4' }));
-    deleteRejectedVideo(video, { sources: [lib], userDataDir: userData, reason: 'low-rating' });
+    deleteRejectedVideo(video, { sources: [lib], userDataDir: userData, reason: 'no-thank-you' });
     const copy = touch('C/S/S.mp4');
     touch('C/S/eroscripts.json', JSON.stringify({ topicId: 8, video: 'w.mp4' }));
     deleteRejectedVideo(copy, { sources: [lib], userDataDir: userData, reason: 'duplicate' });
-    expect(readRejected(userData).entries.map((e) => [e.key, e.reason])).toEqual([['7|v.mp4', 'low-rating'], ['8|w.mp4', 'duplicate']]);
+    expect(readRejected(userData).entries.map((e) => [e.key, e.reason])).toEqual([['7|v.mp4', 'no-thank-you'], ['8|w.mp4', 'duplicate']]);
     expect(() => deleteRejectedVideo(touch('B/S/S.mp4'), { sources: [lib], userDataDir: userData, reason: 'short' })).toThrow(/unknown reason/);
   });
 
@@ -165,11 +165,12 @@ function data(playlists, ratings = {}, store = {}) {
 describe('sweepRejected', () => {
   it('takes each deleted video out of every playlist and keeps one whose deletion failed', async () => {
     const playlists = [
-      { id: 'n', name: ' no THANK you ', videoPaths: ['/a.mp4', '/b.mp4'] },
+      { id: 'k', name: 'Keep Forever', videoPaths: ['/a.mp4', '/b.mp4'] },
       { id: 'd', name: 'Discovery', videoPaths: ['/a.mp4', '/b.mp4', '/c.mp4'] },
     ];
-    const r = await sweepRejected({ data: data(playlists), deleteVideo: async (p) => (p === '/b.mp4' ? { success: false, error: 'busy' } : { success: true }) });
-    expect(r).toEqual({ removed: [{ path: '/a.mp4', reason: 'no-thank-you' }], failed: [{ path: '/b.mp4', error: 'busy' }] });
+    const ratings = { '/a.mp4': { rating: 1 }, '/b.mp4': { rating: 2 } };
+    const r = await sweepRejected({ data: data(playlists, ratings), deleteVideo: async (p) => (p === '/b.mp4' ? { success: false, error: 'busy' } : { success: true }) });
+    expect(r).toEqual({ removed: [{ path: '/a.mp4', reason: 'low-rating' }], failed: [{ path: '/b.mp4', error: 'busy' }] });
     expect(playlists.map((p) => p.videoPaths)).toEqual([['/b.mp4'], ['/b.mp4', '/c.mp4']]);
   });
 
@@ -182,9 +183,12 @@ describe('sweepRejected', () => {
     expect(Object.keys(ratings)).toEqual(['/fav.mp4', '/mid.mp4', '/top.mp4']);
   });
 
-  it('does nothing without a No thank you playlist or low ratings', async () => {
-    const r = await sweepRejected({ data: data([{ id: 'd', name: 'Discovery', videoPaths: ['/a.mp4'] }]), deleteVideo: async () => { throw new Error('called'); } });
-    expect(r).toEqual({ removed: [], failed: [] });
+  it('leaves videos in a No thank you playlist alone unless they are rated 2 or lower', async () => {
+    const playlists = [{ id: 'n', name: 'No thank you', videoPaths: ['/a.mp4', '/b.mp4'] }];
+    const ratings = { '/b.mp4': { rating: 1.5 } };
+    const r = await sweepRejected({ data: data(playlists, ratings), deleteVideo: async () => ({ success: true }) });
+    expect(r).toEqual({ removed: [{ path: '/b.mp4', reason: 'low-rating' }], failed: [] });
+    expect(playlists[0].videoPaths).toEqual(['/a.mp4']);
   });
 });
 
