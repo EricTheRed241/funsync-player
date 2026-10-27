@@ -262,10 +262,10 @@ async function scan(opts, { userData, config, incoming }) {
 
   const freshIds = new Set(fresh.map((c) => c.id));
   const mins = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-  console.log('\n| # | New | Video | Axis | Length | Tags | Quality |\n|---|---|---|---|---|---|---|');
+  console.log('\n| # | New | Video | Axis | Length | Focus | Quality |\n|---|---|---|---|---|---|---|');
   candidates.slice(0, opts.top).forEach((c, i) => {
-    const tags = [c.vr && 'VR', ...c.preferred, c.music && 'music', c.artistInLibrary && `artist: ${c.artistInLibrary}`].filter(Boolean).join(', ');
-    console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | Single | ${mins(c.duration)} | ${tags} | ${c.quality}p |`);
+    const focus = [...lib.focusOf(c), c.artistInLibrary && `artist: ${c.artistInLibrary}`].filter(Boolean).join(', ');
+    console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | Single | ${mins(c.duration)} | ${focus} | ${c.quality}p |`);
   });
   const feed = state.feeds[lib.FEED];
   console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length}`);
@@ -381,7 +381,7 @@ async function fetchPass(queue, { userData, incoming, staging }) {
 async function fetchAll(opts, { userData, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(listPath(userData), 'utf8'));
-  const queue = [...candidates].sort((a, b) => b.score - a.score).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
+  const queue = [...candidates].filter(lib.inFocus).sort((a, b) => b.score - a.score).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
   console.log(`Queue: ${queue.length} videos → ${incoming}`);
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.id} ${c.quality}p ${c.title}`);
