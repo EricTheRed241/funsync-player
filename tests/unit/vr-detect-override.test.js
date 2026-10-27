@@ -4,7 +4,7 @@
  * "Test environments" before changing this or adding DOM here.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { isVRVideo, setOverrideStore } from '../../renderer/js/vr-detect.js';
+import { isVRVideo, isVRAutoDetected, setOverrideStore, setDetectedFlags, forgetDetectedFlags } from '../../renderer/js/vr-detect.js';
 
 describe('isVRVideo — manual override (renderer)', () => {
   afterEach(() => {
@@ -62,5 +62,30 @@ describe('isVRVideo — manual override (renderer)', () => {
     setOverrideStore(null);
     expect(isVRVideo({ path: '/foo/movie_sbs.mp4', name: 'movie_sbs.mp4' })).toBe(true);
     expect(isVRVideo({ path: '/foo/plain.mp4', name: 'plain.mp4' })).toBe(false);
+  });
+});
+
+describe('isVRVideo — the backend\'s decision', () => {
+  afterEach(() => {
+    setOverrideStore(() => null);
+    setDetectedFlags(null);
+  });
+
+  it('beats the filename heuristic, and the override beats it', () => {
+    setDetectedFlags({ '/v/CuddleMocap_6k.mp4': true, '/v/AidenHet 2D VR.mp4': false });
+    expect(isVRVideo({ path: '/v/CuddleMocap_6k.mp4' })).toBe(true);
+    expect(isVRVideo({ path: '/v/AidenHet 2D VR.mp4' })).toBe(false);
+    setOverrideStore((p) => (p === '/v/CuddleMocap_6k.mp4' ? 'flat' : null));
+    expect(isVRVideo({ path: '/v/CuddleMocap_6k.mp4' })).toBe(false);
+    // The kebab's "auto" wording skips the override, not the decision.
+    expect(isVRAutoDetected('/v/CuddleMocap_6k.mp4')).toBe(true);
+  });
+
+  it('falls back to the heuristic for videos it has not decided, or whose decision was dropped', () => {
+    setDetectedFlags({ '/v/movie_sbs.mp4': false });
+    expect(isVRVideo({ path: '/v/other_sbs.mp4' })).toBe(true);
+    expect(isVRVideo({ path: '/v/movie_sbs.mp4' })).toBe(false);
+    forgetDetectedFlags(['/v/movie_sbs.mp4']);
+    expect(isVRVideo({ path: '/v/movie_sbs.mp4' })).toBe(true);
   });
 });
