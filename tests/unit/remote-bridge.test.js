@@ -301,6 +301,39 @@ describe('RemoteBridge — reconnect', () => {
     vi.advanceTimersByTime(4200);
     expect(FakeWebSocket.instances.length).toBe(4);
   });
+
+  // app.js re-registers the library on a reconnect, because the backend
+  // behind it restarted with an empty registry. The first open must not
+  // count, however many attempts it took while the backend was booting.
+  it('reports the first open as a connect, even after failed attempts', () => {
+    vi.useFakeTimers();
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onBridgeOpen = spy;
+    b.connect();
+    latest().simulateClose();
+    vi.advanceTimersByTime(1200);
+    latest().simulateClose();
+    vi.advanceTimersByTime(2200);
+    latest().simulateOpen();
+    expect(spy.mock.calls).toEqual([[false]]);
+  });
+
+  it('reports every open after a drop as a reconnect', () => {
+    vi.useFakeTimers();
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onBridgeOpen = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateClose();
+    vi.advanceTimersByTime(1500);
+    latest().simulateOpen();
+    latest().simulateClose();
+    vi.advanceTimersByTime(1500);
+    latest().simulateOpen();
+    expect(spy.mock.calls).toEqual([[false], [true], [true]]);
+  });
 });
 
 describe('RemoteBridge — library edits', () => {
