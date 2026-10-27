@@ -1,20 +1,28 @@
-// One playlist per artist with more than six videos.
+// One playlist per artist with more than six videos, and per favourite
+// artist from the first video, plus one "Favourite artists" playlist.
 //
 // The library is laid out `<source>/<artist>/<scene>/<video>` (the scout
 // names Discovery's artist folders the same way), so a video's artist is the
 // first folder under its source. After each library scan every artist folder
 // holding at least MIN_ARTIST_VIDEOS videos, across all sources, gets a
-// playlist named after it, and new videos of that artist join it.
+// playlist named after it, and new videos of that artist join it. A
+// favourite (a name in `<userData>/scout-favourites.json`, the scouts' list,
+// matched to the folder name whatever its case or Unicode form) gets its
+// playlist from one video, and every favourite's videos also go into
+// FAVOURITES_PLAYLIST, grouped by artist.
 //
 // The user stays in charge, as with the EroScripts categories: an existing
 // playlist of the same name is reused, a playlist is made once (a deleted
 // one is not made again), and each video is added once (taking it out by
 // hand sticks). That history is `library.artistPlaylists`: `{created:
-// [artistKey], added: {videoPath: [artistKey]}}`.
+// [artistKey], added: {videoPath: [artistKey]}}`, where the combined
+// playlist's key is FAVOURITES_STATE_KEY (a colon can't be in a folder name).
 
 export const ARTIST_PLAYLISTS_KEY = 'library.artistPlaylists';
 /** "More than six videos". */
 export const MIN_ARTIST_VIDEOS = 7;
+export const FAVOURITES_PLAYLIST = 'Favourite artists';
+export const FAVOURITES_STATE_KEY = ':favourites';
 // Folders that hold videos of many artists.
 const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'others', 'new folder', 'cock hero', 'fap hero', 'pmv', 'hmv', 'compilation', 'compilations']);
 
@@ -50,11 +58,12 @@ export function artistOf(videoPath, sourcePaths) {
  * @param {string[]} o.sourcePaths library source folders
  * @param {{id: string, name: string, videoPaths?: string[]}[]} o.playlists
  * @param {{created?: string[], added?: Object<string, string[]>}} [o.state] `library.artistPlaylists`
+ * @param {string[]} [o.favourites] favourite artist names
  * @returns {{create: {name: string, videoPaths: string[]}[], extend: {id: string, videoPaths: string[]}[],
  *   state: {created: string[], added: Object<string, string[]>}}}
  *   `extend` holds the videos to append to each existing playlist
  */
-export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlists = [], state = {} }) {
+export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlists = [], state = {}, favourites = [] }) {
   const groups = new Map();
   for (const p of videoPaths) {
     const artist = artistOf(p, sourcePaths);
@@ -65,23 +74,35 @@ export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlis
     groups.set(fold(artist), g);
   }
 
+  const favouriteKeys = new Set(favourites.map(fold).filter(Boolean));
   const byName = new Map(playlists.map((pl) => [fold(pl.name), pl]));
   const created = new Set(state.created || []);
   const added = { ...(state.added || {}) };
   const create = [];
   const extend = [];
-  for (const [key, g] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    if (g.paths.length < MIN_ARTIST_VIDEOS) continue;
-    const name = [...g.spellings].sort((a, b) => b[1] - a[1])[0][0];
-    const paths = [...g.paths].sort((a, b) => baseName(a).localeCompare(baseName(b), undefined, { numeric: true, sensitivity: 'base' }));
+  const plan = (key, name, paths) => {
     const existing = byName.get(fold(name));
-    if (!existing && created.has(key)) continue;
+    if (!existing && created.has(key)) return;
     created.add(key);
     const inList = new Set(existing?.videoPaths || []);
     const fresh = paths.filter((p) => !inList.has(p) && !(added[p] || []).includes(key));
     for (const p of paths) if (!(added[p] || []).includes(key)) added[p] = [...(added[p] || []), key];
     if (!existing) create.push({ name, videoPaths: paths });
     else if (fresh.length) extend.push({ id: existing.id, videoPaths: fresh });
+  };
+
+  const artists = [...groups]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, g]) => ({
+      key,
+      name: [...g.spellings].sort((a, b) => b[1] - a[1])[0][0],
+      paths: [...g.paths].sort((a, b) => baseName(a).localeCompare(baseName(b), undefined, { numeric: true, sensitivity: 'base' })),
+      favourite: favouriteKeys.has(key),
+    }));
+  const favouritePaths = artists.filter((a) => a.favourite).flatMap((a) => a.paths);
+  if (favouritePaths.length) plan(FAVOURITES_STATE_KEY, FAVOURITES_PLAYLIST, favouritePaths);
+  for (const a of artists) {
+    if (a.favourite || a.paths.length >= MIN_ARTIST_VIDEOS) plan(a.key, a.name, a.paths);
   }
   return { create, extend, state: { created: [...created], added } };
 }
@@ -91,11 +112,12 @@ export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlis
  *
  * @param {object} data DataService (get, set, getPlaylists, addPlaylist, addVideosToPlaylist)
  * @param {string[]} videoPaths
+ * @param {string[]} [favourites] favourite artist names (`get-scout-favourites` IPC)
  * @returns {Promise<{created: string[], extended: number}>} names of new playlists, count of grown ones
  */
-export async function applyArtistPlaylists(data, videoPaths) {
+export async function applyArtistPlaylists(data, videoPaths, favourites = []) {
   const sourcePaths = (data.get('library.sources') || []).map((s) => s?.path).filter(Boolean);
-  const plan = planArtistPlaylists({ videoPaths, sourcePaths, playlists: data.getPlaylists(), state: data.get(ARTIST_PLAYLISTS_KEY) || {} });
+  const plan = planArtistPlaylists({ videoPaths, sourcePaths, playlists: data.getPlaylists(), state: data.get(ARTIST_PLAYLISTS_KEY) || {}, favourites });
   for (const c of plan.create) {
     const pl = await data.addPlaylist(c.name);
     data.addVideosToPlaylist(pl.id, c.videoPaths);

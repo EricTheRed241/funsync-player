@@ -921,7 +921,7 @@
     "mutexTakeover": "{incoming} hat von {evicted} übernommen",
     "added": "Hinzugefügt",
     "addedTo": "Zu „{name}\" hinzugefügt",
-    "rejectedDeleted": "{count} abgelehnte(s) Video(s) von der Festplatte gelöscht („No thank you\" oder 2 Sterne und weniger)",
+    "rejectedDeleted": "{count} abgelehnte(s) Video(s) von der Festplatte gelöscht (2 Sterne und weniger)",
     "removed": "Entfernt",
     "saved": "Gespeichert",
     "copied": "Kopiert",

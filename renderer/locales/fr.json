@@ -643,7 +643,7 @@
     "mutexTakeover": "{incoming} a pris le relais de {evicted}",
     "added": "Ajouté",
     "addedTo": "Ajouté à \"{name}\"",
-    "rejectedDeleted": "{count} vidéo(s) rejetée(s) supprimée(s) du disque (« No thank you » ou 2 étoiles ou moins)",
+    "rejectedDeleted": "{count} vidéo(s) rejetée(s) supprimée(s) du disque (2 étoiles ou moins)",
     "removed": "Supprimé",
     "saved": "Enregistré",
     "copied": "Copié",

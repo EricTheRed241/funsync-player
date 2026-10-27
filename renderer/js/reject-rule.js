@@ -1,19 +1,16 @@
 // Triage rules, renderer side.
 //
-// • Deleted from disk (electron/rejected-videos.js, through the
-//   `delete-rejected-video` IPC) and taken out of every playlist: every
-//   video in the No thank you playlist, and every video rated 2 stars or
-//   lower (a favourite never is).
+// • Rated 2 stars or lower (a favourite never is): deleted from disk
+//   (electron/rejected-videos.js, through the `delete-rejected-video` IPC)
+//   and taken out of every playlist.
 // • Rated 2½–3½ stars: put in the Review playlist (made when needed).
 // • Rated 4 stars or more: taken out of Review.
 //
-// Runs at startup and whenever a video lands in No thank you or a rating
-// changes, from the desktop, the web remote or HereSphere (all go through
-// the data service).
+// Runs at startup and whenever a rating changes, from the desktop, the web
+// remote or HereSphere (all go through the data service).
 
 import { getRatingEntry } from './ratings.js';
 
-export const REJECT_PLAYLIST = 'No thank you';
 export const REVIEW_PLAYLIST = 'Review';
 /** Ratings at or below this are deleted. */
 export const DELETE_AT_OR_BELOW = 2;
@@ -23,11 +20,6 @@ export const KEEP_FROM = 4;
 export const REVIEW_HISTORY_KEY = 'library.reviewAdded';
 
 const sameName = (a, b) => String(a || '').trim().toLocaleLowerCase() === b.toLocaleLowerCase();
-
-/** True for the reject playlist's name, whatever its case or spacing. */
-export function isRejectPlaylist(name) {
-  return sameName(name, REJECT_PLAYLIST);
-}
 
 /**
  * What a rating means: 'delete' (rated, ≤ 2, not a favourite), 'review'
@@ -43,7 +35,7 @@ export function ratingVerdict(entry) {
 }
 
 /**
- * Delete every video in the reject playlist and every video rated too low.
+ * Delete every video rated too low.
  * A video whose deletion fails stays where it is, so the next sweep tries
  * again; a deleted one leaves every playlist and loses its rating.
  *
@@ -56,11 +48,9 @@ export async function sweepRejected({ data, deleteVideo }) {
   const removed = [];
   const failed = [];
   const targets = new Map();
-  const reject = data.getPlaylists().find((p) => isRejectPlaylist(p.name));
-  for (const p of reject?.videoPaths || []) targets.set(p, 'no-thank-you');
   const ratings = data.getRatings();
   for (const p of Object.keys(ratings)) {
-    if (!targets.has(p) && ratingVerdict(getRatingEntry(ratings, p)) === 'delete') targets.set(p, 'low-rating');
+    if (ratingVerdict(getRatingEntry(ratings, p)) === 'delete') targets.set(p, 'low-rating');
   }
   for (const [videoPath, reason] of targets) {
     const result = await deleteVideo(videoPath, reason);

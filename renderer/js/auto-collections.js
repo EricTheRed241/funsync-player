@@ -1,10 +1,12 @@
 // Collections made from what the library already knows about each video:
-// the EroScripts post tags (`library.scriptTags`) and the duration
-// (`library.durationCache`). After each library scan five themes are kept
-// up to date: medium (Hentai, SFM, VaM …), session length (Quick, Sessions,
-// Marathons), franchise (Overwatch, Genshin Impact …), script style
-// (Music / beat, Action) and source (FapTap: scenes `npm run faptap:scout`
-// brought in, by their scriptTags record).
+// the EroScripts post tags (`library.scriptTags`), the duration
+// (`library.durationCache`) and the video's title (its file name). After
+// each library scan five themes are kept up to date: medium (Hentai, SFM,
+// VaM …), session length (Quick, Sessions, Marathons), franchise (Overwatch,
+// Genshin Impact, NieR …: a tag or a franchise / character name in the
+// title), script style (Music / beat, Action, Cock Hero / Fap Hero) and
+// source (FapTap: scenes `npm run faptap:scout` brought in, by their
+// scriptTags record).
 //
 // The user stays in charge, as with the EroScripts categories and the
 // artist playlists: a collection of the same name is reused, a collection
@@ -21,8 +23,26 @@ export const COLLECTIONS_KEY = 'library.collections';
 const DURATION_KEY = 'library.durationCache';
 
 const anyTag = (...tags) => (v) => tags.some((t) => v.tags.has(t));
+// Title patterns match whole words only (`\b…\b` around the alternatives),
+// so a short name doesn't hit inside another word.
+const tagsOrTitle = (tags, words) => {
+  const re = new RegExp(`\\b(?:${words})\\b`);
+  return (v) => anyTag(...tags)(v) || re.test(v.title || '');
+};
 // Duration when known (seconds), else the post's `len-*` bucket.
 const byLength = (test, tags) => (v) => (v.duration > 0 ? test(v.duration) : anyTag(...tags)(v));
+
+/**
+ * A video's title as the collections match it: the file name without its
+ * extension, lower-cased, underscores as spaces.
+ *
+ * @param {string} videoPath
+ */
+export function titleOf(videoPath) {
+  const name = String(videoPath || '').split(/[\\/]/).pop();
+  const dot = name.lastIndexOf('.');
+  return (dot > 0 ? name.slice(0, dot) : name).normalize('NFC').toLocaleLowerCase().replace(/_+/g, ' ');
+}
 
 /** Collection definitions, in the order they appear. */
 export const AUTO_COLLECTIONS = [
@@ -38,13 +58,19 @@ export const AUTO_COLLECTIONS = [
   { key: 'sessions', name: 'Sessions (15 min+)', match: byLength((s) => s >= 900, ['len-25-60', 'len-60-plus']) },
   { key: 'marathons', name: 'Marathons (1 hr+)', match: byLength((s) => s >= 3600, ['len-60-plus']) },
   // Franchise
-  { key: 'overwatch', name: 'Overwatch', match: anyTag('overwatch') },
-  { key: 'genshin', name: 'Genshin Impact', match: anyTag('genshin-impact', 'genshin') },
-  { key: 'zzz', name: 'Zenless Zone Zero', match: anyTag('zenless-zone-zero') },
-  { key: 'final-fantasy', name: 'Final Fantasy', match: anyTag('final-fantasy', 'ff7', 'final-fantasy-7') },
+  { key: 'overwatch', name: 'Overwatch', match: tagsOrTitle(['overwatch'], 'overwatch|widowmaker|tracer|mercy|d\\.? ?va|kiriko|sombra|brigitte|pharah|symmetra|juno') },
+  { key: 'genshin', name: 'Genshin Impact', match: tagsOrTitle(['genshin-impact', 'genshin'], 'genshin|raiden shogun|ganyu|yae miko|furina|hu tao|keqing|lumine|nilou|eula|yelan|shenhe|arlecchino|navia|ayaka|fischl') },
+  { key: 'zzz', name: 'Zenless Zone Zero', match: tagsOrTitle(['zenless-zone-zero'], 'zenless|zzz|ellen joe|yixuan|qingyi|zhu yuan|burnice|miyabi|jane doe|nicole demara|anby|astra yao') },
+  { key: 'final-fantasy', name: 'Final Fantasy', match: tagsOrTitle(['final-fantasy', 'ff7', 'final-fantasy-7'], 'final fantasy|tifa|aerith|yuna|ff ?(?:7|vii|10|x|14|xiv)') },
+  { key: 'nier', name: 'NieR (2B)', match: tagsOrTitle(['nier', 'nier-automata', '2b'], 'nier|2b|yorha|a2') },
+  { key: 'hsr', name: 'Honkai: Star Rail', match: tagsOrTitle(['honkai-star-rail', 'honkai'], 'honkai|star rail|silver wolf|kafka|black swan|firefly|acheron|march 7th|stelle') },
+  { key: 'lol', name: 'League of Legends', match: tagsOrTitle(['league-of-legends', 'lol'], 'league of legends|ahri|akali|k[/-]?da|evelynn|miss fortune|caitlyn|seraphine') },
+  { key: 'street-fighter', name: 'Street Fighter', match: tagsOrTitle(['street-fighter'], 'street fighter|chun[- ]?li|cammy|juri|kimberly jackson') },
+  { key: 'marvel-rivals', name: 'Marvel Rivals', match: tagsOrTitle(['marvel-rivals'], 'marvel rivals|psylocke|black widow|scarlet witch|invisible woman|emma frost|luna snow') },
   // Script style
   { key: 'music', name: 'Music / beat', match: anyTag('music', 'beat-based', 'music-based', 'music-video', 'hybrid-based', 'pmv', 'hmv', 'cock-hero', 'fap-hero') },
   { key: 'action', name: 'Action', match: anyTag('action-based', 'hybrid-based') },
+  { key: 'cock-hero', name: 'Cock Hero / Fap Hero', match: tagsOrTitle(['cock-hero', 'fap-hero'], 'cock ?hero|fap ?hero') },
   // Source
   { key: 'faptap', name: 'FapTap', match: (v) => v.source === FAPTAP_SOURCE },
 ];
@@ -56,7 +82,7 @@ const nameKey = (s) => String(s || '').trim().toLocaleLowerCase();
  *
  * @param {object} o
  * @param {{id: string, name: string, videoPaths?: string[]}[]} o.collections
- * @param {{path: string, tags: Set<string>, duration?: number}[]} o.videos
+ * @param {{path: string, tags: Set<string>, title?: string, source?: string|null, duration?: number}[]} o.videos
  * @param {{created?: string[], added?: Object<string, string[]>}} [o.state] `library.autoCollections`
  * @returns {{create: {key: string, name: string, videoPaths: string[]}[], extend: {id: string, videoPaths: string[]}[],
  *   state: {created: string[], added: Object<string, string[]>}}} `extend` holds the videos to append
@@ -96,7 +122,7 @@ export function applyAutoCollections(data, videoPaths, newId = () => crypto.rand
   const scriptTags = data.get(SCRIPT_TAGS_KEY) || {};
   const durations = data.get(DURATION_KEY) || {};
   const videos = videoPaths.map((path) => ({
-    path, tags: new Set(scriptTags[path]?.tags || []), source: scriptTags[path]?.source || null, duration: Number(durations[path]) || 0,
+    path, title: titleOf(path), tags: new Set(scriptTags[path]?.tags || []), source: scriptTags[path]?.source || null, duration: Number(durations[path]) || 0,
   }));
   const collections = data.get(COLLECTIONS_KEY) || [];
   const plan = planAutoCollections({ collections, videos, state: data.get(AUTO_COLLECTIONS_KEY) || {} });
