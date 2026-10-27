@@ -206,6 +206,7 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsMatchPreview: (videoPath, topicId, extraUrls) => ipcRenderer.invoke('eroscripts-match-preview', videoPath, topicId, extraUrls),
   eroscriptsValidatePoster: (videoPath, imagePath) => ipcRenderer.invoke('eroscripts-validate-poster', videoPath, imagePath),
   deleteEroScriptsThumbnail: (imagePath) => ipcRenderer.invoke('delete-eroscripts-thumbnail', imagePath),
+  faptapImportThumbnail: (videoPath, url) => ipcRenderer.invoke('faptap-import-thumbnail', videoPath, url),
 
   // Editor pop-out window
   editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),

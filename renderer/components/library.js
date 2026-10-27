@@ -18,7 +18,7 @@ import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import {
   importPostPreview, fetchPreviewsBatch, planPreviewBatch, usePreviewCandidate, isRevalidatable,
-  PREVIEW_EVENT, CUSTOM_THUMBS_KEY,
+  fetchFaptapThumbnails, PREVIEW_EVENT, CUSTOM_THUMBS_KEY,
 } from '../js/eroscripts-preview.js';
 import { getScriptTags, recordScriptTags, SCRIPT_TAGS_KEY } from '../js/script-tags.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
@@ -868,6 +868,7 @@ export class Library {
       this._settings.set(SCRIPT_TAGS_KEY, scout.map);
       console.log('[Library] Discovery sources recorded:', { added: scout.added, updated: scout.updated });
     }
+    this._startFaptapThumbnails();
     applyEroscriptsLinks(this._settings, window.funsync)
       .then((merged) => { if (merged) console.log('[Library] EroScripts links merged:', merged); })
       .catch((err) => console.warn('[Library] EroScripts links not merged:', err?.message || err))
@@ -3372,6 +3373,30 @@ export class Library {
       progress?.dismiss();
       this._previewBatchRunning = false;
     }
+  }
+
+  /**
+   * After each scan, FapTap's thumbnail becomes the thumbnail of every
+   * FapTap Discovery scene that has none yet and whose thumbnail matches
+   * the video (eroscripts-preview.js `fetchFaptapThumbnails`). One video at
+   * a time in the background; a new scan stops the running batch after its
+   * current video and starts over once it has stopped, so two never run.
+   */
+  _startFaptapThumbnails() {
+    if (!window.funsync?.faptapImportThumbnail) return;
+    this._faptapThumbAbort?.abort();
+    const ctrl = new AbortController();
+    this._faptapThumbAbort = ctrl;
+    const videos = this._videos || [];
+    const previous = this._faptapThumbRun || Promise.resolve();
+    this._faptapThumbRun = previous
+      .then(() => (ctrl.signal.aborted ? null : fetchFaptapThumbnails({
+        settings: this._settings, api: window.funsync, videos, signal: ctrl.signal,
+      })))
+      .then((r) => {
+        if (r && (r.imported || r.noMatch || r.failed)) console.log('[Library] FapTap thumbnails:', r);
+      })
+      .catch((err) => console.warn('[Library] FapTap thumbnails failed:', err?.message || err));
   }
 
   async _resetCustomThumbnail(video, cardEl) {

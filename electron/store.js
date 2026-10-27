@@ -101,8 +101,14 @@ const DEFAULTS = {
       //   `{ seekPct: 0..1 }` — pinned frame (legacy shape, no `type` key)
       //   `{ type: 'image', imagePath }` — user-uploaded poster, imported
       //     into userData/custom-thumbs by main.js (community #217)
+      // EroScripts previews and FapTap thumbnails add `source`
+      // ('eroscripts' | 'faptap'), see renderer/js/eroscripts-preview.js.
       // Absent means auto (10%-mark frame).
       customThumbnails: {},
+      // Settled FapTap thumbnail imports per video path, so a thumbnail
+      // that doesn't match isn't fetched again on every scan:
+      //   `{ url, status: 'imported'|'no-match', distance? }`
+      faptapThumbnails: {},
       // Per-path resume position — "continue where you left off"
       // (community request 2026-08-05). Shape:
       //   `{ position: seconds, duration: seconds, updatedAt: epochMs }`
@@ -139,7 +145,7 @@ const DEFAULTS = {
       // Discovery sidecars. Shape:
       //   `{ tags: string[], topicId, topicUrl, source, savedAt }`
       // FapTap scenes (`source: 'faptap-scout'`) have `topicId: null` and
-      // add `faptapId`, `faptapUrl`.
+      // add `faptapId`, `faptapUrl` and FapTap's thumbnail as `previewUrl`.
       // Last write wins — the record describes the CURRENT script's post.
       scriptTags: {},
       collections: [],
