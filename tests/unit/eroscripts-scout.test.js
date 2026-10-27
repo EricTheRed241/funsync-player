@@ -11,9 +11,10 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, MIN_VIDEO_MS, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
+  contentRuleBreak, isHentaiOnly, HENTAI_ONLY_PENALTY, FEED_TAGS,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 
-const topic = (tags, title = 'Some scene', id = 1) => ({ id, title, tags });
+const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
 const files = (...names) => names.map((name) => ({ name, host: 'forum', url: `https://x/${encodeURIComponent(name)}` }));
 const vids = (...names) => names.map((name) => ({ name, size: 1e8, host: 'mega' }));
 
@@ -27,21 +28,44 @@ describe('screenTopic', () => {
     ['futanari tag', topic(['hentai', 'futanari'])],
     ['hyphenated futa tag', topic(['animation', 'futa-on-female'])],
     ['futa in the title', topic(['3d'], '[Multi-axis] Futa Elf Riding')],
+    ['monster tag', topic(['animation', 'vaginal', 'tentacle'])],
+    ['monster-girl tag', topic(['3d', 'riding', 'monster-girl'])],
+    ['horse-cock tag', topic(['sfm', 'anal', 'horse-cock'])],
+    ['horse guy in the title', topic(['sfm', 'riding'], 'Solace2K - Mercy X Horseguy')],
+    ['WW (werewolf) in the title', topic(['sfm', 'pmv'], '2B X WW - BJ')],
+    ['werewolf in the title', topic(['3d', 'vaginal'], 'Tracer and the Werewolves')],
+    ['orc in the title', topic(['vam', 'creampie'], 'Elf captured by orcs')],
+    ['tentacles in Japanese', topic(['mmd', 'sex'], '触手 セックス')],
+    ['footjob tag', topic(['animation', 'riding', 'footjob'])],
+    ['feet tag', topic(['3d', 'vaginal', 'feet'])],
+    ['feet in the title', topic(['3d', 'riding'], 'Tifa feet and riding')],
+    ['footjob in Japanese', topic(['mmd', 'creampie'], '足コキ 中出し')],
   ])('never accepts %s', (_, t) => {
     expect(screenTopic(t)).toEqual({ ok: false, reason: 'excluded' });
+  });
+
+  it('keeps succubi, demons and elves, and matches whole words only (Orchid, trolley, Footloose, Ww)', () => {
+    expect(screenTopic(topic(['3d', 'riding'], 'Succubus demon girl rides the elf'))).toMatchObject({ ok: true });
+    expect(screenTopic(topic(['3d', 'riding'], 'Orchid trolley at Footloose Ww'))).toMatchObject({ ok: true });
+  });
+
+  it('turns down monsters and feet for favourites too', () => {
+    const favourites = ['Solace2K'];
+    expect(screenTopic(topic(['sfm', 'riding'], 'Solace2K - Mercy X Horseguy'), { favourites })).toEqual({ ok: false, reason: 'excluded' });
+    expect(screenTopic(topic(['sfm', 'riding', 'toes'], 'Solace2K - Mercy'), { favourites })).toEqual({ ok: false, reason: 'excluded' });
   });
 
   it('takes animated posts, including AI-generated video; live action only waits for the live quota', () => {
     expect(screenTopic(topic(['animation', 'ai-video']))).toMatchObject({ ok: true, live: false, liveQuota: false });
     expect(screenTopic(topic(['animation', 'real']))).toMatchObject({ ok: true, live: true, liveQuota: true });
-    expect(screenTopic(topic(['pov', 'blowjob']))).toMatchObject({ ok: true, live: true, liveQuota: true });
+    expect(screenTopic(topic(['pov', 'blowjob', 'doggy']))).toMatchObject({ ok: true, live: true, liveQuota: true });
   });
 
   it('takes live action by a favourite, named in the title or a tag, without the quota', () => {
     const favourites = ['Candy Love', 'NoFaceGirl'];
     expect(screenTopic(topic(['real', 'pov'], 'Candy Love rides POV'), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Candy Love', liveQuota: false });
     expect(screenTopic(topic(['real', 'nofacegirl'], 'Reverse cowgirl'), { favourites })).toMatchObject({ favourite: 'NoFaceGirl', liveQuota: false });
-    expect(screenTopic(topic(['real'], 'Candy Lovers'), { favourites })).toMatchObject({ favourite: null, liveQuota: true });
+    expect(screenTopic(topic(['real', 'vaginal'], 'Candy Lovers'), { favourites })).toMatchObject({ favourite: null, liveQuota: true });
   });
 
   it('takes a music post by a creator already in the library even without an animation tag', () => {
@@ -55,33 +79,81 @@ describe('screenTopic', () => {
     expect(screenTopic(topic(['animation'], 'Fap Hero - Fantasy Play'), { sceneNames: ['fap hero fantasy play'] }).reason).toBe('in-library');
   });
 
-  it('turns down posts tagged sfw or non-porn before reading them', () => {
+  it('turns down posts without penetrative sex, or tagged sfw or non-porn, before reading them', () => {
     expect(screenTopic(topic(['animation', 'sfw'])).reason).toBe('not-sexual');
     expect(screenTopic(topic(['mmd', 'dance', 'non-porn', 'riding'])).reason).toBe('not-sexual');
+    expect(screenTopic(topic(['animation', 'titjob'], 'Rio Paizuri')).reason).toBe('not-sexual');
+  });
+
+  it('marks 2D-hentai-only posts so they rank lower', () => {
+    expect(screenTopic(topic(['animation', 'hentai', 'vaginal']))).toMatchObject({ ok: true, hentaiOnly: true });
+    expect(screenTopic(topic(['3d', 'hentai', 'vaginal']))).toMatchObject({ ok: true, hentaiOnly: false });
+  });
+});
+
+describe('contentRuleBreak', () => {
+  it('names the rule a post or saved candidate breaks, by its tags and title', () => {
+    expect(contentRuleBreak({ tags: ['sfm', 'riding'], title: 'Solace2K - Mercy X Horseguy' })).toBe('monster');
+    expect(contentRuleBreak({ tags: ['animation', 'footjob', 'vaginal'], title: 'X' })).toBe('feet');
+    expect(contentRuleBreak({ tags: ['animation', 'blowjob'], title: 'X' })).toBe('not-sexual');
+    expect(contentRuleBreak({ tags: ['animation', 'blowjob', 'riding'], title: 'X' })).toBeNull();
   });
 });
 
 describe('isSexual', () => {
-  it('needs a sex-act tag or word, in any language, for a dance', () => {
+  it('needs penetrative sex by tag or title word, in any language, dance or not', () => {
     expect(isSexual({ tags: ['mmd', 'dance', 'solo-female'], title: 'CLC - Devil MMD Dance' })).toBe(false);
     expect(isSexual({ tags: ['mmd', 'dance', 'straight', 'music'], title: 'Miku Tell Me What You Want' })).toBe(false);
     expect(isSexual({ tags: ['mmd', 'dance', 'riding'], title: 'Lantern Rite' })).toBe(true);
     expect(isSexual({ tags: ['mmd', 'dance'], title: 'Iroha Sex Dance' })).toBe(true);
-    expect(isSexual({ tags: ['vam'], title: '[VAM]红衣', text: '骑乘 动作' })).toBe(true);
-    expect(isSexual({ tags: ['vam'], title: 'Lapdance', text: 'she ends up riding him' })).toBe(true);
+    expect(isSexual({ tags: ['vam'], title: '[VAM]红衣 骑乘' })).toBe(true);
+    expect(isSexual({ tags: ['mmd'], title: 'ミク 中出し' })).toBe(true);
+    expect(isSexual({ tags: ['3d'], title: 'Getting fucked on the couch' })).toBe(true);
+    expect(isSexual({ tags: ['3d'], title: 'Tifa mating press' })).toBe(true);
   });
 
-  it('counts a porn genre or music tag only when the post is not a dance', () => {
-    expect(isSexual({ tags: ['hentai', 'straight'], title: 'Fluorite - Caught You Staring' })).toBe(true);
+  it('refuses blowjob, handjob, titjob or paizuri alone, and takes them with sex', () => {
+    expect(isSexual({ tags: ['animation', 'titjob', 'titfuck'], title: 'Rio Paizuri' })).toBe(false);
+    expect(isSexual({ tags: ['animation', 'blowjob', 'deepthroat', 'facefuck'], title: 'Tifa Side Facefuck' })).toBe(false);
+    expect(isSexual({ tags: ['animation', 'handjob', 'cumshot'], title: 'Hand service' })).toBe(false);
+    expect(isSexual({ tags: ['animation', 'oral-creampie'], title: 'Miku oral sex and face fucking' })).toBe(false);
+    expect(isSexual({ tags: ['animation', 'blowjob', 'riding'], title: 'Bocchi Blowjob' })).toBe(true);
+    expect(isSexual({ tags: ['animation', 'blowjob'], title: 'Blowjob then doggy' })).toBe(true);
+  });
+
+  it('takes a music video unless it is a dance or about a non-sex act', () => {
     expect(isSexual({ tags: ['hmv', 'beat-based'], title: 'KDA PORN STARS' })).toBe(true);
+    expect(isSexual({ tags: ['animation'], title: 'Overwatch PMV' })).toBe(true);
+    expect(isSexual({ tags: ['pmv'], title: 'Blowjob PMV' })).toBe(false);
+    expect(isSexual({ tags: ['hmv'], title: 'Titjob HMV' })).toBe(false);
+    expect(isSexual({ tags: ['cock-hero'], title: 'JOI Cock Hero' })).toBe(false);
+    expect(isSexual({ tags: ['pmv'], title: 'Blowjob & Riding PMV' })).toBe(true);
     expect(isSexual({ tags: ['hmv', 'dance', 'music'], title: 'Thumbs up' })).toBe(false);
-    expect(isSexual({ tags: ['hentai', 'straight', 'mmd'], title: '[mizuki_kirio] わためで生足トントンダンス！' })).toBe(false);
+  });
+
+  it('no longer takes a porn genre tag alone', () => {
+    expect(isSexual({ tags: ['hentai', 'straight'], title: 'Fluorite - Caught You Staring' })).toBe(false);
     expect(isSexual({ tags: ['animation', 'solo-female', 'ai-video'], title: 'Golden thread beauty sways' })).toBe(false);
   });
 
   it('never takes a post tagged sfw or non-porn, and matches whole words only', () => {
-    expect(isSexual({ tags: ['dance', 'non-porn', 'straight'], title: 'CH4NGE MMD (Hardcore Script)' })).toBe(false);
+    expect(isSexual({ tags: ['dance', 'non-porn', 'riding'], title: 'CH4NGE MMD sex' })).toBe(false);
     expect(isSexual({ tags: ['animation'], title: 'Cumulus Dickens Analysis' })).toBe(false);
+    expect(isSexual({ tags: ['animation'], title: 'Sexy titfuck' })).toBe(false);
+  });
+});
+
+describe('isHentaiOnly', () => {
+  it('is 2D hentai: hentai / 2d / anime with nothing 3D in tags or title', () => {
+    expect(isHentaiOnly({ tags: ['animation', 'hentai'], title: 'X' })).toBe(true);
+    expect(isHentaiOnly({ tags: ['2d', 'riding'], title: 'X' })).toBe(true);
+    expect(isHentaiOnly({ tags: ['hentai', 'koikatsu'], title: 'X' })).toBe(false);
+    expect(isHentaiOnly({ tags: ['hentai', 'animation'], title: '[SFM] X' })).toBe(false);
+    expect(isHentaiOnly({ tags: ['animation', '3d'], title: 'X' })).toBe(false);
+  });
+
+  it('has no hentai feed', () => {
+    expect(FEED_TAGS).not.toContain('hentai');
   });
 });
 
@@ -116,6 +188,11 @@ describe('scoreCandidate', () => {
   it('ranks VR above a preferred tag and caps likes', () => {
     expect(scoreCandidate({ vr: true })).toBeGreaterThan(scoreCandidate({ preferred: ['riding'] }));
     expect(scoreCandidate({ likes: 10_000 })).toBe(3);
+  });
+
+  it('ranks a 2D-hentai-only post lower', () => {
+    const post = { vr: true, preferred: ['creampie'], likes: 40 };
+    expect(scoreCandidate({ ...post, hentaiOnly: true })).toBe(scoreCandidate(post) - HENTAI_ONLY_PENALTY);
   });
 });
 
@@ -341,24 +418,39 @@ describe('downloadQueue', () => {
   });
 
   it('drops single-axis scenes a saved list holds that the rules no longer want', () => {
-    const q = downloadQueue([{ id: 1, axisType: 'multi', score: 1, tags: [], vr: false, scenes: [{ axes: ['roll'] }, { axes: [] }] }, { id: 2, axisType: 'single', score: 9, tags: ['creampie'], vr: false, scenes: [{ axes: [] }] }]);
+    const q = downloadQueue([{ id: 1, axisType: 'multi', score: 1, tags: ['vaginal'], vr: false, scenes: [{ axes: ['roll'] }, { axes: [] }] }, { id: 2, axisType: 'single', score: 9, tags: ['creampie'], vr: false, scenes: [{ axes: [] }] }]);
     expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[1, 1]]);
   });
 
   it('keeps every scene of a post the user picked, single-axis ones too', () => {
-    const q = downloadQueue([{ id: 3, axisType: 'single', score: 1, tags: [], vr: false, picked: true, scenes: [{ axes: [] }, { axes: [] }] }]);
+    const q = downloadQueue([{ id: 3, axisType: 'single', score: 1, tags: ['riding'], vr: false, picked: true, scenes: [{ axes: [] }, { axes: [] }] }]);
     expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[3, 2]]);
+  });
+
+  it('drops saved posts that break the content rules, picks and favourites too', () => {
+    const c = (id, title, tags, extra = {}) => ({ id, title, tags, axisType: 'multi', score: 1, vr: false, scenes: [{ axes: ['twist'] }], ...extra });
+    const q = downloadQueue([
+      c(1, 'Solace2K - Mercy X Horseguy', ['sfm', 'riding'], { favourite: 'Solace2K' }),
+      c(2, 'Necromancer steamy footjob', ['animation', 'footjob'], { picked: true }),
+      c(3, 'Rio Paizuri', ['animation', 'titjob'], { picked: true }),
+      c(4, 'Tracer rides', ['animation', 'riding']),
+    ]);
+    expect(q.map((x) => x.id)).toEqual([4]);
   });
 });
 
 describe('screenPick', () => {
-  it('takes a picked post past the sex and animation rules, never on the live quota', () => {
-    const s = screenPick(topic(['pmv', 'sfw', 'real'], '[JJULEZ] Some PMV', 5), { favourites: ['JJULEZ'] });
+  it('takes a picked post past the animation rule, never on the live quota', () => {
+    const s = screenPick(topic(['pmv', 'real'], '[JJULEZ] Some PMV', 5), { favourites: ['JJULEZ'] });
     expect(s).toMatchObject({ ok: true, picked: true, liveQuota: false, favourite: 'JJULEZ' });
+    expect(screenPick(topic(['real', 'riding'], 'Somebody rides', 9))).toMatchObject({ ok: true, live: true, liveQuota: false });
   });
 
-  it('still refuses exclusions, posts the library links or the user turned down, and library scenes', () => {
+  it('still refuses exclusions, the content rules, posts the library links or the user turned down, and library scenes', () => {
     expect(screenPick(topic(['pmv', 'futanari'], 'X', 6))).toEqual({ ok: false, reason: 'excluded' });
+    expect(screenPick(topic(['sfm', 'pmv'], '2B X WW - BJ', 6))).toEqual({ ok: false, reason: 'excluded' });
+    expect(screenPick(topic(['animation', 'blowjob'], 'Seraphine BJ', 6))).toEqual({ ok: false, reason: 'not-sexual' });
+    expect(screenPick(topic(['pmv', 'sfw'], 'X', 6))).toEqual({ ok: false, reason: 'not-sexual' });
     expect(screenPick(topic(['pmv'], 'X', 7), { knownTopics: new Set([7]) })).toEqual({ ok: false, reason: 'known' });
     expect(screenPick(topic(['pmv'], 'JJULEZ - Work That Body', 8), { sceneNames: ['jjulez work that body'] })).toEqual({ ok: false, reason: 'in-library' });
   });
@@ -503,10 +595,11 @@ describe('scan state', () => {
     expect(pendingTopics(seen).map((t) => t.id)).toEqual([290]);
   });
 
-  it('keeps earlier candidates until every scene is fetched, and drops posts turned down', () => {
-    const c = (id, score, ...videos) => ({ id, score, scenes: videos.map((name) => ({ video: { name } })) });
+  it('keeps earlier candidates until every scene is fetched, and drops posts turned down or breaking the content rules', () => {
+    const c = (id, score, ...videos) => ({ id, score, title: 'X', tags: ['vaginal'], scenes: videos.map((name) => ({ video: { name } })) });
     const done = new Set(['1|a.mp4', '2|b.mp4']);
-    const merged = mergeCandidates([c(1, 5, 'a.mp4'), c(2, 3, 'b.mp4', 'c.mp4'), c(3, 9, 'd.mp4')], [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4')],
+    const merged = mergeCandidates([c(1, 5, 'a.mp4'), c(2, 3, 'b.mp4', 'c.mp4'), c(3, 9, 'd.mp4'), { ...c(5, 8, 'f.mp4'), tags: ['tentacle', 'vaginal'] }],
+      [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4'), { ...c(6, 6, 'g.mp4'), tags: ['titjob'] }],
       (id, v) => done.has(`${id}|${v}`), new Set([3]));
     expect(merged.map((x) => [x.id, x.score])).toEqual([[4, 7], [2, 4]]);
   });

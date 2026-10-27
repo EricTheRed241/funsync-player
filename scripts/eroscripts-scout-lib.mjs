@@ -9,22 +9,32 @@
 //   • Free Scripts only (the CLI lists that category).
 //   • Never: loli, shota, furry / anthro / yiff, futa / futanari (tags, title
 //     or first post). Scenes already in the library stay.
+//   • Never monsters (monster / tentacle / werewolf / horse / orc / goblin /
+//     alien … tags, those words in the title, `X WW` for werewolf) nor feet
+//     (footjob / feet / soles / toes … tags or title words), favourites and
+//     posts picked by id (`--add`) included. Succubi, demons and elves stay.
 //   • Animated: a tag like animation / 3d / hentai / vam / sfm / mmd and no
 //     `real` tag. AI-generated video counts. A music post (PMV / HMV / Cock
 //     Hero …) by a creator already in the library is accepted as well. Live
 //     action by a favourite creator or actress (title, tags or poster;
 //     scripts/scout-live.mjs) is taken; other live action waits for the
 //     live quota (one in every 20 Discovery downloads, both scouts).
-//   • Sex only: a sex-act tag (vaginal, blowjob, riding …) or word in the
-//     title or first post, or a porn music tag (HMV / PMV / Cock Hero) on a
-//     post that isn't a dance. Never a post tagged sfw / non-porn.
+//   • Sex required, picks included: a penetrative sex tag (vaginal, anal,
+//     riding, doggy, missionary, creampie, threesome …) or sex word in the
+//     title. Blowjob / handjob / titjob / paizuri alone don't count. A music
+//     video (PMV / HMV / Cock Hero / Fap Hero) counts unless it's a dance or
+//     its title is about a non-sex act (`Blowjob PMV`, `JOI`). Never a post
+//     tagged sfw / non-porn. `--fetch` and every scan drop saved candidates
+//     that now break these content rules (contentRuleBreak).
 //   • Videos shorter than two minutes (by the main script) aren't downloaded;
 //     shorter scenes fetched under the old one-minute rule stay.
 //   • Multi-axis scenes only. A single-axis scene is taken only when the post
 //     is VR, has creampie, and is by a creator already in the library or a
 //     PMV / HMV / Cock Hero / Fap Hero.
 //   • Ranking: VR +3, music +2, creator already in the library +2,
-//     creampie / riding +2 (+0.5 for both), multi-axis +1, likes up to +3.
+//     creampie / riding +2 (+0.5 for both), multi-axis +1, likes up to +3;
+//     2D hentai only (hentai / 2d / anime, nothing 3D) −3. There's no
+//     hentai feed; hentai comes in through the other feeds.
 //   • Skip posts the library already links and scenes whose video is
 //     already in the library.
 //   • Video variant: VR ≤ 8K and ≤ 60 fps, low bitrate when offered;
@@ -44,28 +54,49 @@ export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
 const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
 // Tags that say a post has no porn in it.
 const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 'non-nude']);
-// Tags that name a sex act.
-const SEX_TAGS = new Set([
-  'sex', 'hardcore', 'vaginal', 'anal', 'pussy', 'creampie', 'anal-creampie', 'oral-creampie', 'riding', 'cowgirl',
-  'reverse-cowgirl', 'missionary', 'doggy', 'doggy-style', 'doggystyle', 'standing-doggy', 'pronebone', 'blowjob', 'bj',
-  'deepthroat', 'facefuck', 'throatpie', 'cum-in-mouth', 'handjob', 'titfuck', 'titjob', 'paizuri', 'boobjob', 'footjob',
-  'thighjob', 'cumshot', 'facial', 'gangbang', 'double-penetration', 'threesome', 'foursome', 'fivesome', 'orgy',
-  'milking', 'fingering', 'masturbation', 'dildo', 'tentacle',
+// Monsters (tags and title words): never, favourites and picks included.
+// Succubi, demon girls and elves aren't monsters.
+const MONSTER_TAGS = new Set([
+  'monster', 'monsters', 'monstergirls', 'monstergirl', 'monster-girl', 'monster-girls', 'tentacle', 'tentacles', 'tentacle-sex',
+  'tentacle-monster', 'werewolf', 'werewolves', 'horse', 'horse-cock', 'horsecock', 'bestiality', 'animated-bestiality', 'zoophilia',
+  'orc', 'orcs', 'goblin', 'goblins', 'minotaur', 'ogre', 'troll', 'alien', 'aliens', 'beast', 'slime-girl', 'knot', 'knotted', 'knotting',
 ]);
-// Porn genres and music videos: sex unless the post is a dance.
-const PORN_TAGS = new Set(['hentai', 'straight', 'hmv', 'pmv', 'cock-hero', 'fap-hero']);
-const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck\w*|creampie|cum|cums|cumming|cumshots?|blowjobs?|bj|handjobs?|titjobs?|titfuck\w*|paizuri|boobjobs?|footjobs?|riding|rides?|cowgirl|doggy\w*|missionary|anal|vaginal|deepthroat\w*|penetration|gangbang|threesome|orgy|milking|pussy|cock|dick|penis|intercourse|nakadashi|bred|breeding)(?![\p{L}\p{N}])/iu;
+const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
+// `Mercy X WW`: Solace2K and Rekin3D's short for werewolf, a standalone capital token.
+const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
+// Feet (tags and title words): never.
+const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
+const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
+// Tags that name penetrative sex. Blowjob, handjob and titjob don't count alone.
+const SEX_TAGS = new Set([
+  'sex', 'vaginal', 'vaginal-sex', 'anal', 'anal-sex', 'riding', 'cowgirl', 'reverse-cowgirl', 'doggy', 'doggystyle', 'doggy-style',
+  'standing-doggy', 'missionary', 'mating-press', 'pronebone', 'prone-bone', 'spooning', 'creampie', 'anal-creampie', 'cum-inside',
+  'cum-in-pussy', 'cum-in-ass', 'double-penetration', 'penetration', 'intercourse', 'threesome', 'foursome', 'fivesome', 'gangbang',
+  'orgy', 'group-sex', 'breeding', 'nakadashi',
+]);
+// Acts on their own that aren't sex (`Face Fuck PMV`, `Titjob HMV`, `JOI`);
+// NON_SEX_PHRASES go before sex words are looked for.
+const NON_SEX_PHRASES = /(?<![\p{L}\p{N}])(?:(?:face|throat|mouth|skull|tit|titty|boob|thigh|armpit|hand|foot|feet)[ -]?fuck\w*|oral[ -]?sex)/giu;
+const NON_SEX_ACT_TITLE = /(?<![\p{L}\p{N}])(blowjobs?|blow ?job|bj|handjobs?|hand ?job|hj|titjobs?|tit ?job|titfuck\w*|tittyfuck\w*|boobjobs?|paizuri|joi|deepthroat\w*|(?:face|throat|mouth|skull) ?fuck\w*|fellatio|oral)(?![\p{L}\p{N}])|フェラ|パイズリ|手コキ|口交|乳交/iu;
+const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck|fucks|fucked|fucking|riding|rides?|cowgirl|doggy\w*|missionary|creampies?|anal|vaginal|mating ?press|prone ?bone|intercourse|penetration|gangbang\w*|threesome|foursome|orgy|orgies|nakadashi|breeding|cum ?inside)(?![\p{L}\p{N}])/iu;
 // Scripts without spaces between words.
-const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|フェラ|パイズリ|手コキ|足コキ|做爱|性爱|骑乘|口交|后入|中出|乳交|섹스/u;
+const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|正常位|做爱|性爱|骑乘|后入|中出|内射|섹스|내사/u;
 // A title that says the video is a dance counts like the `dance` tag.
 const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダンス|踊り|舞蹈|跳舞|댄스/iu;
+// 2D hentai ranks lower: a post whose animation tags are only these, with no
+// 3D tag and no 3D / SFM / VaM / MMD in its title.
+const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
+const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);
+const THREE_D_TITLE = /(?<![\p{L}\p{N}])(3d|sfm|vam|mmd)(?![\p{L}\p{N}])/iu;
+/** Score taken off a 2D-hentai-only post. */
+export const HENTAI_ONLY_PENALTY = 3;
 // Shortest video worth downloading, by its main script's last action.
 export const MIN_VIDEO_MS = 120_000;
 /** The minimum as words for messages: `2 min`. */
 export const MIN_VIDEO_LABEL = `${MIN_VIDEO_MS / 60_000} min`;
 
 export const DISCOVERY_NAME = 'Discovery';
-export const FEED_TAGS = ['multi-axis', 'animation', 'hentai', '3d', 'vam', 'sfm', 'mmd'];
+export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm', 'mmd'];
 
 const VIDEO_EXT_RE = /\.(mp4|m4v|mkv|webm|mov)$/i;
 const SCRIPT_AXES = new Set(['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve']);
@@ -143,6 +174,31 @@ export function hasExcludedText(text) {
   return EXCLUDED_TEXT.test(String(text || ''));
 }
 
+/** True when a post's tags or title name a monster (tentacles, werewolves, horse guys, orcs …). */
+export function hasMonster({ tags = [], title = '' }) {
+  return tags.some((t) => MONSTER_TAGS.has(t)) || MONSTER_TITLE.test(title) || WEREWOLF_TOKEN.test(title);
+}
+
+/** True when a post's tags or title are about feet (footjob, soles, toes …). */
+export function hasFeet({ tags = [], title = '' }) {
+  return tags.some((t) => FEET_TAGS.has(t)) || FEET_TITLE.test(title);
+}
+
+/**
+ * Why a post or video breaks the content rules every scout list obeys
+ * (favourites and picks included), judged by its tags and title alone, so a
+ * saved candidate can be checked again: `monster`, `feet`, `not-sexual`
+ * (see isSexual), or null when it doesn't.
+ *
+ * @param {{tags?: string[], title?: string}} post
+ */
+export function contentRuleBreak({ tags = [], title = '' }) {
+  if (hasMonster({ tags, title })) return 'monster';
+  if (hasFeet({ tags, title })) return 'feet';
+  if (!isSexual({ tags, title })) return 'not-sexual';
+  return null;
+}
+
 /**
  * First pass on a listed topic, before any request for its files.
  *
@@ -153,33 +209,39 @@ export function hasExcludedText(text) {
  * @param {string[]} ctx.sceneNames normName of every library scene folder
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
  * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null,
- *   live: boolean, favourite: string|null, liveQuota: boolean}}
+ *   live: boolean, favourite: string|null, liveQuota: boolean, hentaiOnly: boolean}}
+ *   reasons: known, excluded (also monsters and feet), not-sexual, in-library
  */
 export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [] } = {}) {
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
   if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
-  if (tags.some((t) => SFW_TAGS.has(t))) return { ok: false, reason: 'not-sexual' };
+  const rule = contentRuleBreak({ tags, title: topic.title });
+  if (rule) return { ok: false, reason: rule === 'not-sexual' ? rule : 'excluded' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
   const live = !(tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real'));
   const music = tags.some((t) => MUSIC_TAGS.has(t));
   const favourite = favouriteIn([topic.title, ...tags], favourites);
   if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
-  return { ok: true, music, vr: tags.includes('vr'), artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }) };
+  return {
+    ok: true, music, vr: tags.includes('vr'), artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }),
+    hentaiOnly: isHentaiOnly({ tags, title: topic.title }),
+  };
 }
 
 /** Discourse category of Free Scripts (Paid Scripts posts link to a store instead of files). */
 export const FREE_SCRIPTS_CATEGORY = 14;
 
 /**
- * Screen a post the user picked by id (`--add`): only the exclusions, posts
- * the library already links or the user turned down, and scenes the library
- * already has count. The animation and sex rules don't apply, and a pick
- * never waits for the live quota.
+ * Screen a post the user picked by id (`--add`): the exclusions, the
+ * content rules (contentRuleBreak), posts the library already links or the
+ * user turned down, and scenes the library already has count. The
+ * animation and multi-axis rules don't apply, and a pick never waits for
+ * the live quota.
  */
 export function screenPick(topic, ctx) {
-  const s = screenTopic({ ...topic, tags: (topic.tags || []).filter((t) => !SFW_TAGS.has(t)) }, ctx);
+  const s = screenTopic(topic, ctx);
   return s.ok ? { ...s, liveQuota: false, picked: true } : s;
 }
 
@@ -188,9 +250,6 @@ export function liveOnQuota({ live, favourite, music, artist }) {
   return !!live && !favourite && !(music && artist);
 }
 
-// Music videos that let a single-axis VR creampie post in.
-const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
-const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu;
 const CREAMPIE_TITLE = /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])|中出し|内射/iu;
 
 /**
@@ -216,21 +275,40 @@ export function wantedScenes(post) {
   return takesSingleAxis(post) ? post.scenes : post.scenes.filter((sc) => sc.axes.length);
 }
 
+// Music videos: the single-axis exception below, and sex unless a dance or a non-sex act.
+const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
+const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu;
+
 /**
- * True when a post shows some sign of sex: a sex-act tag, a sex word in its
- * title or first post, or a porn genre / music tag (hentai, straight, HMV,
- * PMV, Cock Hero) on a post that isn't a dance. A post tagged sfw /
- * non-porn never is.
+ * True when a post shows penetrative sex, by its tags and title: a sex tag
+ * (vaginal, anal, riding, doggy, missionary, creampie, threesome …) or a sex
+ * word in the title (English, Japanese, Chinese or Korean). Blowjob,
+ * handjob, titjob or paizuri alone isn't sex. A music video (PMV / HMV /
+ * Cock Hero / Fap Hero) counts unless it's a dance or its title is about a
+ * non-sex act (`Blowjob PMV`, `Titjob HMV`, `JOI`) without a sex word. A
+ * post tagged sfw / non-porn never is.
  *
- * @param {{tags?: string[], title?: string, text?: string}} post
+ * @param {{tags?: string[], title?: string}} post
  */
-export function isSexual({ tags = [], title = '', text = '' }) {
+export function isSexual({ tags = [], title = '' }) {
   if (tags.some((t) => SFW_TAGS.has(t))) return false;
   if (tags.some((t) => SEX_TAGS.has(t))) return true;
-  const words = `${title}\n${text}`;
+  const words = String(title).replace(NON_SEX_PHRASES, ' ');
   if (SEX_WORDS.test(words) || SEX_WORDS_CJK.test(words)) return true;
+  if (!(tags.some((t) => PMV_TAGS.has(t)) || PMV_TITLE.test(title))) return false;
   const dance = tags.includes('dance') || DANCE_TITLE.test(title);
-  return !dance && tags.some((t) => PORN_TAGS.has(t));
+  return !dance && !NON_SEX_ACT_TITLE.test(title);
+}
+
+/**
+ * True for 2D hentai: animation tags only hentai / 2d / anime, no 3D tag
+ * (3d, sfm, vam, mmd, cgi, blender, koikatsu …) and no 3D / SFM / VaM / MMD
+ * in the title. Such posts rank lower (HENTAI_ONLY_PENALTY).
+ *
+ * @param {{tags?: string[], title?: string}} post
+ */
+export function isHentaiOnly({ tags = [], title = '' }) {
+  return tags.some((t) => FLAT_HENTAI_TAGS.has(t)) && !tags.some((t) => THREE_D_TAGS.has(t)) && !THREE_D_TITLE.test(title);
 }
 
 /** Last action time of a parsed funscript in ms; 0 when it has none. */
@@ -240,13 +318,14 @@ export function scriptDurationMs(script) {
 }
 
 /** Ranking score; higher downloads first. */
-export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0 }) {
+export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false }) {
   return (vr ? 3 : 0)
     + (music ? 2 : 0)
     + (artistInLibrary ? 2 : 0)
     + (preferred.length ? 2 + 0.5 * (preferred.length - 1) : 0)
     + (multiAxis ? 1 : 0)
-    + Math.min(3, likes / 20);
+    + Math.min(3, likes / 20)
+    - (hentaiOnly ? HENTAI_ONLY_PENALTY : 0);
 }
 
 // ── Video variant ───────────────────────────────────────────────────────
@@ -626,7 +705,7 @@ export function remapPaths(value, moves) {
 // `single-axis` post with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 3;
+export const RULES_VERSION = 4;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
@@ -688,7 +767,8 @@ export function feedState(state, tag) {
 /**
  * The saved candidate list after a scan: candidates found now, plus earlier
  * ones that still have a scene to download, minus posts the user turned
- * down. Best score first.
+ * down and posts that break the content rules (contentRuleBreak; lists
+ * saved under older rules may hold some, picks too). Best score first.
  *
  * @param {object[]} previous candidates from the last list
  * @param {object[]} fresh candidates found by this scan
@@ -699,7 +779,7 @@ export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set())
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(c.id, c);
   return [...byId.values()]
-    .filter((c) => !turnedDown.has(c.id) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
+    .filter((c) => !turnedDown.has(c.id) && !contentRuleBreak(c) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
     .sort((a, b) => b.score - a.score);
 }
 
@@ -768,11 +848,14 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 /**
  * Download order: multi-axis posts first, then single-axis; each by score.
  * Live action on the quota comes last, so the run's other downloads can earn
- * it a slot. Scenes a saved list holds but the rules no longer want are
- * dropped, except on posts the user picked (`--add`), which keep every scene.
+ * it a slot. Posts a saved list holds that break the content rules
+ * (contentRuleBreak) are dropped, picks included; so are scenes the rules no
+ * longer want, except on posts the user picked (`--add`), which keep every
+ * scene.
  */
 export function downloadQueue(candidates) {
   const ok = candidates
+    .filter((c) => !contentRuleBreak(c))
     .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
     .filter((c) => c.scenes.length);
   const byScore = (a, b) => b.score - a.score;

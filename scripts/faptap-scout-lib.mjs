@@ -16,7 +16,8 @@
 // except the multi-axis one, narrowed to what the user wants from FapTap.
 //   • Never loli, shota, furry / anthro / yiff, futa / futanari (tags, title
 //     or description), nor FapTap's furry tags that don't say so (scalie,
-//     knot, Krystal, Renamon …).
+//     knot, Krystal, Renamon …). Never monsters or feet (tags or title, as
+//     on EroScripts), favourites and picks included.
 //   • Animated, unless a favourite: an animation tag (animated, hentai,
 //     cgi, sfm, mmd …), no live-action tag (amateur, homemade, pornstar,
 //     onlyfans …), and no FapTap model / pornstar named in the title or
@@ -31,9 +32,14 @@
 //   • Focus, except for favourites: at least two of PMV / HMV (Cock Hero
 //     and Fap Hero included), creampie, reverse cowgirl and VR, each by tag
 //     or title (VR also by FapTap's VR flag).
-//   • Videos the user picks by id (`--add`) skip the animation, focus and
-//     sex rules; the exclusions, audio, length and library checks stay.
-//   • Sex only (as on EroScripts), at least two minutes long.
+//   • Videos the user picks by id (`--add`) skip the animation and focus
+//     rules; the exclusions, content rules, audio, length and library
+//     checks stay.
+//   • Sex required (as on EroScripts: penetrative sex by tag or title, a
+//     blowjob / handjob / titjob alone isn't; picks too), at least two
+//     minutes long. `--fetch` and every scan drop saved candidates that now
+//     break the content rules (stillWanted).
+//   • Ranking as on EroScripts; 2D hentai only ranks 3 lower.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream up to 4K (8K for VR); none below
 //     720p (1080p for VR).
@@ -45,8 +51,8 @@
 // `overwatch`.
 
 import {
-  ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, hasExcludedText, isCreatorLabel, isSexual, normName, sameVideo, sceneTitle,
-  scoreCandidate, titleArtist,
+  ANIMATION_TAGS, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, contentRuleBreak, hasExcludedText, hasFeet, hasMonster, isCreatorLabel, isHentaiOnly,
+  isSexual, normName, sameVideo, sceneTitle, scoreCandidate, titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import { favouriteIn } from './scout-live.mjs';
 import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
@@ -54,7 +60,7 @@ import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 4;
+export const FAPTAP_RULES_VERSION = 5;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -270,14 +276,15 @@ export function faptapSceneName(video, ctx = {}) {
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
  * @param {boolean} [ctx.picked] the user asked for this video by id
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
- *   focus: string[], preferred: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean}}
- *   reasons: excluded, audio-only, off-focus, not-sexual, short, in-library
+ *   focus: string[], preferred: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean, hentaiOnly: boolean}}
+ *   reasons: excluded (also monsters and feet), audio-only, off-focus, not-sexual, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
   const tags = videoTags(video);
   const title = String(video.name || '');
   const text = htmlText(video.description);
-  if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)) {
+  if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)
+    || hasMonster({ tags, title }) || hasFeet({ tags, title })) {
     return { ok: false, reason: 'excluded' };
   }
   const name = normName(title);
@@ -292,15 +299,16 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   if (tags.some(isAudioTag) || AUDIO_TITLE.test(title)) return { ok: false, reason: 'audio-only' };
   const vr = !!video.vr || tags.includes('vr');
   const focus = focusOf({ tags, title, vr });
-  if (!picked) {
-    if (!favourite && focus.length < FOCUS_MIN) return { ok: false, reason: 'off-focus' };
-    if (!isSexual({ tags, title, text })) return { ok: false, reason: 'not-sexual' };
-  }
+  if (!picked && !favourite && focus.length < FOCUS_MIN) return { ok: false, reason: 'off-focus' };
+  if (!isSexual({ tags, title })) return { ok: false, reason: 'not-sexual' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
   if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
   const liveQuota = live && !picked && !favourite && !(music && artist);
-  return { ok: true, tags, vr, music, artist, focus, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)), live, favourite, liveQuota, picked };
+  return {
+    ok: true, tags, vr, music, artist, focus, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)), live, favourite, liveQuota, picked,
+    hentaiOnly: isHentaiOnly({ tags, title }),
+  };
 }
 
 /**
@@ -393,7 +401,9 @@ export function toCandidate(video, screen) {
     favourite: screen.favourite || null,
     liveQuota: !!screen.liveQuota,
     picked: !!screen.picked,
-    score: +scoreCandidate({ vr: screen.vr, music: screen.music, artistInLibrary: !!(screen.artist || screen.favourite), preferred: screen.preferred, likes }).toFixed(2),
+    score: +scoreCandidate({
+      vr: screen.vr, music: screen.music, artistInLibrary: !!(screen.artist || screen.favourite), preferred: screen.preferred, likes, hentaiOnly: screen.hentaiOnly,
+    }).toFixed(2),
   };
 }
 
@@ -423,8 +433,11 @@ export function mergeCookies(jar, setCookies) {
   return [...cookies.values()].join('; ');
 }
 
-/** True when a saved candidate still meets the focus rule (lists saved under older rules may not); picks and favourites need none. */
-export const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FOCUS_MIN;
+// The focus rule on a saved candidate (lists saved under older rules may miss it); picks and favourites need none.
+const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FOCUS_MIN;
+
+/** True when a saved candidate may still be downloaded: in focus, and within the content rules (no monsters, no feet, sex; picks too). */
+export const stillWanted = (c) => inFocus(c) && !contentRuleBreak(c);
 
 /**
  * FapTap often holds one video uploaded several times, with other scripts.
@@ -446,7 +459,7 @@ export function dropDuplicateCandidates(candidates) {
 
 /**
  * The saved list after a scan: candidates found now plus earlier ones not
- * yet fetched or rejected and still in focus, one per video
+ * yet fetched or rejected and still wanted (`stillWanted`), one per video
  * (`dropDuplicateCandidates`), best score first.
  *
  * @param {object[]} previous
@@ -456,6 +469,6 @@ export function dropDuplicateCandidates(candidates) {
 export function mergeCandidates(previous, fresh, isDone) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(String(c.id), c);
-  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && inFocus(c));
+  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && stillWanted(c));
   return dropDuplicateCandidates(open).kept.sort((a, b) => b.score - a.score);
 }
