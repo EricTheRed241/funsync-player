@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   tagSlug, videoTags, screenVideo, pickSource, csvToFunscript, vrSuffix, toCandidate, mergeCandidates, fetchedKey, FAPTAP_RULES_VERSION,
-  livePerformerNames, hasLivePerformer, mergeCookies, withPerformers, faptapArtist, faptapSceneName, thumbnailUrl,
+  livePerformerNames, hasLivePerformer, mergeCookies, withPerformers, faptapArtist, faptapSceneName, thumbnailUrl, stillWanted,
 } from '../../scripts/faptap-scout-lib.mjs';
 import { emptyScoutState, listFeed, markTopic, seenTopic, RULES_VERSION } from '../../scripts/eroscripts-scout-lib.mjs';
 
@@ -89,6 +89,12 @@ describe('screenVideo', () => {
     ['a furry tag that does not say furry', video(['Animated', 'scalie', 'Sex'])],
     ['futa in the title', video(['Hentai', 'Riding'], { name: 'Futa Elf rides' })],
     ['loli in the description', video(['Hentai', 'Riding'], { description: '<p>loli edit</p>' })],
+    ['a tentacle tag', video(['Hentai', 'Tentacles', ...FOCUS2])],
+    ['a monster girl tag', video(['Animated 3d', 'Monster Girl', ...FOCUS2])],
+    ['a horse guy in the title', video(['Animated 3d', ...FOCUS2], { name: 'Solace2K - Mercy X Horseguy' })],
+    ['WW (werewolf) in the title', video(['Animated 3d', ...FOCUS2], { name: '2B X WW - Creampie' })],
+    ['a footjob tag', video(['Animated 3d', 'Footjob', ...FOCUS2])],
+    ['feet in the title', video(['Animated 3d', ...FOCUS2], { name: 'Tifa soles and creampie' })],
   ])('never takes %s', (_, v) => {
     expect(screenVideo(v)).toEqual({ ok: false, reason: 'excluded' });
   });
@@ -106,7 +112,9 @@ describe('screenVideo', () => {
     const favourites = ['Noodledude', 'NoFaceGirl', 'Candy Love'];
     expect(screenVideo(video(['PMV', 'tiktok'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Noodledude', liveQuota: false });
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Fit babe rides', performers: [{ name: 'NoFaceGirl' }] }), { favourites }).favourite).toBe('NoFaceGirl');
-    expect(screenVideo(video(['Amateur', 'Blowjob', 'noodledude'], { name: 'IWYC' }), { favourites }).favourite).toBe('Noodledude');
+    expect(screenVideo(video(['Amateur', 'Blowjob', 'Riding', 'noodledude'], { name: 'IWYC' }), { favourites }).favourite).toBe('Noodledude');
+    expect(screenVideo(video(['Amateur', 'Blowjob', 'noodledude'], { name: 'IWYC' }), { favourites }).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Amateur', 'POV', 'Riding', 'Feet'], { name: 'Fit babe rides', performers: [{ name: 'NoFaceGirl' }] }), { favourites }).reason).toBe('excluded');
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Candy Lovers' }), { favourites }).reason).toBe('off-focus');
   });
 
@@ -117,10 +125,12 @@ describe('screenVideo', () => {
     expect(withPerformers(s, [{ name: 'Moecode', category: '' }], [])).toMatchObject({ live: false, liveQuota: false });
   });
 
-  it('lets a video picked by id past the animation, focus and sex rules, but not the exclusions', () => {
-    expect(screenVideo(video(['Amateur', 'POV'], { name: 'Pov boobfuck' }), { picked: true })).toMatchObject({ ok: true, picked: true, liveQuota: false });
+  it('lets a video picked by id past the animation and focus rules, but not the exclusions or content rules', () => {
+    expect(screenVideo(video(['Amateur', 'POV'], { name: 'Pov riding' }), { picked: true })).toMatchObject({ ok: true, picked: true, liveQuota: false });
+    expect(screenVideo(video(['Amateur', 'POV'], { name: 'NoFaceGirl Pov boobfuck and blowjob' }), { picked: true }).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Amateur', 'Riding'], { name: 'Werewolf rides' }), { picked: true }).reason).toBe('excluded');
     expect(screenVideo(video(['Amateur', 'Futa']), { picked: true }).reason).toBe('excluded');
-    expect(screenVideo(video(['Amateur'], { duration: 30 }), { picked: true }).reason).toBe('short');
+    expect(screenVideo(video(['Amateur', 'Riding'], { duration: 30 }), { picked: true }).reason).toBe('short');
   });
 
   it('needs two of PMV / HMV, creampie, reverse cowgirl and VR, by tag, title or VR flag', () => {
@@ -168,9 +178,12 @@ describe('screenVideo', () => {
     expect(hasLivePerformer({ performers: null })).toBe(false);
   });
 
-  it('needs sex and at least two minutes', () => {
+  it('needs penetrative sex and at least two minutes', () => {
     expect(screenVideo(video(['Animated', 'dance', 'HMV', 'VR'], { name: 'Bulma dances' })).reason).toBe('not-sexual');
     expect(screenVideo(video(['Animated', 'non-nude', ...FOCUS2])).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', 'Titjob', 'HMV', 'VR'], { name: 'Titjob HMV' })).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', 'Blowjob', 'PMV', 'VR'], { name: 'Blowjob PMV' })).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Animated', 'PMV', 'VR'], { name: 'Overwatch PMV' })).ok).toBe(true);
     expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 119 })).reason).toBe('short');
     expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 120 })).ok).toBe(true);
   });
@@ -228,18 +241,32 @@ describe('mergeCandidates', () => {
     expect(list.map((x) => [x.id, x.score])).toEqual([['1', 4], ['3', 3]]);
   });
 
+  it('drops saved candidates that break the content rules, picks and favourites too', () => {
+    const c = (id, title, tags, extra = {}) => ({ id, score: 1, tags, title, ...extra });
+    const saved = [
+      c('1', 'NoFaceGirl Pov boobfuck and blowjob', ['pov', 'blowjob'], { picked: true }),
+      c('2', 'JJULEZ - Goon Training JOI', ['pmv'], { favourite: 'JJULEZ' }),
+      c('3', 'Mercy X Horseguy', ['creampie', 'hmv']),
+      c('4', 'Kiriko rides', ['creampie', 'hmv']),
+    ];
+    expect(mergeCandidates(saved, [], () => false).map((x) => x.id)).toEqual(['4']);
+    expect(saved.filter(stillWanted).map((x) => x.id)).toEqual(['4']);
+  });
+
   it('keeps one of several uploads of the same video: the best stream, then the most liked', () => {
     const c = (id, quality, likes, title = 'Agapilord - HMV - SEXUAL') => ({ id, score: 5, tags: ['creampie', 'hmv'], title, duration: 190, vr: false, quality, likes });
     const list = mergeCandidates([c('1', 720, 50)], [c('2', 1080, 3), c('3', 1080, 9), c('4', 1080, 1, 'Something Else')], () => false);
     expect(list.map((x) => x.id).sort()).toEqual(['3', '4']);
   });
 
-  it('ranks VR and preferred tags above plain videos', () => {
+  it('ranks VR and preferred tags above plain videos, and 2D hentai only lower', () => {
     const plain = toCandidate(video(['Animated', 'HMV', 'PMV']), screenVideo(video(['Animated', 'HMV', 'Reverse Cowgirl'])));
     const vr = toCandidate(video(['Animated', 'Creampie'], { vr: true }), screenVideo(video(['Animated', 'Creampie'], { vr: true })));
     expect(vr.score).toBeGreaterThan(plain.score);
     expect(plain).toMatchObject({ id: '1', url: 'https://faptap.net/v/1', author: 'Zoot', focus: ['PMV / HMV', 'reverse cowgirl'] });
     expect(fetchedKey(plain.id)).toBe('faptap|1');
+    const flat = (tags) => toCandidate(video(tags), screenVideo(video(tags))).score;
+    expect(flat(['Hentai', ...FOCUS2])).toBe(flat(['Animated 3d', ...FOCUS2]) - 3);
   });
 });
 

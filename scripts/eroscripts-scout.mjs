@@ -6,7 +6,9 @@
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //
-// Rules and ranking: scripts/eroscripts-scout-lib.mjs. Scenes land in
+// Rules and ranking: scripts/eroscripts-scout-lib.mjs (no monsters, no feet
+// and sex required for every post, favourites and picks too; 2D hentai
+// ranks lower). Scenes land in
 // `<library parent>/_incoming/<creator>/<Artist - Title (metadata)>/` with an
 // `eroscripts.json` sidecar. Single-axis scenes get generated twist / roll / pitch companions
 // (scripts/upgrade-multi-axis.mjs). Each finished video joins the Discovery
@@ -47,20 +49,22 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
 Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.json):
   --pages N              most pages of new posts on the multi-axis feed (30 posts each, default 6)
-  --anim-pages N         most pages of new posts on each animation feed (animation, hentai, 3d, vam, sfm, mmd; default 3)
+  --anim-pages N         most pages of new posts on each animation feed (animation, 3d, vam, sfm, mmd; default 3)
   --backfill N           older pages to read per feed, continuing from the last run (default 2; 0 = none)
-  --feeds a,b            only these feeds (multi-axis, animation, hentai, 3d, vam, sfm, mmd; default all)
+  --feeds a,b            only these feeds (multi-axis, animation, 3d, vam, sfm, mmd; default all)
   --since YYYY-MM-DD     backfill only down to posts last active on that date; a feed that gets there
                          isn't backfilled again unless a later run passes an earlier date
   --full                 judge every listed post again, not only new ones
   --top N                candidates to print (default 40)
 Pick:
-  --add 1,2,3            judge these post ids and put them on the list: only the exclusions, posts the
-                         library has or the user turned down, and library duplicates count (the animation,
-                         sex and multi-axis rules don't; single-axis scenes get generated axes)
+  --add 1,2,3            judge these post ids and put them on the list: only the exclusions, the content
+                         rules (no monsters, no feet, sex), posts the library has or the user turned down,
+                         and library duplicates count (the animation and multi-axis rules don't;
+                         single-axis scenes get generated axes)
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
-                         skips videos under 2 minutes and scenes rejected in the app (2 stars or lower)
+                         skips videos under 2 minutes, scenes rejected in the app (2 stars or lower)
+                         and waiting posts that break the content rules
   --ids 1,2,3            only these post ids
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
@@ -211,7 +215,7 @@ function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, ho
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
     vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, ...(picked ? { picked } : {}),
-    score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes }).toFixed(2),
+    score: +lib.scoreCandidate({ vr: s.vr, music: s.music, artistInLibrary: !!(artistInLibrary || favourite), preferred, multiAxis: axisType === 'multi', likes: t.likes, hentaiOnly: s.hentaiOnly }).toFixed(2),
     scenes,
   };
 }
@@ -252,7 +256,6 @@ async function scan(opts, { api, userData, config, incoming }) {
       const cooked = op.cooked || '';
       const text = cooked.replace(/<[^>]+>/g, ' ');
       if (lib.hasExcludedText(text)) { verdict('excluded'); continue; }
-      if (!lib.isSexual({ tags: t.tags, title: t.title, text })) { verdict('not-sexual'); continue; }
       let files, hosts;
       try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
@@ -494,6 +497,13 @@ async function fetchAll(opts, { api, userData, incoming }) {
   const file = path.join(userData, 'eroscripts-scout.json');
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const breaks = {};
+  for (const c of candidates) {
+    const rule = lib.contentRuleBreak(c);
+    if (rule) breaks[rule] = (breaks[rule] || 0) + 1;
+  }
+  const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
+  if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
   const queue = lib.downloadQueue(candidates).filter((c) => !opts.ids || opts.ids.has(c.id));
   const gb = queue.reduce((n, c) => n + c.scenes.reduce((m, sc) => m + (sc.video.size || 0), 0), 0) / 1e9;
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);

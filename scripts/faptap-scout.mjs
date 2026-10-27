@@ -5,8 +5,10 @@
 //   npm run faptap:scout                 scan new videos (+ some backfill) → <userData>/faptap-scout.json
 //   npm run faptap:scout -- --fetch      download the saved list
 //
-// Rules: scripts/faptap-scout-lib.mjs. Scenes land in `<library parent>/
-// _incoming/<creator>/<Artist - Title>/` with a `faptap.json` sidecar. FapTap
+// Rules: scripts/faptap-scout-lib.mjs (no monsters, no feet and sex required
+// for every video, favourites and picks too; 2D hentai ranks lower). Scenes
+// land in `<library parent>/_incoming/<creator>/<Artist - Title>/` with a
+// `faptap.json` sidecar. FapTap
 // scripts are single-axis, so every scene gets generated twist / roll /
 // pitch companions (scripts/upgrade-multi-axis.mjs). Videos come from
 // FapTap's HLS streams through ffmpeg. Finished videos join Discovery like
@@ -54,11 +56,13 @@ Scan (default; only videos not judged before, see <userData>/faptap-scout-state.
   --full                 judge every listed video again, not only new ones
   --top N                candidates to print (default 40)
 Pick:
-  --add a,b,c            add these FapTap video ids to the list, skipping the animation, focus and sex
-                         rules (exclusions, audio roleplays, length and library duplicates still apply)
+  --add a,b,c            add these FapTap video ids to the list, skipping the animation and focus rules
+                         (exclusions, no monsters / feet, sex, audio roleplays, length and library
+                         duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, add each scene to Discovery;
-                         skips scripts under 2 minutes and scenes rejected in the app (2 stars or lower)
+                         skips scripts under 2 minutes, scenes rejected in the app (2 stars or lower)
+                         and waiting videos now off focus or breaking the content rules
   --ids a,b,c            only these FapTap video ids
                          (live action by non-favourites waits for the live quota: one in every 20 downloads)
   --passes N             repeat the queue until no failures, at most N times (default 1)
@@ -456,7 +460,14 @@ async function fetchAll(opts, { userData, config, incoming }) {
   const { candidates } = JSON.parse(fs.readFileSync(listPath(userData), 'utf8'));
   // Live action on the quota goes last, so this run's downloads can earn it a slot.
   const byScore = (a, b) => b.score - a.score;
-  const wanted = candidates.filter(lib.inFocus).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
+  const breaks = {};
+  for (const c of candidates) {
+    const rule = scout.contentRuleBreak(c);
+    if (rule) breaks[rule] = (breaks[rule] || 0) + 1;
+  }
+  const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
+  if (dropped) console.log(`Dropped ${dropped} waiting videos that break the content rules ${JSON.stringify(breaks)}`);
+  const wanted = candidates.filter(lib.stillWanted).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
   const queue = [...wanted.filter((c) => !c.liveQuota).sort(byScore), ...wanted.filter((c) => c.liveQuota).sort(byScore)];
   console.log(`Queue: ${queue.length} videos → ${incoming}`);
   if (opts.dryRun) {
