@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// One playlist per artist with more than six videos, per favourite from one
+// One playlist per artist with at least MIN_ARTIST_VIDEOS videos, per favourite from one
 // video, and the combined Favourite artists playlist
 // (renderer/js/artist-playlists.js): who counts, when a playlist is made,
 // and that the user's own edits stick.
@@ -54,7 +54,7 @@ describe('planArtistPlaylists', () => {
     expect(again).toMatchObject({ create: [], extend: [] });
   });
 
-  it('gives a favourite a playlist from one video, matched whatever the case or Unicode form; others still need seven', () => {
+  it('gives a favourite a playlist from one video, matched whatever the case or Unicode form; others still need MIN_ARTIST_VIDEOS', () => {
     const videoPaths = [
       ...vids('/GVP/Multi Generated', 'Eternal Enigma', 1),
       ...vids('/GVP/_incoming', 'Cafe\u0301 Girl', 2),

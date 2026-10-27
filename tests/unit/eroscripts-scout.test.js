@@ -458,7 +458,7 @@ describe('remapPaths', () => {
 describe('downloadQueue', () => {
   it('puts every multi-axis post before single-axis ones and drops posts without scenes', () => {
     const allowed = { vr: true, tags: ['creampie', 'pmv'] };
-    const c = (id, axisType, score, scenes = 1) => ({ id, axisType, score, ...allowed, scenes: Array(scenes).fill({ axes: axisType === 'multi' ? ['twist'] : [] }) });
+    const c = (id, axisType, likes, scenes = 1) => ({ id, axisType, likes, ...allowed, scenes: Array(scenes).fill({ axes: axisType === 'multi' ? ['twist'] : [] }) });
     const q = downloadQueue([c(1, 'single', 9), c(2, 'multi', 1), c(3, 'multi', 5), c(4, 'single', 2), c(5, 'multi', 8, 0)]);
     expect(q.map((x) => x.id)).toEqual([3, 2, 1, 4]);
   });
@@ -648,12 +648,18 @@ describe('scan state', () => {
   });
 
   it('keeps earlier candidates until every scene is fetched, and drops posts turned down or breaking the content rules', () => {
-    const c = (id, score, ...videos) => ({ id, score, title: 'X', tags: ['vaginal'], scenes: videos.map((name) => ({ video: { name } })) });
+    const c = (id, likes, ...videos) => ({ id, likes, title: 'X', tags: ['vaginal'], scenes: videos.map((name) => ({ video: { name } })) });
     const done = new Set(['1|a.mp4', '2|b.mp4']);
     const merged = mergeCandidates([c(1, 5, 'a.mp4'), c(2, 3, 'b.mp4', 'c.mp4'), c(3, 9, 'd.mp4'), { ...c(5, 8, 'f.mp4'), tags: ['tentacle', 'vaginal'] }],
       [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4'), { ...c(6, 6, 'g.mp4'), tags: ['titjob'] }],
       (id, v) => done.has(`${id}|${v}`), new Set([3]));
-    expect(merged.map((x) => [x.id, x.score])).toEqual([[4, 7], [2, 4]]);
+    expect(merged.map((x) => x.id)).toEqual([4, 2]);
+  });
+
+  it('scores a saved list again under the current weights', () => {
+    const saved = { id: 1, title: 'X', tags: ['vaginal'], likes: 0, axisType: 'multi', score: 1, scenes: [{ video: { name: 'a.mp4' } }] };
+    const [c] = mergeCandidates([saved], [], () => false);
+    expect(c.score).toBe(scoreCandidate({ multiAxis: true }));
   });
 });
 

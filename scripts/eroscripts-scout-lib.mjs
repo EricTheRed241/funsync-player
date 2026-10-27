@@ -335,6 +335,17 @@ export function scoreCandidate({ vr = false, music = false, artistInLibrary = fa
     - (hentaiOnly ? RANKING.hentaiOnly : 0);
 }
 
+/**
+ * Score of a saved candidate under the current RANKING, from what the list
+ * keeps, so a weight change reorders lists saved before it.
+ */
+export function candidateScore(c) {
+  return +scoreCandidate({
+    vr: !!c.vr, music: !!c.music, artistInLibrary: !!(c.artistInLibrary || c.favourite), preferred: c.preferred || [],
+    multiAxis: c.axisType === 'multi', likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
+  }).toFixed(2);
+}
+
 // ── Video variant ───────────────────────────────────────────────────────
 
 // "K" of a file name (8K = 4320 lines, 4K = 2160); a height cap in the same unit.
@@ -779,7 +790,8 @@ export function feedState(state, tag) {
  * The saved candidate list after a scan: candidates found now, plus earlier
  * ones that still have a scene to download, minus posts the user turned
  * down and posts that break the content rules (contentRuleBreak; lists
- * saved under older rules may hold some, picks too). Best score first.
+ * saved under older rules may hold some, picks too). Best score first, each
+ * scored again under the current RANKING.
  *
  * @param {object[]} previous candidates from the last list
  * @param {object[]} fresh candidates found by this scan
@@ -791,6 +803,7 @@ export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set())
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(c.id, c);
   return [...byId.values()]
     .filter((c) => !turnedDown.has(c.id) && !contentRuleBreak(c) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
+    .map((c) => ({ ...c, score: candidateScore(c) }))
     .sort((a, b) => b.score - a.score);
 }
 
@@ -857,7 +870,8 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 // ── Queue & playlist ────────────────────────────────────────────────────
 
 /**
- * Download order: multi-axis posts first, then single-axis; each by score.
+ * Download order: multi-axis posts first, then single-axis; each by score
+ * (candidateScore, so a list saved under older weights follows the current ones).
  * Live action on the quota comes last, so the run's other downloads can earn
  * it a slot. Posts a saved list holds that break the content rules
  * (contentRuleBreak) are dropped, picks included; so are scenes the rules no
@@ -869,7 +883,7 @@ export function downloadQueue(candidates) {
     .filter((c) => !contentRuleBreak(c))
     .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
     .filter((c) => c.scenes.length);
-  const byScore = (a, b) => b.score - a.score;
+  const byScore = (a, b) => candidateScore(b) - candidateScore(a);
   const own = ok.filter((c) => !c.liveQuota);
   return [
     ...own.filter((c) => c.axisType === 'multi').sort(byScore), ...own.filter((c) => c.axisType !== 'multi').sort(byScore),
