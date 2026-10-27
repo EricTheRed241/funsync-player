@@ -169,6 +169,20 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   return { ok: true, music, vr: tags.includes('vr'), artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }) };
 }
 
+/** Discourse category of Free Scripts (Paid Scripts posts link to a store instead of files). */
+export const FREE_SCRIPTS_CATEGORY = 14;
+
+/**
+ * Screen a post the user picked by id (`--add`): only the exclusions, posts
+ * the library already links or the user turned down, and scenes the library
+ * already has count. The animation and sex rules don't apply, and a pick
+ * never waits for the live quota.
+ */
+export function screenPick(topic, ctx) {
+  const s = screenTopic({ ...topic, tags: (topic.tags || []).filter((t) => !SFW_TAGS.has(t)) }, ctx);
+  return s.ok ? { ...s, liveQuota: false, picked: true } : s;
+}
+
 /** True when a live post isn't a favourite's nor a library creator's music video, so it waits for the live quota. */
 export function liveOnQuota({ live, favourite, music, artist }) {
   return !!live && !favourite && !(music && artist);
@@ -755,11 +769,11 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
  * Download order: multi-axis posts first, then single-axis; each by score.
  * Live action on the quota comes last, so the run's other downloads can earn
  * it a slot. Scenes a saved list holds but the rules no longer want are
- * dropped.
+ * dropped, except on posts the user picked (`--add`), which keep every scene.
  */
 export function downloadQueue(candidates) {
   const ok = candidates
-    .map((c) => ({ ...c, scenes: wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
+    .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
     .filter((c) => c.scenes.length);
   const byScore = (a, b) => b.score - a.score;
   const own = ok.filter((c) => !c.liveQuota);

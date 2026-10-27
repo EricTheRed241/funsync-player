@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, MIN_VIDEO_MS, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
-  emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics,
+  emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const topic = (tags, title = 'Some scene', id = 1) => ({ id, title, tags });
@@ -343,6 +343,24 @@ describe('downloadQueue', () => {
   it('drops single-axis scenes a saved list holds that the rules no longer want', () => {
     const q = downloadQueue([{ id: 1, axisType: 'multi', score: 1, tags: [], vr: false, scenes: [{ axes: ['roll'] }, { axes: [] }] }, { id: 2, axisType: 'single', score: 9, tags: ['creampie'], vr: false, scenes: [{ axes: [] }] }]);
     expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[1, 1]]);
+  });
+
+  it('keeps every scene of a post the user picked, single-axis ones too', () => {
+    const q = downloadQueue([{ id: 3, axisType: 'single', score: 1, tags: [], vr: false, picked: true, scenes: [{ axes: [] }, { axes: [] }] }]);
+    expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[3, 2]]);
+  });
+});
+
+describe('screenPick', () => {
+  it('takes a picked post past the sex and animation rules, never on the live quota', () => {
+    const s = screenPick(topic(['pmv', 'sfw', 'real'], '[JJULEZ] Some PMV', 5), { favourites: ['JJULEZ'] });
+    expect(s).toMatchObject({ ok: true, picked: true, liveQuota: false, favourite: 'JJULEZ' });
+  });
+
+  it('still refuses exclusions, posts the library links or the user turned down, and library scenes', () => {
+    expect(screenPick(topic(['pmv', 'futanari'], 'X', 6))).toEqual({ ok: false, reason: 'excluded' });
+    expect(screenPick(topic(['pmv'], 'X', 7), { knownTopics: new Set([7]) })).toEqual({ ok: false, reason: 'known' });
+    expect(screenPick(topic(['pmv'], 'JJULEZ - Work That Body', 8), { sceneNames: ['jjulez work that body'] })).toEqual({ ok: false, reason: 'in-library' });
   });
 });
 
