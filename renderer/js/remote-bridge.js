@@ -24,6 +24,9 @@ export class RemoteBridge {
     this._reconnectAttempts = 0;
     this._reconnectTimer = null;
     this._shouldRun = false;
+    // Set by the first socket that opens. Every later open is a reconnect,
+    // usually to a backend that restarted and lost the desktop's registry.
+    this._hasOpened = false;
 
     // Upward callbacks — set by app.js
     this.onPhoneConnected = null;      // (ip, videoId, videoPath) => {}
@@ -38,7 +41,7 @@ export class RemoteBridge {
     this.onPhoneOrgasmHold = null;     // (active, ip) => {} — phone orgasm button press/release (F2)
     this.onPhoneSetOffset = null;      // (device, ms, ip) => {} — phone offset slider (F4)
     this.onLibraryEdit = null;         // (edit) => {} — rating / playlist edit from phone or headset
-    this.onBridgeOpen = null;          // () => {}
+    this.onBridgeOpen = null;          // (reconnected: boolean) => {} — false for the first open only
     this.onBridgeClose = null;         // () => {}
   }
 
@@ -104,7 +107,9 @@ export class RemoteBridge {
 
     ws.addEventListener('open', () => {
       this._reconnectAttempts = 0;
-      if (this.onBridgeOpen) this.onBridgeOpen();
+      const reconnected = this._hasOpened;
+      this._hasOpened = true;
+      if (this.onBridgeOpen) this.onBridgeOpen(reconnected);
     });
 
     ws.addEventListener('message', (evt) => {

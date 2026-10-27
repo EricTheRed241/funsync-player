@@ -835,7 +835,19 @@ class App {
         const backendPort = this.settings.get('backend.port') || 5123;
         this.remoteBridge = new RemoteBridge({ port: backendPort });
         this._wireRemoteBridge();
-        this.remoteBridge.onBridgeOpen = () => console.log('[Remote] observer bridge connected');
+        this.remoteBridge.onBridgeOpen = (reconnected) => {
+          console.log(`[Remote] observer bridge ${reconnected ? 'reconnected' : 'connected'}`);
+          // The backend keeps the library in memory only. A reconnect almost
+          // always means it restarted (health monitor, Restart backend, or a
+          // process started outside the app) with an empty registry, so the
+          // phone and HereSphere would see nothing until the next rescan.
+          // Push the last scan again. Before the first scan there is nothing
+          // to push; the scan registers it.
+          if (reconnected && this.library?._videos?.length > 0) {
+            console.log('[Remote] re-registering the library with the backend');
+            this.library._registerWithBackend();
+          }
+        };
         this.remoteBridge.onBridgeClose = () => console.log('[Remote] observer bridge closed — will retry');
         this.remoteBridge.connect();
         console.log('[Remote] observer bridge: attempting connect to ws://127.0.0.1:' + backendPort + '/api/remote/sync/observe');
