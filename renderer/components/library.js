@@ -6751,17 +6751,15 @@ export class Library {
     });
     // Custom thumbnails reach the phone too (F7): the backend applies
     // frame pins to its thumb generation and serves uploaded posters
-    // (validated inside the custom-thumbs dir, fetched lazily once).
-    if (this._customThumbsDir === undefined) {
-      this._customThumbsDir = null; // sentinel: fetch in flight
-      window.funsync.getCustomThumbsDir?.()
-        .then((dir) => { this._customThumbsDir = dir || null; })
-        .catch(() => { this._customThumbsDir = null; });
-    }
+    // (validated inside the custom-thumbs dir, fetched once). Every
+    // registration waits for that dir: one sent without it (the first after
+    // a start) made the backend serve generated frames in place of every
+    // poster, and the headset keeps the first thumbnail it gets.
+    this._customThumbsDirReady ??= Promise.resolve(window.funsync.getCustomThumbsDir?.())
+      .then((dir) => dir || undefined, () => undefined);
     const payload = {
       videos: videosWithOverride,
       customThumbnails: this._settings.get('library.customThumbnails') || {},
-      customThumbsDir: this._customThumbsDir || undefined,
       // Sources are needed by the phone's folder-browse tree view — it
       // uses {id, name, path} to seed the source-root nodes so the tree
       // walker knows where to stop climbing.
@@ -6790,7 +6788,10 @@ export class Library {
         });
       } catch { /* ignore */ }
     };
-    attempt(0);
+    this._customThumbsDirReady.then((dir) => {
+      payload.customThumbsDir = dir;
+      attempt(0);
+    });
   }
 
   _escapeHtml(str) {
