@@ -1,4 +1,5 @@
-// An EroScripts post's preview image as a video's library thumbnail.
+// An EroScripts post's preview image as a video's library thumbnail, and
+// FapTap's thumbnail of a FapTap Discovery scene (see "FapTap thumbnails").
 //
 // Stored like a user-uploaded poster (`library.customThumbnails[path]`,
 // `{ type: 'image', imagePath }`) so every thumbnail surface (library,
@@ -16,16 +17,21 @@
 //
 // Automatic imports never replace an existing custom thumbnail: a poster
 // the user uploaded or a frame they pinned always wins, and Reset brings
-// back the generated frame. Revalidation removes automatic EroScripts
-// posters that don't match their video; one the user picked by hand
+// back the generated frame. Revalidation removes automatic EroScripts and
+// FapTap posters that don't match their video; one the user picked by hand
 // (`forced`) is theirs and is never touched.
 
 import * as thumbCache from './thumbnail-cache.js';
 import { eventBus } from './event-bus.js';
 import { SCRIPT_TAGS_KEY } from './script-tags.js';
+import { FAPTAP_SOURCE } from './eroscripts-links.js';
 
 export const CUSTOM_THUMBS_KEY = 'library.customThumbnails';
 export const PREVIEW_SOURCE = 'eroscripts';
+/** `source` of customThumbnails entries holding FapTap's thumbnail. */
+export const FAPTAP_THUMB_SOURCE = 'faptap';
+/** Settled FapTap thumbnail attempts: `{ [videoPath]: {url, status: 'imported'|'no-match', distance?} }`. */
+export const FAPTAP_ATTEMPTS_KEY = 'library.faptapThumbnails';
 
 /** Spacing between posts in a batch, so the forum sees ≤ 2 requests/s. */
 export const BATCH_DELAY_MS = 600;
@@ -52,12 +58,12 @@ export function isPreviewEntry(entry) {
 }
 
 /**
- * May revalidation remove this entry? Only an EroScripts poster FunSync
- * picked by itself. Uploads, pinned frames and previews the user chose by
- * hand are left alone.
+ * May revalidation remove this entry? Only a poster FunSync picked by
+ * itself: an EroScripts preview or FapTap's thumbnail. Uploads, pinned
+ * frames and previews the user chose by hand are left alone.
  */
 export function isRevalidatable(entry) {
-  return isPreviewEntry(entry) && !entry.forced;
+  return (isPreviewEntry(entry) || isFaptapEntry(entry)) && !entry.forced;
 }
 
 /**
@@ -153,7 +159,8 @@ export function planPreviewBatch(settings, videos) {
 }
 
 /**
- * Check every automatic EroScripts poster of `videos` against its video.
+ * Check every automatic poster (EroScripts preview, FapTap thumbnail) of
+ * `videos` against its video.
  * One that doesn't match is removed (the generated frame comes back) and
  * its image file deleted; one that matches gets its `matchScore`. A poster
  * that can't be checked (video offline) is kept.
@@ -240,5 +247,141 @@ export async function fetchPreviewsBatch({
     else summary.failed++;
   }
   onProgress?.('fetch', pending.length, pending.length);
+  return summary;
+}
+
+// ---- FapTap thumbnails ----
+// A FapTap Discovery scene's scriptTags record (`source: 'faptap-scout'`)
+// carries FapTap's thumbnail URL as `previewUrl`. After each library scan
+// the main process downloads it, checks it against the video like a post
+// preview and imports it when it matches (`faptap-import-thumbnail`). The
+// entry is a poster tagged `source: 'faptap'` and `faptapId`.
+//
+// Each attempt that settles (imported or no match) is remembered per video
+// and URL in FAPTAP_ATTEMPTS_KEY, so a no-match isn't downloaded again on
+// every scan and a FapTap thumbnail the user reset stays reset. A new URL
+// gets a fresh attempt. Failures (download, offline video) are retried on
+// the next scan.
+
+/** Wait before each FapTap thumbnail, so the batch stays in the background. */
+export const FAPTAP_DELAY_MS = 1000;
+
+/**
+ * @param {string} imagePath file in the custom-thumbs dir
+ * @param {string} faptapId
+ * @param {{imageUrl?: string|null, matchScore?: number|null}} [extra]
+ */
+export function makeFaptapEntry(imagePath, faptapId, { imageUrl = null, matchScore = null } = {}) {
+  const entry = { type: 'image', imagePath, source: FAPTAP_THUMB_SOURCE, faptapId };
+  if (imageUrl) entry.imageUrl = imageUrl;
+  if (typeof matchScore === 'number') entry.matchScore = matchScore;
+  return entry;
+}
+
+/** Is this customThumbnails entry FapTap's thumbnail? */
+export function isFaptapEntry(entry) {
+  return entry?.type === 'image' && entry.source === FAPTAP_THUMB_SOURCE;
+}
+
+/**
+ * May the FapTap import set this thumbnail to `url`? When none is set, or
+ * to replace an earlier FapTap thumbnail from another URL. Uploads, pinned
+ * frames, EroScripts previews and anything picked by hand stay.
+ */
+export function canFaptapImport(entry, url) {
+  return !entry || (isFaptapEntry(entry) && !entry.forced && entry.imageUrl !== url);
+}
+
+function rememberFaptapAttempt(settings, videoPath, attempt) {
+  const map = { ...(settings.get(FAPTAP_ATTEMPTS_KEY) || {}) };
+  map[videoPath] = attempt;
+  settings.set(FAPTAP_ATTEMPTS_KEY, map);
+}
+
+/**
+ * Videos the FapTap batch would cover: a FapTap record with a thumbnail
+ * URL not tried yet, and a thumbnail slot the import may fill.
+ *
+ * @param {{get: Function}} settings
+ * @param {Array<{path: string}>} videos
+ * @returns {Array<{videoPath: string, faptapId: string, url: string}>}
+ */
+export function planFaptapThumbnails(settings, videos) {
+  const links = settings.get(SCRIPT_TAGS_KEY) || {};
+  const custom = settings.get(CUSTOM_THUMBS_KEY) || {};
+  const tried = settings.get(FAPTAP_ATTEMPTS_KEY) || {};
+  const pending = [];
+  for (const video of videos || []) {
+    const record = links[video?.path];
+    if (record?.source !== FAPTAP_SOURCE) continue;
+    const url = record.previewUrl;
+    if (typeof url !== 'string' || !url) continue;
+    if (tried[video.path]?.url === url) continue;
+    if (!canFaptapImport(custom[video.path], url)) continue;
+    pending.push({ videoPath: video.path, faptapId: record.faptapId, url });
+  }
+  return pending;
+}
+
+/**
+ * Import FapTap's thumbnail of one video if it shows the video.
+ *
+ * @returns {Promise<{status: 'imported'|'skipped'|'no-match'|'failed',
+ *   dataUrl?: string, matchScore?: number, distance?: number|null}>}
+ */
+export async function importFaptapThumbnail({ settings, api, videoPath, faptapId, url }) {
+  const current = () => (settings.get(CUSTOM_THUMBS_KEY) || {})[videoPath];
+  if (!videoPath || !url || !api?.faptapImportThumbnail) return { status: 'failed' };
+  if (!canFaptapImport(current(), url)) return { status: 'skipped' };
+
+  const res = await api.faptapImportThumbnail(videoPath, url);
+  if (res?.status === 'no-match') {
+    const distance = res.distance ?? null;
+    rememberFaptapAttempt(settings, videoPath, { url, status: 'no-match', distance });
+    return { status: 'no-match', distance };
+  }
+  if (res?.status !== 'imported' || !res.path) return { status: 'failed' };
+
+  // Matching took a while: the user may have picked a thumbnail since.
+  if (!canFaptapImport(current(), url)) return { status: 'skipped' };
+
+  writeEntry(settings, videoPath, makeFaptapEntry(res.path, faptapId, { imageUrl: url, matchScore: res.distance }), res.dataUrl);
+  rememberFaptapAttempt(settings, videoPath, { url, status: 'imported' });
+  return { status: 'imported', dataUrl: res.dataUrl, matchScore: res.distance };
+}
+
+/**
+ * Import FapTap thumbnails for every planned video, one at a time. Stops
+ * before the next video once `signal` is aborted (a new scan started).
+ *
+ * @param {object} args
+ * @param {{get: Function, set: Function}} args.settings
+ * @param {object} args.api `window.funsync`
+ * @param {Array<{path: string}>} args.videos
+ * @param {AbortSignal} [args.signal]
+ * @param {(ms: number) => Promise<void>} [args.sleep]
+ * @param {number} [args.delayMs]
+ * @returns {Promise<{total: number, imported: number, noMatch: number, skipped: number,
+ *   failed: number, stopped: boolean}>}
+ */
+export async function fetchFaptapThumbnails({
+  settings, api, videos, signal,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  delayMs = FAPTAP_DELAY_MS,
+}) {
+  const pending = planFaptapThumbnails(settings, videos);
+  const summary = { total: pending.length, imported: 0, noMatch: 0, skipped: 0, failed: 0, stopped: false };
+  for (const item of pending) {
+    if (!signal?.aborted) await sleep(delayMs);
+    if (signal?.aborted) {
+      summary.stopped = true;
+      break;
+    }
+    const { status } = await importFaptapThumbnail({ settings, api, ...item });
+    if (status === 'imported') summary.imported++;
+    else if (status === 'no-match') summary.noMatch++;
+    else if (status === 'skipped') summary.skipped++;
+    else summary.failed++;
+  }
   return summary;
 }

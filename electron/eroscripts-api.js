@@ -3,6 +3,7 @@
 
 const log = require('./logger');
 const { collectPreviewCandidates } = require('./preview-match');
+const { readCapped } = require('./read-capped');
 
 const BASE_URL = 'https://discuss.eroscripts.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -38,31 +39,6 @@ const PREVIEW_TIMEOUT_MS = 30_000;
 // Topic payloads reused by the preview batch (see getTopicData).
 const TOPIC_CACHE_MS = 10 * 60_000;
 const TOPIC_CACHE_SIZE = 50;
-
-/**
- * Read a response body, giving up (null) once it passes `limit` bytes:
- * a missing or wrong Content-Length can't make it buffer more.
- */
-async function readCapped(resp, limit) {
-  if (!resp.body?.getReader) {
-    const buf = Buffer.from(await resp.arrayBuffer());
-    return buf.length > limit ? null : buf;
-  }
-  const reader = resp.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      try { await reader.cancel(); } catch { /* already closed */ }
-      return null;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)), total);
-}
 
 const SCRIPT_FILE_RE = /\.(funscript|zip)$/i;
 const PIXELDRAIN_RE = /https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/(u|l)\/([A-Za-z0-9]+)/gi;

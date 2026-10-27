@@ -82,6 +82,29 @@ describe('scanLibrary', () => {
     expect(byName['NoId.mp4'].faptap).toBeUndefined();
   });
 
+  it("attaches FapTap's thumbnail URL only from FapTap's own hosts, over https", async () => {
+    const urls = {
+      Webp: 'https://faptap.net/api/assets/thumbnails/1.webp',
+      Bunny: 'https://vz-5d2e7f1a-b3c.b-cdn.net/0a1b2c3d/thumbnail.jpg',
+      Http: 'http://faptap.net/api/assets/thumbnails/3.webp',
+      Elsewhere: 'https://evil.example/thumbnail.jpg',
+      LookAlike: 'https://faptap.net.evil.example/x.webp',
+      OtherZone: 'https://cdn.b-cdn.net/thumbnail.jpg',
+      Port: 'https://faptap.net:8443/api/assets/thumbnails/7.webp',
+      NotString: 42,
+    };
+    for (const [name, thumbnailUrl] of Object.entries(urls)) {
+      touch(`In/A/${name}/${name}.mp4`);
+      fs.writeFileSync(path.join(tmp, `In/A/${name}/faptap.json`), JSON.stringify({ faptapId: name, tags: [], thumbnailUrl }));
+    }
+    const byName = Object.fromEntries((await scanLibrary(path.join(tmp, 'In'))).videos.map((v) => [v.name, v]));
+    expect(byName['Webp.mp4'].faptap.thumbnailUrl).toBe(urls.Webp);
+    expect(byName['Bunny.mp4'].faptap.thumbnailUrl).toBe(urls.Bunny);
+    for (const name of ['Http', 'Elsewhere', 'LookAlike', 'OtherZone', 'Port', 'NotString']) {
+      expect(byName[`${name}.mp4`].faptap).toEqual({ faptapId: name, url: null, tags: [] });
+    }
+  });
+
   it('reports a missing source instead of throwing', async () => {
     const r = await scanLibrary([path.join(tmp, 'missing')]);
     expect(r.failedPaths).toEqual([path.join(tmp, 'missing')]);

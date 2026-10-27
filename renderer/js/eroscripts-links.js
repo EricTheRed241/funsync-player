@@ -120,14 +120,15 @@ const sameTags = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
  *   wrote itself (`source: 'eroscripts'`) still wins.
  * - `video.faptap`, the FapTap scene (no EroScripts post, `topicId: null`):
  *   its record only fills a gap or refreshes an older FapTap record; any
- *   EroScripts record (app download, sync link, scout) wins.
+ *   EroScripts record (app download, sync link, scout) wins. FapTap's
+ *   thumbnail URL (`thumbnailUrl`) becomes the record's `previewUrl`.
  *
  * Unchanged records are not rewritten.
  *
  * @param {Object<string, object>} current scriptTags map
  * @param {{path: string,
  *   eroscripts?: {topicId: number, url: string|null, tags: string[]},
- *   faptap?: {faptapId: string, url: string|null, tags: string[]}}[]} videos
+ *   faptap?: {faptapId: string, url: string|null, tags: string[], thumbnailUrl?: string}}[]} videos
  * @param {number} now epoch ms
  * @returns {{map: Object<string, object>, added: number, updated: number}|null} null when nothing changes
  */
@@ -154,11 +155,14 @@ export function mergeScoutPosts(current, videos, now) {
       if (existing && existing.source !== FAPTAP_SOURCE) continue;
       const tags = Array.isArray(scene.tags) ? scene.tags : [];
       const faptapUrl = scene.url || null;
+      const previewUrl = typeof scene.thumbnailUrl === 'string' && scene.thumbnailUrl ? scene.thumbnailUrl : null;
       if (existing && existing.faptapId === scene.faptapId && (existing.faptapUrl || null) === faptapUrl
-        && sameTags(existing.tags, tags)) continue;
-      put(v.path, existing, {
+        && (existing.previewUrl || null) === previewUrl && sameTags(existing.tags, tags)) continue;
+      const record = {
         tags, topicId: null, topicUrl: null, faptapId: scene.faptapId, faptapUrl, source: FAPTAP_SOURCE, savedAt: now,
-      });
+      };
+      if (previewUrl) record.previewUrl = previewUrl;
+      put(v.path, existing, record);
     }
   }
   return added || updated ? { map, added, updated } : null;
