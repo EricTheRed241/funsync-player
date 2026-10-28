@@ -1,6 +1,7 @@
 // File-system side of the Discovery scouts (scripts/eroscripts-scout.mjs,
 // scripts/faptap-scout.mjs): the app's config.json and lock, the library's
-// folders, and the Discovery playlist. config.json is written only while the
+// folders (each scout downloads into its own source folder, EroScripts or
+// FapTap), and the Discovery playlist. config.json is written only while the
 // app is closed; otherwise finished videos wait in
 // `<userData>/eroscripts-scout-pending.json` for the next run of either scout.
 
@@ -46,7 +47,7 @@ export function removeIfEmpty(dir) {
   for (const form of [side, side.normalize('NFC')]) fs.rmSync(form, { force: true });
 }
 
-/** Enabled library sources other than the Discovery folder. */
+/** Enabled library sources other than the scout's own download folder. */
 export function librarySources(config, incoming) {
   return (config.settings?.library?.sources || [])
     .filter((s) => s.enabled !== false && s.path && path.resolve(s.path) !== path.resolve(incoming || '/nonexistent'));
@@ -84,7 +85,7 @@ export function libraryState(roots) {
 }
 
 /** Rename `from` to `to`, with its AppleDouble `._` sidecar if the volume keeps one. */
-function renameWithSidecar(from, to) {
+export function renameWithSidecar(from, to) {
   fs.renameSync(from, to);
   const side = (p) => path.join(path.dirname(p), `._${path.basename(p)}`);
   if (fs.existsSync(side(from)) && !fs.existsSync(side(to))) fs.renameSync(side(from), side(to));
@@ -161,8 +162,11 @@ export function onDiskPath(p) {
   return cur;
 }
 
-/** Add finished videos (and any left from earlier runs) to Discovery; false when the app is open. */
-export function flushPlaylist(userData, incoming, videoPaths) {
+/**
+ * Add finished videos (and any left from earlier runs) to Discovery, with the
+ * scout's download folder (`{name, path}`) as a library source; false when the app is open.
+ */
+export function flushPlaylist(userData, folder, videoPaths) {
   const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
   let pending = [];
   try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf8')); } catch { /* none */ }
@@ -170,10 +174,10 @@ export function flushPlaylist(userData, incoming, videoPaths) {
   if (!all.length) return true;
   if (appRunning(userData)) { fs.writeFileSync(pendingFile, JSON.stringify(all, null, 1)); return false; }
   const config = readConfig(userData);
-  const changes = addToDiscovery(config, all, { incomingDir: incoming, newId: randomUUID });
+  const changes = addToDiscovery(config, all, { folder, newId: randomUUID });
   if (changes.sourceAdded || changes.playlistCreated || changes.added.length) writeConfig(userData, config);
   fs.rmSync(pendingFile, { force: true });
-  if (changes.sourceAdded) console.log(`  added library source "${DISCOVERY_NAME}" → ${incoming}`);
+  if (changes.sourceAdded) console.log(`  added library source "${folder.name}" → ${folder.path}`);
   if (changes.playlistCreated) console.log(`  created playlist "${DISCOVERY_NAME}"`);
   return true;
 }
@@ -188,11 +192,17 @@ export function dedupeAfterFetch(userData) {
   if (r.status !== 0) console.log('  duplicate check failed; run npm run dedupe:scenes to see why');
 }
 
-/** The Discovery folder: --incoming, the Discovery source, else `_incoming` beside the first library source. */
-export function incomingDir(config, override) {
-  const sources = librarySources(config, override);
-  const discovery = (config.settings?.library?.sources || []).find((s) => s.name === DISCOVERY_NAME);
-  const dir = override || discovery?.path || (sources[0] && path.join(path.dirname(sources[0].path), '_incoming'));
-  if (!dir) throw new Error('No library source to put _incoming next to; pass --incoming <dir>.');
-  return dir;
+/**
+ * A scout's download folder (`{name, path}`): --incoming, else the library
+ * source called `name` (EroScripts / FapTap), else `<name>` beside the first
+ * library source (the library:reorganize layout).
+ */
+export function downloadFolder(config, name, override) {
+  if (override) return { name, path: override };
+  const all = (config.settings?.library?.sources || []).filter((s) => s.path);
+  const own = all.find((s) => s.name === name);
+  if (own) return { name, path: own.path };
+  const first = all.find((s) => s.enabled !== false);
+  if (!first) throw new Error(`No library source to put ${name} next to; pass --incoming <dir>.`);
+  return { name, path: path.join(path.dirname(first.path), name) };
 }

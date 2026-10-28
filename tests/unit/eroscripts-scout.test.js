@@ -676,21 +676,22 @@ describe('scan state', () => {
 });
 
 describe('addToDiscovery', () => {
-  it('adds the incoming source and playlist once, then only new videos', () => {
+  it("adds the scout's folder as a source and the playlist once, then only new videos", () => {
     let n = 0;
     const newId = () => `id${++n}`;
-    const config = { settings: { library: { sources: [{ id: 's', name: 'Multi-Axis', path: '/GVP/Multi-Axis' }] } }, playlists: [] };
-    const first = addToDiscovery(config, ['/GVP/_incoming/a/a.mp4'], { incomingDir: '/GVP/_incoming', newId, now: 1 });
-    expect(first).toEqual({ sourceAdded: true, playlistCreated: true, added: ['/GVP/_incoming/a/a.mp4'] });
-    const again = addToDiscovery(config, ['/GVP/_incoming/a/a.mp4', '/GVP/_incoming/b/b.mp4'], { incomingDir: '/GVP/_incoming/', newId });
-    expect(again).toEqual({ sourceAdded: false, playlistCreated: false, added: ['/GVP/_incoming/b/b.mp4'] });
-    expect(config.settings.library.sources.map((s) => s.name)).toEqual(['Multi-Axis', DISCOVERY_NAME]);
-    expect(config.playlists).toEqual([{ id: 'id2', name: DISCOVERY_NAME, createdAt: 1, videoPaths: ['/GVP/_incoming/a/a.mp4', '/GVP/_incoming/b/b.mp4'] }]);
+    const config = { settings: { library: { sources: [{ id: 's', name: 'Other', path: '/GVP/Other' }] } }, playlists: [] };
+    const folder = { name: 'EroScripts', path: '/GVP/EroScripts' };
+    const first = addToDiscovery(config, ['/GVP/EroScripts/a/a.mp4'], { folder, newId, now: 1 });
+    expect(first).toEqual({ sourceAdded: true, playlistCreated: true, added: ['/GVP/EroScripts/a/a.mp4'] });
+    const again = addToDiscovery(config, ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'], { folder: { ...folder, path: '/GVP/EroScripts/' }, newId });
+    expect(again).toEqual({ sourceAdded: false, playlistCreated: false, added: ['/GVP/EroScripts/b/b.mp4'] });
+    expect(config.settings.library.sources.map((s) => [s.name, s.path])).toEqual([['Other', '/GVP/Other'], ['EroScripts', '/GVP/EroScripts']]);
+    expect(config.playlists).toEqual([{ id: 'id2', name: DISCOVERY_NAME, createdAt: 1, videoPaths: ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'] }]);
   });
 
   it('uses an existing Discovery playlist whatever its case', () => {
     const config = { settings: { library: { sources: [{ path: '/in' }] } }, playlists: [{ id: 'p', name: ' discovery ', videoPaths: [] }] };
-    expect(addToDiscovery(config, ['/in/x.mp4'], { incomingDir: '/in', newId: () => 'new' }).playlistCreated).toBe(false);
+    expect(addToDiscovery(config, ['/in/x.mp4'], { folder: { name: 'FapTap', path: '/in' }, newId: () => 'new' }).playlistCreated).toBe(false);
     expect(config.playlists[0].videoPaths).toEqual(['/in/x.mp4']);
   });
 });
