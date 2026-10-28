@@ -33,6 +33,9 @@ def fresh_state():
     media.register_tag_scores({})
     media.register_tag_score_info({})
     media.register_preference_scores({})
+    media.register_artists([])
+    media.register_favourite_artists([])
+    media.register_favourite_artist_score({})
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
@@ -40,6 +43,9 @@ def fresh_state():
     media.register_tag_scores({})
     media.register_tag_score_info({})
     media.register_preference_scores({})
+    media.register_artists([])
+    media.register_favourite_artists([])
+    media.register_favourite_artist_score({})
     remote_sync._reset_state_for_tests()
 
 
@@ -557,3 +563,159 @@ class TestTagScores:
         q.enqueue(library_edits.make_recalculate_edit())
         again = LibraryEditQueue(persist_dir=str(tmp_path))
         assert [e["kind"] for e in again.pending()] == ["tag-score", "recalculate-scores"]
+
+
+# --- Favourite artists --------------------------------------------------------
+
+class TestFavouriteArtists:
+    def test_artist_key_folds_case_unicode_and_space(self):
+        assert library_edits.artist_key("  Ünder ") == library_edits.artist_key("u\u0308nder")
+        assert library_edits.artist_key("STRASSE") == library_edits.artist_key("straße")
+        assert library_edits.artist_key(None) == "" and library_edits.artist_key(3) == ""
+
+    @pytest.mark.parametrize("artist, favourite", [
+        (None, True), ("", True), ("   ", False), (3, True), ("Mira", None), ("Mira", 1), ("Mira", "true"),
+    ])
+    def test_artist_edit_rejects(self, artist, favourite):
+        with pytest.raises(ValueError):
+            library_edits.make_favourite_artist_edit(artist, favourite)
+
+    def test_artist_edit_keeps_spelling(self):
+        assert library_edits.make_favourite_artist_edit("  MiraBot ", False, source="remote") == {
+            "kind": "favourite-artist", "artist": "MiraBot", "favourite": False, "source": "remote",
+        }
+
+    @pytest.mark.parametrize("raw, expected", [(5, 5.0), (2.3, 2.5), (-99, -10.0), ("1.5", 1.5), (0, 0.0)])
+    def test_score_edit_steps_and_clamps(self, raw, expected):
+        assert library_edits.make_favourite_score_edit(raw)["score"] == expected
+
+    @pytest.mark.parametrize("raw", [None, True, "lots", [], float("nan")])
+    def test_score_edit_rejects(self, raw):
+        with pytest.raises(ValueError):
+            library_edits.make_favourite_score_edit(raw)
+
+    def test_effective_favourites_overlay_pending_edits_in_order(self):
+        base = ["Mira", "Zeta", "Kai"]
+        pending = [
+            library_edits.make_favourite_artist_edit("MIRA", False),
+            library_edits.make_favourite_artist_edit("newcomer", True),
+            library_edits.make_favourite_artist_edit("zeta", True),
+            library_edits.make_favourite_artist_edit("Newcomer", False),
+            library_edits.make_favourite_artist_edit("NewComer", True),
+            library_edits.make_tag_score_edit("riding", 1),
+        ]
+        # Case-insensitive; a later edit wins and its spelling replaces the old one.
+        assert library_edits.effective_favourite_artists(base, pending) == ["Kai", "zeta", "NewComer"]
+        assert base == ["Mira", "Zeta", "Kai"]
+
+    def test_effective_score_takes_the_last_pending_edit(self):
+        assert library_edits.effective_favourite_score(5.0, []) == 5.0
+        assert library_edits.effective_favourite_score(None, []) is None
+        pending = [library_edits.make_favourite_score_edit(3), library_edits.make_favourite_score_edit(-2)]
+        assert library_edits.effective_favourite_score(5.0, pending) == -2.0
+
+    def test_registration_drops_junk(self, client):
+        client.post("/api/media/register", json={
+            "artists": [
+                {"name": " Mira ", "videoPaths": [A, 3, None, ""]},
+                {"name": "MIRA", "videoPaths": [A, B]},
+                {"name": "", "videoPaths": [C]},
+                {"videoPaths": [C]},
+                "Kai",
+                {"name": "Kai", "videoPaths": "nope"},
+            ],
+            "favouriteArtists": [" Zeta ", "zeta", "", 7, None, "Kai"],
+            "favouriteArtistScore": {"score": 2.3, "default": 5},
+        })
+        assert media.get_artists() == [{"name": "Mira", "videoPaths": [A, B]}, {"name": "Kai", "videoPaths": []}]
+        assert media.get_favourite_artists() == ["Zeta", "Kai"]
+        assert media.get_favourite_artist_score() == {"score": 2.5, "default": 5.0}
+        # Each key is independent; a missing score falls back to the default.
+        client.post("/api/media/register", json={"favouriteArtistScore": {"default": 5}})
+        assert media.get_favourite_artist_score() == {"score": 5.0, "default": 5.0}
+        assert media.get_artists()[0]["name"] == "Mira"
+        client.post("/api/media/register", json={"favouriteArtistScore": "junk", "favouriteArtists": "junk"})
+        assert media.get_favourite_artist_score() == {"score": None, "default": None}
+        assert media.get_favourite_artists() == []
+
+    def test_list_merges_artists_and_favourites(self, client, library):
+        client.post("/api/media/register", json={
+            "artists": [
+                {"name": "beta", "videoPaths": [B, "/Lib/gone.mp4"]},
+                {"name": "Mira", "videoPaths": [C, A]},
+                {"name": "alpha", "videoPaths": []},
+            ],
+            "favouriteArtists": ["MIRA", "Zoë"],
+            "favouriteArtistScore": {"score": 5, "default": 5},
+        })
+        data = client.get("/api/remote/artists").json()
+        assert data == {
+            "artists": [
+                {"id": "mira", "name": "Mira", "videoCount": 2, "totalDuration": 1100.0,
+                 "videoIds": [library["C"], library["A"]], "favourite": True, "pending": False},
+                {"id": "zoë", "name": "Zoë", "videoCount": 0, "totalDuration": 0.0,
+                 "videoIds": [], "favourite": True, "pending": False},
+                {"id": "alpha", "name": "alpha", "videoCount": 0, "totalDuration": 0.0,
+                 "videoIds": [], "favourite": False, "pending": False},
+                {"id": "beta", "name": "beta", "videoCount": 1, "totalDuration": 400.0,
+                 "videoIds": [library["B"]], "favourite": False, "pending": False},
+            ],
+            "score": 5.0, "defaultScore": 5.0, "scorePending": False,
+        }
+
+    def test_pending_edits_overlay_the_list(self, client, library):
+        client.post("/api/media/register", json={
+            "artists": [{"name": "Mira", "videoPaths": [A]}, {"name": "beta", "videoPaths": [B]}],
+            "favouriteArtists": ["Mira", "Zeta"],
+            "favouriteArtistScore": {"score": 5, "default": 5},
+        })
+        client.post("/api/remote/favourite-artist", json={"artist": "MIRA", "favourite": False})
+        client.post("/api/remote/favourite-artist", json={"artist": "Beta", "favourite": True})
+        client.post("/api/remote/favourite-score", json={"score": 7})
+        data = client.get("/api/remote/artists").json()
+        rows = [(a["id"], a["name"], a["favourite"], a["pending"]) for a in data["artists"]]
+        assert rows == [("beta", "beta", True, True), ("zeta", "Zeta", True, False), ("mira", "Mira", False, True)]
+        assert (data["score"], data["defaultScore"], data["scorePending"]) == (7.0, 5.0, True)
+
+    @pytest.mark.parametrize("payload", [
+        {"favourite": True}, {"artist": "  ", "favourite": True}, {"artist": "Mira"}, {"artist": "Mira", "favourite": "yes"},
+        {"artist": 5, "favourite": True},
+    ])
+    def test_artist_endpoint_rejects(self, client, payload):
+        assert client.post("/api/remote/favourite-artist", json=payload).status_code == 400
+        assert library_edits.queue.pending() == []
+
+    @pytest.mark.parametrize("payload", [{}, {"score": None}, {"score": "lots"}, {"score": True}])
+    def test_score_endpoint_rejects(self, client, payload):
+        assert client.post("/api/remote/favourite-score", json=payload).status_code == 400
+        assert library_edits.queue.pending() == []
+
+    def test_set_while_desktop_offline_then_applied(self, client):
+        client.post("/api/media/register", json={
+            "favouriteArtists": ["Mira"], "favouriteArtistScore": {"score": 5, "default": 5},
+        })
+        r = client.post("/api/remote/favourite-artist", json={"artist": " Kai ", "favourite": True})
+        assert r.json() == {"ok": True, "seq": 1, "delivered": False, "artist": "Kai", "favourite": True}
+        r = client.post("/api/remote/favourite-score", json={"score": 12})
+        assert r.json() == {"ok": True, "seq": 2, "delivered": False, "score": 10.0}
+
+        with client.websocket_connect("/api/remote/sync/observe") as ws:
+            msgs = [ws.receive_json() for _ in range(2)]
+            assert [m["edit"]["kind"] for m in msgs] == ["favourite-artist", "favourite-score"]
+            assert "path" not in msgs[0]["edit"] and "path" not in msgs[1]["edit"]
+            for m in msgs:
+                _ack(ws, m)
+            assert _wait_until(lambda: library_edits.queue.pending() == [])
+        # Folded into the registered state until the desktop registers again.
+        data = client.get("/api/remote/artists").json()
+        assert [(a["name"], a["favourite"], a["pending"]) for a in data["artists"]] == [
+            ("Kai", True, False), ("Mira", True, False),
+        ]
+        assert (data["score"], data["scorePending"]) == (10.0, False)
+
+    def test_edits_survive_a_backend_restart(self, tmp_path):
+        q = LibraryEditQueue(persist_dir=str(tmp_path))
+        q.enqueue(library_edits.make_favourite_artist_edit("Mira", True))
+        q.enqueue(library_edits.make_favourite_score_edit(3))
+        again = LibraryEditQueue(persist_dir=str(tmp_path))
+        assert [e["kind"] for e in again.pending()] == ["favourite-artist", "favourite-score"]

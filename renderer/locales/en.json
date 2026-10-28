@@ -1271,6 +1271,7 @@
       "playlists": "Search playlists",
       "categories": "Search categories",
       "tags": "Search tags",
+      "artists": "Search artists",
       "sources": "Search sources",
       "short": "Search",
       "aria": "Search",
@@ -1296,6 +1297,7 @@
       "playlists": "Playlists",
       "categories": "Categories",
       "tags": "Tags",
+      "artists": "Artists",
       "folders": "Folders"
     },
     "filterSheet": {
@@ -1357,10 +1359,25 @@
       "rules": {
         "multiAxis": "Hand-made axes {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "Favourite or known artist {score}",
+        "artistInLibrary": "Known artist {score}",
+        "favouriteArtist": "Favourite artist {score}",
         "likes": "Likes up to {score}",
         "hentaiOnly": "2D hentai only {score}"
       }
+    },
+    "artists": {
+      "hint": "Favourite artists: their videos get the bonus below on top of the ◆ preference score, and the scouts rank their posts higher and take their live action.",
+      "bonus": "Favourite artist bonus",
+      "bonusIsDefault": "Default",
+      "bonusDefault": "Default {score}",
+      "addPlaceholder": "Add a favourite artist",
+      "add": "Add",
+      "notInLibrary": "Not in the library yet",
+      "favourite": "Make {artist} a favourite",
+      "unfavourite": "Remove {artist} from favourites",
+      "added": "{artist} is a favourite now",
+      "removed": "{artist} is no longer a favourite",
+      "alreadyFavourite": "{artist} is already a favourite"
     },
     "breadcrumb": {
       "allSources": "All sources",
@@ -1389,13 +1406,13 @@
       "emptyFolderBody": "No subfolders or videos here.",
       "videoNotFoundTitle": "Video not found",
       "videoNotFoundBody": "Go back and try again.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Couldn't load collections} playlists {Couldn't load playlists} categories {Couldn't load categories} tags {Couldn't load tags} other {Couldn't load items}}",
-      "noGroupingTitle": "{kind, select, collections {No collections yet} playlists {No playlists yet} categories {No categories yet} tags {No tags yet} other {Nothing yet}}",
-      "noGroupingBody": "{kind, select, collections {Create collections in FunSync on your desktop — they'll show up here.} playlists {Create playlists in FunSync on your desktop — they'll show up here.} categories {Create categories in FunSync on your desktop — they'll show up here.} tags {Tags come from the EroScripts and FapTap posts linked to your videos on the desktop.} other {Create items in FunSync on your desktop.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {Couldn't load collections} playlists {Couldn't load playlists} categories {Couldn't load categories} tags {Couldn't load tags} artists {Couldn't load artists} other {Couldn't load items}}",
+      "noGroupingTitle": "{kind, select, collections {No collections yet} playlists {No playlists yet} categories {No categories yet} tags {No tags yet} artists {No artists yet} other {Nothing yet}}",
+      "noGroupingBody": "{kind, select, collections {Create collections in FunSync on your desktop — they'll show up here.} playlists {Create playlists in FunSync on your desktop — they'll show up here.} categories {Create categories in FunSync on your desktop — they'll show up here.} tags {Tags come from the EroScripts and FapTap posts linked to your videos on the desktop.} artists {Artists are the artist folders of your library. Add a favourite above to rank their posts higher.} other {Create items in FunSync on your desktop.}}",
       "groupingNotFoundTitle": "Not found",
-      "groupingNotFoundBody": "{kind, select, collections {This collection no longer exists on the desktop.} playlists {This playlist no longer exists on the desktop.} categories {This category no longer exists on the desktop.} other {This item no longer exists on the desktop.}}",
+      "groupingNotFoundBody": "{kind, select, collections {This collection no longer exists on the desktop.} playlists {This playlist no longer exists on the desktop.} categories {This category no longer exists on the desktop.} artists {This artist is no longer in the library.} other {This item no longer exists on the desktop.}}",
       "groupingEmptyTitle": "Empty",
-      "groupingEmptyBody": "{kind, select, collections {No videos in this collection are currently available.} playlists {No videos in this playlist are currently available.} categories {No videos in this category are currently available.} other {No videos in this item are currently available.}}"
+      "groupingEmptyBody": "{kind, select, collections {No videos in this collection are currently available.} playlists {No videos in this playlist are currently available.} categories {No videos in this category are currently available.} artists {No videos of this artist are currently available.} other {No videos in this item are currently available.}}"
     },
     "player": {
       "switching": "Switching script…",

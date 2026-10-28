@@ -748,6 +748,7 @@
       "playlists": "Rechercher des listes",
       "categories": "Rechercher des catégories",
       "tags": "Rechercher des tags",
+      "artists": "Rechercher des artistes",
       "sources": "Rechercher des sources",
       "short": "Rechercher",
       "aria": "Rechercher",
@@ -773,6 +774,7 @@
       "playlists": "Listes",
       "categories": "Catégories",
       "tags": "Tags",
+      "artists": "Artistes",
       "folders": "Dossiers"
     },
     "filterSheet": {
@@ -834,10 +836,25 @@
       "rules": {
         "multiAxis": "Axes faits main {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "Artiste favori ou connu {score}",
+        "artistInLibrary": "Artiste connu {score}",
+        "favouriteArtist": "Artiste favori {score}",
         "likes": "J'aime jusqu'à {score}",
         "hentaiOnly": "Hentai 2D seul {score}"
       }
+    },
+    "artists": {
+      "hint": "Artistes favoris : leurs vidéos reçoivent le bonus ci-dessous en plus du score de préférence ◆, et les éclaireurs classent leurs posts plus haut et prennent leurs vidéos live action.",
+      "bonus": "Bonus d'artiste favori",
+      "bonusIsDefault": "Par défaut",
+      "bonusDefault": "Par défaut {score}",
+      "addPlaceholder": "Ajouter un artiste favori",
+      "add": "Ajouter",
+      "notInLibrary": "Pas encore dans la bibliothèque",
+      "favourite": "Ajouter {artist} aux favoris",
+      "unfavourite": "Retirer {artist} des favoris",
+      "added": "{artist} est maintenant un favori",
+      "removed": "{artist} n'est plus un favori",
+      "alreadyFavourite": "{artist} est déjà un favori"
     },
     "breadcrumb": {
       "allSources": "Toutes les sources",
@@ -866,13 +883,13 @@
       "emptyFolderBody": "Aucun sous-dossier ni vidéo ici.",
       "videoNotFoundTitle": "Vidéo introuvable",
       "videoNotFoundBody": "Revenez en arrière et réessayez.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} tags {Impossible de charger les tags} other {Impossible de charger les éléments}}",
-      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} tags {Aucun tag pour l'instant} other {Rien pour l'instant}}",
-      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} tags {Les tags viennent des publications EroScripts et FapTap liées à vos vidéos sur l'ordinateur.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} tags {Impossible de charger les tags} artists {Impossible de charger les artistes} other {Impossible de charger les éléments}}",
+      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} tags {Aucun tag pour l'instant} artists {Pas encore d'artistes} other {Rien pour l'instant}}",
+      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} tags {Les tags viennent des publications EroScripts et FapTap liées à vos vidéos sur l'ordinateur.} artists {Les artistes sont les dossiers d'artiste de votre bibliothèque. Ajoutez un favori ci-dessus pour classer ses posts plus haut.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
       "groupingNotFoundTitle": "Introuvable",
-      "groupingNotFoundBody": "{kind, select, collections {Cette collection n'existe plus sur l'ordinateur.} playlists {Cette liste n'existe plus sur l'ordinateur.} categories {Cette catégorie n'existe plus sur l'ordinateur.} other {Cet élément n'existe plus sur l'ordinateur.}}",
+      "groupingNotFoundBody": "{kind, select, collections {Cette collection n'existe plus sur l'ordinateur.} playlists {Cette liste n'existe plus sur l'ordinateur.} categories {Cette catégorie n'existe plus sur l'ordinateur.} artists {Cet artiste n'est plus dans la bibliothèque.} other {Cet élément n'existe plus sur l'ordinateur.}}",
       "groupingEmptyTitle": "Vide",
-      "groupingEmptyBody": "{kind, select, collections {Aucune vidéo disponible dans cette collection.} playlists {Aucune vidéo disponible dans cette liste.} categories {Aucune vidéo disponible dans cette catégorie.} other {Aucune vidéo disponible dans cet élément.}}"
+      "groupingEmptyBody": "{kind, select, collections {Aucune vidéo disponible dans cette collection.} playlists {Aucune vidéo disponible dans cette liste.} categories {Aucune vidéo disponible dans cette catégorie.} artists {Aucune vidéo de cet artiste n'est disponible pour le moment.} other {Aucune vidéo disponible dans cet élément.}}"
     },
     "player": {
       "switching": "Changement de script…",

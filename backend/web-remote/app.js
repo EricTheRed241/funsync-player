@@ -21,7 +21,12 @@ import {
 } from './triage.js';
 import {
   createTagScoreEditor, updateTagScoreEditor, fetchTagScores, setTagScore, requestRecalculation, pollTagScores, formatRules,
+  formatTagScore,
 } from './tag-scores.js';
+import {
+  fetchArtists, setFavouriteArtist, setFavouriteScore, pollArtists, mergeArtistEdits, appliedArtistEdits,
+  artistsPending, foldArtist, createFavouriteStar, updateFavouriteStar,
+} from './artists.js';
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
@@ -141,6 +146,7 @@ document.getElementById('navCollectionsIcon').appendChild(svgIcon('layoutGrid', 
 document.getElementById('navPlaylistsIcon').appendChild(svgIcon('listMusic', 22));
 document.getElementById('navCategoriesIcon').appendChild(svgIcon('tag', 22));
 document.getElementById('navTagsIcon').appendChild(svgIcon('hash', 22));
+document.getElementById('navArtistsIcon').appendChild(svgIcon('user', 22));
 
 let library = null;       // cached list of video objects
 
@@ -168,7 +174,7 @@ let categories = null;    // cached list from /api/remote/categories
 let searchContextMap = null;
 let _searchContextLoading = false;
 let currentView = 'list'; // 'list' | 'player' | 'groupings' | 'grouping-detail'
-let currentMode = 'library'; // 'library' | 'collections' | 'playlists' | 'categories' | 'tags'
+let currentMode = 'library'; // 'library' | 'collections' | 'playlists' | 'categories' | 'tags' | 'artists'
 let activeSyncClient = null;  // torn down on view change / unload
 
 // Persisted filter/sort state
@@ -472,6 +478,12 @@ async function loadGrouping(kind) {
   // Tags aren't a desktop grouping: they come with the videos, so the
   // list is built from the library each time (cheap, and never stale).
   if (kind === 'tags') return tagGroupings(await loadLibrary());
+  // Artists: always fetched (stars change from here and the desktop), and
+  // shown with the stars still on their way merged in.
+  if (kind === 'artists') {
+    adoptArtistState(await fetchArtists());
+    return displayedArtists();
+  }
   const cache = { collections, playlists, categories }[kind];
   if (cache) return cache;
   const resp = await fetch(`/api/remote/${kind}`);
@@ -511,8 +523,8 @@ async function render() {
     return;
   }
 
-  // Grouping list: #collections, #playlists, #categories, #tags
-  if (hash === 'collections' || hash === 'playlists' || hash === 'categories' || hash === 'tags') {
+  // Grouping list: #collections, #playlists, #categories, #tags, #artists
+  if (hash === 'collections' || hash === 'playlists' || hash === 'categories' || hash === 'tags' || hash === 'artists') {
     currentMode = hash;
     currentView = 'groupings';
     backBtn.hidden = true;
@@ -687,19 +699,10 @@ async function renderGroupingsList(kind) {
     return;
   }
 
-  // Filter grouping cards by search query. Reuses fuzzySearch (same
-  // tokenisation / separator-flattening as the video search) so typing
-  // "two girls" matches a collection named "Two-Girl Scenes" the same
-  // way it would match a video filename. Wraps each grouping as a
-  // {name, path} so fuzzySearch's name+path tiers don't error on
-  // missing path; we strip the wrapper after.
-  let filtered = items;
-  if (uiState.search) {
-    const wrapped = items.map(g => ({ name: g.name || '', path: g.name || '', _orig: g }));
-    filtered = fuzzySearch(wrapped, uiState.search).map(w => w._orig);
-  }
+  const filtered = filterGroupings(items);
 
   countEl.textContent = filtered.length ? `${filtered.length}` : '';
+  const bar = groupingBar(kind);
 
   if (items.length === 0) {
     mainEl.innerHTML = `
@@ -707,7 +710,7 @@ async function renderGroupingsList(kind) {
         <div class="empty__title">${escapeHtml(t('webRemote.empty.noGroupingTitle', { kind }))}</div>
         <div>${escapeHtml(t('webRemote.empty.noGroupingBody', { kind }))}</div>
       </div>`;
-    if (kind === 'tags') mainEl.prepend(createTagScoresBar());
+    if (bar) mainEl.prepend(bar);
     return;
   }
   if (filtered.length === 0) {
@@ -716,23 +719,46 @@ async function renderGroupingsList(kind) {
         <div class="empty__title">${escapeHtml(t('webRemote.empty.noMatchesTitle'))}</div>
         <div>${escapeHtml(t('webRemote.empty.noMatchesBodyShort'))}</div>
       </div>`;
-    if (kind === 'tags') mainEl.prepend(createTagScoresBar());
+    if (bar) mainEl.prepend(bar);
     return;
   }
 
   await awaitSkeletonMinDwell();
   mainEl.innerHTML = '';
-  if (kind === 'tags') mainEl.appendChild(createTagScoresBar());
+  if (bar) mainEl.appendChild(bar);
   const list = document.createElement('div');
   list.className = 'grouping-list';
   for (const item of filtered) list.appendChild(createGroupingRow(kind, item));
   mainEl.appendChild(list);
   if (kind === 'tags' && (tagScoreState.pending.size || tagScoreState.recalculating)) watchTagScores();
+  if (kind === 'artists' && artistsPending(artistState)) watchArtists();
+}
+
+/**
+ * Filter grouping cards by search query. Reuses fuzzySearch (same
+ * tokenisation / separator-flattening as the video search) so typing
+ * "two girls" matches a collection named "Two-Girl Scenes" the same
+ * way it would match a video filename. Wraps each grouping as a
+ * {name, path} so fuzzySearch's name+path tiers don't error on
+ * missing path; we strip the wrapper after.
+ */
+function filterGroupings(items) {
+  if (!uiState.search) return items;
+  const wrapped = items.map(g => ({ name: g.name || '', path: g.name || '', _orig: g }));
+  return fuzzySearch(wrapped, uiState.search).map(w => w._orig);
+}
+
+/** The editing bar above a grouping list (Tags, Artists), else null. */
+function groupingBar(kind) {
+  if (kind === 'tags') return createTagScoresBar();
+  if (kind === 'artists') return createArtistsBar();
+  return null;
 }
 
 function createGroupingRow(kind, item) {
   const row = document.createElement('div');
   row.className = 'grouping-row';
+  if (kind === 'artists') row.dataset.artist = foldArtist(item.name);
   row.addEventListener('click', () => {
     if (kind === 'tags') showLibraryWithTag(item.name);
     else location.hash = groupingDetailHash(kind, item.id);
@@ -745,7 +771,7 @@ function createGroupingRow(kind, item) {
     badge.classList.add('grouping-row__badge--dot');
     badge.style.backgroundColor = item.color || '#888';
   } else {
-    badge.appendChild(svgIcon({ playlists: 'play', tags: 'hash' }[kind] || 'layoutGrid', 18));
+    badge.appendChild(svgIcon({ playlists: 'play', tags: 'hash', artists: 'user' }[kind] || 'layoutGrid', 18));
   }
   row.appendChild(badge);
 
@@ -760,7 +786,9 @@ function createGroupingRow(kind, item) {
   const countLabel = item.videoCount === 1 ? '1 video' : `${item.videoCount || 0} videos`;
   const runtime = formatTotalDuration(item.totalDuration || 0);
   const group = kind === 'tags' ? tagScoreState.groups[item.name] : null;
-  sub.textContent = [countLabel, runtime, group && t('webRemote.tagScores.group', { group })].filter(Boolean).join(' • ');
+  sub.textContent = kind === 'artists' && !item.videoCount
+    ? t('webRemote.artists.notInLibrary')
+    : [countLabel, runtime, group && t('webRemote.tagScores.group', { group })].filter(Boolean).join(' • ');
   info.appendChild(sub);
   row.appendChild(info);
 
@@ -770,6 +798,14 @@ function createGroupingRow(kind, item) {
       score: displayedTagScore(item.name),
       pending: tagScorePending(item.name),
       onStep: (next) => onTagScoreStep(item.name, next),
+    }));
+  }
+  if (kind === 'artists') {
+    row.appendChild(createFavouriteStar({
+      artist: item.name,
+      favourite: item.favourite,
+      pending: item.pending,
+      onToggle: (next) => onFavouriteToggle(item.name, next),
     }));
   }
 
@@ -850,7 +886,8 @@ async function refreshLibraryScores() {
 }
 
 function repaintTagScores(applied = []) {
-  for (const el of mainEl.querySelectorAll('.tag-score')) {
+  // The favourite-artist bonus uses the same editor; it repaints with the artists.
+  for (const el of mainEl.querySelectorAll('.tag-score:not(.favourite-score)')) {
     const tag = el.dataset.tag;
     updateTagScoreEditor(el, { score: displayedTagScore(tag), pending: tagScorePending(tag) });
     if (applied.includes(tag)) {
@@ -944,6 +981,223 @@ async function recalculateScores() {
     return;
   }
   watchTagScores();
+}
+
+// --- Favourite artists (Artists view) -------------------------------------
+//
+// Every artist of the library (one per artist folder) with a star, plus the
+// favourites that have no videos. The bar on top has the favourite-artist
+// bonus (−/+, sent after a short pause like a tag score) and adds a
+// favourite by name. A star is sent at once. Stars and the bonus read as
+// pending (dimmed) until the desktop has applied them; once it has, the video
+// list (◆ scores) is fetched again. State from GET /api/remote/artists
+// (queued edits included); stars whose POST hasn't answered live in
+// `artistUnsent`, a bonus still in its pause in `favouriteScoreUnsent`, so a
+// re-render or a poll in between keeps them.
+let artistState = { artists: [], score: 0, defaultScore: 0, scorePending: false };
+const artistUnsent = new Map();  // folded name → {name, favourite} not answered yet
+let favouriteScoreUnsent;        // bonus not sent yet
+let favouriteScoreTimer = null;
+let artistWatching = false;
+
+function displayedArtists() {
+  return mergeArtistEdits(artistState.artists, artistUnsent);
+}
+
+function displayedFavouriteScore() {
+  return favouriteScoreUnsent ?? artistState.score;
+}
+
+function favouriteScorePending() {
+  return favouriteScoreUnsent !== undefined || artistState.scorePending;
+}
+
+async function loadArtistState() {
+  try {
+    adoptArtistState(await fetchArtists());
+  } catch { /* keep the last known artists */ }
+}
+
+/**
+ * Take a fresh state from the backend: stars (and the bonus) the desktop
+ * has applied since the last one flash, and once anything was applied the
+ * video list (◆ scores) is fetched again.
+ */
+function adoptArtistState(next) {
+  const applied = appliedArtistEdits(artistState, next);
+  artistState = next;
+  if (applied.artists.length || applied.score) refreshLibraryScores();
+  repaintArtists(applied);
+}
+
+function flash(el, className) {
+  el.classList.add(className);
+  setTimeout(() => el.classList.remove(className), 1200);
+}
+
+/**
+ * Bring the Artists view up to date in place: stars and the bonus follow the
+ * state; the list is built again only when an artist without a row appears
+ * (a favourite just added), so rows don't jump under the finger.
+ */
+function repaintArtists(applied = { artists: [], score: false }) {
+  const bar = mainEl.querySelector('.artists-bar');
+  if (!bar) return;
+  const editor = bar.querySelector('.favourite-score');
+  if (editor) {
+    updateTagScoreEditor(editor, { score: displayedFavouriteScore(), pending: favouriteScorePending() });
+    if (applied.score) flash(editor, 'tag-score--applied');
+  }
+  updateBonusDefault(bar.querySelector('.artists-bar__default'));
+
+  const artists = filterGroupings(displayedArtists());
+  const rows = new Map([...mainEl.querySelectorAll('.grouping-row[data-artist]')].map((r) => [r.dataset.artist, r]));
+  if (artists.some((a) => !rows.has(foldArtist(a.name)))) {
+    const list = document.createElement('div');
+    list.className = 'grouping-list';
+    for (const item of artists) list.appendChild(createGroupingRow('artists', item));
+    const old = mainEl.querySelector('.grouping-list') || mainEl.querySelector('.empty');
+    if (old) old.replaceWith(list);
+    else mainEl.appendChild(list);
+    countEl.textContent = `${artists.length}`;
+    return;
+  }
+  const byKey = new Map(artists.map((a) => [foldArtist(a.name), a]));
+  for (const [key, row] of rows) {
+    const star = row.querySelector('.artist-star');
+    if (!star) continue;
+    // A row whose artist left the list (a favourite without videos, just
+    // unstarred) stays until the next render, unstarred.
+    const artist = byKey.get(key) || { favourite: false, pending: false };
+    updateFavouriteStar(star, artist);
+    if (applied.artists.includes(key)) flash(star, 'artist-star--applied');
+  }
+}
+
+function updateBonusDefault(el) {
+  if (!el) return;
+  const { defaultScore } = artistState;
+  el.textContent = displayedFavouriteScore() === defaultScore
+    ? t('webRemote.artists.bonusIsDefault')
+    : t('webRemote.artists.bonusDefault', { score: formatTagScore(defaultScore) });
+}
+
+async function onFavouriteToggle(name, favourite) {
+  const key = foldArtist(name);
+  const edit = { name, favourite };
+  artistUnsent.set(key, edit);
+  repaintArtists();
+  const result = await setFavouriteArtist(name, favourite);
+  // A tap made while this was on its way keeps waiting for its own answer.
+  if (artistUnsent.get(key) === edit) artistUnsent.delete(key);
+  const artist = result.data?.artist || name;
+  reportResult(result, t(favourite ? 'webRemote.artists.added' : 'webRemote.artists.removed', { artist }));
+  if (result.ok) {
+    const applied = { name: artist, favourite: typeof result.data?.favourite === 'boolean' ? result.data.favourite : favourite };
+    artistState = { ...artistState, artists: mergeArtistEdits(artistState.artists, new Map([[key, applied]])) };
+    repaintArtists();
+  } else {
+    await loadArtistState();
+  }
+  watchArtists();
+}
+
+function addFavouriteFromInput(input) {
+  const name = input.value.trim();
+  if (!name) return;
+  input.value = '';
+  // Same artist spelled differently: star the one already listed.
+  const known = displayedArtists().find((a) => foldArtist(a.name) === foldArtist(name));
+  if (known?.favourite) {
+    showToast(t('webRemote.artists.alreadyFavourite', { artist: known.name }), 'info');
+    return;
+  }
+  onFavouriteToggle(known?.name || name, true);
+}
+
+function onFavouriteScoreStep(score) {
+  favouriteScoreUnsent = score;
+  repaintArtists();
+  clearTimeout(favouriteScoreTimer);
+  favouriteScoreTimer = setTimeout(() => { sendFavouriteScore(); }, TAG_SCORE_SEND_DELAY_MS);
+}
+
+async function sendFavouriteScore() {
+  favouriteScoreTimer = null;
+  const score = favouriteScoreUnsent;
+  if (score === undefined) return;
+  const result = await setFavouriteScore(score);
+  // A tap made while this was on its way keeps waiting for its own send.
+  if (favouriteScoreUnsent === score) favouriteScoreUnsent = undefined;
+  reportResult(result);
+  if (result.ok) {
+    const applied = typeof result.data?.score === 'number' ? result.data.score : score;
+    artistState = { ...artistState, score: applied, scorePending: true };
+    repaintArtists();
+  } else {
+    await loadArtistState();
+  }
+  watchArtists();
+}
+
+async function watchArtists() {
+  if (artistWatching) return;
+  artistWatching = true;
+  try {
+    await pollArtists((state) => {
+      adoptArtistState(state);
+      return !artistsPending(state);
+    }, { intervalMs: TAG_SCORE_POLL_MS, timeoutMs: TAG_SCORE_POLL_TIMEOUT_MS });
+  } finally {
+    artistWatching = false;
+  }
+}
+
+function createArtistsBar() {
+  const bar = document.createElement('div');
+  bar.className = 'tag-scores-bar artists-bar';
+  const hint = document.createElement('div');
+  hint.className = 'tag-scores-bar__hint';
+  hint.textContent = t('webRemote.artists.hint');
+
+  const bonus = document.createElement('div');
+  bonus.className = 'artists-bar__bonus';
+  const label = document.createElement('span');
+  label.className = 'artists-bar__label';
+  label.textContent = t('webRemote.artists.bonus');
+  const editor = createTagScoreEditor({
+    tag: t('webRemote.artists.bonus'),
+    score: displayedFavouriteScore(),
+    pending: favouriteScorePending(),
+    onStep: onFavouriteScoreStep,
+  });
+  editor.classList.add('favourite-score');
+  const byDefault = document.createElement('span');
+  byDefault.className = 'artists-bar__default';
+  bonus.append(label, editor, byDefault);
+
+  const form = document.createElement('form');
+  form.className = 'artists-bar__add';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'artists-bar__input';
+  input.placeholder = t('webRemote.artists.addPlaceholder');
+  input.setAttribute('aria-label', t('webRemote.artists.addPlaceholder'));
+  input.autocomplete = 'off';
+  input.setAttribute('enterkeyhint', 'done');
+  const add = document.createElement('button');
+  add.type = 'submit';
+  add.className = 'tag-scores-bar__recalc';
+  add.textContent = t('webRemote.artists.add');
+  form.append(input, add);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    addFavouriteFromInput(input);
+  });
+
+  bar.append(hint, bonus, form);
+  updateBonusDefault(byDefault);
+  return bar;
 }
 
 // --- Folder browse (real subfolder tree) --------------------------------

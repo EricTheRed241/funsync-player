@@ -748,6 +748,7 @@
       "playlists": "Поиск плейлистов",
       "categories": "Поиск категорий",
       "tags": "Поиск тегов",
+      "artists": "Поиск авторов",
       "sources": "Поиск источников",
       "short": "Поиск",
       "aria": "Поиск",
@@ -773,6 +774,7 @@
       "playlists": "Плейлисты",
       "categories": "Категории",
       "tags": "Теги",
+      "artists": "Авторы",
       "folders": "Папки"
     },
     "filterSheet": {
@@ -834,10 +836,25 @@
       "rules": {
         "multiAxis": "Оси вручную {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "Любимый или известный автор {score}",
+        "artistInLibrary": "Известный автор {score}",
+        "favouriteArtist": "Любимый автор {score}",
         "likes": "Лайки до {score}",
         "hentaiOnly": "Только 2D-хентай {score}"
       }
+    },
+    "artists": {
+      "hint": "Любимые авторы: их видео получают бонус ниже сверх оценки предпочтения ◆, а скауты ставят их посты выше и берут их live action.",
+      "bonus": "Бонус любимого автора",
+      "bonusIsDefault": "По умолчанию",
+      "bonusDefault": "По умолчанию {score}",
+      "addPlaceholder": "Добавить любимого автора",
+      "add": "Добавить",
+      "notInLibrary": "Пока нет в библиотеке",
+      "favourite": "Добавить {artist} в любимые",
+      "unfavourite": "Убрать {artist} из любимых",
+      "added": "{artist} теперь в любимых",
+      "removed": "{artist} больше не в любимых",
+      "alreadyFavourite": "{artist} уже в любимых"
     },
     "breadcrumb": {
       "allSources": "Все источники",
@@ -866,13 +883,13 @@
       "emptyFolderBody": "Здесь нет ни подпапок, ни видео.",
       "videoNotFoundTitle": "Видео не найдено",
       "videoNotFoundBody": "Вернитесь и попробуйте снова.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Не удалось загрузить коллекции} playlists {Не удалось загрузить плейлисты} categories {Не удалось загрузить категории} tags {Не удалось загрузить теги} other {Не удалось загрузить элементы}}",
-      "noGroupingTitle": "{kind, select, collections {Пока нет коллекций} playlists {Пока нет плейлистов} categories {Пока нет категорий} tags {Пока нет тегов} other {Пока ничего нет}}",
-      "noGroupingBody": "{kind, select, collections {Создайте коллекции в FunSync на компьютере — они появятся здесь.} playlists {Создайте плейлисты в FunSync на компьютере — они появятся здесь.} categories {Создайте категории в FunSync на компьютере — они появятся здесь.} tags {Теги берутся из постов EroScripts и FapTap, связанных с вашими видео на компьютере.} other {Создайте элементы в FunSync на компьютере.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {Не удалось загрузить коллекции} playlists {Не удалось загрузить плейлисты} categories {Не удалось загрузить категории} tags {Не удалось загрузить теги} artists {Не удалось загрузить авторов} other {Не удалось загрузить элементы}}",
+      "noGroupingTitle": "{kind, select, collections {Пока нет коллекций} playlists {Пока нет плейлистов} categories {Пока нет категорий} tags {Пока нет тегов} artists {Авторов пока нет} other {Пока ничего нет}}",
+      "noGroupingBody": "{kind, select, collections {Создайте коллекции в FunSync на компьютере — они появятся здесь.} playlists {Создайте плейлисты в FunSync на компьютере — они появятся здесь.} categories {Создайте категории в FunSync на компьютере — они появятся здесь.} tags {Теги берутся из постов EroScripts и FapTap, связанных с вашими видео на компьютере.} artists {Авторы — это папки авторов в вашей библиотеке. Добавьте любимого автора выше, чтобы его посты ставились выше.} other {Создайте элементы в FunSync на компьютере.}}",
       "groupingNotFoundTitle": "Не найдено",
-      "groupingNotFoundBody": "{kind, select, collections {Этой коллекции больше нет на компьютере.} playlists {Этого плейлиста больше нет на компьютере.} categories {Этой категории больше нет на компьютере.} other {Этого элемента больше нет на компьютере.}}",
+      "groupingNotFoundBody": "{kind, select, collections {Этой коллекции больше нет на компьютере.} playlists {Этого плейлиста больше нет на компьютере.} categories {Этой категории больше нет на компьютере.} artists {Этого автора больше нет в библиотеке.} other {Этого элемента больше нет на компьютере.}}",
       "groupingEmptyTitle": "Пусто",
-      "groupingEmptyBody": "{kind, select, collections {В этой коллекции сейчас нет доступных видео.} playlists {В этом плейлисте сейчас нет доступных видео.} categories {В этой категории сейчас нет доступных видео.} other {В этом элементе сейчас нет доступных видео.}}"
+      "groupingEmptyBody": "{kind, select, collections {В этой коллекции сейчас нет доступных видео.} playlists {В этом плейлисте сейчас нет доступных видео.} categories {В этой категории сейчас нет доступных видео.} artists {Видео этого автора сейчас недоступны.} other {В этом элементе сейчас нет доступных видео.}}"
     },
     "player": {
       "switching": "Переключение скрипта…",

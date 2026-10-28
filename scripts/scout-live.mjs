@@ -3,7 +3,9 @@
 //
 // The scouts take animated scenes. Live action gets in two ways:
 //   • by a favourite: a creator or actress the user likes (FAVOURITES in
-//     renderer/js/content-preferences.js);
+//     renderer/js/content-preferences.js with the user's changes from the
+//     web remote's Artists view, `library.favouriteArtists`; see
+//     scoutPreferences);
 //   • on the quota: anyone else, one in every LIVE_QUOTA_EVERY downloads,
 //     to discover new live action. Every scene either scout downloads counts;
 //     `<userData>/scout-live-quota.json` holds `{ downloads, live }`.
@@ -11,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LIVE_QUOTA_EVERY } from '../renderer/js/content-preferences.js';
+import { effectiveFavourites, favouriteScore } from '../renderer/js/favourite-artists.js';
 
 // Letters and digits, single-spaced, like eroscripts-scout-lib's normName
 // (that module imports this one).
@@ -42,6 +45,37 @@ export function favouriteIn(texts, favourites) {
     if (names.some((w) => ` ${w.join(' ')} `.includes(` ${spaced} `) || runs(w, squash(fav)) || (head.length >= 6 && w.includes(head)))) return fav;
   }
   return null;
+}
+
+/**
+ * The user's preferences the scouts screen and rank by, from config.json:
+ * the favourite artists (FAVOURITES with `library.favouriteArtists`) and the
+ * `scoring` for candidateScore (`library.tagScores` and the favourite artist
+ * bonus, `library.favouriteArtistScore` or RANKING.favouriteArtist).
+ *
+ * @param {object} config config.json
+ * @returns {{favourites: string[], scoring: {tagScores: Object<string, number>, favouriteScore: number}}}
+ */
+export function scoutPreferences(config) {
+  const library = config?.settings?.library || {};
+  return {
+    favourites: effectiveFavourites(library.favouriteArtists),
+    scoring: { tagScores: library.tagScores || {}, favouriteScore: favouriteScore(library.favouriteArtistScore) },
+  };
+}
+
+/**
+ * A saved candidate's favourite under the current favourites: its saved one
+ * while that is still a favourite (it may have come from texts the list
+ * doesn't keep, like FapTap performers), else the favourite `texts` name, or
+ * null. A favourite the user removed drops; one added since is found.
+ *
+ * @param {{favourite?: string|null}} c
+ * @param {string[]} texts what the scan matched favourites in, as the list keeps it
+ * @param {string[]} favourites
+ */
+export function currentFavourite(c, texts, favourites) {
+  return (c.favourite && favouriteIn([c.favourite], favourites)) || favouriteIn(texts, favourites);
 }
 
 /** True when the next download may be a non-favourite live scene: one in every LIVE_QUOTA_EVERY. */

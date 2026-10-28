@@ -1,6 +1,7 @@
 // Preference score: how well a post, a candidate or a library scene fits the
 // user's preferences: the RANKING weights in content-preferences.js (VR,
-// hand-made axes, known artist, likes, 2D hentai) plus the tag scores.
+// hand-made axes, known artist, favourite artist, likes, 2D hentai) plus the
+// tag scores.
 //
 // One implementation for everything that ranks: the EroScripts and FapTap
 // scouts order their candidates by it (scripts/eroscripts-scout-lib.mjs
@@ -8,8 +9,10 @@
 // scan (library-scores.js), so a scene ranks in the library as its post did
 // in the scouting. Tag scores start from TAG_SCORE_GROUPS (creampie, riding,
 // music, POV, monster, feet, FFM) and the user changes them per tag
-// (`library.tagScores`, set from the web remote's Tags view); callers pass
-// that map in. Pure and renderer-safe: no Node imports.
+// (`library.tagScores`, set from the web remote's Tags view); the favourite
+// artist bonus is RANKING.favouriteArtist or the user's
+// `library.favouriteArtistScore` (favourite-artists.js). Callers pass both in
+// (`scoring`). Pure and renderer-safe: no Node imports.
 
 import {
   FEET_TAGS, FEET_TITLE, FFM_TAGS, FFM_TITLE, FLAT_HENTAI_TAGS, MONSTER_TAGS, MONSTER_TITLE, RANKING, TAG_SCORE_GROUPS, THREE_D_TAGS, THREE_D_TITLE,
@@ -53,7 +56,10 @@ export const DEFAULT_TAG_SCORES = Object.freeze(Object.fromEntries([...GROUP_OF]
 export function tagScoreInfo() {
   return {
     groups: Object.fromEntries([...GROUP_OF].map(([tag, g]) => [tag, g.name])),
-    rules: { multiAxis: RANKING.multiAxis, vr: RANKING.vr, artistInLibrary: RANKING.artistInLibrary, likes: RANKING.likesMax, hentaiOnly: -RANKING.hentaiOnly },
+    rules: {
+      multiAxis: RANKING.multiAxis, vr: RANKING.vr, artistInLibrary: RANKING.artistInLibrary, favouriteArtist: RANKING.favouriteArtist,
+      likes: RANKING.likesMax, hentaiOnly: -RANKING.hentaiOnly,
+    },
   };
 }
 
@@ -154,10 +160,14 @@ export function isHentaiOnly({ tags = [], title = '' }) {
   return tags.some((t) => FLAT_HENTAI_TAGS.has(t)) && !tags.some((t) => THREE_D_TAGS.has(t)) && !THREE_D_TITLE.test(title);
 }
 
-/** The RANKING part of the score (everything but the tags); higher downloads first. */
-export function scoreCandidate({ vr = false, artistInLibrary = false, multiAxis = false, likes = 0, hentaiOnly = false }) {
+/**
+ * The RANKING part of the score (everything but the tags); higher downloads
+ * first. A favourite gets `favouriteScore` (the favourite artist bonus) on top.
+ */
+export function scoreCandidate({ vr = false, artistInLibrary = false, multiAxis = false, likes = 0, hentaiOnly = false, favourite = false, favouriteScore = RANKING.favouriteArtist }) {
   return (vr ? RANKING.vr : 0)
     + (artistInLibrary ? RANKING.artistInLibrary : 0)
+    + (favourite ? favouriteScore : 0)
     + (multiAxis ? RANKING.multiAxis : 0)
     + Math.min(RANKING.likesMax, likes / RANKING.likesPer)
     - (hentaiOnly ? RANKING.hentaiOnly : 0);
@@ -165,19 +175,23 @@ export function scoreCandidate({ vr = false, artistInLibrary = false, multiAxis 
 
 /**
  * Score of a saved candidate (either scout) or a library scene under the
- * current RANKING and tag scores, from what the list keeps, so a weight
- * change reorders lists saved before it. Monster / feet / FFM named outside
- * the tags come from its title, the first-post flags saved with it
- * (`monster`, `feet`, `ffm`), or an older `--recheck` mark. Two decimals.
+ * current RANKING, tag scores and favourite artist bonus, from what the list
+ * keeps, so a weight change reorders lists saved before it. A favourite
+ * (`c.favourite`, a name) counts as an artist in the library plus the bonus.
+ * Monster / feet / FFM named outside the tags come from its title, the
+ * first-post flags saved with it (`monster`, `feet`, `ffm`), or an older
+ * `--recheck` mark. Two decimals.
  *
  * @param {object} c
- * @param {Object<string, number>} [tagScores] `library.tagScores` (the user's changes)
+ * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring]
+ *   `library.tagScores` (the user's changes) and the favourite artist bonus
+ *   (favourite-artists.js favouriteScore; RANKING.favouriteArtist when left out)
  */
-export function candidateScore(c, tagScores) {
+export function candidateScore(c, { tagScores, favouriteScore = RANKING.favouriteArtist } = {}) {
   const named = lessPreferred(c);
   return +(scoreCandidate({
     vr: !!c.vr, artistInLibrary: !!(c.artistInLibrary || c.favourite), multiAxis: c.axisType === 'multi',
-    likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
+    likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c), favourite: !!c.favourite, favouriteScore,
   }) + tagScoreSum(c.tags, tagScores, {
     monster: named.monster || !!c.monster || c.contentBreak === 'monster',
     feet: named.feet || !!c.feet || c.contentBreak === 'feet',

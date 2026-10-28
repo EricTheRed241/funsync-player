@@ -748,6 +748,7 @@
       "playlists": "Buscar listas",
       "categories": "Buscar categorías",
       "tags": "Buscar etiquetas",
+      "artists": "Buscar artistas",
       "sources": "Buscar orígenes",
       "short": "Buscar",
       "aria": "Buscar",
@@ -773,6 +774,7 @@
       "playlists": "Listas",
       "categories": "Categorías",
       "tags": "Etiquetas",
+      "artists": "Artistas",
       "folders": "Carpetas"
     },
     "filterSheet": {
@@ -834,10 +836,25 @@
       "rules": {
         "multiAxis": "Ejes hechos a mano {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "Artista favorito o conocido {score}",
+        "artistInLibrary": "Artista conocido {score}",
+        "favouriteArtist": "Artista favorito {score}",
         "likes": "Me gusta hasta {score}",
         "hentaiOnly": "Solo hentai 2D {score}"
       }
+    },
+    "artists": {
+      "hint": "Artistas favoritos: sus vídeos reciben la bonificación de abajo además de la puntuación de preferencia ◆, y los exploradores clasifican sus publicaciones más alto e incluyen su acción real.",
+      "bonus": "Bonificación de artista favorito",
+      "bonusIsDefault": "Predeterminado",
+      "bonusDefault": "Predeterminado {score}",
+      "addPlaceholder": "Añadir un artista favorito",
+      "add": "Añadir",
+      "notInLibrary": "Aún no está en la biblioteca",
+      "favourite": "Marcar a {artist} como favorito",
+      "unfavourite": "Quitar a {artist} de favoritos",
+      "added": "{artist} ahora es favorito",
+      "removed": "{artist} ya no es favorito",
+      "alreadyFavourite": "{artist} ya es favorito"
     },
     "breadcrumb": {
       "allSources": "Todos los orígenes",
@@ -866,13 +883,13 @@
       "emptyFolderBody": "No hay subcarpetas ni vídeos aquí.",
       "videoNotFoundTitle": "Vídeo no encontrado",
       "videoNotFoundBody": "Vuelve atrás e inténtalo de nuevo.",
-      "loadGroupingFailedTitle": "{kind, select, collections {No se pudieron cargar las colecciones} playlists {No se pudieron cargar las listas} categories {No se pudieron cargar las categorías} tags {No se pudieron cargar las etiquetas} other {No se pudieron cargar los elementos}}",
-      "noGroupingTitle": "{kind, select, collections {Aún no hay colecciones} playlists {Aún no hay listas} categories {Aún no hay categorías} tags {Aún no hay etiquetas} other {Aún no hay elementos}}",
-      "noGroupingBody": "{kind, select, collections {Crea colecciones en FunSync en tu escritorio — aparecerán aquí.} playlists {Crea listas en FunSync en tu escritorio — aparecerán aquí.} categories {Crea categorías en FunSync en tu escritorio — aparecerán aquí.} tags {Las etiquetas vienen de las publicaciones de EroScripts y FapTap vinculadas a tus vídeos en el escritorio.} other {Crea elementos en FunSync en tu escritorio.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {No se pudieron cargar las colecciones} playlists {No se pudieron cargar las listas} categories {No se pudieron cargar las categorías} tags {No se pudieron cargar las etiquetas} artists {No se pudieron cargar los artistas} other {No se pudieron cargar los elementos}}",
+      "noGroupingTitle": "{kind, select, collections {Aún no hay colecciones} playlists {Aún no hay listas} categories {Aún no hay categorías} tags {Aún no hay etiquetas} artists {Aún no hay artistas} other {Aún no hay elementos}}",
+      "noGroupingBody": "{kind, select, collections {Crea colecciones en FunSync en tu escritorio — aparecerán aquí.} playlists {Crea listas en FunSync en tu escritorio — aparecerán aquí.} categories {Crea categorías en FunSync en tu escritorio — aparecerán aquí.} tags {Las etiquetas vienen de las publicaciones de EroScripts y FapTap vinculadas a tus vídeos en el escritorio.} artists {Los artistas son las carpetas de artista de tu biblioteca. Añade un favorito arriba para clasificar sus publicaciones más alto.} other {Crea elementos en FunSync en tu escritorio.}}",
       "groupingNotFoundTitle": "No encontrado",
-      "groupingNotFoundBody": "{kind, select, collections {Esta colección ya no existe en el escritorio.} playlists {Esta lista ya no existe en el escritorio.} categories {Esta categoría ya no existe en el escritorio.} other {Este elemento ya no existe en el escritorio.}}",
+      "groupingNotFoundBody": "{kind, select, collections {Esta colección ya no existe en el escritorio.} playlists {Esta lista ya no existe en el escritorio.} categories {Esta categoría ya no existe en el escritorio.} artists {Este artista ya no está en la biblioteca.} other {Este elemento ya no existe en el escritorio.}}",
       "groupingEmptyTitle": "Vacío",
-      "groupingEmptyBody": "{kind, select, collections {No hay vídeos disponibles en esta colección.} playlists {No hay vídeos disponibles en esta lista.} categories {No hay vídeos disponibles en esta categoría.} other {No hay vídeos disponibles en este elemento.}}"
+      "groupingEmptyBody": "{kind, select, collections {No hay vídeos disponibles en esta colección.} playlists {No hay vídeos disponibles en esta lista.} categories {No hay vídeos disponibles en esta categoría.} artists {No hay vídeos de este artista disponibles en este momento.} other {No hay vídeos disponibles en este elemento.}}"
     },
     "player": {
       "switching": "Cambiando script…",

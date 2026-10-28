@@ -273,3 +273,49 @@ describe('tag-score edits', () => {
     expect(recalculateScores).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('favourite artist edits', () => {
+  const favData = () => {
+    const store = {};
+    return { store, get: (k) => store[k], set: vi.fn((k, v) => { store[k] = v; }) };
+  };
+
+  it('stores favourites and the bonus as changes, then refreshes favourites or rescores, in order', async () => {
+    const data = favData();
+    const log = [];
+    const applier = new LibraryEditApplier({
+      data,
+      publish: async () => { log.push(`publish ${JSON.stringify(data.store['library.favouriteArtists'] || {})} ${data.store['library.favouriteArtistScore'] ?? null}`); },
+      ack: (seq, error) => log.push(error ? `ack ${seq} ${error}` : `ack ${seq}`),
+      recalculateScores: async () => { log.push('recalculate'); return { videos: 2, changed: true }; },
+      favouritesChanged: async () => { log.push('favourites'); return { videos: 2, changed: true }; },
+    });
+    applier.apply({ seq: 1, kind: 'favourite-artist', artist: ' Shayuki ', favourite: true });
+    applier.apply({ seq: 2, kind: 'favourite-artist', artist: 'scyllahmv', favourite: false });
+    applier.apply({ seq: 3, kind: 'favourite-score', score: 2.26 });
+    applier.apply({ seq: 4, kind: 'favourite-artist', artist: 'ScyllaHMV', favourite: true });
+    applier.apply({ seq: 5, kind: 'favourite-artist', artist: 'X', favourite: 'yes' });
+    await applier.apply({ seq: 6, kind: 'favourite-score', score: 'lots' });
+    expect(log).toEqual([
+      'favourites', 'publish {"Shayuki":true} null', 'ack 1',
+      'favourites', 'publish {"Shayuki":true,"scyllahmv":false} null', 'ack 2',
+      'recalculate', 'publish {"Shayuki":true,"scyllahmv":false} 2.5', 'ack 3',
+      'favourites', 'publish {"Shayuki":true} 2.5', 'ack 4',
+      'publish {"Shayuki":true} 2.5', 'ack 5 invalid favourite "yes"',
+      'publish {"Shayuki":true} 2.5', 'ack 6 invalid favourite artist score "lots"',
+    ]);
+  });
+
+  it('rejects a favourite without a name, without writing', async () => {
+    const data = favData();
+    await expect(applyLibraryEdit({ kind: 'favourite-artist', artist: '  ', favourite: true }, data)).rejects.toThrow(/without a name/);
+    expect(data.set).not.toHaveBeenCalled();
+  });
+
+  it('says what changed, and how many videos were scored again', async () => {
+    const favouritesChanged = vi.fn(async () => ({ videos: 7, changed: true }));
+    expect(await applyLibraryEdit({ kind: 'favourite-artist', artist: 'Shayuki', favourite: true }, favData(), { favouritesChanged }))
+      .toBe('favourite artist "Shayuki" added, 7 videos scored again');
+    expect(await applyLibraryEdit({ kind: 'favourite-score', score: 5 }, favData())).toBe('favourite artist bonus = 5');
+  });
+});

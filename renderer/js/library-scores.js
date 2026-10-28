@@ -13,17 +13,21 @@
 //     scouts judge a post
 //   • artist in library: the video's artist folder (artist-playlists.js) is
 //     a favourite or holds at least MIN_ARTIST_VIDEOS videos
+//   • favourite: the artist folder is a favourite artist (favourite-artists.js:
+//     FAVOURITES with the user's changes); adds the favourite artist bonus
 //   • likes: from the post record when it holds them, else 0
 // Scenes without post tags still get a score from VR, axes and the title.
 //
 // Derived and recomputed after each scan, when the backend's VR / axis
-// decisions arrive, and when a tag score changes or the web remote asks
-// (Recalculate scores); kept in `library.preferenceScores` ({videoPath: score},
+// decisions arrive, when a tag score, a favourite artist or the favourite
+// artist bonus changes, and when the web remote asks (Recalculate scores);
+// kept in `library.preferenceScores` ({videoPath: score},
 // written only when it changed) so sorting works right after a start, and
 // sent to the backend for the web remote and the headsets.
 
 import { artistOf } from './artist-playlists.js';
 import { MIN_ARTIST_VIDEOS } from './content-preferences.js';
+import { favouriteScoreOf, favouritesOf } from './favourite-artists.js';
 import { candidateScore, effectiveTagScores, tagScoreInfo } from './preference-score.js';
 import { SCRIPT_TAGS_KEY } from './script-tags.js';
 
@@ -54,8 +58,9 @@ const titleOf = (p) => (String(p).split(/[\\/]/).pop() || '').replace(/\.[^/.]+$
  * @param {boolean} [o.vr]
  * @param {'handmade'|'generated'|'single'|null} [o.axisKind]
  * @param {boolean} [o.artistInLibrary]
+ * @param {string|null} [o.favourite] the favourite artist it is by
  */
-export function sceneCandidate({ title = '', tags = [], likes = 0, vr = false, axisKind = null, artistInLibrary = false }) {
+export function sceneCandidate({ title = '', tags = [], likes = 0, vr = false, axisKind = null, artistInLibrary = false, favourite = null }) {
   const t = [...new Set((Array.isArray(tags) ? tags : []).filter((x) => typeof x === 'string').map((x) => x.trim().toLowerCase()))];
   return {
     title,
@@ -64,6 +69,7 @@ export function sceneCandidate({ title = '', tags = [], likes = 0, vr = false, a
     vr: !!vr,
     axisType: axisKind === 'handmade' ? 'multi' : 'single',
     artistInLibrary: !!artistInLibrary,
+    favourite: favourite || null,
   };
 }
 
@@ -80,16 +86,20 @@ export function sceneCandidate({ title = '', tags = [], likes = 0, vr = false, a
  * @param {Object<string, {tags?: string[], likes?: number}>} [o.scriptTags] `library.scriptTags`
  * @param {(path: string) => boolean} [o.vrOf]
  * @param {Object<string, string>} [o.axisFlags] videoPath → axis kind
- * @param {string[]} [o.favourites] favourite artist names
+ * @param {string[]} [o.favourites] favourite artist names (favourite-artists.js favouritesOf)
  * @param {Object<string, number>} [o.previous] the stored scores
  * @param {Object<string, number>} [o.tagScores] `library.tagScores` (tag → score)
+ * @param {number} [o.favouriteScore] the favourite artist bonus (favourite-artists.js favouriteScore)
  * @returns {Object<string, number>} videoPath → score
  */
-export function planPreferenceScores({ videos = [], sourcePaths = [], scriptTags = {}, vrOf = () => false, axisFlags = {}, favourites = [], previous = {}, tagScores = {} }) {
+export function planPreferenceScores({
+  videos = [], sourcePaths = [], scriptTags = {}, vrOf = () => false, axisFlags = {}, favourites = [], previous = {}, tagScores = {}, favouriteScore,
+}) {
   const artists = new Map(videos.map((v) => [v.path, artistOf(v.path, sourcePaths)]));
   const counts = new Map();
   for (const a of artists.values()) if (a) counts.set(fold(a), (counts.get(fold(a)) || 0) + 1);
-  const favouriteKeys = new Set(favourites.map(fold).filter(Boolean));
+  const favouriteNames = new Map(favourites.map((f) => [fold(f), f]).filter(([k]) => k));
+  const scoring = { tagScores, favouriteScore };
 
   const scores = {};
   for (const v of videos) {
@@ -107,8 +117,9 @@ export function planPreferenceScores({ videos = [], sourcePaths = [], scriptTags
       likes: record.likes,
       vr: vrOf(v.path),
       axisKind: kind,
-      artistInLibrary: !!key && (favouriteKeys.has(key) || counts.get(key) >= MIN_ARTIST_VIDEOS),
-    }), tagScores);
+      artistInLibrary: !!key && (favouriteNames.has(key) || counts.get(key) >= MIN_ARTIST_VIDEOS),
+      favourite: (key && favouriteNames.get(key)) || null,
+    }), scoring);
   }
   return scores;
 }
@@ -120,14 +131,15 @@ export function sameScores(a = {}, b = {}) {
 }
 
 /**
- * Score the library's videos and store the scores when they changed.
+ * Score the library's videos and store the scores when they changed. The
+ * favourite artists and their bonus come from `data` (favourite-artists.js).
  *
  * @param {object} data DataService (get, set)
  * @param {{path: string, hasFunscript?: boolean}[]} videos
- * @param {{vrOf?: (path: string) => boolean, axisFlags?: Object<string, string>, favourites?: string[]}} inputs
+ * @param {{vrOf?: (path: string) => boolean, axisFlags?: Object<string, string>}} inputs
  * @returns {{scores: Object<string, number>, changed: boolean}}
  */
-export function applyPreferenceScores(data, videos, { vrOf, axisFlags, favourites } = {}) {
+export function applyPreferenceScores(data, videos, { vrOf, axisFlags } = {}) {
   const previous = data.get(PREFERENCE_SCORES_KEY) || {};
   const scores = planPreferenceScores({
     videos,
@@ -135,9 +147,10 @@ export function applyPreferenceScores(data, videos, { vrOf, axisFlags, favourite
     scriptTags: data.get(SCRIPT_TAGS_KEY) || {},
     vrOf,
     axisFlags,
-    favourites,
+    favourites: favouritesOf(data),
     previous,
     tagScores: data.get(TAG_SCORES_KEY) || {},
+    favouriteScore: favouriteScoreOf(data),
   });
   const changed = !sameScores(scores, previous);
   if (changed) data.set(PREFERENCE_SCORES_KEY, scores);

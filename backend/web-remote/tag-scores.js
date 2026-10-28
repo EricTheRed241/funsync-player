@@ -57,7 +57,7 @@ export function parseTagScores(data) {
 }
 
 // Built-in weights in the order the Tags view lists them.
-const RULE_ORDER = ['multiAxis', 'vr', 'artistInLibrary', 'likes', 'hentaiOnly'];
+const RULE_ORDER = ['multiAxis', 'vr', 'artistInLibrary', 'favouriteArtist', 'likes', 'hentaiOnly'];
 
 /** The built-in weights as one line (`Hand-made axes +4 · VR +3 …`); '' when none are known. */
 export function formatRules(rules = {}) {

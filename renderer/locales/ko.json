@@ -748,6 +748,7 @@
       "playlists": "재생 목록 검색",
       "categories": "카테고리 검색",
       "tags": "태그 검색",
+      "artists": "아티스트 검색",
       "sources": "소스 검색",
       "short": "검색",
       "aria": "검색",
@@ -773,6 +774,7 @@
       "playlists": "재생 목록",
       "categories": "카테고리",
       "tags": "태그",
+      "artists": "아티스트",
       "folders": "폴더"
     },
     "filterSheet": {
@@ -834,10 +836,25 @@
       "rules": {
         "multiAxis": "수작업 축 {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "즐겨찾기 또는 알려진 아티스트 {score}",
+        "artistInLibrary": "알려진 아티스트 {score}",
+        "favouriteArtist": "즐겨찾는 아티스트 {score}",
         "likes": "좋아요 최대 {score}",
         "hentaiOnly": "2D 헨타이만 {score}"
       }
+    },
+    "artists": {
+      "hint": "즐겨찾는 아티스트: 해당 동영상은 ◆ 선호 점수에 더해 아래 보너스를 받고, 스카우트는 그 게시물을 더 높게 평가하며 실사 작품도 가져옵니다.",
+      "bonus": "즐겨찾는 아티스트 보너스",
+      "bonusIsDefault": "기본값",
+      "bonusDefault": "기본값 {score}",
+      "addPlaceholder": "즐겨찾는 아티스트 추가",
+      "add": "추가",
+      "notInLibrary": "아직 라이브러리에 없음",
+      "favourite": "{artist}을(를) 즐겨찾기에 추가",
+      "unfavourite": "{artist}을(를) 즐겨찾기에서 제거",
+      "added": "{artist}을(를) 즐겨찾기에 추가했습니다",
+      "removed": "{artist}을(를) 즐겨찾기에서 제거했습니다",
+      "alreadyFavourite": "{artist}은(는) 이미 즐겨찾기에 있습니다"
     },
     "breadcrumb": {
       "allSources": "모든 소스",
@@ -866,13 +883,13 @@
       "emptyFolderBody": "여기에는 하위 폴더나 동영상이 없습니다.",
       "videoNotFoundTitle": "동영상을 찾을 수 없습니다",
       "videoNotFoundBody": "돌아가서 다시 시도하세요.",
-      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} tags {태그를 로드할 수 없습니다} other {항목을 로드할 수 없습니다}}",
-      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} tags {아직 태그가 없습니다} other {아직 항목이 없습니다}}",
-      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} tags {태그는 데스크톱에서 동영상에 연결된 EroScripts 및 FapTap 게시물에서 가져옵니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} tags {태그를 로드할 수 없습니다} artists {아티스트를 불러올 수 없습니다} other {항목을 로드할 수 없습니다}}",
+      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} tags {아직 태그가 없습니다} artists {아직 아티스트가 없습니다} other {아직 항목이 없습니다}}",
+      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} tags {태그는 데스크톱에서 동영상에 연결된 EroScripts 및 FapTap 게시물에서 가져옵니다.} artists {아티스트는 라이브러리의 아티스트 폴더입니다. 위에서 즐겨찾기를 추가하면 그 게시물이 더 높게 평가됩니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
       "groupingNotFoundTitle": "찾을 수 없음",
-      "groupingNotFoundBody": "{kind, select, collections {이 컬렉션은 더 이상 데스크톱에 존재하지 않습니다.} playlists {이 재생 목록은 더 이상 데스크톱에 존재하지 않습니다.} categories {이 카테고리는 더 이상 데스크톱에 존재하지 않습니다.} other {이 항목은 더 이상 데스크톱에 존재하지 않습니다.}}",
+      "groupingNotFoundBody": "{kind, select, collections {이 컬렉션은 더 이상 데스크톱에 존재하지 않습니다.} playlists {이 재생 목록은 더 이상 데스크톱에 존재하지 않습니다.} categories {이 카테고리는 더 이상 데스크톱에 존재하지 않습니다.} artists {이 아티스트는 더 이상 라이브러리에 없습니다.} other {이 항목은 더 이상 데스크톱에 존재하지 않습니다.}}",
       "groupingEmptyTitle": "비어 있음",
-      "groupingEmptyBody": "{kind, select, collections {이 컬렉션에는 현재 사용 가능한 동영상이 없습니다.} playlists {이 재생 목록에는 현재 사용 가능한 동영상이 없습니다.} categories {이 카테고리에는 현재 사용 가능한 동영상이 없습니다.} other {이 항목에는 현재 사용 가능한 동영상이 없습니다.}}"
+      "groupingEmptyBody": "{kind, select, collections {이 컬렉션에는 현재 사용 가능한 동영상이 없습니다.} playlists {이 재생 목록에는 현재 사용 가능한 동영상이 없습니다.} categories {이 카테고리에는 현재 사용 가능한 동영상이 없습니다.} artists {현재 이 아티스트의 동영상이 없습니다.} other {이 항목에는 현재 사용 가능한 동영상이 없습니다.}}"
     },
     "player": {
       "switching": "스크립트 전환 중…",

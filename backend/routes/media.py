@@ -69,6 +69,17 @@ _tag_scores: dict[str, float] = {}
 # a scene counts each group once) and `rules` (built-in weight id → number,
 # read-only), as the desktop registers them.
 _tag_score_info: dict = {"groups": {}, "rules": {}}
+# The library's artists — [{name, videoPaths}], one per artist folder
+# (renderer/js/artist-playlists.js::artistOf), as the desktop registers
+# them. The web remote's Artists view lists them.
+_artists: list[dict] = []
+# The effective favourite artists — [name], the desktop's built-in
+# favourites with the user's `library.favouriteArtists` changes on top.
+_favourite_artists: list[str] = []
+# The bonus a favourite artist's scenes get — {score, default}: the
+# effective bonus and the built-in one (content-preferences.js RANKING);
+# None until the desktop registers it.
+_favourite_artist_score: dict = {"score": None, "default": None}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -445,6 +456,12 @@ def apply_acked_edit(edit: dict):
         library_edits.apply_to_tag_scores(_tag_scores, edit)
     elif kind in (library_edits.KIND_PLAYLIST_ADD, library_edits.KIND_PLAYLIST_REMOVE):
         library_edits.apply_to_playlists(_playlists, edit)
+    elif kind == library_edits.KIND_FAVOURITE_ARTIST:
+        library_edits.apply_to_favourite_artists(_favourite_artists, edit)
+    elif kind == library_edits.KIND_FAVOURITE_SCORE:
+        _favourite_artist_score["score"] = library_edits.effective_favourite_score(
+            _favourite_artist_score["score"], [edit],
+        )
 
 
 def register_categories(categories: list[dict], video_categories: dict):
@@ -520,6 +537,73 @@ def register_tag_score_info(info: dict):
 def get_tag_score_info() -> dict:
     """The registered tag groups and built-in weights."""
     return {"groups": dict(_tag_score_info["groups"]), "rules": dict(_tag_score_info["rules"])}
+
+
+def register_artists(artists: list[dict]):
+    """Register the library's artists ([{name, videoPaths}]). Entries
+    without a name are dropped, as are non-string paths; two spellings of
+    one artist (`library_edits.artist_key`) merge under the first."""
+    global _artists
+    by_key: dict[str, dict] = {}
+    for entry in artists if isinstance(artists, list) else ():
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        key = library_edits.artist_key(name)
+        if not key:
+            continue
+        paths = entry.get("videoPaths")
+        paths = [p for p in paths if isinstance(p, str) and p] if isinstance(paths, list) else []
+        if key in by_key:
+            by_key[key]["videoPaths"].extend(p for p in paths if p not in by_key[key]["videoPaths"])
+        else:
+            by_key[key] = {"name": name.strip(), "videoPaths": paths}
+    _artists = list(by_key.values())
+
+
+def register_favourite_artists(names: list[str]):
+    """Register the effective favourite artists ([name]). Names are
+    trimmed; blanks, non-strings and repeated spellings are dropped."""
+    global _favourite_artists
+    out, seen = [], set()
+    for name in names if isinstance(names, list) else ():
+        key = library_edits.artist_key(name)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(name.strip())
+    _favourite_artists = out
+
+
+def register_favourite_artist_score(info: dict):
+    """Register the favourite-artist bonus ({score, default}), each stepped
+    and clamped like a tag score; a missing score is the default, anything
+    that isn't a number None."""
+    info = info if isinstance(info, dict) else {}
+    default = library_edits.normalize_tag_score(info.get("default"))
+    score = library_edits.normalize_tag_score(info.get("score"))
+    _favourite_artist_score["default"] = default
+    _favourite_artist_score["score"] = default if score is None else score
+
+
+def get_artists() -> list[dict]:
+    """The registered artists, [{name, videoPaths}] in the desktop's order."""
+    return [{"name": a["name"], "videoPaths": list(a["videoPaths"])} for a in _artists]
+
+
+def get_favourite_artists() -> list[str]:
+    """Registered favourite artists with edits still waiting for the desktop
+    applied."""
+    return library_edits.effective_favourite_artists(_favourite_artists, library_edits.queue.pending())
+
+
+def get_favourite_artist_score() -> dict:
+    """The favourite-artist bonus ({score, default}) with an edit still
+    waiting for the desktop applied."""
+    return {
+        "score": library_edits.effective_favourite_score(_favourite_artist_score["score"], library_edits.queue.pending()),
+        "default": _favourite_artist_score["default"],
+    }
+
 
 
 def register_sources(sources: list[dict]):
@@ -888,9 +972,12 @@ async def register_library(request: Request):
     {projection, ...}, the VR Format panel's choices), `scriptTags`
     (videoPath → [post tag, ...], kept as chip tags), `preferenceScores`
     (videoPath → number, the desktop's preference score), `tagScores`
-    (tag → number, every tag's score, defaults included) and `tagScoreInfo`
-    ({groups: {tag: group}, rules: {id: number}}). Every field is
-    independent: omit a key to leave that slice untouched on the backend.
+    (tag → number, every tag's score, defaults included), `tagScoreInfo`
+    ({groups: {tag: group}, rules: {id: number}}), `artists` ([{name,
+    videoPaths}], one per artist folder), `favouriteArtists` ([name], the
+    effective favourites) and `favouriteArtistScore` ({score, default}, the
+    favourite-artist bonus). Every field is independent: omit a key to leave
+    that slice untouched on the backend.
     That lets the renderer push groupings FAST (in-memory, no filesystem
     work) ahead of the slower video scan — the phone can render
     Collections / Playlists / Categories tabs within ~100 ms of desktop
@@ -943,6 +1030,12 @@ def _apply_registration(data: dict):
         register_tag_scores(data.get("tagScores") or {})
     if "tagScoreInfo" in data:
         register_tag_score_info(data.get("tagScoreInfo") or {})
+    if "artists" in data:
+        register_artists(data.get("artists") or [])
+    if "favouriteArtists" in data:
+        register_favourite_artists(data.get("favouriteArtists") or [])
+    if "favouriteArtistScore" in data:
+        register_favourite_artist_score(data.get("favouriteArtistScore") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:
