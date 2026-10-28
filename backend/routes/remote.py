@@ -3,8 +3,8 @@
 The SPA itself lives in `backend/web-remote/` and is served via a
 `StaticFiles` mount on `/remote/` (wired up in `main.py`). This module
 exposes the JSON endpoints the SPA calls: the flat video list, the
-collection/playlist/category groupings, and the triage writes (rating,
-favourite, add to / remove from a playlist).
+collection/playlist/category/artist groupings, and the triage writes (rating,
+favourite, add to / remove from a playlist, tag scores, favourite artists).
 
 The writes never touch the library here: the desktop owns it. Each becomes
 a library edit (`services.library_edits`) delivered to the desktop over the
@@ -34,6 +34,9 @@ from routes.media import (
     get_preference_score,
     get_tag_scores,
     get_tag_score_info,
+    get_artists,
+    get_favourite_artists,
+    get_favourite_artist_score,
     get_sources,
     bump_rescan_request,
     _path_to_id,
@@ -406,6 +409,82 @@ async def recalculate_scores():
         if edit.get("kind") == library_edits.KIND_RECALCULATE_SCORES:
             return {"ok": True, "seq": edit["seq"], "delivered": desktop_connected(), "alreadyPending": True}
     return await _submit(library_edits.make_recalculate_edit(source="remote"))
+
+
+@router.get("/artists")
+async def list_artists():
+    """Every artist of the library plus the favourites with no videos, for
+    the Artists view.
+
+    `{artists: [{id, name, videoCount, totalDuration, videoIds, favourite,
+    pending}], score, defaultScore, scorePending}`. `id` is the artist's
+    folded name (`library_edits.artist_key`); `favourite` and `score` (the
+    favourite-artist bonus) already include edits waiting for the desktop,
+    which `pending` / `scorePending` flag. Favourites first, then by name.
+    """
+    pending = library_edits.queue.pending()
+    pending_keys = {
+        library_edits.artist_key(e.get("artist"))
+        for e in pending if e.get("kind") == library_edits.KIND_FAVOURITE_ARTIST
+    }
+    favourites = get_favourite_artists()
+    favourite_keys = {library_edits.artist_key(n) for n in favourites}
+
+    def entry(key, name, video_ids):
+        return {
+            "id": key,
+            "name": name,
+            "videoCount": len(video_ids),
+            "totalDuration": _total_duration(video_ids),
+            "videoIds": video_ids,
+            "favourite": key in favourite_keys,
+            "pending": key in pending_keys,
+        }
+
+    out, seen = [], set()
+    for artist in get_artists():
+        key = library_edits.artist_key(artist["name"])
+        seen.add(key)
+        out.append(entry(key, artist["name"], _video_ids_from_paths(artist["videoPaths"])))
+    for name in favourites:
+        key = library_edits.artist_key(name)
+        if key not in seen:
+            seen.add(key)
+            out.append(entry(key, name, []))
+    out.sort(key=lambda a: (not a["favourite"], a["name"].casefold()))
+    score = get_favourite_artist_score()
+    return {
+        "artists": out,
+        "score": score["score"],
+        "defaultScore": score["default"],
+        "scorePending": any(e.get("kind") == library_edits.KIND_FAVOURITE_SCORE for e in pending),
+    }
+
+
+@router.post("/favourite-artist")
+async def set_favourite_artist(payload: dict = Body(default={})):
+    """Make an artist a favourite or not: `{artist, favourite}`. The desktop
+    stores it in `library.favouriteArtists` (as a change from the built-in
+    favourites) and scores the library again."""
+    try:
+        edit = library_edits.make_favourite_artist_edit(payload.get("artist"), payload.get("favourite"), source="remote")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    result = await _submit(edit)
+    return {**result, "artist": edit["artist"], "favourite": edit["favourite"]}
+
+
+@router.post("/favourite-score")
+async def set_favourite_score(payload: dict = Body(default={})):
+    """Set the bonus a favourite artist's scenes get: `{score}`, rounded to
+    0.5 and clamped to -10 … +10 like a tag score. The desktop stores it in
+    `library.favouriteArtistScore` and scores the library again."""
+    try:
+        edit = library_edits.make_favourite_score_edit(payload.get("score"), source="remote")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    result = await _submit(edit)
+    return {**result, "score": edit["score"]}
 
 
 @router.get("/categories")

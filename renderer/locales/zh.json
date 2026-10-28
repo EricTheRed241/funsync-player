@@ -748,6 +748,7 @@
       "playlists": "搜索播放列表",
       "categories": "搜索分类",
       "tags": "搜索标签",
+      "artists": "搜索作者",
       "sources": "搜索来源",
       "short": "搜索",
       "aria": "搜索",
@@ -773,6 +774,7 @@
       "playlists": "播放列表",
       "categories": "分类",
       "tags": "标签",
+      "artists": "作者",
       "folders": "文件夹"
     },
     "filterSheet": {
@@ -834,10 +836,25 @@
       "rules": {
         "multiAxis": "手工轴 {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "收藏或已知作者 {score}",
+        "artistInLibrary": "已知作者 {score}",
+        "favouriteArtist": "收藏作者 {score}",
         "likes": "点赞最多 {score}",
         "hentaiOnly": "仅 2D 动漫 {score}"
       }
+    },
+    "artists": {
+      "hint": "收藏作者：其视频在 ◆ 偏好分数之外再获得下方的加分，搜寻器会把其帖子排得更靠前，并收录其真人作品。",
+      "bonus": "收藏作者加分",
+      "bonusIsDefault": "默认",
+      "bonusDefault": "默认 {score}",
+      "addPlaceholder": "添加收藏作者",
+      "add": "添加",
+      "notInLibrary": "尚未在库中",
+      "favourite": "收藏 {artist}",
+      "unfavourite": "取消收藏 {artist}",
+      "added": "已收藏 {artist}",
+      "removed": "已取消收藏 {artist}",
+      "alreadyFavourite": "{artist} 已在收藏中"
     },
     "breadcrumb": {
       "allSources": "所有来源",
@@ -866,13 +883,13 @@
       "emptyFolderBody": "此处没有子文件夹或视频。",
       "videoNotFoundTitle": "未找到视频",
       "videoNotFoundBody": "请返回并重试。",
-      "loadGroupingFailedTitle": "{kind, select, collections {无法加载合集} playlists {无法加载播放列表} categories {无法加载分类} tags {无法加载标签} other {无法加载项目}}",
-      "noGroupingTitle": "{kind, select, collections {尚无合集} playlists {尚无播放列表} categories {尚无分类} tags {尚无标签} other {尚无项目}}",
-      "noGroupingBody": "{kind, select, collections {在桌面端的 FunSync 中创建合集——它们将显示在此处。} playlists {在桌面端的 FunSync 中创建播放列表——它们将显示在此处。} categories {在桌面端的 FunSync 中创建分类——它们将显示在此处。} tags {标签来自桌面端与你的视频关联的 EroScripts 和 FapTap 帖子。} other {在桌面端的 FunSync 中创建项目。}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {无法加载合集} playlists {无法加载播放列表} categories {无法加载分类} tags {无法加载标签} artists {无法加载作者} other {无法加载项目}}",
+      "noGroupingTitle": "{kind, select, collections {尚无合集} playlists {尚无播放列表} categories {尚无分类} tags {尚无标签} artists {尚无作者} other {尚无项目}}",
+      "noGroupingBody": "{kind, select, collections {在桌面端的 FunSync 中创建合集——它们将显示在此处。} playlists {在桌面端的 FunSync 中创建播放列表——它们将显示在此处。} categories {在桌面端的 FunSync 中创建分类——它们将显示在此处。} tags {标签来自桌面端与你的视频关联的 EroScripts 和 FapTap 帖子。} artists {作者即库中的作者文件夹。在上方添加收藏作者，其帖子会排得更靠前。} other {在桌面端的 FunSync 中创建项目。}}",
       "groupingNotFoundTitle": "未找到",
-      "groupingNotFoundBody": "{kind, select, collections {此合集在桌面端已不存在。} playlists {此播放列表在桌面端已不存在。} categories {此分类在桌面端已不存在。} other {此项目在桌面端已不存在。}}",
+      "groupingNotFoundBody": "{kind, select, collections {此合集在桌面端已不存在。} playlists {此播放列表在桌面端已不存在。} categories {此分类在桌面端已不存在。} artists {该作者已不在库中。} other {此项目在桌面端已不存在。}}",
       "groupingEmptyTitle": "空",
-      "groupingEmptyBody": "{kind, select, collections {此合集中目前没有可用的视频。} playlists {此播放列表中目前没有可用的视频。} categories {此分类中目前没有可用的视频。} other {此项目中目前没有可用的视频。}}"
+      "groupingEmptyBody": "{kind, select, collections {此合集中目前没有可用的视频。} playlists {此播放列表中目前没有可用的视频。} categories {此分类中目前没有可用的视频。} artists {目前没有该作者的可用视频。} other {此项目中目前没有可用的视频。}}"
     },
     "player": {
       "switching": "正在切换脚本…",

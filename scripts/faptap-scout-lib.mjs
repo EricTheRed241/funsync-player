@@ -36,8 +36,9 @@
 //     long. `--fetch` and every scan drop saved candidates that now break
 //     the content rules (stillWanted).
 //   • Ranking as on EroScripts (candidateScore with the user's tag scores,
-//     `library.tagScores`; monsters, feet and 2D hentai only rank lower),
-//     saved lists scored again under it.
+//     `library.tagScores`, and favourite artist bonus; monsters, feet and
+//     2D hentai only rank lower), saved lists scored again under it, with
+//     their favourites under the user's current favourites.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream within the flat / VR height cap;
 //     none below MIN_STREAM_HEIGHT.
@@ -56,7 +57,7 @@ import {
   ANIMATION_TAGS, AUDIO_TITLE, FAPTAP_ANIMATION_TAGS, FAPTAP_FOCUS, FAPTAP_FOCUS_MIN, FLAT_MAX_HEIGHT, FURRY_TAGS, LIVE_TAGS,
   MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
 } from '../renderer/js/content-preferences.js';
-import { favouriteIn } from './scout-live.mjs';
+import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 
 export const FAPTAP_ORIGIN = 'https://faptap.net';
@@ -359,9 +360,9 @@ export function csvToFunscript(text) {
  *
  * @param {object} video
  * @param {object} screen
- * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
+ * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring] see candidateScore
  */
-export function toCandidate(video, screen, tagScores = {}) {
+export function toCandidate(video, screen, scoring = {}) {
   const c = {
     id: String(video.id),
     title: String(video.name || '').trim(),
@@ -380,7 +381,7 @@ export function toCandidate(video, screen, tagScores = {}) {
     liveQuota: !!screen.liveQuota,
     picked: !!screen.picked,
   };
-  return { ...c, score: candidateScore(c, tagScores) };
+  return { ...c, score: candidateScore(c, scoring) };
 }
 
 /** Key of a fetched or rejected FapTap scene; the same as electron/rejected-videos.js `faptapRejectionKey`. */
@@ -416,6 +417,21 @@ const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FAPTA
 export const stillWanted = (c) => inFocus(c) && !contentRuleBreak(c);
 
 /**
+ * A saved candidate with its favourite under the current favourites
+ * (currentFavourite over what the list keeps of what the scan matched:
+ * title, uploader, tags; a performer's favourite stays while it is one); as
+ * it was when `favourites` isn't given. Refresh before stillWanted: a
+ * favourite skips the focus rule.
+ *
+ * @param {object} c
+ * @param {string[]} [favourites]
+ */
+export function withCurrentFavourite(c, favourites) {
+  if (!Array.isArray(favourites)) return c;
+  return { ...c, favourite: currentFavourite(c, [c.title, c.author, ...(c.tags || [])], favourites) };
+}
+
+/**
  * FapTap often holds one video uploaded several times, with other scripts.
  * Of candidates with the same title and length (scripts/scene-dedupe-lib.mjs)
  * the best stream stays, then the most liked.
@@ -436,17 +452,23 @@ export function dropDuplicateCandidates(candidates) {
 /**
  * The saved list after a scan: candidates found now plus earlier ones not
  * yet fetched or rejected and still wanted (`stillWanted`), one per video
- * (`dropDuplicateCandidates`), best score first, each scored again under
- * the current RANKING and the user's tag scores (candidateScore).
+ * (`dropDuplicateCandidates`), best score first, each with its favourite
+ * under the current favourites (withCurrentFavourite) and scored again under
+ * the current RANKING, the user's tag scores and favourite artist bonus
+ * (candidateScore).
  *
  * @param {object[]} previous
  * @param {object[]} fresh
  * @param {(id: string) => boolean} isDone fetched, or turned down in the app
- * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
+ * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring] see candidateScore
+ * @param {string[]} [favourites] the current favourite artists (scout-live.mjs scoutPreferences)
  */
-export function mergeCandidates(previous, fresh, isDone, tagScores = {}) {
+export function mergeCandidates(previous, fresh, isDone, scoring = {}, favourites = undefined) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(String(c.id), c);
-  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && stillWanted(c)).map((c) => ({ ...c, score: candidateScore(c, tagScores) }));
+  const open = [...byId.values()]
+    .map((c) => withCurrentFavourite(c, favourites))
+    .filter((c) => !isDone(String(c.id)) && stillWanted(c))
+    .map((c) => ({ ...c, score: candidateScore(c, scoring) }));
   return dropDuplicateCandidates(open).kept.sort((a, b) => b.score - a.score);
 }

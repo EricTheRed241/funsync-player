@@ -1,6 +1,6 @@
 // Library edits from the backend — ratings, favourites and playlist changes
-// made in HereSphere or on the web remote, plus the web remote's tag scores
-// and Recalculate scores.
+// made in HereSphere or on the web remote, plus the web remote's tag scores,
+// favourite artists, favourite artist bonus and Recalculate scores.
 //
 // The desktop owns the library (config.json is written only by Electron), so
 // the backend never applies these itself. It queues each one and sends it
@@ -18,11 +18,14 @@
 
 import { DEFAULT_TAG_SCORES, normalizeTagScore, tagKey } from './preference-score.js';
 import { TAG_SCORES_KEY } from './library-scores.js';
+import { setFavouriteArtist, setFavouriteScore } from './favourite-artists.js';
 
 const KIND_RATING = 'rating';
 const KIND_PLAYLIST_ADD = 'playlist-add';
 const KIND_PLAYLIST_REMOVE = 'playlist-remove';
 const KIND_TAG_SCORE = 'tag-score';
+const KIND_FAVOURITE_ARTIST = 'favourite-artist';
+const KIND_FAVOURITE_SCORE = 'favourite-score';
 const KIND_RECALCULATE_SCORES = 'recalculate-scores';
 const PENDING_ID_PREFIX = 'pending:';
 const VIDEO_KINDS = new Set([KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE]);
@@ -83,10 +86,13 @@ export function setTagScore(data, tag, score) {
  *
  * @param {object} edit
  * @param {object} data — getPlaylists/addPlaylist/addVideoToPlaylist/removeVideoFromPlaylist/setRating/get/set
- * @param {{recalculateScores?: () => Promise<object|null>}} [hooks] — score the
- *   library again (and store it); run after a tag score and on request
+ * @param {{recalculateScores?: () => Promise<object|null>, favouritesChanged?: () => Promise<object|null>}} [hooks]
+ *   recalculateScores: score the library again (and store it); run after a
+ *   tag score or the favourite artist bonus changes and on request.
+ *   favouritesChanged: score again and refresh the artist playlists; run
+ *   after a favourite artist changes
  */
-export async function applyLibraryEdit(edit, data, { recalculateScores } = {}) {
+export async function applyLibraryEdit(edit, data, { recalculateScores, favouritesChanged } = {}) {
   if (!edit) throw new Error('empty edit');
   if (VIDEO_KINDS.has(edit.kind) && (typeof edit.path !== 'string' || !edit.path)) throw new Error('edit without a video path');
   switch (edit.kind) {
@@ -94,6 +100,16 @@ export async function applyLibraryEdit(edit, data, { recalculateScores } = {}) {
       const { tag, score } = setTagScore(data, edit.tag, edit.score);
       const r = recalculateScores ? await recalculateScores() : null;
       return `tag score "${tag}" = ${score}${r ? `, ${r.videos} videos scored again` : ''}`;
+    }
+    case KIND_FAVOURITE_ARTIST: {
+      const { artist, favourite } = setFavouriteArtist(data, edit.artist, edit.favourite);
+      const r = favouritesChanged ? await favouritesChanged() : null;
+      return `favourite artist "${artist}" ${favourite ? 'added' : 'removed'}${r ? `, ${r.videos} videos scored again` : ''}`;
+    }
+    case KIND_FAVOURITE_SCORE: {
+      const { score } = setFavouriteScore(data, edit.score);
+      const r = recalculateScores ? await recalculateScores() : null;
+      return `favourite artist bonus = ${score}${r ? `, ${r.videos} videos scored again` : ''}`;
     }
     case KIND_RECALCULATE_SCORES: {
       const r = recalculateScores ? await recalculateScores() : null;
@@ -141,13 +157,14 @@ export async function applyLibraryEdit(edit, data, { recalculateScores } = {}) {
  * @param {() => Promise<void>} [o.publish] — re-register ratings, playlists and scores
  * @param {(seq: number, error?: string) => void} o.ack
  * @param {() => Promise<object|null>} [o.recalculateScores] — see applyLibraryEdit
+ * @param {() => Promise<object|null>} [o.favouritesChanged] — see applyLibraryEdit
  */
 export class LibraryEditApplier {
-  constructor({ data, publish, ack, recalculateScores }) {
+  constructor({ data, publish, ack, recalculateScores, favouritesChanged }) {
     this._data = data;
     this._publish = publish || (async () => {});
     this._ack = ack;
-    this._hooks = { recalculateScores };
+    this._hooks = { recalculateScores, favouritesChanged };
     this._chain = Promise.resolve();
   }
 

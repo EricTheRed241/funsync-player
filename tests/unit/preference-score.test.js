@@ -79,11 +79,22 @@ describe('scoring boundaries', () => {
 describe('planPreferenceScores', () => {
   const plan = (o) => planPreferenceScores({ sourcePaths: SOURCES, ...o });
 
-  it('gives a favourite\'s artist folder the library-creator bonus from one video', () => {
+  it('gives a favourite\'s artist folder the library-creator bonus and the favourite bonus from one video', () => {
     const fav = scene('ScyllaHMV', 'One');
     const other = scene('Nobody', 'One');
-    const s = plan({ videos: [video(fav), video(other)], favourites: ['scyllahmv'], axisFlags: { [fav]: 'single', [other]: 'single' } });
-    expect(s[fav] - s[other]).toBe(RANKING.artistInLibrary);
+    const o = { videos: [video(fav), video(other)], favourites: ['scyllahmv'], axisFlags: { [fav]: 'single', [other]: 'single' } };
+    const s = plan(o);
+    expect(s[fav] - s[other]).toBe(RANKING.artistInLibrary + RANKING.favouriteArtist);
+    expect(plan({ ...o, favouriteScore: 1.5 })[fav]).toBe(RANKING.artistInLibrary + 1.5);
+    // Bonus 0: the library-creator bonus only, as before favourites ranked higher.
+    expect(plan({ ...o, favouriteScore: 0 })[fav]).toBe(RANKING.artistInLibrary);
+  });
+
+  it('matches a favourite to the artist folder whatever its case or Unicode form', () => {
+    const fav = scene('Cafe\u0301 Girl', 'One');
+    const s = plan({ videos: [video(fav, false)], favourites: ['  CAFÉ GIRL '] });
+    expect(s[fav]).toBe(RANKING.artistInLibrary + RANKING.favouriteArtist);
+    expect(plan({ videos: [video(fav, false)], favourites: ['Cafe Girl'] })[fav]).toBe(0);
   });
 
   it('gives a known artist the bonus from MIN_ARTIST_VIDEOS videos, across sources and spellings', () => {
@@ -213,10 +224,10 @@ describe('tag scores', () => {
     const post = { title: 'Tracer rides', tags: ['3d', 'riding', 'ahegao'], likes: 30, vr: true, axisType: 'multi' };
     const base = candidateScore(post);
     expect(candidateScore(post, {})).toBe(base);
-    expect(candidateScore(post, { blowjob: 4 })).toBe(base);
-    expect(candidateScore(post, { ahegao: 1.5 })).toBeCloseTo(base + 1.5, 10);
-    expect(candidateScore(post, { riding: 4 })).toBeCloseTo(base + 4 - D.riding, 10);
-    expect(candidateScore(post, { '3d': -20 })).toBeCloseTo(base - 10, 10);
+    expect(candidateScore(post, { tagScores: { blowjob: 4 } })).toBe(base);
+    expect(candidateScore(post, { tagScores: { ahegao: 1.5 } })).toBeCloseTo(base + 1.5, 10);
+    expect(candidateScore(post, { tagScores: { riding: 4 } })).toBeCloseTo(base + 4 - D.riding, 10);
+    expect(candidateScore(post, { tagScores: { '3d': -20 } })).toBeCloseTo(base - 10, 10);
   });
 
   it('scores library scenes with library.tagScores', () => {
@@ -235,5 +246,33 @@ describe('tag scores', () => {
     expect(store[PREFERENCE_SCORES_KEY]).toEqual(without);
     store[TAG_SCORES_KEY] = { riding: 1, ahegao: -3, '3d': 0.5 };
     expect(applyPreferenceScores(data, base.videos, { axisFlags: base.axisFlags })).toEqual({ scores: withScores, changed: true });
+  });
+});
+
+describe('favourite artist bonus', () => {
+  const post = { title: 'Tracer rides', tags: ['3d', 'riding'], likes: 20, vr: true, axisType: 'multi' };
+
+  it('adds the bonus on top of the library-creator bonus; 0 gives the score without it', () => {
+    const plain = candidateScore(post);
+    const known = candidateScore({ ...post, artistInLibrary: 'ScyllaHMV' });
+    expect(known).toBe(plain + RANKING.artistInLibrary);
+    expect(candidateScore({ ...post, favourite: 'ScyllaHMV' })).toBe(known + RANKING.favouriteArtist);
+    expect(candidateScore({ ...post, favourite: 'ScyllaHMV' }, { favouriteScore: 2.5 })).toBe(known + 2.5);
+    expect(candidateScore({ ...post, favourite: 'ScyllaHMV' }, { favouriteScore: -1 })).toBe(known - 1);
+    expect(candidateScore({ ...post, favourite: 'ScyllaHMV' }, { favouriteScore: 0 })).toBe(known);
+    expect(candidateScore({ ...post, favourite: null }, { favouriteScore: 9 })).toBe(plain);
+  });
+
+  it('scores library scenes with the favourites and bonus stored in the config', () => {
+    const fav = scene('Shayuki', 'One');
+    const builtIn = scene('ScyllaHMV', 'One');
+    const videos = [video(fav, false), video(builtIn, false)];
+    const store = { 'library.sources': SOURCES.map((path) => ({ path })) };
+    const data = { get: (k) => store[k], set: (k, v) => { store[k] = v; } };
+    const bonus = RANKING.artistInLibrary + RANKING.favouriteArtist;
+    expect(applyPreferenceScores(data, videos).scores).toEqual({ [fav]: 0, [builtIn]: bonus });
+    store['library.favouriteArtists'] = { shayuki: true, scyllahmv: false };
+    store['library.favouriteArtistScore'] = 3;
+    expect(applyPreferenceScores(data, videos).scores).toEqual({ [fav]: RANKING.artistInLibrary + 3, [builtIn]: 0 });
   });
 });

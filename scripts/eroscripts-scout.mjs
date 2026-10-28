@@ -201,7 +201,7 @@ function feedPage(api, pacer) {
   };
 }
 
-/** What screening needs: the library, the posts it already links or the user turned down, favourites. */
+/** What screening needs: the library, the posts it already links or the user turned down, favourites, scoring. */
 function scoutContext(config, userData, incoming) {
   const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
   const library = libraryState(roots);
@@ -215,11 +215,11 @@ function scoutContext(config, userData, incoming) {
   // a short video or an extra copy of one (dedupe) doesn't turn down the post.
   const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.reason !== 'duplicate' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);
-  return { library, knownTopics, turnedDown, favourites: prefs.FAVOURITES, tagScores: config.settings?.library?.tagScores || {} };
+  return { library, knownTopics, turnedDown, ...live.scoutPreferences(config) };
 }
 
-/** A judged post as a saved candidate, scored with the user's tag scores. */
-function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first, picked = false }, tagScores) {
+/** A judged post as a saved candidate, scored with the user's tag scores and favourite artist bonus. */
+function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first, picked = false }, scoring) {
   const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
   const c = {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
@@ -228,12 +228,12 @@ function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, ho
     ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(first.ffm ? { ffm: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
-  return { ...c, score: lib.candidateScore(c, tagScores) };
+  return { ...c, score: lib.candidateScore(c, scoring) };
 }
 
 async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
-  const { library, knownTopics, turnedDown, favourites, tagScores } = scoutContext(config, userData, incoming);
+  const { library, knownTopics, turnedDown, favourites, scoring } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
   const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
@@ -288,7 +288,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
       const scenes = lib.wantedScenes({ scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }, tagScores));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }, scoring));
       verdict('candidate');
       process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
     }
@@ -303,12 +303,12 @@ async function scan(opts, { api, userData, config, incoming }) {
   let previous = [];
   try { previous = JSON.parse(fs.readFileSync(out, 'utf8')).candidates || []; } catch { /* first scan */ }
   const done = fetchedScenes(incoming, userData);
-  const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, tagScores);
+  const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
   fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
 
   const gb = (c) => c.scenes.reduce((n, sc) => n + (sc.video.size || 0), 0) / 1e9;
   const freshIds = new Set(fresh.map((c) => c.id));
-  const tagScore = lib.effectiveTagScores(tagScores);
+  const tagScore = lib.effectiveTagScores(scoring.tagScores);
   console.log('\n| # | New | Post | Axis | Tags | Videos | GB | Host |\n|---|---|---|---|---|---|---|---|');
   candidates.slice(0, opts.top).forEach((c, i) => {
     const axis = c.axisType === 'multi' ? `Multi (${1 + new Set(c.scenes.flatMap((sc) => sc.axes)).size})` : 'Single';
@@ -330,7 +330,7 @@ async function scan(opts, { api, userData, config, incoming }) {
 /** `--add`: judge posts the user picked by id and put them on the list (lib.screenPick). */
 async function addPicked(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
-  const { library, knownTopics, turnedDown, favourites, tagScores } = scoutContext(config, userData, incoming);
+  const { library, knownTopics, turnedDown, favourites, scoring } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
   const fresh = [];
   try {
@@ -363,7 +363,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, first, picked: true }, tagScores));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, first, picked: true }, scoring));
       lib.markTopic(state, id, 'candidate');
       console.log(`✓ ${id} ${t.title} (${plan.scenes.length} video${plan.scenes.length > 1 ? 's' : ''}, ${plan.scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis'})`);
     }
@@ -374,7 +374,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
   let saved = { candidates: [] };
   try { saved = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { /* no list yet */ }
   const done = fetchedScenes(incoming, userData);
-  const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, tagScores);
+  const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
   fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
   console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run eroscripts:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
   return 0;
@@ -580,7 +580,8 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
-  const queue = lib.downloadQueue(candidates, config.settings?.library?.tagScores || {}).filter((c) => !opts.ids || opts.ids.has(c.id));
+  const { favourites, scoring } = live.scoutPreferences(config);
+  const queue = lib.downloadQueue(candidates, scoring, favourites).filter((c) => !opts.ids || opts.ids.has(c.id));
   const gb = queue.reduce((n, c) => n + c.scenes.reduce((m, sc) => m + (sc.video.size || 0), 0), 0) / 1e9;
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);
   if (opts.dryRun) {

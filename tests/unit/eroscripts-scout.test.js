@@ -551,7 +551,15 @@ describe('downloadQueue', () => {
     const list = [c(1, 'multi', ['blowjob']), c(2, 'multi', ['ahegao']), c(3, 'multi', [])];
     expect(downloadQueue(list).map((x) => x.id)).toEqual([1, 2, 3]);
     expect(downloadQueue(list, {}).map((x) => x.id)).toEqual([1, 2, 3]);
-    expect(downloadQueue(list, { ahegao: 2, blowjob: -1.5 }).map((x) => x.id)).toEqual([2, 3, 1]);
+    expect(downloadQueue(list, { tagScores: { ahegao: 2, blowjob: -1.5 } }).map((x) => x.id)).toEqual([2, 3, 1]);
+  });
+
+  it('ranks by the current favourites: a removed favourite loses its bonus, an added one gains it', () => {
+    const c = (id, title, author, likes) => ({ id, title, author, axisType: 'multi', tags: ['animation', 'riding'], vr: false, likes, scenes: [{ axes: ['twist'] }], favourite: null });
+    const list = [{ ...c(1, 'Scylla rides', 'ScyllaHMV', 0), favourite: 'ScyllaHMV' }, c(2, 'Tracer rides', 'Shayuki', 40), c(3, 'Mercy rides', 'Other', 20)];
+    expect(downloadQueue(list).map((x) => x.id)).toEqual([1, 2, 3]);
+    const q = downloadQueue(list, {}, ['Shayuki']);
+    expect(q.map((x) => [x.id, x.favourite])).toEqual([[2, 'Shayuki'], [3, null], [1, null]]);
   });
 });
 
@@ -719,10 +727,23 @@ describe('scan state', () => {
   it('scores saved and fresh candidates with the user\'s tag scores', () => {
     const c = (id, tags) => ({ id, title: `Scene ${id}`, tags: ['vaginal', ...tags], likes: 0, axisType: 'multi', score: 1, scenes: [{ video: { name: `${id}.mp4` } }] });
     const plain = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false);
-    const scored = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false, new Set(), { ahegao: 3, POV: 1, pov: -2 });
+    const scored = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false, new Set(), { tagScores: { ahegao: 3, POV: 1, pov: -2 } });
     const by = (list) => Object.fromEntries(list.map((x) => [x.id, x.score]));
     expect(by(scored)).toEqual({ 1: by(plain)[1] - D.pov - 2, 2: by(plain)[2] + 3, 3: by(plain)[3] });
     expect(scored.map((x) => x.id)).toEqual([2, 3, 1]);
+  });
+
+  it('re-ranks a saved list when a favourite is removed or added, matching title, tags and author', () => {
+    const c = (id, extra) => ({ id, title: `Scene ${id}`, tags: ['vaginal'], likes: 0, axisType: 'multi', scenes: [{ video: { name: `${id}.mp4` } }], favourite: null, ...extra });
+    const saved = [c(1, { favourite: 'ScyllaHMV', author: 'ScyllaHMV' }), c(2, { likes: 20 }), c(3, { tags: ['vaginal', 'candy-love'] }), c(4, { author: 'shayuki' })];
+    const before = mergeCandidates(saved, [], () => false);
+    expect(before.map((x) => x.id)).toEqual([1, 2, 3, 4]);
+    const after = mergeCandidates(saved, [], () => false, new Set(), {}, ['Candy Love', 'Shayuki']);
+    expect(after.map((x) => [x.id, x.favourite])).toEqual([[3, 'Candy Love'], [4, 'Shayuki'], [2, null], [1, null]]);
+    expect(after.find((x) => x.id === 1).score).toBe(scoreCandidate({ multiAxis: true }));
+    expect(after.find((x) => x.id === 3).score).toBe(scoreCandidate({ multiAxis: true, artistInLibrary: true, favourite: true }));
+    // Without the favourites the saved ones stand.
+    expect(mergeCandidates(saved, [], () => false, new Set(), { favouriteScore: 0 }).map((x) => x.favourite)).toEqual(['ScyllaHMV', null, null, null]);
   });
 });
 

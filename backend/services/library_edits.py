@@ -13,12 +13,17 @@ cannot be stored here. It becomes an EDIT:
      "playlistId": "pl-1" | None, "name": "Triage", ...}
     {"seq": 10, "kind": "tag-score", "tag": "riding", "score": 1.5, ...}
     {"seq": 11, "kind": "recalculate-scores", ...}
+    {"seq": 12, "kind": "favourite-artist", "artist": "Mira", "favourite": true, ...}
+    {"seq": 13, "kind": "favourite-score", "score": 5.0, ...}
 
 A tag score is the user's weight for a post tag; the backend holds every
 tag's score as the desktop registers it (starting scores included, absent =
 0), added to every scene's preference score; a recalculation asks the
 desktop to score the library again now (renderer/js/library-scores.js).
-Neither names a video.
+A favourite-artist edit marks an artist (matched case-insensitively, see
+`artist_key`) as a favourite or not; a favourite-score edit sets the bonus a
+favourite artist's scenes get (renderer/js/favourite-artists.js). None of
+these names a video.
 
 Edits wait in one ordered queue (`queue`). The renderer's observer socket
 (`routes/remote_sync.py`) receives each as `{"type": "library-edit", "edit":
@@ -29,8 +34,9 @@ stay queued, and every reconnect replays the whole queue in order, so nothing
 made while the desktop was down is lost.
 
 Every edit is idempotent (set a rating, add-if-missing, remove-if-present,
-create-by-name-if-missing, set a tag score, recalculate), so a replay after a
-lost ack is harmless.
+create-by-name-if-missing, set a tag score, recalculate, set or clear a
+favourite artist, set the favourite bonus), so a replay after a lost ack is
+harmless.
 
 The queue is mirrored to `<userData>/pending-library-edits.json` when the
 backend knows the userData dir, so it also survives a backend restart. That
@@ -52,6 +58,7 @@ import math
 import os
 import threading
 import time
+import unicodedata
 
 log = logging.getLogger("funsync.library_edits")
 
@@ -60,7 +67,12 @@ KIND_PLAYLIST_ADD = "playlist-add"
 KIND_PLAYLIST_REMOVE = "playlist-remove"
 KIND_TAG_SCORE = "tag-score"
 KIND_RECALCULATE_SCORES = "recalculate-scores"
-KINDS = (KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE, KIND_TAG_SCORE, KIND_RECALCULATE_SCORES)
+KIND_FAVOURITE_ARTIST = "favourite-artist"
+KIND_FAVOURITE_SCORE = "favourite-score"
+KINDS = (
+    KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE, KIND_TAG_SCORE, KIND_RECALCULATE_SCORES,
+    KIND_FAVOURITE_ARTIST, KIND_FAVOURITE_SCORE,
+)
 
 MAX_PENDING = 1000
 RATING_MAX = 5
@@ -143,6 +155,13 @@ def clean_tag_scores(scores):
     return out
 
 
+def artist_key(name):
+    """The key two spellings of an artist compare by: NFC, trimmed, case
+    folded (as `renderer/js/favourite-artists.js::fold`); '' for a
+    non-string."""
+    return unicodedata.normalize("NFC", name).strip().casefold() if isinstance(name, str) else ""
+
+
 def _same_name(a, b):
     return (a or "").strip().casefold() == (b or "").strip().casefold()
 
@@ -216,6 +235,20 @@ def apply_to_tag_scores(scores, edit):
         scores[key] = score
 
 
+def apply_to_favourite_artists(names, edit):
+    """Apply one favourite-artist edit to a list of favourite names in place:
+    every spelling of the artist goes, and a favourite comes back (last) as
+    the edit spells it."""
+    artist = edit.get("artist")
+    key = artist_key(artist)
+    favourite = edit.get("favourite")
+    if not key or not isinstance(favourite, bool):
+        return
+    names[:] = [n for n in names if artist_key(n) != key]
+    if favourite:
+        names.append(artist.strip())
+
+
 def effective_ratings(base, pending):
     """The registered ratings with the pending rating edits applied."""
     out = dict(base or {})
@@ -243,6 +276,29 @@ def effective_tag_scores(base, pending):
         if edit["kind"] == KIND_TAG_SCORE:
             apply_to_tag_scores(out, edit)
     return out
+
+
+def effective_favourite_artists(base, pending):
+    """The registered favourite artists with the pending favourite-artist
+    edits applied."""
+    out = list(base or [])
+    for edit in pending:
+        if edit["kind"] == KIND_FAVOURITE_ARTIST:
+            apply_to_favourite_artists(out, edit)
+    return out
+
+
+def effective_favourite_score(base_score, pending):
+    """The registered favourite-artist bonus, or the last pending
+    favourite-score edit's."""
+    score = base_score
+    for edit in pending:
+        if edit["kind"] == KIND_FAVOURITE_SCORE:
+            normalized = normalize_tag_score(edit.get("score"))
+            if normalized is not None:
+                score = normalized
+    return score
+
 
 
 def make_rating_edit(path, rating=None, favorite=None, source=""):
@@ -290,6 +346,27 @@ def make_tag_score_edit(tag, score, source=""):
 def make_recalculate_edit(source=""):
     """Edit asking the desktop to score the library again now."""
     return {"kind": KIND_RECALCULATE_SCORES, "source": source}
+
+
+def make_favourite_artist_edit(artist, favourite, source=""):
+    """Validated favourite-artist edit (without seq): the artist name
+    trimmed, its spelling kept. Raises ValueError on a missing name or a
+    favourite flag that isn't true / false."""
+    if not isinstance(artist, str) or not artist.strip():
+        raise ValueError("artist required")
+    if not isinstance(favourite, bool):
+        raise ValueError("favourite must be true or false")
+    return {"kind": KIND_FAVOURITE_ARTIST, "artist": artist.strip(), "favourite": favourite, "source": source}
+
+
+def make_favourite_score_edit(score, source=""):
+    """Validated favourite-artist bonus edit (without seq): stepped and
+    clamped like a tag score. Raises ValueError when it isn't a number."""
+    normalized = normalize_tag_score(score)
+    if normalized is None:
+        raise ValueError(f"invalid score {score!r}: a number, -{TAG_SCORE_MAX} to {TAG_SCORE_MAX} in steps of {TAG_SCORE_STEP}")
+    return {"kind": KIND_FAVOURITE_SCORE, "score": normalized, "source": source}
+
 
 
 class LibraryEditQueue:

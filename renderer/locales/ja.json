@@ -748,6 +748,7 @@
       "playlists": "プレイリストを検索",
       "categories": "カテゴリーを検索",
       "tags": "タグを検索",
+      "artists": "アーティストを検索",
       "sources": "ソースを検索",
       "short": "検索",
       "aria": "検索",
@@ -773,6 +774,7 @@
       "playlists": "プレイリスト",
       "categories": "カテゴリー",
       "tags": "タグ",
+      "artists": "アーティスト",
       "folders": "フォルダー"
     },
     "filterSheet": {
@@ -834,10 +836,25 @@
       "rules": {
         "multiAxis": "手作りの軸 {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "お気に入りまたは既知のアーティスト {score}",
+        "artistInLibrary": "既知のアーティスト {score}",
+        "favouriteArtist": "お気に入りアーティスト {score}",
         "likes": "いいね 最大 {score}",
         "hentaiOnly": "2D エロアニメのみ {score}"
       }
+    },
+    "artists": {
+      "hint": "お気に入りアーティスト: その動画には ◆ 好みスコアに加えて下のボーナスが付き、スカウトはその投稿を上位にし、実写作品も取り込みます。",
+      "bonus": "お気に入りアーティストのボーナス",
+      "bonusIsDefault": "デフォルト",
+      "bonusDefault": "デフォルト {score}",
+      "addPlaceholder": "お気に入りアーティストを追加",
+      "add": "追加",
+      "notInLibrary": "まだライブラリにありません",
+      "favourite": "{artist} をお気に入りにする",
+      "unfavourite": "{artist} をお気に入りから外す",
+      "added": "{artist} をお気に入りにしました",
+      "removed": "{artist} をお気に入りから外しました",
+      "alreadyFavourite": "{artist} はすでにお気に入りです"
     },
     "breadcrumb": {
       "allSources": "すべてのソース",
@@ -866,13 +883,13 @@
       "emptyFolderBody": "ここにはサブフォルダーや動画がありません。",
       "videoNotFoundTitle": "動画が見つかりません",
       "videoNotFoundBody": "戻ってもう一度お試しください。",
-      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} tags {タグを読み込めませんでした} other {読み込めませんでした}}",
-      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} tags {まだタグがありません} other {まだ項目がありません}}",
-      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} tags {タグは、デスクトップで動画にリンクされた EroScripts と FapTap の投稿から取得されます。} other {デスクトップの FunSync で項目を作成してください。}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} tags {タグを読み込めませんでした} artists {アーティストを読み込めませんでした} other {読み込めませんでした}}",
+      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} tags {まだタグがありません} artists {まだアーティストがいません} other {まだ項目がありません}}",
+      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} tags {タグは、デスクトップで動画にリンクされた EroScripts と FapTap の投稿から取得されます。} artists {アーティストはライブラリのアーティストフォルダーです。上でお気に入りを追加すると、その投稿が上位になります。} other {デスクトップの FunSync で項目を作成してください。}}",
       "groupingNotFoundTitle": "見つかりません",
-      "groupingNotFoundBody": "{kind, select, collections {このコレクションはもうデスクトップに存在しません。} playlists {このプレイリストはもうデスクトップに存在しません。} categories {このカテゴリーはもうデスクトップに存在しません。} other {この項目はもうデスクトップに存在しません。}}",
+      "groupingNotFoundBody": "{kind, select, collections {このコレクションはもうデスクトップに存在しません。} playlists {このプレイリストはもうデスクトップに存在しません。} categories {このカテゴリーはもうデスクトップに存在しません。} artists {このアーティストはもうライブラリにありません。} other {この項目はもうデスクトップに存在しません。}}",
       "groupingEmptyTitle": "空",
-      "groupingEmptyBody": "{kind, select, collections {このコレクションには現在利用可能な動画がありません。} playlists {このプレイリストには現在利用可能な動画がありません。} categories {このカテゴリーには現在利用可能な動画がありません。} other {この項目には現在利用可能な動画がありません。}}"
+      "groupingEmptyBody": "{kind, select, collections {このコレクションには現在利用可能な動画がありません。} playlists {このプレイリストには現在利用可能な動画がありません。} categories {このカテゴリーには現在利用可能な動画がありません。} artists {現在、このアーティストの動画はありません。} other {この項目には現在利用可能な動画がありません。}}"
     },
     "player": {
       "switching": "スクリプトを切り替え中…",

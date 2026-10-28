@@ -112,10 +112,13 @@ export const FAPTAP_FOCUS_MIN = 2;
 // ── Discovery: favourites and live action ───────────────────────────────
 
 /**
- * Favourite creators and actresses: their live action is always taken,
- * they skip the FapTap focus rule, and the app gives each an artist
- * playlist from their first video plus the FAVOURITES_PLAYLIST. Matched in
- * titles, tags, uploaders and performers (scripts/scout-live.mjs favouriteIn).
+ * Starting favourite creators and actresses: their live action is always
+ * taken, they skip the FapTap focus rule, they rank RANKING.favouriteArtist
+ * higher, and the app gives each an artist playlist from their first video
+ * plus the FAVOURITES_PLAYLIST. Matched in titles, tags, uploaders and
+ * performers (scripts/scout-live.mjs favouriteIn). The user adds and removes
+ * favourites in the web remote's Artists view; `library.favouriteArtists`
+ * holds only those changes (renderer/js/favourite-artists.js).
  */
 export const FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle Mocap', 'Noodledude', 'NoFaceGirl', 'Candy Love', 'JJULEZ'];
 /** Other live action: one in every LIVE_QUOTA_EVERY Discovery downloads, counted across both scouts. */
@@ -129,10 +132,13 @@ export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-b
  * Candidate score for what isn't a single tag; higher downloads first. Likes
  * add likes / likesPer, up to likesMax; 2D hentai only loses hentaiOnly.
  * multiAxis applies to EroScripts only (FapTap has no multi-axis scripts).
+ * A favourite artist's post counts as artistInLibrary and also gets
+ * favouriteArtist on top (the user changes it in the web remote's Artists
+ * view: `library.favouriteArtistScore`, same range and steps as a tag score).
  * Tag preferences are TAG_SCORE_GROUPS. The app scores every library scene
  * the same way (preference-score.js, library-scores.js).
  */
-export const RANKING = { vr: 3, artistInLibrary: 2, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
+export const RANKING = { vr: 3, artistInLibrary: 2, favouriteArtist: 5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
 /**
  * Tag scores the preference score starts from: every tag of a group starts at
  * the group's score, and a scene counts each group once (its highest positive

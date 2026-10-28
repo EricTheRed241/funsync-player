@@ -36,6 +36,7 @@ import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
 import { PREFERENCE_SCORES_KEY, tagScoreRegistration } from './library-scores.js';
+import { artistRegistration } from './favourite-artists.js';
 import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
@@ -2403,13 +2404,14 @@ class App {
     };
 
     // Ratings / favourites / playlist edits made on the phone or in
-    // HereSphere, and the phone's tag scores and Recalculate scores (see
-    // library-edits.js).
+    // HereSphere, and the phone's tag scores, favourite artists, favourite
+    // artist bonus and Recalculate scores (see library-edits.js).
     this._libraryEdits = new LibraryEditApplier({
       data: this.settings,
       publish: () => this._publishTriageState(),
       ack: (seq, error) => this.remoteBridge.ackLibraryEdit(seq, error),
       recalculateScores: async () => (this.library ? this.library.recalculatePreferenceScores() : null),
+      favouritesChanged: async () => (this.library ? this.library.favouritesChanged() : null),
     });
     this.remoteBridge.onLibraryEdit = (edit) => { this._libraryEdits.apply(edit); };
 
@@ -2495,11 +2497,12 @@ class App {
   }
 
   /**
-   * Push ratings, playlists, categories and the scores (preference score
-   * per video, score per tag) to the backend (`/api/media/register` treats
-   * each key independently, so the video registry is left alone). Keeps the
-   * headset sections, the HereSphere scene state (`Playlist:` / `Category:`
-   * / `Score:` tags) and the phone current.
+   * Push ratings, playlists, categories, the scores (preference score per
+   * video, score per tag) and the favourite artists with their bonus to the
+   * backend (`/api/media/register` treats each key independently, so the
+   * video registry is left alone). Keeps the headset sections, the
+   * HereSphere scene state (`Playlist:` / `Category:` / `Score:` tags) and
+   * the phone current.
    */
   async _publishTriageState() {
     const port = this.backendPort || this.settings.get('backend.port') || 5123;
@@ -2513,6 +2516,7 @@ class App {
         videoCategories: this.settings._cache?.videoCategories || {},
         preferenceScores: this.settings.get(PREFERENCE_SCORES_KEY) || {},
         ...tagScoreRegistration(this.settings),
+        ...artistRegistration(this.settings),
       }),
     });
     if (!res.ok) throw new Error(`register ${res.status}`);

@@ -159,6 +159,17 @@ const DEFAULTS = {
       // in renderer/js/content-preferences.js, else 0). Set from the web
       // remote's Tags view (library edits).
       tagScores: {},
+      // The user's changes to the favourite artists: artist name (as
+      // spelled) → true (added) / false (a starting favourite removed).
+      // Absent = FAVOURITES in renderer/js/content-preferences.js decides;
+      // names compare case- and Unicode-insensitively
+      // (renderer/js/favourite-artists.js). Set from the web remote's Artists
+      // view (library edits).
+      favouriteArtists: {},
+      // The favourite artist bonus added to a favourite's preference score
+      // and scout ranking: -10 … +10 in 0.5 steps; null = RANKING.favouriteArtist
+      // in renderer/js/content-preferences.js. Set from the Artists view.
+      favouriteArtistScore: null,
       collections: [],
       activeCollectionId: null,
     },

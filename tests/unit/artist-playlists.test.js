@@ -82,10 +82,27 @@ describe('planArtistPlaylists', () => {
     const gone = planArtistPlaylists({ videoPaths: [...scylla, ...agapi], sourcePaths: SOURCES, favourites, state: next.state });
     expect(gone.create.map((c) => c.name)).not.toContain(FAVOURITES_PLAYLIST);
   });
+
+  it('takes a former favourite\'s videos out of Favourite artists and puts them back when favourited again', () => {
+    const agapi = vids('/GVP/Multi Generated', 'Agapilord', 2);
+    const scylla = vids('/GVP/Multi-Axis', 'ScyllaHMV', 2);
+    const videoPaths = [...agapi, ...scylla];
+    const first = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, favourites: ['Agapilord', 'ScyllaHMV'] });
+    const playlists = [{ id: 'f', name: FAVOURITES_PLAYLIST, videoPaths: [...agapi, ...scylla] }];
+
+    const dropped = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, favourites: ['ScyllaHMV'], playlists, state: first.state });
+    expect(dropped.withdraw).toEqual([{ id: 'f', videoPaths: agapi }]);
+    expect(dropped.extend).toEqual([]);
+
+    const after = [{ id: 'f', name: FAVOURITES_PLAYLIST, videoPaths: scylla }];
+    const again = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, favourites: ['Agapilord', 'ScyllaHMV'], playlists: after, state: dropped.state });
+    expect(again.extend).toEqual([{ id: 'f', videoPaths: agapi }]);
+    expect(again.withdraw).toEqual([]);
+  });
 });
 
 describe('applyArtistPlaylists', () => {
-  it('creates and fills the playlists, and a second run changes nothing', async () => {
+  it('creates and fills the playlists, a second run changes nothing, and a former favourite leaves Favourite artists', async () => {
     const store = { 'library.sources': SOURCES.map((path) => ({ path })) };
     const playlists = [];
     const data = {
@@ -94,14 +111,17 @@ describe('applyArtistPlaylists', () => {
       getPlaylists: () => playlists,
       addPlaylist: async (name) => { const pl = { id: `id${playlists.length}`, name, videoPaths: [] }; playlists.push(pl); return pl; },
       addVideosToPlaylist: (id, paths) => { playlists.find((p) => p.id === id).videoPaths.push(...paths); },
+      removeVideoFromPlaylist: (id, path) => { const pl = playlists.find((p) => p.id === id); pl.videoPaths = pl.videoPaths.filter((p) => p !== path); },
     };
     const videoPaths = [...vids('/GVP/Multi Generated', 'Cuddle Mocap', 12), ...vids('/GVP/Multi-Axis', 'Shayuki', 4)];
-    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: ['Cuddle Mocap'], extended: 0 });
+    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: ['Cuddle Mocap'], extended: 0, withdrawn: 0 });
     expect(playlists[0].videoPaths).toHaveLength(12);
     expect(store[ARTIST_PLAYLISTS_KEY].created).toEqual(['cuddle mocap']);
-    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0 });
-    expect(await applyArtistPlaylists(data, videoPaths, ['Shayuki'])).toEqual({ created: [FAVOURITES_PLAYLIST, 'Shayuki'], extended: 0 });
+    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 0 });
+    expect(await applyArtistPlaylists(data, videoPaths, ['Shayuki'])).toEqual({ created: [FAVOURITES_PLAYLIST, 'Shayuki'], extended: 0, withdrawn: 0 });
     expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 4], ['Shayuki', 4]]);
-    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0 });
+    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 4 });
+    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 0], ['Shayuki', 4]]);
+    expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 0 });
   });
 });

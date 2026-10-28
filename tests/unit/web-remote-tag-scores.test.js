@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   stepTagScore, formatTagScore, parseTagScores, fetchTagScores, setTagScore, requestRecalculation, pollTagScores,
-  createTagScoreEditor, updateTagScoreEditor, TAG_SCORE_MAX,
+  createTagScoreEditor, updateTagScoreEditor, formatRules, TAG_SCORE_MAX,
 } from '../../backend/web-remote/tag-scores.js';
 
 const jsonResponse = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
@@ -49,6 +49,12 @@ describe('server state', () => {
     await requestRecalculation(fetchImpl);
     expect(fetchImpl.mock.calls.at(-1)[0]).toBe('/api/remote/recalculate-scores');
     await expect(fetchTagScores(async () => jsonResponse({}, 500))).rejects.toThrow(/500/);
+  });
+
+  it('lists the favourite-artist bonus right after the known-artist weight', () => {
+    // No bundle loaded: t() returns the key, which shows the order.
+    const line = formatRules({ likes: 1, favouriteArtist: 5, artistInLibrary: 2, vr: 0 });
+    expect(line.split(' · ').map((s) => s.split('.').at(-1))).toEqual(['artistInLibrary', 'favouriteArtist', 'likes']);
   });
 
   it('polls until the desktop is done, past failed fetches, or gives up', async () => {

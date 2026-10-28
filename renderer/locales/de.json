@@ -615,6 +615,7 @@
       "playlists": "Wiedergabelisten durchsuchen",
       "categories": "Kategorien durchsuchen",
       "tags": "Tags durchsuchen",
+      "artists": "Künstler durchsuchen",
       "sources": "Quellen durchsuchen",
       "short": "Suchen",
       "aria": "Suchen",
@@ -640,6 +641,7 @@
       "playlists": "Wiedergabelisten",
       "categories": "Kategorien",
       "tags": "Tags",
+      "artists": "Künstler",
       "folders": "Ordner"
     },
     "filterSheet": {
@@ -701,10 +703,25 @@
       "rules": {
         "multiAxis": "Handgemachte Achsen {score}",
         "vr": "VR {score}",
-        "artistInLibrary": "Lieblings- oder bekannter Künstler {score}",
+        "artistInLibrary": "Bekannter Künstler {score}",
+        "favouriteArtist": "Lieblingskünstler {score}",
         "likes": "Likes bis {score}",
         "hentaiOnly": "Nur 2D-Hentai {score}"
       }
+    },
+    "artists": {
+      "hint": "Lieblingskünstler: Ihre Videos bekommen den Bonus unten zusätzlich zum ◆-Präferenzwert, und die Scouts stufen ihre Posts höher ein und nehmen ihre Realfilme mit.",
+      "bonus": "Bonus für Lieblingskünstler",
+      "bonusIsDefault": "Standard",
+      "bonusDefault": "Standard {score}",
+      "addPlaceholder": "Lieblingskünstler hinzufügen",
+      "add": "Hinzufügen",
+      "notInLibrary": "Noch nicht in der Bibliothek",
+      "favourite": "{artist} zum Lieblingskünstler machen",
+      "unfavourite": "{artist} aus den Lieblingskünstlern entfernen",
+      "added": "{artist} ist jetzt ein Lieblingskünstler",
+      "removed": "{artist} ist kein Lieblingskünstler mehr",
+      "alreadyFavourite": "{artist} ist schon ein Lieblingskünstler"
     },
     "breadcrumb": {
       "allSources": "Alle Quellen",
@@ -733,13 +750,13 @@
       "emptyFolderBody": "Hier gibt es weder Unterordner noch Videos.",
       "videoNotFoundTitle": "Video nicht gefunden",
       "videoNotFoundBody": "Gehe zurück und versuche es erneut.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Sammlungen konnten nicht geladen werden} playlists {Wiedergabelisten konnten nicht geladen werden} categories {Kategorien konnten nicht geladen werden} tags {Tags konnten nicht geladen werden} other {Einträge konnten nicht geladen werden}}",
-      "noGroupingTitle": "{kind, select, collections {Noch keine Sammlungen} playlists {Noch keine Wiedergabelisten} categories {Noch keine Kategorien} tags {Noch keine Tags} other {Noch nichts vorhanden}}",
-      "noGroupingBody": "{kind, select, collections {Erstelle Sammlungen in FunSync auf deinem Desktop — sie erscheinen hier.} playlists {Erstelle Wiedergabelisten in FunSync auf deinem Desktop — sie erscheinen hier.} categories {Erstelle Kategorien in FunSync auf deinem Desktop — sie erscheinen hier.} tags {Tags stammen aus den EroScripts- und FapTap-Beiträgen, die auf dem Desktop mit deinen Videos verknüpft sind.} other {Erstelle Einträge in FunSync auf deinem Desktop.}}",
+      "loadGroupingFailedTitle": "{kind, select, collections {Sammlungen konnten nicht geladen werden} playlists {Wiedergabelisten konnten nicht geladen werden} categories {Kategorien konnten nicht geladen werden} tags {Tags konnten nicht geladen werden} artists {Künstler konnten nicht geladen werden} other {Einträge konnten nicht geladen werden}}",
+      "noGroupingTitle": "{kind, select, collections {Noch keine Sammlungen} playlists {Noch keine Wiedergabelisten} categories {Noch keine Kategorien} tags {Noch keine Tags} artists {Noch keine Künstler} other {Noch nichts vorhanden}}",
+      "noGroupingBody": "{kind, select, collections {Erstelle Sammlungen in FunSync auf deinem Desktop — sie erscheinen hier.} playlists {Erstelle Wiedergabelisten in FunSync auf deinem Desktop — sie erscheinen hier.} categories {Erstelle Kategorien in FunSync auf deinem Desktop — sie erscheinen hier.} tags {Tags stammen aus den EroScripts- und FapTap-Beiträgen, die auf dem Desktop mit deinen Videos verknüpft sind.} artists {Künstler sind die Künstlerordner deiner Bibliothek. Füge oben einen Lieblingskünstler hinzu, um seine Posts höher einzustufen.} other {Erstelle Einträge in FunSync auf deinem Desktop.}}",
       "groupingNotFoundTitle": "Nicht gefunden",
-      "groupingNotFoundBody": "{kind, select, collections {Diese Sammlung existiert nicht mehr auf dem Desktop.} playlists {Diese Wiedergabeliste existiert nicht mehr auf dem Desktop.} categories {Diese Kategorie existiert nicht mehr auf dem Desktop.} other {Dieser Eintrag existiert nicht mehr auf dem Desktop.}}",
+      "groupingNotFoundBody": "{kind, select, collections {Diese Sammlung existiert nicht mehr auf dem Desktop.} playlists {Diese Wiedergabeliste existiert nicht mehr auf dem Desktop.} categories {Diese Kategorie existiert nicht mehr auf dem Desktop.} artists {Dieser Künstler ist nicht mehr in der Bibliothek.} other {Dieser Eintrag existiert nicht mehr auf dem Desktop.}}",
       "groupingEmptyTitle": "Leer",
-      "groupingEmptyBody": "{kind, select, collections {In dieser Sammlung sind derzeit keine Videos verfügbar.} playlists {In dieser Wiedergabeliste sind derzeit keine Videos verfügbar.} categories {In dieser Kategorie sind derzeit keine Videos verfügbar.} other {In diesem Eintrag sind derzeit keine Videos verfügbar.}}"
+      "groupingEmptyBody": "{kind, select, collections {In dieser Sammlung sind derzeit keine Videos verfügbar.} playlists {In dieser Wiedergabeliste sind derzeit keine Videos verfügbar.} categories {In dieser Kategorie sind derzeit keine Videos verfügbar.} artists {Derzeit sind keine Videos dieses Künstlers verfügbar.} other {In diesem Eintrag sind derzeit keine Videos verfügbar.}}"
     },
     "player": {
       "switching": "Skript wird gewechselt…",

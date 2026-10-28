@@ -28,10 +28,12 @@
 //     downloaded; shorter scenes fetched under older rules stay.
 //   • Scenes with hand-made axes only (a partial set counts); single-axis
 //     scenes only as picks (`--add`).
-//   • Ranking: RANKING weights (VR, library creator, multi-axis, likes; 2D
-//     hentai only ranks lower) plus the tag scores (TAG_SCORE_GROUPS:
-//     creampie, riding, music, POV up; monster, feet, FFM down; the user's
-//     changes from `library.tagScores`).
+//   • Ranking: RANKING weights (VR, library creator, favourite artist,
+//     multi-axis, likes; 2D hentai only ranks lower) plus the tag scores
+//     (TAG_SCORE_GROUPS: creampie, riding, music, POV up; monster, feet, FFM
+//     down; the user's changes from `library.tagScores`); the favourite
+//     artist bonus and the favourites are the user's too
+//     (`library.favouriteArtistScore`, `library.favouriteArtists`).
 //     There's no hentai feed; hentai comes in through the other feeds.
 //   • Skip posts the library already links and scenes whose video is
 //     already in the library.
@@ -41,7 +43,7 @@
 //     download (scripts/upgrade-multi-axis.mjs); hand-made axes always win.
 
 import path from 'node:path';
-import { favouriteIn } from './scout-live.mjs';
+import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
   ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES,
@@ -758,24 +760,40 @@ export function feedState(state, tag) {
 }
 
 /**
+ * A saved candidate with its favourite under the current favourites
+ * (currentFavourite over what the scan matched: title, tags, author); as
+ * it was when `favourites` isn't given.
+ *
+ * @param {object} c
+ * @param {string[]} [favourites]
+ */
+export function withCurrentFavourite(c, favourites) {
+  if (!Array.isArray(favourites)) return c;
+  return { ...c, favourite: currentFavourite(c, [c.title, ...(c.tags || []), c.author], favourites) };
+}
+
+/**
  * The saved candidate list after a scan: candidates found now, plus earlier
  * ones that still have a scene to download, minus posts the user turned
  * down and posts that break the content rules (contentRuleBreak; lists
  * saved under older rules may hold some, picks too). Best score first, each
- * scored again under the current RANKING and the user's tag scores.
+ * scored again under the current RANKING, the user's tag scores and the
+ * favourite artist bonus, with its favourite under the current favourites.
  *
  * @param {object[]} previous candidates from the last list
  * @param {object[]} fresh candidates found by this scan
  * @param {(topicId: number, videoName: string) => boolean} isDone scene fetched or rejected
  * @param {Set<number>} [turnedDown] posts the user rejected
- * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
+ * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring] see candidateScore
+ * @param {string[]} [favourites] the current favourite artists (scout-live.mjs scoutPreferences)
  */
-export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set(), tagScores = {}) {
+export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set(), scoring = {}, favourites = undefined) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(c.id, c);
   return [...byId.values()]
     .filter((c) => !turnedDown.has(c.id) && !contentRuleBreak(c) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
-    .map((c) => ({ ...c, score: candidateScore(c, tagScores) }))
+    .map((c) => withCurrentFavourite(c, favourites))
+    .map((c) => ({ ...c, score: candidateScore(c, scoring) }))
     .sort((a, b) => b.score - a.score);
 }
 
@@ -843,8 +861,9 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 
 /**
  * Download order: multi-axis posts first, then single-axis; each by score
- * (candidateScore with the user's tag scores, so a list saved under older
- * weights follows the current ones).
+ * (candidateScore with the user's tag scores and favourite artist bonus, and
+ * each post's favourite under the current favourites, so a list saved under
+ * older weights or favourites follows the current ones).
  * Live action on the quota comes last, so the run's other downloads can earn
  * it a slot. Posts a saved list holds that break the content rules
  * (contentRuleBreak) are dropped, picks included; so are scenes the rules no
@@ -852,14 +871,15 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
  * scene.
  *
  * @param {object[]} candidates
- * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
+ * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring] see candidateScore
+ * @param {string[]} [favourites] the current favourite artists
  */
-export function downloadQueue(candidates, tagScores = {}) {
+export function downloadQueue(candidates, scoring = {}, favourites = undefined) {
   const ok = candidates
     .filter((c) => !contentRuleBreak(c))
-    .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes(c) }))
+    .map((c) => ({ ...withCurrentFavourite(c, favourites), scenes: c.picked ? c.scenes : wantedScenes(c) }))
     .filter((c) => c.scenes.length);
-  const byScore = (a, b) => candidateScore(b, tagScores) - candidateScore(a, tagScores);
+  const byScore = (a, b) => candidateScore(b, scoring) - candidateScore(a, scoring);
   const own = ok.filter((c) => !c.liveQuota);
   return [
     ...own.filter((c) => c.axisType === 'multi').sort(byScore), ...own.filter((c) => c.axisType !== 'multi').sort(byScore),

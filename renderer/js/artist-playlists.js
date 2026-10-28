@@ -7,9 +7,10 @@
 // first folder under its source. After each library scan every artist folder
 // holding at least MIN_ARTIST_VIDEOS videos, across all sources, gets a
 // playlist named after it, and new videos of that artist join it. A
-// favourite (FAVOURITES, matched to the folder name whatever its case or
-// Unicode form) gets its playlist from one video, and every favourite's
-// videos also go into FAVOURITES_PLAYLIST, grouped by artist.
+// favourite (favourite-artists.js: FAVOURITES with the user's changes),
+// matched to the folder name whatever its case or Unicode form, gets its
+// playlist from one video, and every favourite's videos also go into
+// FAVOURITES_PLAYLIST, grouped by artist.
 //
 // The user stays in charge, as with the EroScripts categories: an existing
 // playlist of the same name is reused, a playlist is made once (a deleted
@@ -18,7 +19,10 @@
 // [artistKey], added: {videoPath: [artistKey]}}`, where the combined
 // playlist's key is FAVOURITES_STATE_KEY (a colon can't be in a folder name).
 // A playlist the cleanup removes for falling below the threshold
-// (playlist-cleanup.js) is forgotten there, so it is made again later.
+// (playlist-cleanup.js) is forgotten there, so it is made again later. An
+// artist who stops being a favourite has the videos the app put in
+// FAVOURITES_PLAYLIST taken out again (and forgotten, so favouriting them
+// again puts them back); their own playlist stays until the cleanup.
 
 import { FAVOURITES_PLAYLIST, MIN_ARTIST_VIDEOS, NOT_AN_ARTIST } from './content-preferences.js';
 
@@ -103,16 +107,32 @@ export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlis
   for (const a of artists) {
     if (a.favourite || a.paths.length >= MIN_ARTIST_VIDEOS) plan(a.key, a.name, a.paths);
   }
-  return { create, extend, state: { created: [...created], added } };
+
+  const withdrawn = artists
+    .filter((a) => !a.favourite)
+    .flatMap((a) => a.paths)
+    .filter((p) => (added[p] || []).includes(FAVOURITES_STATE_KEY));
+  for (const p of withdrawn) {
+    const keys = added[p].filter((k) => k !== FAVOURITES_STATE_KEY);
+    if (keys.length) added[p] = keys;
+    else delete added[p];
+  }
+  const combined = byName.get(fold(FAVOURITES_PLAYLIST));
+  const inCombined = new Set(combined?.videoPaths || []);
+  const withdraw = combined && withdrawn.some((p) => inCombined.has(p))
+    ? [{ id: combined.id, videoPaths: withdrawn.filter((p) => inCombined.has(p)) }]
+    : [];
+  return { create, extend, withdraw, state: { created: [...created], added } };
 }
 
 /**
  * Create and fill the artist playlists for `videoPaths`.
  *
- * @param {object} data DataService (get, set, getPlaylists, addPlaylist, addVideosToPlaylist)
+ * @param {object} data DataService (get, set, getPlaylists, addPlaylist, addVideosToPlaylist, removeVideoFromPlaylist)
  * @param {string[]} videoPaths
- * @param {string[]} [favourites] favourite artist names (FAVOURITES in content-preferences.js)
- * @returns {Promise<{created: string[], extended: number}>} names of new playlists, count of grown ones
+ * @param {string[]} [favourites] favourite artist names (favourite-artists.js favouritesOf)
+ * @returns {Promise<{created: string[], extended: number, withdrawn: number}>} names of new playlists, count of
+ *   grown ones, videos taken out of FAVOURITES_PLAYLIST
  */
 export async function applyArtistPlaylists(data, videoPaths, favourites = []) {
   const sourcePaths = (data.get('library.sources') || []).map((s) => s?.path).filter(Boolean);
@@ -122,6 +142,7 @@ export async function applyArtistPlaylists(data, videoPaths, favourites = []) {
     data.addVideosToPlaylist(pl.id, c.videoPaths);
   }
   for (const e of plan.extend) data.addVideosToPlaylist(e.id, e.videoPaths);
+  for (const w of plan.withdraw) for (const p of w.videoPaths) data.removeVideoFromPlaylist(w.id, p);
   if (JSON.stringify(plan.state) !== JSON.stringify(data.get(ARTIST_PLAYLISTS_KEY) || {})) data.set(ARTIST_PLAYLISTS_KEY, plan.state);
-  return { created: plan.create.map((c) => c.name), extended: plan.extend.length };
+  return { created: plan.create.map((c) => c.name), extended: plan.extend.length, withdrawn: plan.withdraw.reduce((n, w) => n + w.videoPaths.length, 0) };
 }

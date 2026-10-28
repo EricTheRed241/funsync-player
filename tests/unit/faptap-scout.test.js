@@ -277,10 +277,24 @@ describe('mergeCandidates', () => {
     const s = screenVideo(v);
     const plain = toCandidate(v, s);
     expect(toCandidate(v, s, {}).score).toBe(plain.score);
-    expect(toCandidate(v, s, { creampie: 1.5, hmv: -0.5, riding: 4 }).score).toBeCloseTo(plain.score + 1 - D.creampie - D.hmv, 10);
+    expect(toCandidate(v, s, { tagScores: { creampie: 1.5, hmv: -0.5, riding: 4 } }).score).toBeCloseTo(plain.score + 1 - D.creampie - D.hmv, 10);
     const c = (id, tags) => ({ id, likes: 40, tags, title: '' });
-    const list = mergeCandidates([c('1', ['creampie', 'hmv'])], [c('2', ['creampie', 'hmv', 'ahegao'])], () => false, { ahegao: -2 });
+    const list = mergeCandidates([c('1', ['creampie', 'hmv'])], [c('2', ['creampie', 'hmv', 'ahegao'])], () => false, { tagScores: { ahegao: -2 } });
     expect(list.map((x) => [x.id, x.score])).toEqual([['1', 2 + D.creampie + D.hmv], ['2', D.creampie + D.hmv]]);
+  });
+
+  it('refreshes saved favourites: a removed one loses its bonus and its pass on the focus rule, a performer\'s stays, an added uploader gains it', () => {
+    const c = (id, extra) => ({ id, likes: 0, tags: ['creampie', 'hmv'], author: 'someone', favourite: null, ...extra });
+    const saved = [
+      c('1', { title: 'Kiriko rides', tags: ['creampie'], author: 'candylove', favourite: 'Candy Love' }),
+      c('2', { title: 'Tracer rides', favourite: 'NoFaceGirl' }),
+      c('3', { title: 'Mercy rides', author: 'Shayuki', likes: 20 }),
+    ];
+    const tags = D.creampie + D.hmv;
+    expect(mergeCandidates(saved, [], () => false).map((x) => [x.id, x.score]))
+      .toEqual([['2', 7 + tags], ['1', 7 + D.creampie], ['3', 1 + tags]]);
+    const list = mergeCandidates(saved, [], () => false, { favouriteScore: 3 }, ['NoFaceGirl', 'Shayuki']);
+    expect(list.map((x) => [x.id, x.favourite, x.score])).toEqual([['3', 'Shayuki', 6 + tags], ['2', 'NoFaceGirl', 5 + tags]]);
   });
 });
 

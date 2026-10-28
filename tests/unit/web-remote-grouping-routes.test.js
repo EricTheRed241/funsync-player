@@ -21,6 +21,7 @@ describe('grouping detail routes', () => {
     ['collections', 'collection/c1'],
     ['playlists', 'playlist/p1'],
     ['categories', 'category/x1'],
+    ['artists', 'artist/alpha'],
   ])('%s round-trip through the hash', (kind, expected) => {
     const id = expected.split('/')[1];
     expect(groupingDetailHash(kind, id)).toBe(expected);
@@ -29,6 +30,13 @@ describe('grouping detail routes', () => {
 
   it('keeps ids with slashes and dashes whole', () => {
     expect(parseGroupingDetailHash('category/a/b-c')).toEqual({ kind: 'categories', id: 'a/b-c' });
+  });
+
+  it('encodes an artist id (a folded name) and decodes it back', () => {
+    const hash = groupingDetailHash('artists', 'café & co/2');
+    expect(hash).toBe('artist/caf%C3%A9%20%26%20co%2F2');
+    expect(parseGroupingDetailHash(hash)).toEqual({ kind: 'artists', id: 'café & co/2' });
+    expect(parseGroupingDetailHash('artist/100%')).toEqual({ kind: 'artists', id: '100%' });
   });
 
   it('other hashes are not grouping details', () => {
