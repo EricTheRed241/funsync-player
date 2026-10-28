@@ -103,6 +103,12 @@ def _edit_message(edit: dict) -> dict:
     return {"type": "library-edit", "edit": edit}
 
 
+def desktop_connected() -> bool:
+    """True while the desktop's observer socket is connected (queued edits
+    reach it right away)."""
+    return _observer is not None
+
+
 async def submit_library_edit(edit: dict) -> tuple[dict, bool]:
     """Queue `edit` for the desktop and push it now if the desktop is
     connected. Returns `(stamped_edit, delivered)`; `delivered` False means

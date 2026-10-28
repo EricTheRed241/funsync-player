@@ -48,7 +48,7 @@ import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js
 import { applyAutoCategories, applyAxisCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
 import { applyPlaylistCleanup } from '../js/playlist-cleanup.js';
-import { applyPreferenceScores, PREFERENCE_SCORES_KEY } from '../js/library-scores.js';
+import { applyPreferenceScores, PREFERENCE_SCORES_KEY, TAG_SCORES_KEY } from '../js/library-scores.js';
 import { FAVOURITES } from '../js/content-preferences.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
 
@@ -6827,8 +6827,10 @@ export class Library {
       vrFormat,
       scriptTags,
       // Preference score per video (library-scores.js) for the web remote
-      // and the headsets' `Score:` tag.
+      // and the headsets' `Score:` tag, and the user's score per tag for the
+      // web remote's Tags view.
       preferenceScores,
+      tagScores: this._settings.get(TAG_SCORES_KEY) || {},
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can
@@ -6935,21 +6937,45 @@ export class Library {
   /**
    * Score every video (library-scores.js) with the backend's latest VR and
    * axis decisions; on a change, store the scores, repaint the badges,
-   * re-sort when sorted by score and send them to the backend. Waits for
-   * the first axis decisions of the session: until then the stored scores
-   * stand.
+   * re-sort when sorted by score and (unless `register` is false) send them
+   * to the backend. Waits for the first axis decisions of the session: until
+   * then the stored scores stand.
+   *
+   * @param {{register?: boolean}} [opts]
+   * @returns {boolean|null} whether the scores changed; null when nothing was scored
    */
-  _refreshPreferenceScores() {
-    if (!this._axisFlags || !this._videos?.length) return;
+  _refreshPreferenceScores({ register = true } = {}) {
+    if (!this._axisFlags || !this._videos?.length) return null;
     const { changed } = applyPreferenceScores(this._settings, this._videos, {
       vrOf: (path) => isVRVideo({ path }),
       axisFlags: this._axisFlags,
       favourites: FAVOURITES,
     });
-    if (!changed) return;
+    if (!changed) return false;
     this._repaintScoreBadges();
     if (this._sortParts()[0] === 'score' && !this._scanning) this._applyFilters();
-    this._registerWithBackend();
+    if (register) this._registerWithBackend();
+    return true;
+  }
+
+  /**
+   * Score the library again now: a tag score changed, or the web remote
+   * asked (Recalculate scores, a library edit). Fetches the backend's axis
+   * decisions first when the session has none yet. Stores the scores but
+   * doesn't register them: the library-edit applier sends them to the
+   * backend before it acks the edit.
+   *
+   * @returns {Promise<{videos: number, changed: boolean}|null>} null when the
+   *   library isn't scanned or the axis decisions aren't available yet
+   */
+  async recalculatePreferenceScores() {
+    if (!this._videos?.length) return null;
+    if (!this._axisFlags) {
+      await this._syncAxesFromBackend()
+        .catch((err) => console.warn('[Library] Axis decisions for the scores not fetched:', err?.message || err));
+    }
+    const changed = this._refreshPreferenceScores({ register: false });
+    return changed === null ? null : { videos: this._videos.length, changed };
   }
 
   /**

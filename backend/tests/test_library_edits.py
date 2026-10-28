@@ -30,10 +30,14 @@ C = "/Lib/C.mp4"
 def fresh_state():
     register_ratings({})
     register_playlists([])
+    media.register_tag_scores({})
+    media.register_preference_scores({})
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
     register_playlists([])
+    media.register_tag_scores({})
+    media.register_preference_scores({})
     remote_sync._reset_state_for_tests()
 
 
@@ -449,3 +453,97 @@ class TestRemoteEndpoints:
         })
         videos = {v["id"]: v for v in client.get("/api/remote/videos").json()["videos"]}
         assert videos[library["C"]]["rating"] == 1.5
+
+
+# --- Tag scores and Recalculate scores ----------------------------------------
+
+class TestTagScores:
+    @pytest.mark.parametrize("raw, expected", [
+        (1.5, 1.5), (1.2, 1.0), (1.25, 1.5), (-1.25, -1.0), (-1.3, -1.5), (0.24, 0.0),
+        ("2.5", 2.5), (11, 10.0), (-99, -10.0), (-10, -10.0),
+        (None, None), (True, None), ("", None), ("x", None), (float("nan"), None), (float("inf"), None),
+        ([], None), (10 ** 400, None),
+    ])
+    def test_normalize_steps_and_clamps(self, raw, expected):
+        """Same rule as renderer/js/preference-score.js::normalizeTagScore."""
+        assert library_edits.normalize_tag_score(raw) == expected
+
+    def test_no_negative_zero(self):
+        assert str(library_edits.normalize_tag_score(-0.2)) == "0.0"
+
+    def test_effective_scores_overlay_pending_edits(self):
+        base = {"riding": 2.0, "pmv": 1.0}
+        pending = [
+            library_edits.make_tag_score_edit(" Riding ", 3),
+            library_edits.make_tag_score_edit("pmv", 0),
+            library_edits.make_tag_score_edit("ahegao", -1.5),
+            library_edits.make_recalculate_edit(),
+        ]
+        assert library_edits.effective_tag_scores(base, pending) == {"riding": 3.0, "ahegao": -1.5}
+        assert base == {"riding": 2.0, "pmv": 1.0}
+
+    def test_registration_cleans_keys_and_values(self, client):
+        client.post("/api/media/register", json={
+            "tagScores": {" Riding ": 2, "pmv": 0, "bad": "x", "ahegao": -1.26, "": 3},
+        })
+        assert client.get("/api/remote/tag-scores").json() == {
+            "scores": {"riding": 2.0, "ahegao": -1.5}, "pending": [], "recalculating": False,
+        }
+
+    @pytest.mark.parametrize("payload", [{"score": 1}, {"tag": "  ", "score": 1}, {"tag": "x"}, {"tag": "x", "score": "lots"}])
+    def test_endpoint_rejects(self, client, payload):
+        assert client.post("/api/remote/tag-score", json=payload).status_code == 400
+        assert library_edits.queue.pending() == []
+
+    def test_set_while_desktop_offline_then_applied(self, client):
+        client.post("/api/media/register", json={"tagScores": {"pmv": 1}})
+        r = client.post("/api/remote/tag-score", json={"tag": "Riding", "score": 2.3})
+        assert r.json() == {"ok": True, "seq": 1, "delivered": False, "tag": "riding", "score": 2.5}
+        client.post("/api/remote/tag-score", json={"tag": "pmv", "score": 0})
+        state = client.get("/api/remote/tag-scores").json()
+        assert state == {"scores": {"riding": 2.5}, "pending": ["pmv", "riding"], "recalculating": False}
+
+        with client.websocket_connect("/api/remote/sync/observe") as ws:
+            msgs = [ws.receive_json() for _ in range(2)]
+            assert [(m["edit"]["kind"], m["edit"]["tag"], m["edit"]["score"]) for m in msgs] == [
+                ("tag-score", "riding", 2.5), ("tag-score", "pmv", 0.0),
+            ]
+            for m in msgs:
+                _ack(ws, m)
+            assert _wait_until(lambda: library_edits.queue.pending() == [])
+        # Folded into the registered state until the desktop registers again.
+        assert client.get("/api/remote/tag-scores").json() == {
+            "scores": {"riding": 2.5}, "pending": [], "recalculating": False,
+        }
+
+    def test_recalculate_waits_for_the_desktop(self, client):
+        r = client.post("/api/remote/recalculate-scores").json()
+        assert (r["ok"], r["delivered"]) == (True, False)
+        assert client.get("/api/remote/tag-scores").json()["recalculating"] is True
+        # Asking again while one waits returns that one.
+        again = client.post("/api/remote/recalculate-scores").json()
+        assert (again["seq"], again["alreadyPending"]) == (r["seq"], True)
+        assert len(library_edits.queue.pending()) == 1
+
+        with client.websocket_connect("/api/remote/sync/observe") as ws:
+            msg = ws.receive_json()
+            assert msg["edit"]["kind"] == "recalculate-scores" and "path" not in msg["edit"]
+            # The desktop scores the library, registers the scores, then acks.
+            client.post("/api/media/register", json={"preferenceScores": {A: 7.5}})
+            _ack(ws, msg)
+            assert _wait_until(lambda: library_edits.queue.pending() == [])
+        assert client.get("/api/remote/tag-scores").json()["recalculating"] is False
+        assert media.get_preference_score(A) == 7.5
+
+    def test_recalculate_delivered_when_desktop_connected(self, client):
+        with client.websocket_connect("/api/remote/sync/observe") as ws:
+            r = client.post("/api/remote/recalculate-scores").json()
+            assert r["delivered"] is True
+            assert ws.receive_json()["edit"]["seq"] == r["seq"]
+
+    def test_tag_edits_survive_a_backend_restart(self, tmp_path):
+        q = LibraryEditQueue(persist_dir=str(tmp_path))
+        q.enqueue(library_edits.make_tag_score_edit("riding", 1))
+        q.enqueue(library_edits.make_recalculate_edit())
+        again = LibraryEditQueue(persist_dir=str(tmp_path))
+        assert [e["kind"] for e in again.pending()] == ["tag-score", "recalculate-scores"]

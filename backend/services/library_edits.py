@@ -11,6 +11,13 @@ cannot be stored here. It becomes an EDIT:
      "playlistId": "pl-1" | None, "name": "Triage", ...}
     {"seq": 9, "kind": "playlist-remove", "path": "/v/a.mp4",
      "playlistId": "pl-1" | None, "name": "Triage", ...}
+    {"seq": 10, "kind": "tag-score", "tag": "riding", "score": 1.5, ...}
+    {"seq": 11, "kind": "recalculate-scores", ...}
+
+A tag score is the user's own weight for a post tag (`library.tagScores`,
+tag → score, absent = 0), added to every scene's preference score; a
+recalculation asks the desktop to score the library again now
+(renderer/js/library-scores.js). Neither names a video.
 
 Edits wait in one ordered queue (`queue`). The renderer's observer socket
 (`routes/remote_sync.py`) receives each as `{"type": "library-edit", "edit":
@@ -21,7 +28,8 @@ stay queued, and every reconnect replays the whole queue in order, so nothing
 made while the desktop was down is lost.
 
 Every edit is idempotent (set a rating, add-if-missing, remove-if-present,
-create-by-name-if-missing), so a replay after a lost ack is harmless.
+create-by-name-if-missing, set a tag score, recalculate), so a replay after a
+lost ack is harmless.
 
 The queue is mirrored to `<userData>/pending-library-edits.json` when the
 backend knows the userData dir, so it also survives a backend restart. That
@@ -39,6 +47,7 @@ sections and the phone's lists reflect a change the moment it is made.
 import copy
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -48,11 +57,17 @@ log = logging.getLogger("funsync.library_edits")
 KIND_RATING = "rating"
 KIND_PLAYLIST_ADD = "playlist-add"
 KIND_PLAYLIST_REMOVE = "playlist-remove"
-KINDS = (KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE)
+KIND_TAG_SCORE = "tag-score"
+KIND_RECALCULATE_SCORES = "recalculate-scores"
+KINDS = (KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE, KIND_TAG_SCORE, KIND_RECALCULATE_SCORES)
 
 MAX_PENDING = 1000
 RATING_MAX = 5
 RATING_STEP = 0.5
+# Tag scores: -10 … +10 in steps of 0.5 (renderer/js/preference-score.js
+# TAG_SCORE_MAX / TAG_SCORE_STEP).
+TAG_SCORE_MAX = 10
+TAG_SCORE_STEP = 0.5
 PENDING_ID_PREFIX = "pending:"
 QUEUE_FILE = "pending-library-edits.json"
 
@@ -90,6 +105,41 @@ def rating_entry(ratings, path):
     if not isinstance(raw, dict):
         return 0.0, False
     return normalize_rating(raw.get("rating")) or 0.0, raw.get("favorite") is True
+
+
+def tag_key(tag):
+    """The key a tag's score is stored under: trimmed, lower case (as
+    `renderer/js/preference-score.js::tagKey`); '' for a non-string."""
+    return tag.strip().lower() if isinstance(tag, str) else ""
+
+
+def normalize_tag_score(value):
+    """`value` as a tag score, else None.
+
+    Same rule as `renderer/js/preference-score.js::normalizeTagScore`: a
+    finite number (or numeric string) rounded to the nearest 0.5 (halves up)
+    and clamped to -10 … +10.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        value = float(value.strip() if isinstance(value, str) else value)
+    except (ValueError, OverflowError):
+        return None
+    if not math.isfinite(value):
+        return None
+    stepped = math.floor(value / TAG_SCORE_STEP + 0.5) * TAG_SCORE_STEP
+    return min(TAG_SCORE_MAX, max(-TAG_SCORE_MAX, stepped)) + 0.0
+
+
+def clean_tag_scores(scores):
+    """A `{tag: score}` map with valid keys and scores only; zeros dropped."""
+    out = {}
+    for tag, raw in (scores.items() if isinstance(scores, dict) else ()):
+        key, score = tag_key(tag), normalize_tag_score(raw)
+        if key and score:
+            out[key] = score
+    return out
 
 
 def _same_name(a, b):
@@ -152,6 +202,19 @@ def apply_to_playlists(playlists, edit):
         target["videoPaths"] = [p for p in target.get("videoPaths") or [] if p != path]
 
 
+def apply_to_tag_scores(scores, edit):
+    """Apply one tag-score edit to a `{tag: score}` map in place; 0 removes
+    the tag."""
+    key = tag_key(edit.get("tag"))
+    score = normalize_tag_score(edit.get("score"))
+    if not key or score is None:
+        return
+    if score == 0:
+        scores.pop(key, None)
+    else:
+        scores[key] = score
+
+
 def effective_ratings(base, pending):
     """The registered ratings with the pending rating edits applied."""
     out = dict(base or {})
@@ -169,6 +232,15 @@ def effective_playlists(base, pending):
     out = copy.deepcopy(list(base or []))
     for edit in edits:
         apply_to_playlists(out, edit)
+    return out
+
+
+def effective_tag_scores(base, pending):
+    """The registered tag scores with the pending tag-score edits applied."""
+    out = dict(base or {})
+    for edit in pending:
+        if edit["kind"] == KIND_TAG_SCORE:
+            apply_to_tag_scores(out, edit)
     return out
 
 
@@ -199,6 +271,24 @@ def make_playlist_edit(kind, path, playlist_id=None, name=None, source=""):
     if not playlist_id and not name:
         raise ValueError("playlistId or name required")
     return {"kind": kind, "path": path, "playlistId": playlist_id or None, "name": name, "source": source}
+
+
+def make_tag_score_edit(tag, score, source=""):
+    """Validated tag-score edit (without seq): the score rounded to 0.5 and
+    clamped to ±TAG_SCORE_MAX. Raises ValueError on a missing tag or a
+    score that isn't a number."""
+    key = tag_key(tag)
+    if not key:
+        raise ValueError("tag required")
+    normalized = normalize_tag_score(score)
+    if normalized is None:
+        raise ValueError(f"invalid score {score!r}: a number, -{TAG_SCORE_MAX} to {TAG_SCORE_MAX} in steps of {TAG_SCORE_STEP}")
+    return {"kind": KIND_TAG_SCORE, "tag": key, "score": normalized, "source": source}
+
+
+def make_recalculate_edit(source=""):
+    """Edit asking the desktop to score the library again now."""
+    return {"kind": KIND_RECALCULATE_SCORES, "source": source}
 
 
 class LibraryEditQueue:
