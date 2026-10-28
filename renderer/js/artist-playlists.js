@@ -17,6 +17,8 @@
 // hand sticks). That history is `library.artistPlaylists`: `{created:
 // [artistKey], added: {videoPath: [artistKey]}}`, where the combined
 // playlist's key is FAVOURITES_STATE_KEY (a colon can't be in a folder name).
+// A playlist the cleanup removes for falling below the threshold
+// (playlist-cleanup.js) is forgotten there, so it is made again later.
 
 import { FAVOURITES_PLAYLIST, MIN_ARTIST_VIDEOS, NOT_AN_ARTIST } from './content-preferences.js';
 

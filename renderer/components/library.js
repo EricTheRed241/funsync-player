@@ -47,6 +47,7 @@ import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js';
 import { applyAutoCategories, applyAxisCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
+import { applyPlaylistCleanup } from '../js/playlist-cleanup.js';
 import { FAVOURITES } from '../js/content-preferences.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
 
@@ -900,12 +901,19 @@ export class Library {
       .catch((err) => console.warn('[Library] Axis categories from the backend not applied:', err?.message || err));
 
     // One playlist per artist with enough videos, per favourite artist from
-    // one video, and "Favourite artists" (artist-playlists.js).
-    applyArtistPlaylists(this._settings, (this._videos || []).map((v) => v.path), FAVOURITES)
+    // one video, and "Favourite artists" (artist-playlists.js); then empty
+    // playlists and artist playlists below the threshold go
+    // (playlist-cleanup.js). The cleanup never runs on a scan that couldn't
+    // read every source: a disconnected drive would make every playlist
+    // look empty.
+    const scannedPaths = (this._videos || []).map((v) => v.path);
+    const scanComplete = this._failedScanPaths.size === 0 && scannedPaths.length > 0;
+    applyArtistPlaylists(this._settings, scannedPaths, FAVOURITES)
       .then((r) => {
-        if (!r.created.length && !r.extended) return;
-        console.log('[Library] Artist playlists:', r);
-        this._registerWithBackend();
+        if (r.created.length || r.extended) console.log('[Library] Artist playlists:', r);
+        const c = scanComplete ? applyPlaylistCleanup(this._settings, scannedPaths, FAVOURITES) : { removed: [] };
+        if (c.removed.length) console.log('[Library] Playlists removed (empty or below the artist threshold):', c.removed);
+        if (r.created.length || r.extended || c.removed.length) this._registerWithBackend();
       })
       .catch((err) => console.warn('[Library] Artist playlists failed:', err?.message || err));
 
