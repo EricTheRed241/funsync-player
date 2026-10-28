@@ -45,7 +45,7 @@ import { matchesRatingFilter, ratingOf, rehomeRatings } from '../js/ratings.js';
 import { createRatingControl, updateRatingControl } from '../js/rating-stars.js';
 import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js';
-import { applyAutoCategories, applyVRCategory } from '../js/auto-categories.js';
+import { applyAutoCategories, applyAxisCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
 import { FAVOURITES } from '../js/content-preferences.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
@@ -65,8 +65,9 @@ import { applyAutoCollections } from '../js/auto-collections.js';
 const MAX_CONCURRENT_THUMBNAILS = 4;
 
 // While the backend is still probing frame sizes (`pending` from
-// `/api/media/vr-flags`), ask for its VR decisions again this often, at
-// most this many times per scan (10 minutes); the next scan starts over.
+// `/api/media/vr-flags`) or reading scripts for embedded axes (`pending` from
+// `/api/media/axis-flags`), ask for its decisions again this often, at most
+// this many times per scan (10 minutes); the next scan starts over.
 const VR_FLAGS_RETRY_MS = 30_000;
 const VR_FLAGS_RETRIES = 20;
 
@@ -894,7 +895,9 @@ export class Library {
       })
       .catch((err) => console.warn('[Library] Categories from EroScripts tags failed:', err?.message || err))
       .then(() => this._syncVRFromBackend({ fresh: true }))
-      .catch((err) => console.warn('[Library] VR from the backend not applied:', err?.message || err));
+      .catch((err) => console.warn('[Library] VR from the backend not applied:', err?.message || err))
+      .then(() => this._syncAxesFromBackend({ fresh: true }))
+      .catch((err) => console.warn('[Library] Axis categories from the backend not applied:', err?.message || err));
 
     // One playlist per artist with enough videos, per favourite artist from
     // one video, and "Favourite artists" (artist-playlists.js).
@@ -6863,6 +6866,39 @@ export class Library {
       this._vrFlagsTimer = setTimeout(() => {
         this._syncVRFromBackend()
           .catch((err) => console.warn('[Library] VR from the backend not applied:', err?.message || err));
+      }, VR_FLAGS_RETRY_MS);
+    }
+  }
+
+  /**
+   * The axis categories (Hand-made axes / Generated axes / Single-axis) from
+   * the backend's axis kind per video (`GET /api/media/axis-flags`, the same
+   * hand-made rule as the headsets' Hand-made section), fetched once the
+   * latest registration has landed. Videos whose scripts the backend is
+   * still reading for embedded axes are left out (`pending`), so it asks
+   * again later, up to `VR_FLAGS_RETRIES` times per scan.
+   *
+   * @param {{fresh?: boolean}} [opts] `fresh`: a new scan, restart the retries
+   */
+  async _syncAxesFromBackend({ fresh = false } = {}) {
+    clearTimeout(this._axisFlagsTimer);
+    if (fresh) this._axisFlagsRetries = 0;
+    if (!(await this._registration)) return;
+    const port = this._settings.get('backend.port') || 5123;
+    const res = await fetch(`http://127.0.0.1:${port}/api/media/axis-flags`);
+    if (!res.ok) throw new Error(`axis-flags ${res.status}`);
+    const { flags = {}, pending = 0 } = await res.json();
+    const r = applyAxisCategories(this._settings, flags);
+    if (r.added || r.removed) {
+      console.log('[Library] Axis categories from the scripts:', r);
+      this._repaintAllCategoryDots();
+      this._registerWithBackend();
+    }
+    if (pending > 0 && (this._axisFlagsRetries || 0) < VR_FLAGS_RETRIES) {
+      this._axisFlagsRetries = (this._axisFlagsRetries || 0) + 1;
+      this._axisFlagsTimer = setTimeout(() => {
+        this._syncAxesFromBackend()
+          .catch((err) => console.warn('[Library] Axis categories from the backend not applied:', err?.message || err));
       }, VR_FLAGS_RETRY_MS);
     }
   }

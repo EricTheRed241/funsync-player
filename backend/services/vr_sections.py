@@ -134,6 +134,42 @@ def is_handmade_multi_axis(video):
     return bool(video.get('handmadeCompanions') or video.get('embeddedAxes'))
 
 
+AXIS_HANDMADE = 'handmade'
+AXIS_GENERATED = 'generated'
+AXIS_SINGLE = 'single'
+
+
+def axis_kind(video):
+    """`handmade` (is_handmade_multi_axis), `generated` (only generated
+    companion files, `generatedCompanions`), or `single`; None when the video
+    has no script or its embedded-axes check hasn't run yet (no
+    `embeddedAxes` key) and nothing else decides it."""
+    video = video or {}
+    if not video.get('funscriptPath'):
+        return None
+    if is_handmade_multi_axis(video):
+        return AXIS_HANDMADE
+    if 'embeddedAxes' not in video:
+        return None
+    return AXIS_GENERATED if video.get('generatedCompanions') else AXIS_SINGLE
+
+
+def axis_flags(registry):
+    """`{"flags": {path: kind}, "pending": n}` for every registered video
+    with a script (`axis_kind`); undecided ones are counted in `pending`."""
+    flags = {}
+    pending = 0
+    for v in registry.values():
+        if not v.get('funscriptPath') or not v.get('path'):
+            continue
+        kind = axis_kind(v)
+        if kind is None:
+            pending += 1
+        else:
+            flags[v['path']] = kind
+    return {'flags': flags, 'pending': pending}
+
+
 def video_sections(video, is_3d, now_ms):
     """Every section this video belongs to, in SECTION_ORDER."""
     names = [SECTION_VR if is_3d else SECTION_FLAT]

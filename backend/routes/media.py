@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from services import library_edits, video_tags
-from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
+from services.funscript import companion_axes, embedded_axes, may_have_embedded_axes
 
 router = APIRouter()
 log = logging.getLogger("funsync.media")
@@ -133,18 +133,20 @@ def register_videos(videos: list[dict]):
 def _annotate_handmade_companions(videos):
     """Set `handmadeCompanions` on every entry: True when its main script
     has a companion axis file a scripter made (not
-    `*.generated.<axis>.funscript`).
+    `*.generated.<axis>.funscript`), and `generatedCompanions`: True when it
+    has generated ones.
 
-    Feeds the headsets' "Hand-made" section and tag, whose listings must
-    not touch the filesystem — so it is decided here, with one directory
-    listing per script folder. An unreadable folder counts as no
-    companions.
+    Feeds the headsets' "Hand-made" section and tag and the desktop's axis
+    categories (`/axis-flags`), whose listings must not touch the
+    filesystem — so it is decided here, with one directory listing per
+    script folder. An unreadable folder counts as no companions.
     """
     listings: dict[str, list[str]] = {}
     for v in videos:
         script = v.get("funscriptPath")
         if not script:
             v["handmadeCompanions"] = False
+            v["generatedCompanions"] = False
             continue
         folder = os.path.dirname(script)
         names = listings.get(folder)
@@ -154,7 +156,9 @@ def _annotate_handmade_companions(videos):
             except OSError:
                 names = []
             listings[folder] = names
-        v["handmadeCompanions"] = has_handmade_companions(script, names)
+        handmade, generated = companion_axes(script, names)
+        v["handmadeCompanions"] = bool(handmade)
+        v["generatedCompanions"] = bool(generated)
 
 
 # --- Background embedded multi-axis scan ---------------------------------
@@ -788,6 +792,21 @@ async def get_vr_flags():
     from routes.vr_api import vr_flags  # deferred: vr_api imports this module
     return vr_flags(_video_registry)
 
+
+@router.get("/axis-flags")
+async def get_axis_flags():
+    """Each registered video's axis kind, for the desktop's axis categories:
+    `handmade` (a scripter's companion axis file, or axes embedded in the
+    script; the headsets' "Hand-made" rule), else `generated` (only
+    `*.generated.<axis>.funscript` companions), else `single`.
+
+    Returns `{"flags": {"<videoPath>": kind}, "pending": n}`. Videos without
+    a script are left out; videos whose embedded-axes check hasn't run yet
+    (and have no hand-made companion) are left out and counted in `pending`,
+    so the desktop asks again. A pure registry scan.
+    """
+    from services.vr_sections import axis_flags
+    return axis_flags(_video_registry)
 
 
 @router.post("/register")

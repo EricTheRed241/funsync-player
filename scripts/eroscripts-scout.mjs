@@ -40,7 +40,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
@@ -286,7 +286,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
       const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
-      const scenes = lib.wantedScenes({ tags: t.tags, title: t.title, vr: s.vr, artistInLibrary: !!artistInLibrary, scenes: plan.scenes });
+      const scenes = lib.wantedScenes({ scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
       fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }));
       verdict('candidate');
@@ -508,13 +508,16 @@ function fetchedScenes(incoming, userData) {
   return done;
 }
 
-async function fetchPass(queue, { api, userData, incoming, staging }) {
+/** One pass over the queue; downloads at most `room` videos (the library cap). */
+async function fetchPass(queue, { api, userData, incoming, staging, room }) {
   const done = fetchedScenes(incoming, userData);
-  let ok = 0; let failed = 0; let generated = 0; let short = 0; let waiting = 0;
+  let ok = 0; let failed = 0; let generated = 0; let short = 0; let waiting = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
+    if (capped) break;
     for (const sc of c.scenes) {
       if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
+      if (ok >= room) { capped = true; break; }
       // Live action by a non-favourite: one in every LIVE_QUOTA_EVERY downloads (both scouts).
       if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
       const creator = lib.creatorFolder(c.title, c.author);
@@ -561,7 +564,7 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
       }
     }
   }
-  return { ok, failed, generated, short, waiting };
+  return { ok, failed, generated, short, waiting, capped };
 }
 
 async function fetchAll(opts, { api, userData, incoming }) {
@@ -584,10 +587,16 @@ async function fetchAll(opts, { api, userData, incoming }) {
   }
   const staging = path.join(path.dirname(incoming), '_staging');
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
-    console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
-    const r = await fetchPass(queue, { api, userData, incoming, staging });
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    const held = libraryVideoCount(readConfig(userData));
+    if (held >= prefs.LIBRARY_MAX_VIDEOS) {
+      console.log(`Library holds ${held} videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Delete scenes or raise the cap.`);
+      break;
+    }
+    console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
+    const r = await fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held });
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
+    if (r.capped) break;
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min for host quotas`);

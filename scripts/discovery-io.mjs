@@ -53,6 +53,15 @@ export function librarySources(config, incoming) {
     .filter((s) => s.enabled !== false && s.path && path.resolve(s.path) !== path.resolve(incoming || '/nonexistent'));
 }
 
+/** How many videos the enabled library sources hold (LIBRARY_MAX_VIDEOS is checked against it). */
+export function libraryVideoCount(config) {
+  let n = 0;
+  for (const s of (config.settings?.library?.sources || []).filter((x) => x.enabled !== false && x.path)) {
+    walk(s.path, 0, (full, e) => { if (!e.isDirectory() && isVideoName(e.name)) n++; });
+  }
+  return n;
+}
+
 /** Visit files and folders up to four levels down, skipping dot names (AppleDouble `._*` included). */
 export function walk(dir, depth, visit) {
   let entries = [];

@@ -22,7 +22,7 @@ from main import app
 from routes import remote_sync
 from routes.media import register_videos, register_playlists, register_ratings, register_categories, get_video_registry, _path_to_id
 from services import vr_sections
-from services.funscript import embedded_axes, has_handmade_companions, may_have_embedded_axes
+from services.funscript import companion_axes, embedded_axes, has_handmade_companions, may_have_embedded_axes
 
 DAY_MS = 24 * 60 * 60 * 1000
 ALL_SECTIONS = [
@@ -123,6 +123,40 @@ class TestHandmadeRule:
         assert not vr_sections.is_handmade_multi_axis({})
         assert not vr_sections.is_handmade_multi_axis({"handmadeCompanions": False, "embeddedAxes": []})
         assert not vr_sections.is_handmade_multi_axis(None)
+
+
+class TestAxisKind:
+    S = {"funscriptPath": "/v/T.funscript", "path": "/v/T.mp4"}
+
+    def test_handmade_beats_generated(self):
+        assert vr_sections.axis_kind({**self.S, "handmadeCompanions": True, "generatedCompanions": True}) == "handmade"
+        assert vr_sections.axis_kind({**self.S, "embeddedAxes": ["roll"], "generatedCompanions": True}) == "handmade"
+
+    def test_generated_then_single(self):
+        assert vr_sections.axis_kind({**self.S, "embeddedAxes": [], "generatedCompanions": True}) == "generated"
+        assert vr_sections.axis_kind({**self.S, "embeddedAxes": [], "generatedCompanions": False}) == "single"
+
+    def test_undecided_until_embedded_check_ran(self):
+        # Embedded axes would make it hand-made, so generated companions don't decide it yet.
+        assert vr_sections.axis_kind({**self.S, "generatedCompanions": True}) is None
+        assert vr_sections.axis_kind({"path": "/v/T.mp4", "embeddedAxes": []}) is None
+
+    def test_flags_leave_out_scriptless_and_count_pending(self):
+        registry = {
+            "a": {**self.S, "handmadeCompanions": True},
+            "b": {"funscriptPath": "/v/B.funscript", "path": "/v/B.mp4", "embeddedAxes": [], "generatedCompanions": True},
+            "c": {"funscriptPath": "/v/C.funscript", "path": "/v/C.mp4"},
+            "d": {"path": "/v/D.mp4", "embeddedAxes": []},
+        }
+        assert vr_sections.axis_flags(registry) == {"flags": {"/v/T.mp4": "handmade", "/v/B.mp4": "generated"}, "pending": 1}
+
+
+class TestCompanionAxes:
+    def test_split_handmade_and_generated(self):
+        assert companion_axes("/v/Title.funscript", [
+            "Title.funscript", "Title.roll.funscript", "Title.generated.twist.funscript",
+            "Title.generated.pitch.funscript", "._Title.surge.funscript", "Other.generated.roll.funscript",
+        ]) == (["roll"], ["pitch", "twist"])
 
 
 class TestBuildSections:

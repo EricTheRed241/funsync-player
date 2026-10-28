@@ -40,7 +40,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 
 const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, libraryVideoCount, readConfig, walk } = await import('./discovery-io.mjs');
 const dedupe = await import('./scene-dedupe-lib.mjs');
 const { libraryVideos, readProbeCache, writeProbeCache } = await import('./scene-probe.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
@@ -403,12 +403,14 @@ function sceneDir(parent, stem, id) {
   }
 }
 
-async function fetchPass(queue, { userData, incoming, staging, naming }) {
+/** One pass over the queue; downloads at most `room` videos (the library cap). */
+async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
   const done = doneScenes(incoming, userData);
-  let ok = 0; let failed = 0; let short = 0; let waiting = 0;
+  let ok = 0; let failed = 0; let short = 0; let waiting = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     if (done.has(lib.fetchedKey(c.id))) continue;
+    if (ok >= room) { capped = true; break; }
     if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
     let creator = c.author;
     let stem = c.title;
@@ -453,7 +455,7 @@ async function fetchPass(queue, { userData, incoming, staging, naming }) {
       failed++;
     }
   }
-  return { ok, failed, short, waiting };
+  return { ok, failed, short, waiting, capped };
 }
 
 async function fetchAll(opts, { userData, config, incoming }) {
@@ -480,10 +482,16 @@ async function fetchAll(opts, { userData, config, incoming }) {
   }
   const staging = path.join(path.dirname(incoming), '_staging');
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
-    console.log(`Pass ${pass}/${Math.max(1, opts.passes)}`);
-    const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming) });
-    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}`);
+    const held = libraryVideoCount(readConfig(userData));
+    if (held >= prefs.LIBRARY_MAX_VIDEOS) {
+      console.log(`Library holds ${held} videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Delete scenes or raise the cap.`);
+      break;
+    }
+    console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
+    const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming), room: prefs.LIBRARY_MAX_VIDEOS - held });
+    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
+    if (r.capped) break;
     if (!r.failed) return 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min before the next pass`);

@@ -7,7 +7,7 @@
 // what gets created and assigned, and that the user's own edits stick.
 import { describe, it, expect } from 'vitest';
 import {
-  planAutoCategories, applyAutoCategories, planVRCategory, applyVRCategory, AUTO_CATEGORIES_KEY,
+  planAutoCategories, applyAutoCategories, planVRCategory, applyVRCategory, planAxisCategories, AUTO_CATEGORIES_KEY,
 } from '../../renderer/js/auto-categories.js';
 import { AUTO_CATEGORIES } from '../../renderer/js/content-preferences.js';
 import { SCRIPT_TAGS_KEY } from '../../renderer/js/script-tags.js';
@@ -169,5 +169,41 @@ describe('VR category from the videos', () => {
     videoCategories['/vr.mp4'] = ['v'];
     videoCategories['/flat.mp4'] = [];
     expect(applyVRCategory(d, flags)).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe('planAxisCategories', () => {
+  const cats = [cat('h', 'Hand-made axes'), cat('g', 'Generated axes'), cat('s', 'Single-axis')];
+
+  it('puts each video in the category of its kind once, and leaves undecided videos alone', () => {
+    const r = planAxisCategories({
+      categories: cats,
+      videoCategories: { '/b.mp4': ['g'] },
+      flags: { '/a.mp4': 'handmade', '/b.mp4': 'generated', '/c.mp4': 'single' },
+      state: { assigned: { '/x.mp4': ['creampie'] } },
+    });
+    expect(r.add).toEqual([['/a.mp4', 'h'], ['/c.mp4', 's']]);
+    expect(r.remove).toEqual([]);
+    expect(r.state.assigned).toEqual({
+      '/x.mp4': ['creampie'], '/a.mp4': ['axes-handmade'], '/b.mp4': ['axes-generated'], '/c.mp4': ['axes-single'],
+    });
+  });
+
+  it('moves a video whose kind changed, and a video taken out by hand stays out', () => {
+    const r = planAxisCategories({
+      categories: cats,
+      videoCategories: { '/up.mp4': ['s', 'other'], '/out.mp4': [] },
+      flags: { '/up.mp4': 'handmade', '/out.mp4': 'generated' },
+      state: { assigned: { '/up.mp4': ['creampie', 'axes-single'], '/out.mp4': ['axes-generated'] } },
+    });
+    expect(r.add).toEqual([['/up.mp4', 'h']]);
+    expect(r.remove).toEqual([['/up.mp4', 's']]);
+    expect(r.state.assigned).toEqual({ '/up.mp4': ['creampie', 'axes-handmade'], '/out.mp4': ['axes-generated'] });
+  });
+
+  it('does nothing for a category the user deleted', () => {
+    const r = planAxisCategories({ categories: [cat('g', 'Generated axes')], flags: { '/a.mp4': 'handmade' } });
+    expect(r.add).toEqual([]);
+    expect(r.state.assigned).toEqual({});
   });
 });
