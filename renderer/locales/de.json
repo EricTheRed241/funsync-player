@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "Ø Geschwindigkeit schnell-langsam",
     "sortMaxSpeedAsc": "Max. Geschwindigkeit langsam-schnell",
     "sortMaxSpeedDesc": "Max. Geschwindigkeit schnell-langsam",
+    "sortScoreDesc": "Präferenzwert hoch-niedrig",
+    "sortScoreAsc": "Präferenzwert niedrig-hoch",
     "filterMatchStatus": "Zuordnungsstatus",
     "filterAll": "Alle",
     "filterMatched": "Zugeordnet",
@@ -312,6 +314,7 @@
     "multiAxis": "Mehrachsig",
     "multiAxisCount": "{count, plural, one {Mehrachsig (# Skript)} other {Mehrachsig (# Skripte)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "Präferenzwert: {score}",
     "flatBadge": "FLAT",
     "limitToFolder": "Auf diesen Ordner beschränken",
     "searchableClear": "— Löschen —",
@@ -669,11 +672,14 @@
       "maxSpeedDesc": "Max. Geschw. schnell-langsam",
       "switchTo": "Wechseln zu {order}",
       "ratingDesc": "Bewertung hoch-niedrig",
-      "ratingAsc": "Bewertung niedrig-hoch"
+      "ratingAsc": "Bewertung niedrig-hoch",
+      "scoreDesc": "Präferenzwert hoch-niedrig",
+      "scoreAsc": "Präferenzwert niedrig-hoch"
     },
     "badge": {
       "script": "Skript",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "Präferenzwert: {score}"
     },
     "tags": {
       "aria": "Kategorien und Tags",

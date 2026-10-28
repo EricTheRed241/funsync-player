@@ -54,6 +54,21 @@ describe('rating sort', () => {
   });
 });
 
+describe('preference score sort', () => {
+  const SCORED = [
+    { id: 'a', name: 'Alpha', path: '/a', score: 4 }, { id: 'b', name: 'Bravo', path: '/b', score: null },
+    { id: 'c', name: 'Charlie', path: '/c', score: -3 }, { id: 'd', name: 'Delta', path: '/d', score: 9.5 },
+    { id: 'e', name: 'Echo', path: '/e', score: 4 },
+  ];
+
+  it('web remote: highest first, unscored last, ties by name; desktop agrees through the score lookup', () => {
+    expect(remoteSort(SCORED, 'score', 'desc').map((v) => v.id)).toEqual(['d', 'a', 'e', 'c', 'b']);
+    expect(remoteSort(SCORED, 'score', 'asc').map((v) => v.id)).toEqual(['c', 'a', 'e', 'd', 'b']);
+    const scores = Object.fromEntries(SCORED.map((v) => [v.path, v.score]));
+    expect(sortVideos(SCORED, 'score', 'desc', { scoreOf: (p) => scores[p] }).map((v) => v.id)).toEqual(['d', 'a', 'e', 'c', 'b']);
+  });
+});
+
 describe('rating filters', () => {
   it('web remote', () => {
     expect(filterByRating(VIDEOS, 'favorites').map((v) => v.id)).toEqual(['b', 'c']);

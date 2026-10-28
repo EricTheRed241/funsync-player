@@ -12,7 +12,7 @@ request fields are the ones XBVR (`pkg/api/heresphere.go`,
 `videoDataRequestDto`) read: `rating` (number, 0-5 in 0.5 steps),
 `isFavorite` (bool) and `tags` (`[{"name", "start", "end", "track"}]`, the
 full list). Only `Playlist:<name>` tags are acted on; every other tag edit
-is ignored (the generated `Studio:` / `Format:` / `Category:` / `Tag:` ...
+is ignored (the generated `Studio:` / `Format:` / `Category:` / `Tag:` / `Score:` ...
 tags simply come back on the next load). `hsp` and `deleteFile` are ignored
 too (`writeHSP` stays false; nothing is ever deleted from the headset).
 
@@ -33,7 +33,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_categories, get_chip_tags, get_playlists, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
+from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
 from routes.remote_sync import submit_library_edit
 from services import library_edits, video_info, vr_sections
 from services.network import get_local_ip
@@ -478,7 +478,8 @@ def _scene_tag_names(video, is_3d, playlists):
     `Studio:<source>`, `Feature:Is scripted`, the filter tags (`Format:`,
     `Speed:`, `Length:`, hand-made multi-axis), then `Playlist:<name>` per
     playlist holding the video (two-way in HereSphere), `Category:<name>`
-    per desktop category and `Tag:<tag>` per chip tag (both read-only)."""
+    per desktop category, `Tag:<tag>` per chip tag and `Score:<n>` for the
+    preference score (all three read-only)."""
     tags = []
     path = video.get('path', '')
     source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
@@ -490,6 +491,7 @@ def _scene_tag_names(video, is_3d, playlists):
     tags.extend(vr_sections.playlist_tags(path, playlists))
     tags.extend(vr_sections.category_tags(path, get_categories(), get_video_categories()))
     tags.extend(vr_sections.chip_tag_names(get_chip_tags(path)))
+    tags.extend(vr_sections.score_tags(get_preference_score(path)))
     return tags
 
 
@@ -827,8 +829,8 @@ async def heresphere_scene(video_id: str, request: Request):
 
     # Tags: studio, scripted, filter tags, then Playlist: (removing one in
     # the headset takes the video out of that playlist, adding
-    # `Playlist:<name>` puts it in, creating it), Category: and Tag: (both
-    # read-only); chapters follow.
+    # `Playlist:<name>` puts it in, creating it), Category:, Tag: and Score:
+    # (all read-only); chapters follow.
     tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists)]
 
     # Auto-generate chapter tags for navigation (every 5 min)

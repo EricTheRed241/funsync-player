@@ -148,6 +148,11 @@ const DEFAULTS = {
       // add `faptapId`, `faptapUrl` and FapTap's thumbnail as `previewUrl`.
       // Last write wins — the record describes the CURRENT script's post.
       scriptTags: {},
+      // Preference score per VIDEO PATH (renderer/js/library-scores.js): the
+      // scouts' ranking applied to each scene, recomputed after each scan and
+      // when the backend's VR / axis decisions arrive. Derived; kept so the
+      // badges and the score sort work right after a start.
+      preferenceScores: {},
       collections: [],
       activeCollectionId: null,
     },

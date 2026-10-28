@@ -862,6 +862,21 @@
   background: var(--badge-info, #3b82f6);
 }
 
+/* Preference score (renderer/js/library-scores.js): a small muted pill in
+ * the same row, so it reads as a number without competing with the rest. */
+.library__score-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+
 /* Playback-mode badges (multi-axis / custom routing).
    Same icon shape as funscript/subtitle so they sit cleanly inside the
    shared .library__card-badges flex row. Skip-when-single keeps the grid

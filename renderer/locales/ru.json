@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "Сред. скорость: от быстрой к медленной",
     "sortMaxSpeedAsc": "Макс. скорость: от медленной к быстрой",
     "sortMaxSpeedDesc": "Макс. скорость: от быстрой к медленной",
+    "sortScoreDesc": "Оценка предпочтений по убыванию",
+    "sortScoreAsc": "Оценка предпочтений по возрастанию",
     "filterMatchStatus": "Статус сопоставления",
     "filterAll": "Все",
     "filterMatched": "Сопоставленные",
@@ -312,6 +314,7 @@
     "multiAxis": "Многоосевой",
     "multiAxisCount": "{count, plural, one {Многоосевой (# скрипт)} few {Многоосевой (# скрипта)} many {Многоосевой (# скриптов)} other {Многоосевой (# скрипта)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "Оценка предпочтений: {score}",
     "flatBadge": "FLAT",
     "limitToFolder": "Ограничить этой папкой",
     "searchableClear": "— Очистить —",
@@ -802,11 +805,14 @@
       "maxSpeedDesc": "Макс. скорость быстр.-медл.",
       "switchTo": "Переключить на {order}",
       "ratingDesc": "Оценка по убыванию",
-      "ratingAsc": "Оценка по возрастанию"
+      "ratingAsc": "Оценка по возрастанию",
+      "scoreDesc": "Оценка предпочтений по убыванию",
+      "scoreAsc": "Оценка предпочтений по возрастанию"
     },
     "badge": {
       "script": "Скрипт",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "Оценка предпочтений: {score}"
     },
     "tags": {
       "aria": "Категории и теги",

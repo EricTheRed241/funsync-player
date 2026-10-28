@@ -1137,6 +1137,7 @@ body::-webkit-scrollbar {
   color: var(--accent);
 }
 .card__badge--vr           { background: rgba(120, 180, 255, 0.12); color: #82b4ff; }
+.card__badge--score       { background: rgba(255,255,255,0.08); color: var(--text-secondary, #bbb); font-variant-numeric: tabular-nums; }
 .card__badge--speed-slow   { background: rgba(120,180,255,0.12); color: #82b4ff; }
 .card__badge--speed-medium { background: rgba(0,200,180,0.12);   color: #4ecdc4; }
 .card__badge--speed-fast   { background: rgba(255,190,80,0.14);  color: #ffc15a; }
@@ -2326,6 +2327,7 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
 
 .list__badge--favorite { color: var(--accent); }
 .list__badge--rating { color: #f5b301; }
+.list__badge--score { font-variant-numeric: tabular-nums; }
 
 .triage-removable {
   position: relative;

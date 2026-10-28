@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "Avg Speed Fast-Slow",
     "sortMaxSpeedAsc": "Max Speed Slow-Fast",
     "sortMaxSpeedDesc": "Max Speed Fast-Slow",
+    "sortScoreDesc": "Preference score High-Low",
+    "sortScoreAsc": "Preference score Low-High",
     "filterMatchStatus": "Match status",
     "filterAll": "All",
     "filterMatched": "Matched",
@@ -312,6 +314,7 @@
     "multiAxis": "Multi-axis",
     "multiAxisCount": "{count, plural, one {Multi-axis (# script)} other {Multi-axis (# scripts)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "Preference score: {score}",
     "flatBadge": "FLAT",
     "limitToFolder": "Limit to this folder",
     "searchableClear": "— Clear —",
@@ -1325,11 +1328,14 @@
       "maxSpeedDesc": "Max Speed Fast-Slow",
       "switchTo": "Switch to {order}",
       "ratingDesc": "Rating High-Low",
-      "ratingAsc": "Rating Low-High"
+      "ratingAsc": "Rating Low-High",
+      "scoreDesc": "Preference score High-Low",
+      "scoreAsc": "Preference score Low-High"
     },
     "badge": {
       "script": "Script",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "Preference score: {score}"
     },
     "tags": {
       "aria": "Categories and tags",

@@ -313,6 +313,17 @@ describe('library-search', () => {
       const sorted = sortVideos(vids, 'duration', 'asc');
       expect(sorted[0].name).toBe('a.mp4'); // undefined → 0
     });
+
+    it('sorts by preference score, unscored last in both directions, ties by name', () => {
+      const vids = [
+        { name: 'b.mp4', path: '/b' }, { name: 'none.mp4', path: '/n' }, { name: 'a.mp4', path: '/a' },
+        { name: 'neg.mp4', path: '/x' }, { name: 'zero.mp4', path: '/z' },
+      ];
+      const scores = { '/a': 7.5, '/b': 7.5, '/x': -3, '/z': 0 };
+      const opts = { scoreOf: (p) => scores[p] };
+      expect(sortVideos(vids, 'score', 'desc', opts).map((v) => v.name)).toEqual(['a.mp4', 'b.mp4', 'zero.mp4', 'neg.mp4', 'none.mp4']);
+      expect(sortVideos(vids, 'score', 'asc', opts).map((v) => v.name)).toEqual(['neg.mp4', 'zero.mp4', 'a.mp4', 'b.mp4', 'none.mp4']);
+    });
   });
 
   describe('filterVideos', () => {

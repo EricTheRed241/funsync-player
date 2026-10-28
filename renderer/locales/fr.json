@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "Vitesse moy. décroissante",
     "sortMaxSpeedAsc": "Vitesse max. croissante",
     "sortMaxSpeedDesc": "Vitesse max. décroissante",
+    "sortScoreDesc": "Score de préférence décroissant",
+    "sortScoreAsc": "Score de préférence croissant",
     "filterMatchStatus": "Statut d'association",
     "filterAll": "Toutes",
     "filterMatched": "Associées",
@@ -312,6 +314,7 @@
     "multiAxis": "Multi-axe",
     "multiAxisCount": "{count, plural, one {Multi-axe (# script)} other {Multi-axe (# scripts)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "Score de préférence : {score}",
     "flatBadge": "FLAT",
     "limitToFolder": "Limiter à ce dossier",
     "searchableClear": "— Effacer —",
@@ -802,11 +805,14 @@
       "maxSpeedDesc": "Vitesse max. rapide-lente",
       "switchTo": "Passer à {order}",
       "ratingDesc": "Note décroissante",
-      "ratingAsc": "Note croissante"
+      "ratingAsc": "Note croissante",
+      "scoreDesc": "Score de préférence décroissant",
+      "scoreAsc": "Score de préférence croissant"
     },
     "badge": {
       "script": "Script",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "Score de préférence : {score}"
     },
     "tags": {
       "aria": "Catégories et tags",

@@ -1,12 +1,13 @@
-"""Chip tags and the VR decision in every viewer.
+"""Chip tags, preference scores and the VR decision in every viewer.
 
 The desktop registers `vrFormat` (the VR Format panel's projection per
-video) and `scriptTags` (EroScripts / FapTap post tags per video). The
+video), `scriptTags` (EroScripts / FapTap post tags per video) and
+`preferenceScores` (the desktop's preference score per video). The
 backend decides VR from the projection first, then `manualVRType`, the
 filename and the frame shape, reports it at `GET /api/media/vr-flags`, and
-hands the same decision plus the chip tags to the web remote
+hands the same decision plus the chip tags and the score to the web remote
 (`/api/remote/videos`) and the headsets (`Tag:` / `Category:` /
-`Playlist:` / `Format:` scene tags).
+`Playlist:` / `Format:` / `Score:` scene tags).
 """
 
 import os
@@ -21,11 +22,13 @@ from routes import media
 from routes.media import (
     register_categories,
     register_playlists,
+    register_preference_scores,
     register_script_tags,
     register_vr_format,
 )
 from services import video_info
 from services.video_tags import chip_tags
+from services.vr_sections import score_tags
 
 VR_DIMS = (5888, 2944, "h265")
 FLAT_DIMS = (1920, 1080, "h264")
@@ -84,6 +87,7 @@ def probe(monkeypatch, tmp_path):
 def _reset_groupings():
     register_vr_format({})
     register_script_tags({})
+    register_preference_scores({})
     register_categories([], {})
     register_playlists([])
 
@@ -214,6 +218,26 @@ async def test_vr_format_projection_sets_the_headset_layout(client, probe, tmp_p
     assert {"name": "Format:VR"} not in scene["tags"]
 
 
+@pytest.mark.anyio
+async def test_register_stores_preference_scores(client, probe, tmp_path):
+    a = _make(tmp_path, probe, "A.mp4", FLAT_DIMS)
+    b = _make(tmp_path, probe, "B.mp4", FLAT_DIMS)
+    await _register(client, {
+        "videos": [_video(a), _video(b)],
+        "preferenceScores": {a: 7.5, b: -3, "/bad.mp4": "9", "/flag.mp4": True, "/nan.mp4": None},
+    })
+    assert (media.get_preference_score(a), media.get_preference_score(b)) == (7.5, -3.0)
+    assert media.get_preference_score("/bad.mp4") is None
+    assert media.get_preference_score("/flag.mp4") is None
+    assert media.get_preference_score("/nan.mp4") is None
+
+    # A registration without the key leaves the scores alone; a new map replaces them.
+    await _register(client, {"scriptTags": {a: ["riding"]}})
+    assert media.get_preference_score(a) == 7.5
+    await _register(client, {"preferenceScores": {b: 2}})
+    assert (media.get_preference_score(a), media.get_preference_score(b)) == (None, 2.0)
+
+
 # --- web remote -------------------------------------------------------------------
 
 @pytest.mark.anyio
@@ -231,6 +255,16 @@ async def test_remote_videos_carry_is_vr_tags_and_categories(client, probe, tmp_
     assert videos[a]["tags"] == ["creampie", "riding"]
     assert videos[a]["categories"] == ["Creampie", "VR"]  # category order, blank names skipped
     assert (videos[b]["isVR"], videos[b]["tags"], videos[b]["categories"]) == (False, [], [])
+
+
+@pytest.mark.anyio
+async def test_remote_videos_carry_the_preference_score(client, probe, tmp_path):
+    a = _make(tmp_path, probe, "Alpha.mp4", FLAT_DIMS)
+    b = _make(tmp_path, probe, "Beta.mp4", FLAT_DIMS)
+    await _register(client, {"videos": [_video(a), _video(b)], "preferenceScores": {a: 9.25}})
+    videos = await _remote_videos(client)
+    assert videos[a]["score"] == 9.25
+    assert videos[b]["score"] is None  # not scored yet
 
 
 # --- headsets ---------------------------------------------------------------------
@@ -256,6 +290,43 @@ async def test_heresphere_and_deovr_scene_tags(client, probe, tmp_path):
     deovr = (await client.get(f"/deovr/{vid}")).json()
     assert [c["tag"]["name"] for c in deovr["categories"]] == expected
     assert [c["tag"]["id"] for c in deovr["categories"]] == list(range(1, len(expected) + 1))
+
+
+class TestScoreTag:
+    @pytest.mark.parametrize("score, tag", [
+        (7, "Score:7.0"), (7.5, "Score:7.5"), (7.2, "Score:7.0"), (7.25, "Score:7.5"),
+        (7.74, "Score:7.5"), (7.75, "Score:8.0"), (0, "Score:0.0"), (-0.1, "Score:0.0"), (-3, "Score:-3.0"),
+        (-3.25, "Score:-3.0"), (13.15, "Score:13.0"),
+    ])
+    def test_nearest_half_one_decimal(self, score, tag):
+        assert score_tags(score) == [tag]
+
+    def test_no_score_no_tag(self):
+        assert score_tags(None) == []
+
+
+@pytest.mark.anyio
+async def test_heresphere_and_deovr_score_tag(client, probe, tmp_path):
+    a = _make(tmp_path, probe, "Alpha_180_LR.mp4", None)
+    b = _make(tmp_path, probe, "Beta_180_LR.mp4", None)
+    await _register(client, {
+        "videos": [_video(a, hasFunscript=True, sourceName="EroScripts"), _video(b)],
+        "scriptTags": {a: ["riding"]},
+        "preferenceScores": {a: 10.25},
+    })
+    vid = media._path_to_id(a)
+    names = [t["name"] for t in (await client.get(f"/heresphere/{vid}")).json()["tags"]]
+    # After the chip tags; chapters follow.
+    assert names[names.index("Tag:riding") + 1] == "Score:10.5"
+    deovr = [c["tag"]["name"] for c in (await client.get(f"/deovr/{vid}")).json()["categories"]]
+    assert deovr[-2:] == ["Tag:riding", "Score:10.5"]
+
+    unscored = [t["name"] for t in (await client.get(f"/heresphere/{media._path_to_id(b)}")).json()["tags"]]
+    assert not [n for n in unscored if n.startswith("Score:")]
+
+    # Read-only: a save without it changes nothing, and it comes back.
+    r = await client.post(f"/heresphere/{vid}", json={"tags": [{"name": "Format:VR"}]})
+    assert {"name": "Score:10.5"} in r.json()["tags"]
 
 
 @pytest.mark.anyio
