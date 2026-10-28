@@ -821,14 +821,23 @@
       "openCategory": "打开分类 {name}"
     },
     "tagScores": {
-      "hint": "标签的分数会加到每个带有该标签的视频的 ◆ 偏好分数上。标签初始为 0。",
+      "hint": "标签的分数会加到每个带有该标签的视频的 ◆ 偏好分数上。同一组的标签每个视频只计一次。",
       "recalculate": "重新计算分数",
       "recalculating": "正在重新计算…",
       "recalculated": "分数已重新计算",
       "increase": "提高 {tag} 的分数",
       "decrease": "降低 {tag} 的分数",
       "scoreLabel": "{tag} 的分数：{score}",
-      "saving": "正在等待桌面应用"
+      "saving": "正在等待桌面应用",
+      "group": "{group} 组",
+      "builtIn": "内置：{rules}",
+      "rules": {
+        "multiAxis": "手工轴 {score}",
+        "vr": "VR {score}",
+        "artistInLibrary": "收藏或已知作者 {score}",
+        "likes": "点赞最多 {score}",
+        "hentaiOnly": "仅 2D 动漫 {score}"
+      }
     },
     "breadcrumb": {
       "allSources": "所有来源",

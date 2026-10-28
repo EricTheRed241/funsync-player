@@ -31,12 +31,14 @@ def fresh_state():
     register_ratings({})
     register_playlists([])
     media.register_tag_scores({})
+    media.register_tag_score_info({})
     media.register_preference_scores({})
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
     register_playlists([])
     media.register_tag_scores({})
+    media.register_tag_score_info({})
     media.register_preference_scores({})
     remote_sync._reset_state_for_tests()
 
@@ -485,10 +487,18 @@ class TestTagScores:
     def test_registration_cleans_keys_and_values(self, client):
         client.post("/api/media/register", json={
             "tagScores": {" Riding ": 2, "pmv": 0, "bad": "x", "ahegao": -1.26, "": 3},
+            "tagScoreInfo": {
+                "groups": {" Riding ": "Riding", "cowgirl": "Riding", "odd": 3, "": "X"},
+                "rules": {"vr": 3, "hentaiOnly": -3, "bad": "x", "flag": True},
+            },
         })
         assert client.get("/api/remote/tag-scores").json() == {
             "scores": {"riding": 2.0, "ahegao": -1.5}, "pending": [], "recalculating": False,
+            "groups": {"riding": "Riding", "cowgirl": "Riding"}, "rules": {"vr": 3, "hentaiOnly": -3},
         }
+        # A registration without tagScoreInfo leaves it alone.
+        client.post("/api/media/register", json={"tagScores": {}})
+        assert client.get("/api/remote/tag-scores").json()["groups"] == {"riding": "Riding", "cowgirl": "Riding"}
 
     @pytest.mark.parametrize("payload", [{"score": 1}, {"tag": "  ", "score": 1}, {"tag": "x"}, {"tag": "x", "score": "lots"}])
     def test_endpoint_rejects(self, client, payload):
@@ -501,7 +511,7 @@ class TestTagScores:
         assert r.json() == {"ok": True, "seq": 1, "delivered": False, "tag": "riding", "score": 2.5}
         client.post("/api/remote/tag-score", json={"tag": "pmv", "score": 0})
         state = client.get("/api/remote/tag-scores").json()
-        assert state == {"scores": {"riding": 2.5}, "pending": ["pmv", "riding"], "recalculating": False}
+        assert state == {"scores": {"riding": 2.5}, "pending": ["pmv", "riding"], "recalculating": False, "groups": {}, "rules": {}}
 
         with client.websocket_connect("/api/remote/sync/observe") as ws:
             msgs = [ws.receive_json() for _ in range(2)]
@@ -513,7 +523,7 @@ class TestTagScores:
             assert _wait_until(lambda: library_edits.queue.pending() == [])
         # Folded into the registered state until the desktop registers again.
         assert client.get("/api/remote/tag-scores").json() == {
-            "scores": {"riding": 2.5}, "pending": [], "recalculating": False,
+            "scores": {"riding": 2.5}, "pending": [], "recalculating": False, "groups": {}, "rules": {},
         }
 
     def test_recalculate_waits_for_the_desktop(self, client):

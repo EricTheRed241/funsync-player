@@ -821,14 +821,23 @@
       "openCategory": "カテゴリー {name} を開く"
     },
     "tagScores": {
-      "hint": "タグのスコアは、そのタグを持つすべての動画の ◆ 好みスコアに加算されます。初期値は 0 です。",
+      "hint": "タグのスコアは、そのタグを持つすべての動画の ◆ 好みスコアに加算されます。同じグループのタグは動画ごとに 1 回だけ数えます。",
       "recalculate": "スコアを再計算",
       "recalculating": "再計算中…",
       "recalculated": "スコアを再計算しました",
       "increase": "{tag} のスコアを上げる",
       "decrease": "{tag} のスコアを下げる",
       "scoreLabel": "{tag} のスコア: {score}",
-      "saving": "デスクトップアプリを待っています"
+      "saving": "デスクトップアプリを待っています",
+      "group": "{group} グループ",
+      "builtIn": "固定: {rules}",
+      "rules": {
+        "multiAxis": "手作りの軸 {score}",
+        "vr": "VR {score}",
+        "artistInLibrary": "お気に入りまたは既知のアーティスト {score}",
+        "likes": "いいね 最大 {score}",
+        "hentaiOnly": "2D エロアニメのみ {score}"
+      }
     },
     "breadcrumb": {
       "allSources": "すべてのソース",

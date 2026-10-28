@@ -967,6 +967,10 @@ body::-webkit-scrollbar {
   font-size: 12px;
   color: var(--text-dim);
 }
+.tag-scores-bar__rules {
+  margin-top: 4px;
+  color: var(--text);
+}
 .tag-scores-bar__recalc {
   flex-shrink: 0;
   min-height: 36px;

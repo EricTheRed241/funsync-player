@@ -26,12 +26,17 @@ describe('stepping a tag score', () => {
 });
 
 describe('server state', () => {
-  it('fills in defaults and keeps numbers only', () => {
-    const s = parseTagScores({ scores: { riding: 2, bad: 'x' }, pending: ['riding'], recalculating: true });
+  it('fills in defaults and keeps numbers (scores, built-in weights) and group names only', () => {
+    const s = parseTagScores({
+      scores: { riding: 2, bad: 'x' }, pending: ['riding'], recalculating: true,
+      groups: { riding: 'Riding', cowgirl: 'Riding', odd: 3 }, rules: { vr: 3, hentaiOnly: -3, bad: 'x' },
+    });
     expect(s.scores).toEqual({ riding: 2 });
+    expect(s.groups).toEqual({ riding: 'Riding', cowgirl: 'Riding' });
+    expect(s.rules).toEqual({ vr: 3, hentaiOnly: -3 });
     expect([...s.pending]).toEqual(['riding']);
     expect(s.recalculating).toBe(true);
-    expect(parseTagScores(null)).toEqual({ scores: {}, pending: new Set(), recalculating: false });
+    expect(parseTagScores(null)).toEqual({ scores: {}, groups: {}, rules: {}, pending: new Set(), recalculating: false });
   });
 
   it('GETs the scores and POSTs a score or a recalculation', async () => {

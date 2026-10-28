@@ -14,10 +14,11 @@ cannot be stored here. It becomes an EDIT:
     {"seq": 10, "kind": "tag-score", "tag": "riding", "score": 1.5, ...}
     {"seq": 11, "kind": "recalculate-scores", ...}
 
-A tag score is the user's own weight for a post tag (`library.tagScores`,
-tag → score, absent = 0), added to every scene's preference score; a
-recalculation asks the desktop to score the library again now
-(renderer/js/library-scores.js). Neither names a video.
+A tag score is the user's weight for a post tag; the backend holds every
+tag's score as the desktop registers it (starting scores included, absent =
+0), added to every scene's preference score; a recalculation asks the
+desktop to score the library again now (renderer/js/library-scores.js).
+Neither names a video.
 
 Edits wait in one ordered queue (`queue`). The renderer's observer socket
 (`routes/remote_sync.py`) receives each as `{"type": "library-edit", "edit":

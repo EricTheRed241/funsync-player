@@ -54,7 +54,7 @@ import {
 } from './eroscripts-scout-lib.mjs';
 import {
   ANIMATION_TAGS, AUDIO_TITLE, FAPTAP_ANIMATION_TAGS, FAPTAP_FOCUS, FAPTAP_FOCUS_MIN, FLAT_MAX_HEIGHT, FURRY_TAGS, LIVE_TAGS,
-  MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, PREFERRED_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
+  MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
 } from '../renderer/js/content-preferences.js';
 import { favouriteIn } from './scout-live.mjs';
 import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
@@ -248,7 +248,7 @@ export function faptapSceneName(video, ctx = {}) {
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
  * @param {boolean} [ctx.picked] the user asked for this video by id
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
- *   focus: string[], preferred: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean, hentaiOnly: boolean}}
+ *   focus: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean, hentaiOnly: boolean}}
  *   reasons: excluded, blocked, audio-only, off-focus, not-sexual, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
@@ -280,7 +280,7 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
   const liveQuota = live && !picked && !favourite && !(music && artist);
   return {
-    ok: true, tags, vr, music, artist, focus, preferred: tags.filter((t) => PREFERRED_TAGS.has(t)), live, favourite, liveQuota, picked,
+    ok: true, tags, vr, music, artist, focus, live, favourite, liveQuota, picked,
     hentaiOnly: isHentaiOnly({ tags, title }),
   };
 }
@@ -374,7 +374,6 @@ export function toCandidate(video, screen, tagScores = {}) {
     projection: video.projection || 'MONO_FLAT',
     music: screen.music,
     focus: screen.focus,
-    preferred: screen.preferred,
     artistInLibrary: screen.artist,
     live: !!screen.live,
     favourite: screen.favourite || null,

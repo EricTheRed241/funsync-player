@@ -5,6 +5,7 @@ import {
   normalizeRating, getRatingEntry, ratingOf, isFavorite, applyRatingChange, rehomeRatings,
 } from '../../renderer/js/ratings.js';
 import { applyLibraryEdit, findPlaylist, LibraryEditApplier } from '../../renderer/js/library-edits.js';
+import { DEFAULT_TAG_SCORES } from '../../renderer/js/preference-score.js';
 import { DataService } from '../../renderer/js/data-service.js';
 import { eventBus } from '../../renderer/js/event-bus.js';
 
@@ -223,7 +224,7 @@ describe('LibraryEditApplier', () => {
     });
     applier.apply({ seq: 1, kind: 'tag-score', tag: ' Riding ', score: 1.5 });
     applier.apply({ seq: 2, kind: 'tag-score', tag: 'ahegao', score: -2 });
-    applier.apply({ seq: 3, kind: 'tag-score', tag: 'riding', score: 0 });
+    applier.apply({ seq: 3, kind: 'tag-score', tag: 'riding', score: DEFAULT_TAG_SCORES.riding });
     applier.apply({ seq: 4, kind: 'tag-score', tag: '', score: 1 });
     await applier.apply({ seq: 5, kind: 'recalculate-scores' });
     expect(log).toEqual([
@@ -242,15 +243,19 @@ describe('tag-score edits', () => {
     return { store, get: (k) => store[k], set: vi.fn((k, v) => { store[k] = v; }) };
   };
 
-  it('rounds to 0.5, clamps to ±10, removes a tag set to 0, and writes nothing when nothing changes', async () => {
+  it('keeps only changes from the starting score: rounds, clamps, keeps a 0 on a grouped tag, writes nothing when nothing changes', async () => {
     const data = tagData({ pmv: 1 });
     await applyLibraryEdit({ kind: 'tag-score', tag: 'Riding', score: 1.26 }, data);
     await applyLibraryEdit({ kind: 'tag-score', tag: 'ahegao', score: -42 }, data);
     expect(data.store['library.tagScores']).toEqual({ pmv: 1, riding: 1.5, ahegao: -10 });
     await applyLibraryEdit({ kind: 'tag-score', tag: 'PMV', score: 0 }, data);
-    expect(data.store['library.tagScores']).toEqual({ riding: 1.5, ahegao: -10 });
+    expect(data.store['library.tagScores']).toEqual({ pmv: 0, riding: 1.5, ahegao: -10 });
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'riding', score: DEFAULT_TAG_SCORES.riding }, data);
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'ahegao', score: 0 }, data);
+    expect(data.store['library.tagScores']).toEqual({ pmv: 0 });
     const writes = data.set.mock.calls.length;
-    await applyLibraryEdit({ kind: 'tag-score', tag: 'riding', score: 1.5 }, data);
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'pmv', score: 0 }, data);
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'creampie', score: DEFAULT_TAG_SCORES.creampie }, data);
     await applyLibraryEdit({ kind: 'tag-score', tag: 'nothing', score: 0 }, data);
     expect(data.set.mock.calls.length).toBe(writes);
   });

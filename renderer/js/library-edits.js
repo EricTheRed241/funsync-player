@@ -16,7 +16,7 @@
 // lost (desktop closed mid-flight) does no harm. Protocol and queue:
 // backend/services/library_edits.py.
 
-import { normalizeTagScore, tagKey } from './preference-score.js';
+import { DEFAULT_TAG_SCORES, normalizeTagScore, tagKey } from './preference-score.js';
 import { TAG_SCORES_KEY } from './library-scores.js';
 
 const KIND_RATING = 'rating';
@@ -54,9 +54,11 @@ export function findPlaylist(playlists, playlistId, name) {
 }
 
 /**
- * Store a tag score in `library.tagScores` (tag → score; 0 removes the tag).
- * Returns `{tag, score}` as stored; throws on a missing tag or a score that
- * isn't a number.
+ * Store a tag score in `library.tagScores`, which holds only the user's
+ * changes from DEFAULT_TAG_SCORES (absent = the default; a tag set back to
+ * its default is removed, so a grouped tag set to 0 stays as 0). Returns
+ * `{tag, score}` as stored; throws on a missing tag or a score that isn't a
+ * number.
  *
  * @param {object} data DataService (get, set)
  */
@@ -65,10 +67,11 @@ export function setTagScore(data, tag, score) {
   if (!key) throw new Error('tag score without a tag');
   const value = normalizeTagScore(score);
   if (value === null) throw new Error(`invalid tag score ${JSON.stringify(score)}`);
+  const isDefault = value === (Object.hasOwn(DEFAULT_TAG_SCORES, key) ? DEFAULT_TAG_SCORES[key] : 0);
   const current = data.get(TAG_SCORES_KEY) || {};
-  if (value === 0 ? !Object.hasOwn(current, key) : current[key] === value) return { tag: key, score: value };
+  if (isDefault ? !Object.hasOwn(current, key) : current[key] === value) return { tag: key, score: value };
   const next = { ...current };
-  if (value === 0) delete next[key];
+  if (isDefault) delete next[key];
   else next[key] = value;
   data.set(TAG_SCORES_KEY, next);
   return { tag: key, score: value };

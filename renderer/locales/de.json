@@ -688,14 +688,23 @@
       "openCategory": "Kategorie {name} öffnen"
     },
     "tagScores": {
-      "hint": "Der Wert eines Tags zählt zum ◆-Präferenzwert jedes Videos mit diesem Tag. Tags beginnen bei 0.",
+      "hint": "Der Wert eines Tags zählt zum ◆-Präferenzwert jedes Videos mit diesem Tag. Tags einer Gruppe zählen pro Video einmal.",
       "recalculate": "Werte neu berechnen",
       "recalculating": "Wird berechnet…",
       "recalculated": "Werte neu berechnet",
       "increase": "Wert von {tag} erhöhen",
       "decrease": "Wert von {tag} senken",
       "scoreLabel": "Wert von {tag}: {score}",
-      "saving": "Wartet auf die Desktop-App"
+      "saving": "Wartet auf die Desktop-App",
+      "group": "Gruppe {group}",
+      "builtIn": "Fest eingebaut: {rules}",
+      "rules": {
+        "multiAxis": "Handgemachte Achsen {score}",
+        "vr": "VR {score}",
+        "artistInLibrary": "Lieblings- oder bekannter Künstler {score}",
+        "likes": "Likes bis {score}",
+        "hentaiOnly": "Nur 2D-Hentai {score}"
+      }
     },
     "breadcrumb": {
       "allSources": "Alle Quellen",

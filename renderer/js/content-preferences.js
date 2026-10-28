@@ -31,7 +31,7 @@ export const FURRY_TAGS = new Set([
   'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
   'renamon-digimon', 'five-nights-at-freddy-s', 'roxanne-wolf-five-nights-at-freddy-s',
 ]);
-/** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post): not preferred, they rank lower (RANKING.monster) but still come in. Succubi, demon girls and elves aren't monsters. */
+/** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post): not preferred, they rank lower (the Monster group of TAG_SCORE_GROUPS) but still come in. Succubi, demon girls and elves aren't monsters. */
 export const MONSTER_TAGS = new Set([
   'monster', 'monsters', 'monstergirls', 'monstergirl', 'monster-girl', 'monster-girls', 'tentacle', 'tentacles', 'tentacle-sex',
   'tentacle-monster', 'werewolf', 'werewolves', 'horse', 'horse-cock', 'horsecock', 'bestiality', 'animated-bestiality', 'zoophilia',
@@ -40,10 +40,10 @@ export const MONSTER_TAGS = new Set([
 export const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
 /** `Mercy X WW`: Solace2K and Rekin3D's short for werewolf, a standalone capital token. */
 export const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
-/** Feet, by tag or title word (EroScripts also in the first post): not preferred, they rank lower (RANKING.feet) but still come in. */
+/** Feet, by tag or title word (EroScripts also in the first post): not preferred, they rank lower (the Feet group of TAG_SCORE_GROUPS) but still come in. */
 export const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
 export const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
-/** FFM (two women, one man), by tag or title word (EroScripts also in the first post): not preferred, ranks lower (RANKING.ffm) but still comes in. */
+/** FFM (two women, one man), by tag or title word (EroScripts also in the first post): not preferred, ranks lower (the FFM group of TAG_SCORE_GROUPS) but still comes in. */
 export const FFM_TAGS = new Set(['ffm', 'f-f-m', 'ffm-threesome']);
 export const FFM_TITLE = /(?<![\p{L}\p{N}])ffm(?![\p{L}\p{N}])/iu;
 /** Tags that say a post has no porn in it: never taken. */
@@ -123,18 +123,35 @@ export const LIVE_QUOTA_EVERY = 20;
 
 // ── Discovery: ranking ──────────────────────────────────────────────────
 
-/** Music tags (+ RANKING.music; a library creator's music video also skips the live quota). */
+/** Music tags (the Music tag-score group; a library creator's music video also skips the live quota). */
 export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
-/** Preferred acts (+ RANKING.preferred, + RANKING.preferredExtra for each one more). */
-export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
 /**
- * Candidate score; higher downloads first. Likes add likes / likesPer, up to
- * likesMax; 2D hentai only loses hentaiOnly, and a monster, feet or FFM post
- * loses monster / feet / ffm each (they add up). multiAxis applies to
- * EroScripts only (FapTap has no multi-axis scripts). The app scores every
- * library scene with the same weights (preference-score.js, library-scores.js).
+ * Candidate score for what isn't a single tag; higher downloads first. Likes
+ * add likes / likesPer, up to likesMax; 2D hentai only loses hentaiOnly.
+ * multiAxis applies to EroScripts only (FapTap has no multi-axis scripts).
+ * Tag preferences are TAG_SCORE_GROUPS. The app scores every library scene
+ * the same way (preference-score.js, library-scores.js).
  */
-export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3, monster: 0.5, feet: 0.5, ffm: 0.5 };
+export const RANKING = { vr: 3, artistInLibrary: 2, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
+/**
+ * Tag scores the preference score starts from: every tag of a group starts at
+ * the group's score, and a scene counts each group once (its highest positive
+ * and its lowest negative tag score), so synonyms don't add up; groups do.
+ * The user changes any tag's score in the web remote's Tags view
+ * (`library.tagScores` holds only the changes). `named`: the group also
+ * counts, at its first tag's score, when the title (EroScripts: or first
+ * post) names it without a tag (lessPreferred in preference-score.js).
+ * A tag belongs to one group at most.
+ */
+export const TAG_SCORE_GROUPS = [
+  { name: 'Creampie', score: 2, tags: ['creampie', 'anal-creampie'] },
+  { name: 'Riding', score: 2, tags: ['riding', 'cowgirl', 'reverse-cowgirl', 'sitting-reverse-cowgirl'] },
+  { name: 'Music', score: 2, tags: [...MUSIC_TAGS] },
+  { name: 'POV', score: 1, tags: ['pov', 'male-pov'] },
+  { name: 'Monster', score: -0.5, tags: [...MONSTER_TAGS], named: 'monster' },
+  { name: 'Feet', score: -0.5, tags: [...FEET_TAGS], named: 'feet' },
+  { name: 'FFM', score: -0.5, tags: [...FFM_TAGS], named: 'ffm' },
+];
 /** 2D hentai only: animation tags among these, no THREE_D_TAGS and no THREE_D_TITLE. */
 export const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
 export const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);

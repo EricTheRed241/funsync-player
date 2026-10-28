@@ -821,14 +821,23 @@
       "openCategory": "{name} 카테고리 열기"
     },
     "tagScores": {
-      "hint": "태그 점수는 해당 태그가 있는 모든 동영상의 ◆ 선호 점수에 더해집니다. 태그는 0에서 시작합니다.",
+      "hint": "태그 점수는 해당 태그가 있는 모든 동영상의 ◆ 선호 점수에 더해집니다. 같은 그룹의 태그는 동영상마다 한 번만 계산됩니다.",
       "recalculate": "점수 다시 계산",
       "recalculating": "다시 계산하는 중…",
       "recalculated": "점수를 다시 계산했습니다",
       "increase": "{tag} 점수 올리기",
       "decrease": "{tag} 점수 내리기",
       "scoreLabel": "{tag} 점수: {score}",
-      "saving": "데스크톱 앱을 기다리는 중"
+      "saving": "데스크톱 앱을 기다리는 중",
+      "group": "{group} 그룹",
+      "builtIn": "기본 제공: {rules}",
+      "rules": {
+        "multiAxis": "수작업 축 {score}",
+        "vr": "VR {score}",
+        "artistInLibrary": "즐겨찾기 또는 알려진 아티스트 {score}",
+        "likes": "좋아요 최대 {score}",
+        "hentaiOnly": "2D 헨타이만 {score}"
+      }
     },
     "breadcrumb": {
       "allSources": "모든 소스",

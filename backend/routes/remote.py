@@ -33,6 +33,7 @@ from routes.media import (
     get_chip_tags,
     get_preference_score,
     get_tag_scores,
+    get_tag_score_info,
     get_sources,
     bump_rescan_request,
     _path_to_id,
@@ -361,27 +362,32 @@ async def remove_video_from_playlist(payload: dict = Body(default={})):
 
 @router.get("/tag-scores")
 async def list_tag_scores():
-    """The user's score per tag, for the Tags view.
+    """Every tag's score, for the Tags view.
 
-    `{scores: {tag: score}, pending: [tag, ...], recalculating: bool}`:
-    `scores` holds only tags with a score (absent = 0) and already includes
-    edits waiting for the desktop; `pending` names those tags; `recalculating`
-    is true while a Recalculate scores request waits for the desktop.
+    `{scores: {tag: score}, pending: [tag, ...], recalculating: bool,
+    groups: {tag: group}, rules: {id: number}}`: `scores` holds only tags
+    with a score (absent = 0; the desktop's starting scores included) and
+    already includes edits waiting for the desktop; `pending` names those
+    tags; `recalculating` is true while a Recalculate scores request waits
+    for the desktop. `groups` names the group of each grouped tag (a video
+    counts each group once); `rules` are the built-in weights that aren't
+    about a tag (read-only).
     """
     pending = library_edits.queue.pending()
     return {
         "scores": get_tag_scores(),
         "pending": sorted({e["tag"] for e in pending if e.get("kind") == library_edits.KIND_TAG_SCORE}),
         "recalculating": any(e.get("kind") == library_edits.KIND_RECALCULATE_SCORES for e in pending),
+        **get_tag_score_info(),
     }
 
 
 @router.post("/tag-score")
 async def set_tag_score(payload: dict = Body(default={})):
     """Set the score of a tag: `{tag, score}`. The score is rounded to 0.5
-    and clamped to -10 … +10; 0 removes it. The desktop stores it in
-    `library.tagScores` and scores the library again, so the videos' `score`
-    follows once it has applied the edit."""
+    and clamped to -10 … +10. The desktop stores it in `library.tagScores`
+    (as a change from the tag's starting score) and scores the library
+    again, so the videos' `score` follows once it has applied the edit."""
     try:
         edit = library_edits.make_tag_score_edit(payload.get("tag"), payload.get("score"), source="remote")
     except ValueError as e:
