@@ -1343,6 +1343,16 @@
       "filterBy": "Show videos tagged {tag}",
       "openCategory": "Open category {name}"
     },
+    "tagScores": {
+      "hint": "Each tag's score adds to the ◆ preference score of every video with that tag. Tags start at 0.",
+      "recalculate": "Recalculate scores",
+      "recalculating": "Recalculating…",
+      "recalculated": "Scores recalculated",
+      "increase": "Raise the score of {tag}",
+      "decrease": "Lower the score of {tag}",
+      "scoreLabel": "Score of {tag}: {score}",
+      "saving": "Waiting for the desktop app"
+    },
     "breadcrumb": {
       "allSources": "All sources",
       "folders": "Folders",

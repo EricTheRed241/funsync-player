@@ -820,6 +820,16 @@
       "filterBy": "Mostrar vídeos con la etiqueta {tag}",
       "openCategory": "Abrir la categoría {name}"
     },
+    "tagScores": {
+      "hint": "La puntuación de cada etiqueta se suma a la puntuación de preferencia ◆ de cada vídeo con esa etiqueta. Las etiquetas empiezan en 0.",
+      "recalculate": "Recalcular puntuaciones",
+      "recalculating": "Recalculando…",
+      "recalculated": "Puntuaciones recalculadas",
+      "increase": "Subir la puntuación de {tag}",
+      "decrease": "Bajar la puntuación de {tag}",
+      "scoreLabel": "Puntuación de {tag}: {score}",
+      "saving": "Esperando a la aplicación de escritorio"
+    },
     "breadcrumb": {
       "allSources": "Todos los orígenes",
       "folders": "Carpetas",

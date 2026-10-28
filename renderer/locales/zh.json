@@ -820,6 +820,16 @@
       "filterBy": "显示带有标签 {tag} 的视频",
       "openCategory": "打开分类 {name}"
     },
+    "tagScores": {
+      "hint": "标签的分数会加到每个带有该标签的视频的 ◆ 偏好分数上。标签初始为 0。",
+      "recalculate": "重新计算分数",
+      "recalculating": "正在重新计算…",
+      "recalculated": "分数已重新计算",
+      "increase": "提高 {tag} 的分数",
+      "decrease": "降低 {tag} 的分数",
+      "scoreLabel": "{tag} 的分数：{score}",
+      "saving": "正在等待桌面应用"
+    },
     "breadcrumb": {
       "allSources": "所有来源",
       "folders": "文件夹",

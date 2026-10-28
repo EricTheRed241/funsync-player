@@ -687,6 +687,16 @@
       "filterBy": "Videos mit dem Tag {tag} anzeigen",
       "openCategory": "Kategorie {name} öffnen"
     },
+    "tagScores": {
+      "hint": "Der Wert eines Tags zählt zum ◆-Präferenzwert jedes Videos mit diesem Tag. Tags beginnen bei 0.",
+      "recalculate": "Werte neu berechnen",
+      "recalculating": "Wird berechnet…",
+      "recalculated": "Werte neu berechnet",
+      "increase": "Wert von {tag} erhöhen",
+      "decrease": "Wert von {tag} senken",
+      "scoreLabel": "Wert von {tag}: {score}",
+      "saving": "Wartet auf die Desktop-App"
+    },
     "breadcrumb": {
       "allSources": "Alle Quellen",
       "folders": "Ordner",

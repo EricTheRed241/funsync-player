@@ -953,6 +953,68 @@ body::-webkit-scrollbar {
   flex-shrink: 0;
 }
 
+/* Tags view: score per tag (−/+) and Recalculate scores. */
+.tag-scores-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.tag-scores-bar__hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.tag-scores-bar__recalc {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tag-scores-bar__recalc:disabled { cursor: default; opacity: 0.6; }
+
+.tag-score {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  transition: opacity 150ms, box-shadow 300ms;
+}
+.tag-score__btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tag-score__btn:disabled { opacity: 0.3; cursor: default; }
+.tag-score__value {
+  min-width: 36px;
+  text-align: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.tag-score--positive .tag-score__value { color: var(--text); font-weight: 600; }
+.tag-score--negative .tag-score__value { color: var(--text); font-weight: 600; }
+.tag-score--pending { opacity: 0.55; }
+.tag-score--pending .tag-score__value { font-style: italic; }
+.tag-score--applied { box-shadow: 0 0 0 2px var(--accent, currentColor); }
+
 /* ============================================================
    Folder breadcrumb / jump — preserved from prior design
    ============================================================ */

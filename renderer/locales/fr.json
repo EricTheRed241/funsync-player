@@ -820,6 +820,16 @@
       "filterBy": "Afficher les vidéos avec le tag {tag}",
       "openCategory": "Ouvrir la catégorie {name}"
     },
+    "tagScores": {
+      "hint": "Le score d'un tag s'ajoute au score de préférence ◆ de chaque vidéo qui porte ce tag. Les tags partent de 0.",
+      "recalculate": "Recalculer les scores",
+      "recalculating": "Recalcul…",
+      "recalculated": "Scores recalculés",
+      "increase": "Augmenter le score de {tag}",
+      "decrease": "Baisser le score de {tag}",
+      "scoreLabel": "Score de {tag} : {score}",
+      "saving": "En attente de l'application de bureau"
+    },
     "breadcrumb": {
       "allSources": "Toutes les sources",
       "folders": "Dossiers",
