@@ -232,7 +232,13 @@ async function screenContext(config, userData, incoming) {
     knownTitles: knownTitles(userData, library),
     livePerformers: await livePerformers(),
     favourites: prefs.FAVOURITES,
+    tagScores: tagScoresOf(config),
   };
+}
+
+/** The user's score per tag (`library.tagScores`), added to every candidate's score. */
+function tagScoresOf(config) {
+  return config.settings?.library?.tagScores || {};
 }
 
 /** What naming needs: favourites and the library's creator folders as spelled (no network). */
@@ -241,11 +247,11 @@ function namingContext(config, userData, incoming) {
   return { favourites: prefs.FAVOURITES, creatorNames: libraryState(roots).creatorNames };
 }
 
-/** Save the merged list and print it. */
-function saveList(userData, fresh, done, { top, listed = 0, judged = 0, rejected = {} }) {
+/** Save the merged list (scored with `tagScores`) and print it. */
+function saveList(userData, fresh, done, { top, listed = 0, judged = 0, rejected = {}, tagScores = {} }) {
   let previous = [];
   try { previous = JSON.parse(fs.readFileSync(listPath(userData), 'utf8')).candidates || []; } catch { /* first scan */ }
-  const candidates = lib.mergeCandidates(previous, fresh, (id) => done.has(lib.fetchedKey(id)));
+  const candidates = lib.mergeCandidates(previous, fresh, (id) => done.has(lib.fetchedKey(id)), tagScores);
   fs.writeFileSync(listPath(userData), JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
   const freshIds = new Set(fresh.map((c) => c.id));
   const mins = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
@@ -304,7 +310,7 @@ async function scan(opts, { userData, config, incoming }) {
         continue;
       }
       if (plan.reason) { verdict(plan.reason); continue; }
-      fresh.push({ ...lib.toCandidate(v, lib.withPerformers(s, plan.detail?.performers, ctx.favourites)), quality: plan.source.height });
+      fresh.push({ ...lib.toCandidate(v, lib.withPerformers(s, plan.detail?.performers, ctx.favourites), ctx.tagScores), quality: plan.source.height });
       verdict('candidate');
       process.stderr.write(`✓ ${v.id} ${v.name.slice(0, 70)}\n`);
     }
@@ -314,7 +320,7 @@ async function scan(opts, { userData, config, incoming }) {
     writeState(userData, state);
   }
 
-  const candidates = saveList(userData, fresh, done, { top: opts.top, listed, judged, rejected });
+  const candidates = saveList(userData, fresh, done, { top: opts.top, listed, judged, rejected, tagScores: ctx.tagScores });
   const feed = state.feeds[lib.FEED];
   const quota = candidates.filter((c) => c.liveQuota).length;
   console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${quota} live on the quota)`);
@@ -337,10 +343,10 @@ async function addPicked(opts, { userData, config, incoming }) {
     if (!s.ok) { console.log(`✗ ${id} ${v.name}: ${s.reason}`); continue; }
     const p = s.vr ? await videoPlan(id, true) : plan;
     if (p.reason) { console.log(`✗ ${id} ${v.name}: ${p.reason}`); continue; }
-    fresh.push({ ...lib.toCandidate({ ...v, id: String(v.id) }, lib.withPerformers(s, v.performers, ctx.favourites)), quality: p.source.height });
+    fresh.push({ ...lib.toCandidate({ ...v, id: String(v.id) }, lib.withPerformers(s, v.performers, ctx.favourites), ctx.tagScores), quality: p.source.height });
     console.log(`✓ ${id} ${v.name}`);
   }
-  saveList(userData, fresh, done, { top: fresh.length });
+  saveList(userData, fresh, done, { top: fresh.length, tagScores: ctx.tagScores });
   console.log(`\nAdded ${fresh.length} of ${opts.add.length}. Download them with: npm run faptap:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}`);
   return 0;
 }
@@ -462,7 +468,8 @@ async function fetchAll(opts, { userData, config, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(listPath(userData), 'utf8'));
   // Live action on the quota goes last, so this run's downloads can earn it a slot.
-  const byScore = (a, b) => scout.candidateScore(b) - scout.candidateScore(a);
+  const tagScores = tagScoresOf(config);
+  const byScore = (a, b) => scout.candidateScore(b, tagScores) - scout.candidateScore(a, tagScores);
   const breaks = {};
   for (const c of candidates) {
     const rule = scout.contentRuleBreak(c);

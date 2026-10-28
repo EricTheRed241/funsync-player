@@ -210,4 +210,61 @@ describe('LibraryEditApplier', () => {
     await applier.apply({ seq: 9, kind: 'rating', path: '/a.mp4', favorite: true });
     expect(ack).toHaveBeenCalledWith(9, undefined);
   });
+
+  it('stores a tag score, scores the library again, publishes, then acks; Recalculate scores too', async () => {
+    const store = {};
+    const data = { ...fakeData(), get: (k) => store[k], set: vi.fn((k, v) => { store[k] = v; }) };
+    const log = [];
+    const applier = new LibraryEditApplier({
+      data,
+      publish: async () => { log.push(`publish ${JSON.stringify(store['library.tagScores'])}`); },
+      ack: (seq, error) => log.push(error ? `ack ${seq} ${error}` : `ack ${seq}`),
+      recalculateScores: async () => { log.push('recalculate'); return { videos: 3, changed: true }; },
+    });
+    applier.apply({ seq: 1, kind: 'tag-score', tag: ' Riding ', score: 1.5 });
+    applier.apply({ seq: 2, kind: 'tag-score', tag: 'ahegao', score: -2 });
+    applier.apply({ seq: 3, kind: 'tag-score', tag: 'riding', score: 0 });
+    applier.apply({ seq: 4, kind: 'tag-score', tag: '', score: 1 });
+    await applier.apply({ seq: 5, kind: 'recalculate-scores' });
+    expect(log).toEqual([
+      'recalculate', 'publish {"riding":1.5}', 'ack 1',
+      'recalculate', 'publish {"riding":1.5,"ahegao":-2}', 'ack 2',
+      'recalculate', 'publish {"ahegao":-2}', 'ack 3',
+      'publish {"ahegao":-2}', 'ack 4 tag score without a tag',
+      'recalculate', 'publish {"ahegao":-2}', 'ack 5',
+    ]);
+  });
+});
+
+describe('tag-score edits', () => {
+  const tagData = (init = {}) => {
+    const store = { 'library.tagScores': init };
+    return { store, get: (k) => store[k], set: vi.fn((k, v) => { store[k] = v; }) };
+  };
+
+  it('rounds to 0.5, clamps to ±10, removes a tag set to 0, and writes nothing when nothing changes', async () => {
+    const data = tagData({ pmv: 1 });
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'Riding', score: 1.26 }, data);
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'ahegao', score: -42 }, data);
+    expect(data.store['library.tagScores']).toEqual({ pmv: 1, riding: 1.5, ahegao: -10 });
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'PMV', score: 0 }, data);
+    expect(data.store['library.tagScores']).toEqual({ riding: 1.5, ahegao: -10 });
+    const writes = data.set.mock.calls.length;
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'riding', score: 1.5 }, data);
+    await applyLibraryEdit({ kind: 'tag-score', tag: 'nothing', score: 0 }, data);
+    expect(data.set.mock.calls.length).toBe(writes);
+  });
+
+  it('rejects a tag score without a tag or a number', async () => {
+    const data = tagData();
+    await expect(applyLibraryEdit({ kind: 'tag-score', score: 1 }, data)).rejects.toThrow(/without a tag/);
+    await expect(applyLibraryEdit({ kind: 'tag-score', tag: 'x', score: 'lots' }, data)).rejects.toThrow(/invalid/);
+    expect(data.set).not.toHaveBeenCalled();
+  });
+
+  it('runs a recalculation when asked, and says so when the library is not scanned yet', async () => {
+    const recalculateScores = vi.fn(async () => null);
+    expect(await applyLibraryEdit({ kind: 'recalculate-scores' }, tagData(), { recalculateScores })).toMatch(/not scanned/);
+    expect(recalculateScores).toHaveBeenCalledTimes(1);
+  });
 });

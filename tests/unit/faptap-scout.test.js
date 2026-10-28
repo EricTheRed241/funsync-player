@@ -268,6 +268,17 @@ describe('mergeCandidates', () => {
     const flat = (tags) => toCandidate(video(tags), screenVideo(video(tags))).score;
     expect(flat(['Hentai', ...FOCUS2])).toBe(flat(['Animated 3d', ...FOCUS2]) - 3);
   });
+
+  it('adds the user\'s tag scores to fresh and saved candidates', () => {
+    const v = video(['Animated', 'Creampie', 'HMV']);
+    const s = screenVideo(v);
+    const plain = toCandidate(v, s);
+    expect(toCandidate(v, s, {}).score).toBe(plain.score);
+    expect(toCandidate(v, s, { creampie: 1.5, hmv: -0.5, riding: 4 }).score).toBeCloseTo(plain.score + 1, 10);
+    const c = (id, tags) => ({ id, likes: 40, tags, title: '' });
+    const list = mergeCandidates([c('1', ['creampie', 'hmv'])], [c('2', ['creampie', 'hmv', 'ahegao'])], () => false, { ahegao: -2 });
+    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 2], ['2', 0]]);
+  });
 });
 
 describe('mergeCookies', () => {

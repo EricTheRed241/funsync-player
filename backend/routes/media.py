@@ -60,6 +60,10 @@ _chip_tags: dict[str, list[str]] = {}
 # ranking applied to each scene). Shown by the web remote and as the
 # headsets' `Score:` tag.
 _preference_scores: dict[str, float] = {}
+# The user's score per post tag — tag → number, the desktop's
+# `library.tagScores` (absent = 0), added to every scene's preference score.
+# The web remote's Tags view shows and edits them.
+_tag_scores: dict[str, float] = {}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -429,9 +433,12 @@ def apply_acked_edit(edit: dict):
     stays visible after it leaves the pending queue, even if the desktop's
     re-registration is slow. Idempotent — the registration that follows
     replaces this with the desktop's own state anyway."""
-    if edit.get("kind") == library_edits.KIND_RATING:
+    kind = edit.get("kind")
+    if kind == library_edits.KIND_RATING:
         library_edits.apply_to_ratings(_ratings, edit)
-    else:
+    elif kind == library_edits.KIND_TAG_SCORE:
+        library_edits.apply_to_tag_scores(_tag_scores, edit)
+    elif kind in (library_edits.KIND_PLAYLIST_ADD, library_edits.KIND_PLAYLIST_REMOVE):
         library_edits.apply_to_playlists(_playlists, edit)
 
 
@@ -483,6 +490,14 @@ def register_preference_scores(scores: dict):
     }
 
 
+def register_tag_scores(scores: dict):
+    """Register library.tagScores (tag → number). Keys are trimmed and
+    lower-cased, scores stepped and clamped like an edit's; zeros and
+    anything that isn't a number are dropped."""
+    _tag_scores.clear()
+    _tag_scores.update(library_edits.clean_tag_scores(scores))
+
+
 def register_sources(sources: list[dict]):
     """Register the library source folders (id/name/path per source).
     Filters out disabled sources — they don't belong in folder browse."""
@@ -510,6 +525,11 @@ def get_playlists() -> list[dict]:
 def get_ratings() -> dict:
     """Registered ratings with edits still waiting for the desktop applied."""
     return library_edits.effective_ratings(_ratings, library_edits.queue.pending())
+
+
+def get_tag_scores() -> dict:
+    """Registered tag scores with edits still waiting for the desktop applied."""
+    return library_edits.effective_tag_scores(_tag_scores, library_edits.queue.pending())
 
 
 def get_categories() -> list[dict]:
@@ -842,8 +862,9 @@ async def register_library(request: Request):
     Also accepts collections/playlists/categories so the web remote can show
     the same groupings the desktop app does, plus `vrFormat` (videoPath →
     {projection, ...}, the VR Format panel's choices), `scriptTags`
-    (videoPath → [post tag, ...], kept as chip tags) and `preferenceScores`
-    (videoPath → number, the desktop's preference score). Every field is
+    (videoPath → [post tag, ...], kept as chip tags), `preferenceScores`
+    (videoPath → number, the desktop's preference score) and `tagScores`
+    (tag → number, the user's score per tag). Every field is
     independent: omit a key to leave that slice untouched on the backend.
     That lets the renderer push groupings FAST (in-memory, no filesystem
     work) ahead of the slower video scan — the phone can render
@@ -893,6 +914,8 @@ def _apply_registration(data: dict):
         register_script_tags(data.get("scriptTags") or {})
     if "preferenceScores" in data:
         register_preference_scores(data.get("preferenceScores") or {})
+    if "tagScores" in data:
+        register_tag_scores(data.get("tagScores") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

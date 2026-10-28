@@ -820,6 +820,16 @@
       "filterBy": "タグ {tag} の動画を表示",
       "openCategory": "カテゴリー {name} を開く"
     },
+    "tagScores": {
+      "hint": "タグのスコアは、そのタグを持つすべての動画の ◆ 好みスコアに加算されます。初期値は 0 です。",
+      "recalculate": "スコアを再計算",
+      "recalculating": "再計算中…",
+      "recalculated": "スコアを再計算しました",
+      "increase": "{tag} のスコアを上げる",
+      "decrease": "{tag} のスコアを下げる",
+      "scoreLabel": "{tag} のスコア: {score}",
+      "saving": "デスクトップアプリを待っています"
+    },
     "breadcrumb": {
       "allSources": "すべてのソース",
       "folders": "フォルダー",

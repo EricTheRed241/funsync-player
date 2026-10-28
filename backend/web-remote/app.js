@@ -17,8 +17,11 @@ import { t, initWebRemoteI18n, translatePage } from './i18n.js';
 import { shuffle as shuffleList, balancedShuffle } from './shuffle.js';
 import {
   createRatingControl, updateRatingControl, filterByRating,
-  setRating, addToPlaylist, removeFromPlaylist, reportResult,
+  setRating, addToPlaylist, removeFromPlaylist, reportResult, showToast,
 } from './triage.js';
+import {
+  createTagScoreEditor, updateTagScoreEditor, fetchTagScores, setTagScore, requestRecalculation, pollTagScores,
+} from './tag-scores.js';
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
@@ -672,7 +675,9 @@ async function renderGroupingsList(kind) {
 
   let items;
   try {
-    items = await loadGrouping(kind);
+    // Tags view: the score per tag comes along (a failed fetch keeps the
+    // last known scores; the editors still work).
+    [items] = await Promise.all([loadGrouping(kind), kind === 'tags' ? loadTagScoreState() : null]);
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
@@ -702,6 +707,7 @@ async function renderGroupingsList(kind) {
         <div class="empty__title">${escapeHtml(t('webRemote.empty.noGroupingTitle', { kind }))}</div>
         <div>${escapeHtml(t('webRemote.empty.noGroupingBody', { kind }))}</div>
       </div>`;
+    if (kind === 'tags') mainEl.prepend(createTagScoresBar());
     return;
   }
   if (filtered.length === 0) {
@@ -710,15 +716,18 @@ async function renderGroupingsList(kind) {
         <div class="empty__title">${escapeHtml(t('webRemote.empty.noMatchesTitle'))}</div>
         <div>${escapeHtml(t('webRemote.empty.noMatchesBodyShort'))}</div>
       </div>`;
+    if (kind === 'tags') mainEl.prepend(createTagScoresBar());
     return;
   }
 
   await awaitSkeletonMinDwell();
   mainEl.innerHTML = '';
+  if (kind === 'tags') mainEl.appendChild(createTagScoresBar());
   const list = document.createElement('div');
   list.className = 'grouping-list';
   for (const item of filtered) list.appendChild(createGroupingRow(kind, item));
   mainEl.appendChild(list);
+  if (kind === 'tags' && (tagScoreState.pending.size || tagScoreState.recalculating)) watchTagScores();
 }
 
 function createGroupingRow(kind, item) {
@@ -754,12 +763,177 @@ function createGroupingRow(kind, item) {
   info.appendChild(sub);
   row.appendChild(info);
 
+  if (kind === 'tags') {
+    row.appendChild(createTagScoreEditor({
+      tag: item.name,
+      score: displayedTagScore(item.name),
+      pending: tagScorePending(item.name),
+      onStep: (next) => onTagScoreStep(item.name, next),
+    }));
+  }
+
   const chev = document.createElement('span');
   chev.className = 'grouping-row__chev';
   chev.textContent = '›';
   row.appendChild(chev);
 
   return row;
+}
+
+// --- Tag scores (Tags view) -----------------------------------------------
+//
+// Every tag shows the user's score for it (0 when unset) with a −/+ editor,
+// and the view has a Recalculate scores button. A tap updates the editor at
+// once and is sent after a short pause (several taps make one edit); the
+// tag reads as pending (dimmed) until the desktop has applied it, then
+// flashes. The desktop scores the library again after each tag score, so
+// the ◆ scores follow: the video list is fetched again once it has.
+// State from GET /api/remote/tag-scores (queued edits included); taps still
+// in their pause live in `tagScoreUnsent` so a re-render keeps them.
+let tagScoreState = { scores: {}, pending: new Set(), recalculating: false };
+const tagScoreUnsent = new Map();  // tag → score not sent yet
+const tagScoreTimers = new Map();  // tag → send timer
+const TAG_SCORE_SEND_DELAY_MS = 600;
+// Poll every 1.5 s while edits wait for the desktop, for up to a minute
+// (a desktop that is closed applies them later; the next render shows it).
+const TAG_SCORE_POLL_MS = 1500;
+const TAG_SCORE_POLL_TIMEOUT_MS = 60000;
+let tagScoreWatching = false;
+let recalculationRequested = false;
+
+function displayedTagScore(tag) {
+  return tagScoreUnsent.has(tag) ? tagScoreUnsent.get(tag) : (tagScoreState.scores[tag] ?? 0);
+}
+
+function tagScorePending(tag) {
+  return tagScoreUnsent.has(tag) || tagScoreState.pending.has(tag);
+}
+
+async function loadTagScoreState() {
+  try {
+    adoptTagScoreState(await fetchTagScores());
+  } catch { /* keep the last known scores */ }
+}
+
+/**
+ * Take a fresh state from the backend: tags whose edit the desktop has
+ * applied since the last one flash, and once anything was applied the
+ * video list (◆ scores) is fetched again.
+ */
+function adoptTagScoreState(next) {
+  const prev = tagScoreState;
+  const applied = [...prev.pending].filter((tag) => !next.pending.has(tag));
+  const recalculated = prev.recalculating && !next.recalculating;
+  tagScoreState = next;
+  if (applied.length || recalculated) refreshLibraryScores();
+  repaintTagScores(applied);
+  if (recalculated && recalculationRequested) {
+    recalculationRequested = false;
+    showToast(t('webRemote.tagScores.recalculated'), 'success');
+  }
+}
+
+/** Adopt a fresh video list (new ◆ scores) without leaving the current view. */
+async function refreshLibraryScores() {
+  if (!library) return;
+  try {
+    const resp = await fetch('/api/remote/videos');
+    if (!resp.ok) return;
+    library = (await resp.json()).videos || [];
+    folderIndex = null;
+    searchContextMap = null;
+    if (currentView === 'list') rerenderCurrent();
+  } catch { /* the next refresh picks them up */ }
+}
+
+function repaintTagScores(applied = []) {
+  for (const el of mainEl.querySelectorAll('.tag-score')) {
+    const tag = el.dataset.tag;
+    updateTagScoreEditor(el, { score: displayedTagScore(tag), pending: tagScorePending(tag) });
+    if (applied.includes(tag)) {
+      el.classList.add('tag-score--applied');
+      setTimeout(() => el.classList.remove('tag-score--applied'), 1200);
+    }
+  }
+  const button = mainEl.querySelector('.tag-scores-bar__recalc');
+  if (button) updateRecalculateButton(button);
+}
+
+function onTagScoreStep(tag, score) {
+  tagScoreUnsent.set(tag, score);
+  repaintTagScores();
+  clearTimeout(tagScoreTimers.get(tag));
+  tagScoreTimers.set(tag, setTimeout(() => { sendTagScore(tag); }, TAG_SCORE_SEND_DELAY_MS));
+}
+
+async function sendTagScore(tag) {
+  tagScoreTimers.delete(tag);
+  const score = tagScoreUnsent.get(tag);
+  if (score === undefined) return;
+  const result = await setTagScore(tag, score);
+  // A tap made while this was on its way keeps waiting for its own send.
+  if (tagScoreUnsent.get(tag) === score) tagScoreUnsent.delete(tag);
+  reportResult(result);
+  if (result.ok) {
+    const scores = { ...tagScoreState.scores };
+    if (result.data?.score) scores[tag] = result.data.score;
+    else delete scores[tag];
+    tagScoreState = { ...tagScoreState, scores, pending: new Set([...tagScoreState.pending, tag]) };
+    repaintTagScores();
+  } else {
+    await loadTagScoreState();
+  }
+  watchTagScores();
+}
+
+async function watchTagScores() {
+  if (tagScoreWatching) return;
+  tagScoreWatching = true;
+  try {
+    await pollTagScores((state) => {
+      adoptTagScoreState(state);
+      return !state.pending.size && !state.recalculating;
+    }, { intervalMs: TAG_SCORE_POLL_MS, timeoutMs: TAG_SCORE_POLL_TIMEOUT_MS });
+  } finally {
+    tagScoreWatching = false;
+  }
+}
+
+function createTagScoresBar() {
+  const bar = document.createElement('div');
+  bar.className = 'tag-scores-bar';
+  const hint = document.createElement('div');
+  hint.className = 'tag-scores-bar__hint';
+  hint.textContent = t('webRemote.tagScores.hint');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'tag-scores-bar__recalc';
+  button.addEventListener('click', () => { recalculateScores(); });
+  updateRecalculateButton(button);
+  bar.append(hint, button);
+  return bar;
+}
+
+function updateRecalculateButton(button) {
+  const busy = tagScoreState.recalculating;
+  button.disabled = busy;
+  button.classList.toggle('tag-scores-bar__recalc--busy', busy);
+  button.textContent = t(busy ? 'webRemote.tagScores.recalculating' : 'webRemote.tagScores.recalculate');
+}
+
+async function recalculateScores() {
+  recalculationRequested = true;
+  tagScoreState = { ...tagScoreState, recalculating: true };
+  repaintTagScores();
+  const result = await requestRecalculation();
+  reportResult(result);
+  if (!result.ok) {
+    recalculationRequested = false;
+    tagScoreState = { ...tagScoreState, recalculating: false };
+    repaintTagScores();
+    return;
+  }
+  watchTagScores();
 }
 
 // --- Folder browse (real subfolder tree) --------------------------------

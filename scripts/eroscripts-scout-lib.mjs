@@ -759,19 +759,20 @@ export function feedState(state, tag) {
  * ones that still have a scene to download, minus posts the user turned
  * down and posts that break the content rules (contentRuleBreak; lists
  * saved under older rules may hold some, picks too). Best score first, each
- * scored again under the current RANKING.
+ * scored again under the current RANKING and the user's tag scores.
  *
  * @param {object[]} previous candidates from the last list
  * @param {object[]} fresh candidates found by this scan
  * @param {(topicId: number, videoName: string) => boolean} isDone scene fetched or rejected
  * @param {Set<number>} [turnedDown] posts the user rejected
+ * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
  */
-export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set()) {
+export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set(), tagScores = {}) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(c.id, c);
   return [...byId.values()]
     .filter((c) => !turnedDown.has(c.id) && !contentRuleBreak(c) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
-    .map((c) => ({ ...c, score: candidateScore(c) }))
+    .map((c) => ({ ...c, score: candidateScore(c, tagScores) }))
     .sort((a, b) => b.score - a.score);
 }
 
@@ -839,19 +840,23 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 
 /**
  * Download order: multi-axis posts first, then single-axis; each by score
- * (candidateScore, so a list saved under older weights follows the current ones).
+ * (candidateScore with the user's tag scores, so a list saved under older
+ * weights follows the current ones).
  * Live action on the quota comes last, so the run's other downloads can earn
  * it a slot. Posts a saved list holds that break the content rules
  * (contentRuleBreak) are dropped, picks included; so are scenes the rules no
  * longer want, except on posts the user picked (`--add`), which keep every
  * scene.
+ *
+ * @param {object[]} candidates
+ * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
  */
-export function downloadQueue(candidates) {
+export function downloadQueue(candidates, tagScores = {}) {
   const ok = candidates
     .filter((c) => !contentRuleBreak(c))
     .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes(c) }))
     .filter((c) => c.scenes.length);
-  const byScore = (a, b) => candidateScore(b) - candidateScore(a);
+  const byScore = (a, b) => candidateScore(b, tagScores) - candidateScore(a, tagScores);
   const own = ok.filter((c) => !c.liveQuota);
   return [
     ...own.filter((c) => c.axisType === 'multi').sort(byScore), ...own.filter((c) => c.axisType !== 'multi').sort(byScore),
