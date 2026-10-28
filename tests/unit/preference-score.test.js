@@ -8,10 +8,12 @@
 // (renderer/js/library-scores.js): VR, hand-made axes, post tags, the title,
 // favourite / known artists, likes, and the stored map.
 import { describe, it, expect } from 'vitest';
-import { candidateScore } from '../../renderer/js/preference-score.js';
+import {
+  candidateScore, normalizeTagScore, tagKey, tagScoreSum, TAG_SCORE_MAX, TAG_SCORE_STEP,
+} from '../../renderer/js/preference-score.js';
 import * as scout from '../../scripts/eroscripts-scout-lib.mjs';
 import {
-  applyPreferenceScores, planPreferenceScores, sameScores, sceneCandidate, PREFERENCE_SCORES_KEY,
+  applyPreferenceScores, planPreferenceScores, sameScores, sceneCandidate, PREFERENCE_SCORES_KEY, TAG_SCORES_KEY,
 } from '../../renderer/js/library-scores.js';
 import { MIN_ARTIST_VIDEOS, RANKING } from '../../renderer/js/content-preferences.js';
 
@@ -152,5 +154,59 @@ describe('applyPreferenceScores', () => {
     expect(sameScores({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
     expect(sameScores({ a: 1 }, { a: 1, b: 2 })).toBe(false);
     expect(sameScores({ a: 1 }, { a: 1.5 })).toBe(false);
+  });
+});
+
+describe('tag scores', () => {
+  it('adds up the scores of a post\'s distinct tags, negative ones too; tags without a score count 0', () => {
+    const scores = { riding: 2, monstergirl: -1.5, pmv: 0.5 };
+    expect(tagScoreSum(['riding', 'pmv', 'monstergirl', '3d'], scores)).toBe(1);
+    expect(tagScoreSum(['riding', 'Riding', ' RIDING '], scores)).toBe(2);
+    expect(tagScoreSum(['3d', 'sfm'], scores)).toBe(0);
+    expect(tagScoreSum([], scores)).toBe(0);
+    expect(tagScoreSum(['riding'], {})).toBe(0);
+    expect(tagScoreSum(['riding'], undefined)).toBe(0);
+    expect(tagScoreSum(undefined, scores)).toBe(0);
+    expect(tagScoreSum(['toString', 'constructor'], {})).toBe(0);
+  });
+
+  it('rounds scores to 0.5 steps (halves up) and clamps them to ±TAG_SCORE_MAX; anything else is not a score', () => {
+    expect([TAG_SCORE_MAX, TAG_SCORE_STEP]).toEqual([10, 0.5]);
+    expect([1.5, 1.2, 1.25, -1.25, -1.3, 0.24, '2.5', 11, -99, 10, -10].map(normalizeTagScore))
+      .toEqual([1.5, 1, 1.5, -1, -1.5, 0, 2.5, 10, -10, 10, -10]);
+    expect(Object.is(normalizeTagScore(-0.2), 0)).toBe(true);
+    expect([NaN, Infinity, '', ' ', 'x', null, undefined, true, {}, []].map(normalizeTagScore)).toEqual(Array(10).fill(null));
+    expect(tagScoreSum(['riding', 'pmv'], { riding: 25, pmv: 'abc' })).toBe(10);
+  });
+
+  it('keys tags trimmed and lower case', () => {
+    expect([tagKey(' Riding '), tagKey('PMV'), tagKey(3), tagKey(null)]).toEqual(['riding', 'pmv', '', '']);
+  });
+
+  it('adds the tag scores on top of the RANKING score, and changes nothing without any', () => {
+    const post = { title: 'Tracer rides', tags: ['3d', 'riding', 'pmv'], likes: 30, vr: true, music: true, preferred: ['riding'], axisType: 'multi' };
+    const base = candidateScore(post);
+    expect(candidateScore(post, {})).toBe(base);
+    expect(candidateScore(post, { blowjob: 4 })).toBe(base);
+    expect(candidateScore(post, { riding: 2.5, pmv: -1 })).toBeCloseTo(base + 1.5, 10);
+    expect(candidateScore(post, { riding: -20 })).toBeCloseTo(base - 10, 10);
+  });
+
+  it('scores library scenes with library.tagScores', () => {
+    const a = scene('X', 'Riding scene');
+    const b = scene('Y', 'Other scene');
+    const scriptTags = { [a]: { tags: ['riding', 'Monstergirl'] }, [b]: { tags: ['3d'] } };
+    const base = { videos: [video(a), video(b)], sourcePaths: SOURCES, scriptTags, axisFlags: { [a]: 'generated', [b]: 'generated' } };
+    const without = planPreferenceScores(base);
+    const withScores = planPreferenceScores({ ...base, tagScores: { riding: 1, monstergirl: -3, '3d': 0.5 } });
+    expect(withScores[a]).toBe(without[a] - 2);
+    expect(withScores[b]).toBe(without[b] + 0.5);
+
+    const store = { 'library.sources': SOURCES.map((path) => ({ path })), 'library.scriptTags': scriptTags };
+    const data = { get: (k) => store[k], set: (k, v) => { store[k] = v; } };
+    applyPreferenceScores(data, base.videos, { axisFlags: base.axisFlags });
+    expect(store[PREFERENCE_SCORES_KEY]).toEqual(without);
+    store[TAG_SCORES_KEY] = { riding: 1, monstergirl: -3, '3d': 0.5 };
+    expect(applyPreferenceScores(data, base.videos, { axisFlags: base.axisFlags })).toEqual({ scores: withScores, changed: true });
   });
 });

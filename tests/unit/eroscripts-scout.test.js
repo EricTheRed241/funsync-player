@@ -553,6 +553,14 @@ describe('downloadQueue', () => {
     const q = downloadQueue([c(1, { sexual: 'text' }), c(2, { sexual: 'text', contentBreak: 'monster' }), c(3, {}), c(4, { sexual: 'text', contentBreak: 'excluded' })]);
     expect(q.map((x) => x.id)).toEqual([1, 2]);
   });
+
+  it('orders by the user\'s tag scores too, within multi-axis and single-axis', () => {
+    const c = (id, axisType, tags) => ({ id, title: `Scene ${id}`, axisType, tags: ['animation', 'riding', ...tags], vr: false, likes: 0, scenes: [{ axes: axisType === 'multi' ? ['twist'] : [] }] });
+    const list = [c(1, 'multi', ['blowjob']), c(2, 'multi', ['ahegao']), c(3, 'multi', [])];
+    expect(downloadQueue(list).map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(downloadQueue(list, {}).map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(downloadQueue(list, { ahegao: 2, blowjob: -1.5 }).map((x) => x.id)).toEqual([2, 3, 1]);
+  });
 });
 
 describe('screenPick', () => {
@@ -714,6 +722,15 @@ describe('scan state', () => {
     const saved = { id: 1, title: 'X', tags: ['vaginal'], likes: 0, axisType: 'multi', score: 1, scenes: [{ video: { name: 'a.mp4' } }] };
     const [c] = mergeCandidates([saved], [], () => false);
     expect(c.score).toBe(scoreCandidate({ multiAxis: true }));
+  });
+
+  it('scores saved and fresh candidates with the user\'s tag scores', () => {
+    const c = (id, tags) => ({ id, title: `Scene ${id}`, tags: ['vaginal', ...tags], likes: 0, axisType: 'multi', score: 1, scenes: [{ video: { name: `${id}.mp4` } }] });
+    const plain = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false);
+    const scored = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false, new Set(), { ahegao: 3, POV: 1, pov: -2 });
+    const by = (list) => Object.fromEntries(list.map((x) => [x.id, x.score]));
+    expect(by(scored)).toEqual({ 1: by(plain)[1] - 2, 2: by(plain)[2] + 3, 3: by(plain)[3] });
+    expect(scored.map((x) => x.id)).toEqual([2, 3, 1]);
   });
 });
 

@@ -215,11 +215,11 @@ function scoutContext(config, userData, incoming) {
   // a short video or an extra copy of one (dedupe) doesn't turn down the post.
   const turnedDown = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short' && e.reason !== 'duplicate' && e.topicId != null).map((e) => e.topicId));
   for (const id of turnedDown) knownTopics.add(id);
-  return { library, knownTopics, turnedDown, favourites: prefs.FAVOURITES };
+  return { library, knownTopics, turnedDown, favourites: prefs.FAVOURITES, tagScores: config.settings?.library?.tagScores || {} };
 }
 
-/** A judged post as a saved candidate. */
-function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first, picked = false }) {
+/** A judged post as a saved candidate, scored with the user's tag scores. */
+function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first, picked = false }, tagScores) {
   const preferred = t.tags.filter((x) => prefs.PREFERRED_TAGS.has(x));
   const axisType = scenes.some((sc) => sc.axes.length) ? 'multi' : 'single';
   const c = {
@@ -229,12 +229,12 @@ function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, ho
     ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(first.ffm ? { ffm: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
-  return { ...c, score: lib.candidateScore(c) };
+  return { ...c, score: lib.candidateScore(c, tagScores) };
 }
 
 async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
-  const { library, knownTopics, turnedDown, favourites } = scoutContext(config, userData, incoming);
+  const { library, knownTopics, turnedDown, favourites, tagScores } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
   const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
@@ -289,7 +289,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
       const scenes = lib.wantedScenes({ scenes: plan.scenes });
       if (!scenes.length) { verdict('single-axis'); continue; }
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }, tagScores));
       verdict('candidate');
       process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
     }
@@ -304,7 +304,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   let previous = [];
   try { previous = JSON.parse(fs.readFileSync(out, 'utf8')).candidates || []; } catch { /* first scan */ }
   const done = fetchedScenes(incoming, userData);
-  const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown);
+  const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, tagScores);
   fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
 
   const gb = (c) => c.scenes.reduce((n, sc) => n + (sc.video.size || 0), 0) / 1e9;
@@ -330,7 +330,7 @@ async function scan(opts, { api, userData, config, incoming }) {
 /** `--add`: judge posts the user picked by id and put them on the list (lib.screenPick). */
 async function addPicked(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
-  const { library, knownTopics, turnedDown, favourites } = scoutContext(config, userData, incoming);
+  const { library, knownTopics, turnedDown, favourites, tagScores } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
   const fresh = [];
   try {
@@ -363,7 +363,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, first, picked: true }));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes: plan.scenes, first, picked: true }, tagScores));
       lib.markTopic(state, id, 'candidate');
       console.log(`✓ ${id} ${t.title} (${plan.scenes.length} video${plan.scenes.length > 1 ? 's' : ''}, ${plan.scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis'})`);
     }
@@ -374,7 +374,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
   let saved = { candidates: [] };
   try { saved = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { /* no list yet */ }
   const done = fetchedScenes(incoming, userData);
-  const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown);
+  const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, tagScores);
   fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
   console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run eroscripts:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
   return 0;
@@ -569,7 +569,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room }) {
   return { ok, failed, generated, short, waiting, capped };
 }
 
-async function fetchAll(opts, { api, userData, incoming }) {
+async function fetchAll(opts, { api, userData, config, incoming }) {
   const file = path.join(userData, 'eroscripts-scout.json');
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -580,7 +580,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
-  const queue = lib.downloadQueue(candidates).filter((c) => !opts.ids || opts.ids.has(c.id));
+  const queue = lib.downloadQueue(candidates, config.settings?.library?.tagScores || {}).filter((c) => !opts.ids || opts.ids.has(c.id));
   const gb = queue.reduce((n, c) => n + c.scenes.reduce((m, sc) => m + (sc.video.size || 0), 0), 0) / 1e9;
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);
   if (opts.dryRun) {
@@ -656,7 +656,7 @@ async function main() {
   try {
     if (opts.add) return await addPicked(opts, { api, userData, config, incoming });
     if (opts.recheck) return await recheck({ api, userData });
-    return opts.fetch ? await fetchAll(opts, { api, userData, incoming }) : await scan(opts, { api, userData, config, incoming });
+    return opts.fetch ? await fetchAll(opts, { api, userData, config, incoming }) : await scan(opts, { api, userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
     if (err instanceof SessionExpiredError) { console.error(err.message); return 3; }

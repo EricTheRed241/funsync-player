@@ -153,6 +153,10 @@ const DEFAULTS = {
       // when the backend's VR / axis decisions arrive. Derived; kept so the
       // badges and the score sort work right after a start.
       preferenceScores: {},
+      // The user's score per post tag (lower case) → -10 … +10 in 0.5 steps,
+      // added to every scene's preference score and to the scouts' ranking.
+      // Absent = 0. Set from the web remote's Tags view (library edits).
+      tagScores: {},
       collections: [],
       activeCollectionId: null,
     },

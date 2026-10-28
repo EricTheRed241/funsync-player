@@ -35,8 +35,9 @@
 //   • Sex required (as on EroScripts; picks too), at least MIN_VIDEO_MS
 //     long. `--fetch` and every scan drop saved candidates that now break
 //     the content rules (stillWanted).
-//   • Ranking as on EroScripts (candidateScore; monsters, feet and 2D
-//     hentai only rank lower), saved lists scored again under it.
+//   • Ranking as on EroScripts (candidateScore with the user's tag scores,
+//     `library.tagScores`; monsters, feet and 2D hentai only rank lower),
+//     saved lists scored again under it.
 //   • Skip videos the library or the EroScripts scout list already has.
 //   • Stream: the best Bunny HLS stream within the flat / VR height cap;
 //     none below MIN_STREAM_HEIGHT.
@@ -353,8 +354,14 @@ export function csvToFunscript(text) {
   return { version: '1.0', inverted: false, range: 100, actions };
 }
 
-/** A screened video as a saved candidate. */
-export function toCandidate(video, screen) {
+/**
+ * A screened video as a saved candidate.
+ *
+ * @param {object} video
+ * @param {object} screen
+ * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
+ */
+export function toCandidate(video, screen, tagScores = {}) {
   const c = {
     id: String(video.id),
     title: String(video.name || '').trim(),
@@ -374,7 +381,7 @@ export function toCandidate(video, screen) {
     liveQuota: !!screen.liveQuota,
     picked: !!screen.picked,
   };
-  return { ...c, score: candidateScore(c) };
+  return { ...c, score: candidateScore(c, tagScores) };
 }
 
 /** Key of a fetched or rejected FapTap scene; the same as electron/rejected-videos.js `faptapRejectionKey`. */
@@ -431,15 +438,16 @@ export function dropDuplicateCandidates(candidates) {
  * The saved list after a scan: candidates found now plus earlier ones not
  * yet fetched or rejected and still wanted (`stillWanted`), one per video
  * (`dropDuplicateCandidates`), best score first, each scored again under
- * the current RANKING (candidateScore).
+ * the current RANKING and the user's tag scores (candidateScore).
  *
  * @param {object[]} previous
  * @param {object[]} fresh
  * @param {(id: string) => boolean} isDone fetched, or turned down in the app
+ * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
  */
-export function mergeCandidates(previous, fresh, isDone) {
+export function mergeCandidates(previous, fresh, isDone, tagScores = {}) {
   const byId = new Map();
   for (const c of [...(previous || []), ...(fresh || [])]) byId.set(String(c.id), c);
-  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && stillWanted(c)).map((c) => ({ ...c, score: candidateScore(c) }));
+  const open = [...byId.values()].filter((c) => !isDone(String(c.id)) && stillWanted(c)).map((c) => ({ ...c, score: candidateScore(c, tagScores) }));
   return dropDuplicateCandidates(open).kept.sort((a, b) => b.score - a.score);
 }

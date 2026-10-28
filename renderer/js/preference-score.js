@@ -5,11 +5,53 @@
 // scouts order their candidates by it (scripts/eroscripts-scout-lib.mjs
 // re-exports it), and the app scores every library scene with it after each
 // scan (library-scores.js), so a scene ranks in the library as its post did
-// in the scouting. Pure and renderer-safe: no Node imports.
+// in the scouting. On top of the RANKING weights, the user's own score per
+// post tag (`library.tagScores`, set from the web remote's Tags view) adds
+// up over a candidate's tags; callers pass that map in. Pure and
+// renderer-safe: no Node imports.
 
 import {
   FEET_TAGS, FEET_TITLE, FFM_TAGS, FFM_TITLE, FLAT_HENTAI_TAGS, MONSTER_TAGS, MONSTER_TITLE, RANKING, THREE_D_TAGS, THREE_D_TITLE, WEREWOLF_TOKEN,
 } from './content-preferences.js';
+
+/** Tag scores run from -TAG_SCORE_MAX to +TAG_SCORE_MAX in TAG_SCORE_STEP steps (backend copy: services/library_edits.py). */
+export const TAG_SCORE_MAX = 10;
+export const TAG_SCORE_STEP = 0.5;
+
+/** The key a tag's score is stored under: trimmed, lower case. */
+export function tagKey(tag) {
+  return typeof tag === 'string' ? tag.trim().toLowerCase() : '';
+}
+
+/**
+ * `value` as a tag score: a finite number (or numeric string) rounded to the
+ * nearest TAG_SCORE_STEP (halves up) and clamped to ±TAG_SCORE_MAX; null for
+ * anything else.
+ */
+export function normalizeTagScore(value) {
+  if (typeof value === 'string' && !value.trim()) return null;
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const stepped = Math.floor(n / TAG_SCORE_STEP + 0.5) * TAG_SCORE_STEP;
+  return Math.min(TAG_SCORE_MAX, Math.max(-TAG_SCORE_MAX, stepped)) + 0;
+}
+
+/**
+ * Sum of the user's tag scores over a post's distinct tags (case-insensitive);
+ * a tag without a score counts 0.
+ *
+ * @param {string[]} tags
+ * @param {Object<string, number>} [tagScores] `library.tagScores`
+ */
+export function tagScoreSum(tags, tagScores) {
+  if (!tagScores || !Array.isArray(tags)) return 0;
+  let sum = 0;
+  for (const key of new Set(tags.map(tagKey))) {
+    if (key && Object.hasOwn(tagScores, key)) sum += normalizeTagScore(tagScores[key]) ?? 0;
+  }
+  return sum;
+}
 
 /** True when a post's tags or title name a monster (tentacles, werewolves, horse guys, orcs …). */
 export function hasMonster({ tags = [], title = '' }) {
@@ -70,16 +112,19 @@ export function scoreCandidate({ vr = false, music = false, artistInLibrary = fa
 /**
  * Score of a saved candidate (either scout) or a library scene under the
  * current RANKING, from what the list keeps, so a weight change reorders
- * lists saved before it. Monster / feet / FFM come from its tags and title,
- * the first-post flags saved with it (`monster`, `feet`, `ffm`), or an older
- * `--recheck` mark. Two decimals.
+ * lists saved before it, plus the user's tag scores over its tags. Monster /
+ * feet / FFM come from its tags and title, the first-post flags saved with
+ * it (`monster`, `feet`, `ffm`), or an older `--recheck` mark. Two decimals.
+ *
+ * @param {object} c
+ * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
  */
-export function candidateScore(c) {
+export function candidateScore(c, tagScores) {
   const named = lessPreferred(c);
-  return +scoreCandidate({
+  return +(scoreCandidate({
     vr: !!c.vr, music: !!c.music, artistInLibrary: !!(c.artistInLibrary || c.favourite), preferred: c.preferred || [],
     multiAxis: c.axisType === 'multi', likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
     monster: named.monster || !!c.monster || c.contentBreak === 'monster', feet: named.feet || !!c.feet || c.contentBreak === 'feet',
     ffm: named.ffm || !!c.ffm,
-  }).toFixed(2);
+  }) + tagScoreSum(c.tags, tagScores)).toFixed(2);
 }
