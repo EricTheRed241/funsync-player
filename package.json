@@ -26,7 +26,8 @@
     "eroscripts:preview-check": "node scripts/eroscripts-preview-check.mjs",
     "eroscripts:scout": "node scripts/eroscripts-scout.mjs",
     "faptap:scout": "node scripts/faptap-scout.mjs",
-    "dedupe:scenes": "node scripts/dedupe-scenes.mjs"
+    "dedupe:scenes": "node scripts/dedupe-scenes.mjs",
+    "library:reorganize": "node scripts/library-reorganize.mjs"
   },
   "keywords": [
     "video-player",

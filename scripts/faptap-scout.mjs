@@ -7,8 +7,8 @@
 //
 // Rules: scripts/faptap-scout-lib.mjs (sex required for every video,
 // favourites and picks too; monster, feet and 2D hentai videos rank lower). Scenes
-// land in `<library parent>/_incoming/<creator>/<Artist - Title>/` with a
-// `faptap.json` sidecar. FapTap
+// land in the library's FapTap folder, `<library parent>/FapTap/<creator>/<Artist - Title>/`,
+// with a `faptap.json` sidecar. FapTap
 // scripts are single-axis, so every scene gets generated twist / roll /
 // pitch companions (scripts/upgrade-multi-axis.mjs). Videos come from
 // FapTap's HLS streams through ffmpeg. Finished videos join Discovery like
@@ -40,7 +40,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 
 const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, readConfig, walk } = await import('./discovery-io.mjs');
 const dedupe = await import('./scene-dedupe-lib.mjs');
 const { libraryVideos, readProbeCache, writeProbeCache } = await import('./scene-probe.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
@@ -49,6 +49,7 @@ const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const FOLDER = 'FapTap';
 
 const USAGE = `Usage: npm run faptap:scout -- [options]
 Scan (default; only videos not judged before, see <userData>/faptap-scout-state.json):
@@ -74,7 +75,7 @@ Rename:
                          performers and the thumbnail URL from faptap.net; moves config.json's paths (app closed)
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
-  --incoming <dir>       download folder (default: the Discovery source, else <library parent>/_incoming)`;
+  --incoming <dir>       download folder (default: the FapTap library source, else <library parent>/FapTap)`;
 
 function parseArgs(argv) {
   const opts = { pages: 5, backfill: 10, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false };
@@ -441,7 +442,7 @@ async function fetchPass(queue, { userData, incoming, staging, naming }) {
       }, null, 1));
       const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
       const note = up.status === 0 ? ' + generated axes' : ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
-      const listed = flushPlaylist(userData, incoming, [video]);
+      const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
       live.recordDownload(userData, !!c.liveQuota);
       const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
       console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
@@ -489,7 +490,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));
     }
   }
-  flushPlaylist(userData, incoming, []);
+  flushPlaylist(userData, { name: FOLDER, path: incoming }, []);
   return 2;
 }
 
@@ -550,7 +551,7 @@ async function main() {
   if (opts.help) { console.log(USAGE); return 0; }
   const userData = opts.userData || defaultUserDataDir();
   const config = readConfig(userData);
-  const incoming = incomingDir(config, opts.incoming);
+  const incoming = downloadFolder(config, FOLDER, opts.incoming).path;
   try {
     if (opts.add) return await addPicked(opts, { userData, config, incoming });
     if (opts.retitle) return await retitle(opts, { userData, config, incoming });

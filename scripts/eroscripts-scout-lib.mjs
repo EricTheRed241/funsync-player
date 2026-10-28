@@ -911,17 +911,18 @@ export function downloadQueue(candidates) {
 }
 
 /**
- * Add videos to the Discovery playlist and make sure the incoming folder is a
- * library source, in a parsed config.json (mutated). Returns what changed.
+ * Add videos to the Discovery playlist and make sure the scout's download
+ * folder (`{name: 'EroScripts'|'FapTap', path}`) is a library source, in a
+ * parsed config.json (mutated). Returns what changed.
  */
-export function addToDiscovery(config, videoPaths, { incomingDir, newId, now = Date.now() }) {
+export function addToDiscovery(config, videoPaths, { folder, newId, now = Date.now() }) {
   const changes = { sourceAdded: false, playlistCreated: false, added: [] };
   config.settings ||= {};
   config.settings.library ||= {};
   const lib = config.settings.library;
   lib.sources ||= [];
-  if (!lib.sources.some((s) => path.resolve(s.path) === path.resolve(incomingDir))) {
-    lib.sources.push({ id: newId(), name: DISCOVERY_NAME, path: incomingDir, enabled: true });
+  if (!lib.sources.some((s) => path.resolve(s.path) === path.resolve(folder.path))) {
+    lib.sources.push({ id: newId(), name: folder.name, path: folder.path, enabled: true });
     changes.sourceAdded = true;
   }
   config.playlists ||= [];

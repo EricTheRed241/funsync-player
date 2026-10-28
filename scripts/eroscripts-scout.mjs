@@ -9,11 +9,11 @@
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (sex required for
 // every post, favourites and picks too; monster, feet and 2D hentai posts
-// rank lower). Scenes land in
-// `<library parent>/_incoming/<creator>/<Artist - Title (metadata)>/` with an
+// rank lower). Scenes land in the library's EroScripts folder,
+// `<library parent>/EroScripts/<creator>/<Artist - Title (metadata)>/`, with an
 // `eroscripts.json` sidecar. Single-axis scenes get generated twist / roll / pitch companions
 // (scripts/upgrade-multi-axis.mjs). Each finished video joins the Discovery
-// playlist, and `_incoming` becomes a library source named Discovery, so the
+// playlist, and the EroScripts folder is a library source, so the
 // scenes show in the library, the web remote and HereSphere. config.json is
 // written only while the app is closed; otherwise the paths wait in
 // `<userData>/eroscripts-scout-pending.json` for the next run.
@@ -40,13 +40,14 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, flushPlaylist, incomingDir, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const FOLDER = 'EroScripts';
 
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
 Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.json):
@@ -79,7 +80,7 @@ Recheck (one-off):
                          there rank lower), excluded words there drop them for good; the rest stay skipped
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
-  --incoming <dir>       download folder (default <library parent>/_incoming)`;
+  --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
 
 function parseArgs(argv) {
   const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false };
@@ -202,7 +203,7 @@ function feedPage(api, pacer) {
 
 /** What screening needs: the library, the posts it already links or the user turned down, favourites. */
 function scoutContext(config, userData, incoming) {
-  const roots = librarySources(config, incoming).map((s) => s.path).filter((p) => fs.existsSync(p));
+  const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
   const library = libraryState(roots);
   const knownTopics = new Set(Object.values(config.settings?.library?.scriptTags || {}).map((r) => r?.topicId).filter((id) => id != null));
   try {
@@ -549,7 +550,7 @@ async function fetchPass(queue, { api, userData, incoming, staging }) {
           const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
           if (up.status === 0) { generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
         }
-        const listed = flushPlaylist(userData, incoming, [video]);
+        const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
         live.recordDownload(userData, !!c.liveQuota);
         const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
         console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
@@ -593,7 +594,7 @@ async function fetchAll(opts, { api, userData, incoming }) {
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));
     }
   }
-  flushPlaylist(userData, incoming, []);
+  flushPlaylist(userData, { name: FOLDER, path: incoming }, []);
   return 2;
 }
 
@@ -628,7 +629,7 @@ async function main() {
   if (opts.help) { console.log(USAGE); return 0; }
   const userData = opts.userData || defaultUserDataDir();
   const config = readConfig(userData);
-  const incoming = incomingDir(config, opts.incoming);
+  const incoming = downloadFolder(config, FOLDER, opts.incoming).path;
   if (opts.retitle) return retitle(opts, { userData, incoming });
   const session = config.settings?.eroscripts?.session || {};
   if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
