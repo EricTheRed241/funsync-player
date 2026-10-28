@@ -48,7 +48,7 @@ import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js
 import { applyAutoCategories, applyAxisCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
 import { applyPlaylistCleanup } from '../js/playlist-cleanup.js';
-import { applyPreferenceScores, PREFERENCE_SCORES_KEY, TAG_SCORES_KEY } from '../js/library-scores.js';
+import { applyPreferenceScores, PREFERENCE_SCORES_KEY, tagScoreRegistration } from '../js/library-scores.js';
 import { FAVOURITES } from '../js/content-preferences.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
 
@@ -6827,10 +6827,10 @@ export class Library {
       vrFormat,
       scriptTags,
       // Preference score per video (library-scores.js) for the web remote
-      // and the headsets' `Score:` tag, and the user's score per tag for the
-      // web remote's Tags view.
+      // and the headsets' `Score:` tag, and every tag's score (defaults
+      // included) with its group for the web remote's Tags view.
       preferenceScores,
-      tagScores: this._settings.get(TAG_SCORES_KEY) || {},
+      ...tagScoreRegistration(this._settings),
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can

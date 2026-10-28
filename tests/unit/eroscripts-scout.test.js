@@ -14,6 +14,7 @@ import {
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
+import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
 const files = (...names) => names.map((name) => ({ name, host: 'forum', url: `https://x/${encodeURIComponent(name)}` }));
@@ -98,18 +99,19 @@ describe('lessPreferred and the monster / feet / FFM penalty', () => {
     expect(lessPreferred({ tags: ['threesome'], title: 'Staffmeeting' }).ffm).toBe(false);
   });
 
-  it('takes 0.5 off for each of a monster, feet and FFM, and they add up', () => {
+  it('ranks a monster, feet and FFM lower by their tag-score groups, each once, and they add up', () => {
     const base = { title: 'Tracer rides', tags: ['animation', 'riding'], axisType: 'multi', likes: 20 };
     const plain = candidateScore(base);
-    expect(candidateScore({ ...base, tags: [...base.tags, 'tentacle'] })).toBe(plain - RANKING.monster);
-    expect(candidateScore({ ...base, title: 'Tracer rides - footjob' })).toBe(plain - RANKING.feet);
-    expect(candidateScore({ ...base, tags: [...base.tags, 'ffm'] })).toBe(plain - RANKING.ffm);
-    expect(candidateScore({ ...base, ffm: true })).toBe(plain - 0.5);
-    expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet'] })).toBe(plain - 1);
-    expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet', 'ffm'] })).toBe(plain - 1.5);
-    expect(candidateScore({ ...base, monster: true })).toBe(plain - 0.5);
-    expect(candidateScore({ ...base, contentBreak: 'feet' })).toBe(plain - 0.5);
-    expect(RANKING.monster + RANKING.feet + RANKING.ffm).toBe(1.5);
+    expect([D.monster, D.feet, D.ffm].every((s) => s < 0)).toBe(true);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'tentacle'] })).toBe(plain + D.tentacle);
+    expect(candidateScore({ ...base, title: 'Tracer rides - footjob' })).toBe(plain + D.footjob);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'ffm'] })).toBe(plain + D.ffm);
+    expect(candidateScore({ ...base, ffm: true })).toBe(plain + D.ffm);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet'] })).toBe(plain + D.werewolf + D.feet);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet', 'ffm'] })).toBe(plain + D.werewolf + D.feet + D.ffm);
+    expect(candidateScore({ ...base, title: 'Werewolf footjob', tags: [...base.tags, 'werewolf', 'feet'] })).toBe(plain + D.werewolf + D.feet);
+    expect(candidateScore({ ...base, monster: true })).toBe(plain + D.monster);
+    expect(candidateScore({ ...base, contentBreak: 'feet' })).toBe(plain + D.footjob);
   });
 });
 
@@ -279,22 +281,12 @@ describe('hasExcludedText', () => {
 });
 
 describe('scoreCandidate', () => {
-  it('prefers creampie / riding posts, both more than one', () => {
-    const base = { likes: 20 };
-    const none = scoreCandidate(base);
-    const one = scoreCandidate({ ...base, preferred: ['creampie'] });
-    const both = scoreCandidate({ ...base, preferred: ['creampie', 'riding'] });
-    expect(one).toBeGreaterThan(none);
-    expect(both).toBeGreaterThan(one);
-  });
-
-  it('ranks VR above a preferred tag and caps likes', () => {
-    expect(scoreCandidate({ vr: true })).toBeGreaterThan(scoreCandidate({ preferred: ['riding'] }));
-    expect(scoreCandidate({ likes: 10_000 })).toBe(3);
+  it('caps likes', () => {
+    expect(scoreCandidate({ likes: 10_000 })).toBe(RANKING.likesMax);
   });
 
   it('ranks a 2D-hentai-only post lower', () => {
-    const post = { vr: true, preferred: ['creampie'], likes: 40 };
+    const post = { vr: true, likes: 40 };
     expect(scoreCandidate({ ...post, hentaiOnly: true })).toBe(scoreCandidate(post) - RANKING.hentaiOnly);
   });
 });
@@ -729,7 +721,7 @@ describe('scan state', () => {
     const plain = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false);
     const scored = mergeCandidates([c(1, ['pov']), c(2, ['ahegao'])], [c(3, [])], () => false, new Set(), { ahegao: 3, POV: 1, pov: -2 });
     const by = (list) => Object.fromEntries(list.map((x) => [x.id, x.score]));
-    expect(by(scored)).toEqual({ 1: by(plain)[1] - 2, 2: by(plain)[2] + 3, 3: by(plain)[3] });
+    expect(by(scored)).toEqual({ 1: by(plain)[1] - D.pov - 2, 2: by(plain)[2] + 3, 3: by(plain)[3] });
     expect(scored.map((x) => x.id)).toEqual([2, 3, 1]);
   });
 });

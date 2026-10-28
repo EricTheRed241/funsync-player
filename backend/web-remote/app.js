@@ -20,7 +20,7 @@ import {
   setRating, addToPlaylist, removeFromPlaylist, reportResult, showToast,
 } from './triage.js';
 import {
-  createTagScoreEditor, updateTagScoreEditor, fetchTagScores, setTagScore, requestRecalculation, pollTagScores,
+  createTagScoreEditor, updateTagScoreEditor, fetchTagScores, setTagScore, requestRecalculation, pollTagScores, formatRules,
 } from './tag-scores.js';
 
 /* ============================================================
@@ -759,7 +759,8 @@ function createGroupingRow(kind, item) {
   sub.className = 'grouping-row__sub';
   const countLabel = item.videoCount === 1 ? '1 video' : `${item.videoCount || 0} videos`;
   const runtime = formatTotalDuration(item.totalDuration || 0);
-  sub.textContent = runtime ? `${countLabel} • ${runtime}` : countLabel;
+  const group = kind === 'tags' ? tagScoreState.groups[item.name] : null;
+  sub.textContent = [countLabel, runtime, group && t('webRemote.tagScores.group', { group })].filter(Boolean).join(' • ');
   info.appendChild(sub);
   row.appendChild(info);
 
@@ -782,15 +783,17 @@ function createGroupingRow(kind, item) {
 
 // --- Tag scores (Tags view) -----------------------------------------------
 //
-// Every tag shows the user's score for it (0 when unset) with a −/+ editor,
-// and the view has a Recalculate scores button. A tap updates the editor at
+// Every tag shows its score (the desktop's starting score, 0 for most) with
+// a −/+ editor, and grouped tags name their group (a video counts each group
+// once). The view has the built-in weights (read-only) and a Recalculate
+// scores button. A tap updates the editor at
 // once and is sent after a short pause (several taps make one edit); the
 // tag reads as pending (dimmed) until the desktop has applied it, then
 // flashes. The desktop scores the library again after each tag score, so
 // the ◆ scores follow: the video list is fetched again once it has.
 // State from GET /api/remote/tag-scores (queued edits included); taps still
 // in their pause live in `tagScoreUnsent` so a re-render keeps them.
-let tagScoreState = { scores: {}, pending: new Set(), recalculating: false };
+let tagScoreState = { scores: {}, groups: {}, rules: {}, pending: new Set(), recalculating: false };
 const tagScoreUnsent = new Map();  // tag → score not sent yet
 const tagScoreTimers = new Map();  // tag → send timer
 const TAG_SCORE_SEND_DELAY_MS = 600;
@@ -902,15 +905,22 @@ async function watchTagScores() {
 function createTagScoresBar() {
   const bar = document.createElement('div');
   bar.className = 'tag-scores-bar';
-  const hint = document.createElement('div');
-  hint.className = 'tag-scores-bar__hint';
-  hint.textContent = t('webRemote.tagScores.hint');
+  const text = document.createElement('div');
+  text.className = 'tag-scores-bar__hint';
+  text.textContent = t('webRemote.tagScores.hint');
+  const rules = formatRules(tagScoreState.rules);
+  if (rules) {
+    const builtIn = document.createElement('div');
+    builtIn.className = 'tag-scores-bar__rules';
+    builtIn.textContent = t('webRemote.tagScores.builtIn', { rules });
+    text.appendChild(builtIn);
+  }
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'tag-scores-bar__recalc';
   button.addEventListener('click', () => { recalculateScores(); });
   updateRecalculateButton(button);
-  bar.append(hint, button);
+  bar.append(text, button);
   return bar;
 }
 

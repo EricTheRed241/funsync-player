@@ -60,10 +60,15 @@ _chip_tags: dict[str, list[str]] = {}
 # ranking applied to each scene). Shown by the web remote and as the
 # headsets' `Score:` tag.
 _preference_scores: dict[str, float] = {}
-# The user's score per post tag — tag → number, the desktop's
-# `library.tagScores` (absent = 0), added to every scene's preference score.
-# The web remote's Tags view shows and edits them.
+# Every tag's score — tag → number, the desktop's starting scores
+# (TAG_SCORE_GROUPS) with the user's `library.tagScores` changes on top
+# (absent = 0), added to every scene's preference score. The web remote's
+# Tags view shows and edits them.
 _tag_scores: dict[str, float] = {}
+# What the Tags view shows besides the scores: `groups` (tag → group name;
+# a scene counts each group once) and `rules` (built-in weight id → number,
+# read-only), as the desktop registers them.
+_tag_score_info: dict = {"groups": {}, "rules": {}}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -491,11 +496,30 @@ def register_preference_scores(scores: dict):
 
 
 def register_tag_scores(scores: dict):
-    """Register library.tagScores (tag → number). Keys are trimmed and
+    """Register every tag's score (tag → number). Keys are trimmed and
     lower-cased, scores stepped and clamped like an edit's; zeros and
     anything that isn't a number are dropped."""
     _tag_scores.clear()
     _tag_scores.update(library_edits.clean_tag_scores(scores))
+
+
+def register_tag_score_info(info: dict):
+    """Register the Tags view's groups (tag → group name) and built-in
+    weights (id → number); entries of the wrong type are dropped."""
+    info = info if isinstance(info, dict) else {}
+    groups = info.get("groups") if isinstance(info.get("groups"), dict) else {}
+    rules = info.get("rules") if isinstance(info.get("rules"), dict) else {}
+    _tag_score_info["groups"] = {
+        library_edits.tag_key(tag): name for tag, name in groups.items() if library_edits.tag_key(tag) and isinstance(name, str)
+    }
+    _tag_score_info["rules"] = {
+        k: v for k, v in rules.items() if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
+
+
+def get_tag_score_info() -> dict:
+    """The registered tag groups and built-in weights."""
+    return {"groups": dict(_tag_score_info["groups"]), "rules": dict(_tag_score_info["rules"])}
 
 
 def register_sources(sources: list[dict]):
@@ -863,8 +887,9 @@ async def register_library(request: Request):
     the same groupings the desktop app does, plus `vrFormat` (videoPath →
     {projection, ...}, the VR Format panel's choices), `scriptTags`
     (videoPath → [post tag, ...], kept as chip tags), `preferenceScores`
-    (videoPath → number, the desktop's preference score) and `tagScores`
-    (tag → number, the user's score per tag). Every field is
+    (videoPath → number, the desktop's preference score), `tagScores`
+    (tag → number, every tag's score, defaults included) and `tagScoreInfo`
+    ({groups: {tag: group}, rules: {id: number}}). Every field is
     independent: omit a key to leave that slice untouched on the backend.
     That lets the renderer push groupings FAST (in-memory, no filesystem
     work) ahead of the slower video scan — the phone can render
@@ -916,6 +941,8 @@ def _apply_registration(data: dict):
         register_preference_scores(data.get("preferenceScores") or {})
     if "tagScores" in data:
         register_tag_scores(data.get("tagScores") or {})
+    if "tagScoreInfo" in data:
+        register_tag_score_info(data.get("tagScoreInfo") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

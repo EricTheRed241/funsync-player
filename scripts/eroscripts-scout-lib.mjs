@@ -10,8 +10,9 @@
 //   • Free Scripts only (the CLI lists that category).
 //   • Never excluded content (tags, title or first post). Scenes already in
 //     the library stay.
-//   • Monsters and feet (tags, title words or first post) aren't preferred:
-//     they come in, ranked lower (lessPreferred, RANKING.monster / feet).
+//   • Monsters, feet and FFM (tags, title words or first post) aren't
+//     preferred: they come in, ranked lower (lessPreferred, their
+//     TAG_SCORE_GROUPS group).
 //   • Animated: an animation tag and no `real` tag. A music post by a
 //     creator already in the library is accepted as well. Live action by a
 //     favourite (title, tags or poster; scripts/scout-live.mjs) is taken;
@@ -27,8 +28,10 @@
 //     downloaded; shorter scenes fetched under older rules stay.
 //   • Scenes with hand-made axes only (a partial set counts); single-axis
 //     scenes only as picks (`--add`).
-//   • Ranking: RANKING weights (VR, music, library creator, preferred acts,
-//     multi-axis, likes; 2D hentai only, monsters and feet rank lower).
+//   • Ranking: RANKING weights (VR, library creator, multi-axis, likes; 2D
+//     hentai only ranks lower) plus the tag scores (TAG_SCORE_GROUPS:
+//     creampie, riding, music, POV up; monster, feet, FFM down; the user's
+//     changes from `library.tagScores`).
 //     There's no hentai feed; hentai comes in through the other feeds.
 //   • Skip posts the library already links and scenes whose video is
 //     already in the library.
@@ -48,7 +51,7 @@ import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/pref
 
 // The ranking (renderer/js/preference-score.js, shared with the app's library
 // score) is part of this module's API for the scouts.
-export { candidateScore, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../renderer/js/preference-score.js';
+export { candidateScore, effectiveTagScores, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../renderer/js/preference-score.js';
 
 /** The minimum as words for messages: `2 min`. */
 export const MIN_VIDEO_LABEL = `${MIN_VIDEO_MS / 60_000} min`;

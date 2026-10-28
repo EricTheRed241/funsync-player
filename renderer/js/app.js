@@ -35,7 +35,7 @@ import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
-import { PREFERENCE_SCORES_KEY, TAG_SCORES_KEY } from './library-scores.js';
+import { PREFERENCE_SCORES_KEY, tagScoreRegistration } from './library-scores.js';
 import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
@@ -2512,7 +2512,7 @@ class App {
         categories: this.settings.getCategories ? this.settings.getCategories() : [],
         videoCategories: this.settings._cache?.videoCategories || {},
         preferenceScores: this.settings.get(PREFERENCE_SCORES_KEY) || {},
-        tagScores: this.settings.get(TAG_SCORES_KEY) || {},
+        ...tagScoreRegistration(this.settings),
       }),
     });
     if (!res.ok) throw new Error(`register ${res.status}`);

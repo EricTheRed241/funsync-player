@@ -12,6 +12,7 @@ import {
   livePerformerNames, hasLivePerformer, mergeCookies, withPerformers, faptapArtist, faptapSceneName, thumbnailUrl, stillWanted,
 } from '../../scripts/faptap-scout-lib.mjs';
 import { emptyScoutState, listFeed, markTopic, seenTopic, RULES_VERSION } from '../../scripts/eroscripts-scout-lib.mjs';
+import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
 const video = (tagNames, extra = {}) => ({
   id: '1', name: 'Bulma Yoga', description: '', duration: 300, user: { username: 'Zoot' },
@@ -188,8 +189,8 @@ describe('screenVideo', () => {
     expect(screenVideo(v, { knownTitles: ['zoot yoga time with chichi'] }).ok).toBe(true);
   });
 
-  it('reports VR from the flag or the tag, and the preferred tags', () => {
-    expect(screenVideo(video(['Animated', 'Creampie', 'Riding'], { vr: true }))).toMatchObject({ vr: true, preferred: ['creampie', 'riding'] });
+  it('reports VR from the flag or the tag', () => {
+    expect(screenVideo(video(['Animated', 'Creampie', 'Riding'], { vr: true }))).toMatchObject({ vr: true });
     expect(screenVideo(video(['Animated', 'VR', 'Creampie'])).vr).toBe(true);
   });
 });
@@ -229,16 +230,18 @@ describe('vrSuffix', () => {
 });
 
 describe('mergeCandidates', () => {
-  it('keeps waiting candidates still in focus, drops fetched, rejected or off-focus ones, best first under the current RANKING', () => {
+  it('keeps waiting candidates still in focus, drops fetched, rejected or off-focus ones, best first under the current scores', () => {
     const c = (id, likes, tags = ['creampie', 'hmv']) => ({ id, likes, score: 99, tags, title: '' });
     const list = mergeCandidates([c('1', 20), c('2', 100), c('4', 100, ['reverse-cowgirl'])], [c('3', 40), c('1', 60)], (id) => id === '2');
-    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 3], ['3', 2]]);
+    const tags = D.creampie + D.hmv;
+    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 3 + tags], ['3', 2 + tags]]);
   });
 
-  it('takes monster and feet videos, 0.5 lower each, 1.0 for both', () => {
+  it('takes monster and feet videos, ranked lower by their groups, both groups adding up', () => {
     const c = (id, title, tags = ['creampie', 'hmv']) => ({ id, likes: 40, tags, title });
     const list = mergeCandidates([c('1', 'Kiriko rides'), c('2', 'Mercy X Horseguy'), c('3', 'Tifa soles', ['creampie', 'hmv', 'tentacle']), c('4', 'Tifa toes')], [], () => false);
-    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 2], ['2', 1.5], ['4', 1.5], ['3', 1]]);
+    const k = 2 + D.creampie + D.hmv;
+    expect(list.map((x) => [x.id, x.score])).toEqual([['1', k], ['2', k + D.monster], ['4', k + D.footjob], ['3', k + D.tentacle + D.footjob]]);
   });
 
   it('drops saved candidates that break the content rules, picks and favourites too', () => {
@@ -274,10 +277,10 @@ describe('mergeCandidates', () => {
     const s = screenVideo(v);
     const plain = toCandidate(v, s);
     expect(toCandidate(v, s, {}).score).toBe(plain.score);
-    expect(toCandidate(v, s, { creampie: 1.5, hmv: -0.5, riding: 4 }).score).toBeCloseTo(plain.score + 1, 10);
+    expect(toCandidate(v, s, { creampie: 1.5, hmv: -0.5, riding: 4 }).score).toBeCloseTo(plain.score + 1 - D.creampie - D.hmv, 10);
     const c = (id, tags) => ({ id, likes: 40, tags, title: '' });
     const list = mergeCandidates([c('1', ['creampie', 'hmv'])], [c('2', ['creampie', 'hmv', 'ahegao'])], () => false, { ahegao: -2 });
-    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 2], ['2', 0]]);
+    expect(list.map((x) => [x.id, x.score])).toEqual([['1', 2 + D.creampie + D.hmv], ['2', D.creampie + D.hmv]]);
   });
 });
 

@@ -1,17 +1,19 @@
 // Preference score: how well a post, a candidate or a library scene fits the
-// user's preferences, with the RANKING weights in content-preferences.js.
+// user's preferences: the RANKING weights in content-preferences.js (VR,
+// hand-made axes, known artist, likes, 2D hentai) plus the tag scores.
 //
 // One implementation for everything that ranks: the EroScripts and FapTap
 // scouts order their candidates by it (scripts/eroscripts-scout-lib.mjs
 // re-exports it), and the app scores every library scene with it after each
 // scan (library-scores.js), so a scene ranks in the library as its post did
-// in the scouting. On top of the RANKING weights, the user's own score per
-// post tag (`library.tagScores`, set from the web remote's Tags view) adds
-// up over a candidate's tags; callers pass that map in. Pure and
-// renderer-safe: no Node imports.
+// in the scouting. Tag scores start from TAG_SCORE_GROUPS (creampie, riding,
+// music, POV, monster, feet, FFM) and the user changes them per tag
+// (`library.tagScores`, set from the web remote's Tags view); callers pass
+// that map in. Pure and renderer-safe: no Node imports.
 
 import {
-  FEET_TAGS, FEET_TITLE, FFM_TAGS, FFM_TITLE, FLAT_HENTAI_TAGS, MONSTER_TAGS, MONSTER_TITLE, RANKING, THREE_D_TAGS, THREE_D_TITLE, WEREWOLF_TOKEN,
+  FEET_TAGS, FEET_TITLE, FFM_TAGS, FFM_TITLE, FLAT_HENTAI_TAGS, MONSTER_TAGS, MONSTER_TITLE, RANKING, TAG_SCORE_GROUPS, THREE_D_TAGS, THREE_D_TITLE,
+  WEREWOLF_TOKEN,
 } from './content-preferences.js';
 
 /** Tag scores run from -TAG_SCORE_MAX to +TAG_SCORE_MAX in TAG_SCORE_STEP steps (backend copy: services/library_edits.py). */
@@ -37,19 +39,76 @@ export function normalizeTagScore(value) {
   return Math.min(TAG_SCORE_MAX, Math.max(-TAG_SCORE_MAX, stepped)) + 0;
 }
 
+/** Grouped tag → its TAG_SCORE_GROUPS entry. */
+const GROUP_OF = new Map(TAG_SCORE_GROUPS.flatMap((g) => g.tags.map((t) => [tagKey(t), g])));
+
+/** Every grouped tag's starting score (its group's). */
+export const DEFAULT_TAG_SCORES = Object.freeze(Object.fromEntries([...GROUP_OF].map(([tag, g]) => [tag, g.score])));
+
 /**
- * Sum of the user's tag scores over a post's distinct tags (case-insensitive);
- * a tag without a score counts 0.
+ * What the web remote's Tags view shows besides the scores: each grouped
+ * tag's group name, and the built-in RANKING weights that aren't about a
+ * tag (read-only there).
+ */
+export function tagScoreInfo() {
+  return {
+    groups: Object.fromEntries([...GROUP_OF].map(([tag, g]) => [tag, g.name])),
+    rules: { multiAxis: RANKING.multiAxis, vr: RANKING.vr, artistInLibrary: RANKING.artistInLibrary, likes: RANKING.likesMax, hentaiOnly: -RANKING.hentaiOnly },
+  };
+}
+
+/**
+ * Every tag's score: DEFAULT_TAG_SCORES with the user's changes
+ * (`library.tagScores`, an explicit 0 included) on top. Tags at 0 are left
+ * out.
+ *
+ * @param {Object<string, number>} [tagScores] `library.tagScores`
+ * @returns {Object<string, number>}
+ */
+export function effectiveTagScores(tagScores) {
+  const out = { ...DEFAULT_TAG_SCORES };
+  if (tagScores && typeof tagScores === 'object') {
+    for (const [tag, value] of Object.entries(tagScores)) {
+      const key = tagKey(tag);
+      const score = normalizeTagScore(value);
+      if (key && score !== null) out[key] = score;
+    }
+  }
+  for (const key of Object.keys(out)) if (out[key] === 0) delete out[key];
+  return out;
+}
+
+/**
+ * A post's tag score, over its distinct tags (case-insensitive), each at its
+ * effectiveTagScores score. A TAG_SCORE_GROUPS group counts once: its
+ * highest positive plus its lowest negative score. A group marked `named`
+ * also counts, at its first tag's score, when `named[group.named]` holds and
+ * none of its tags is there (the title or first post names it).
  *
  * @param {string[]} tags
  * @param {Object<string, number>} [tagScores] `library.tagScores`
+ * @param {{monster?: boolean, feet?: boolean, ffm?: boolean}} [named]
  */
-export function tagScoreSum(tags, tagScores) {
-  if (!tagScores || !Array.isArray(tags)) return 0;
+export function tagScoreSum(tags, tagScores, named = {}) {
+  const effective = effectiveTagScores(tagScores);
+  const scoreOf = (key) => (Object.hasOwn(effective, key) ? effective[key] : 0);
+  const groups = new Map();  // group → [highest positive, lowest negative]
+  const count = (group, score) => {
+    const [high, low] = groups.get(group) || [0, 0];
+    groups.set(group, [Math.max(high, score), Math.min(low, score)]);
+  };
   let sum = 0;
-  for (const key of new Set(tags.map(tagKey))) {
-    if (key && Object.hasOwn(tagScores, key)) sum += normalizeTagScore(tagScores[key]) ?? 0;
+  for (const key of new Set((Array.isArray(tags) ? tags : []).map(tagKey))) {
+    if (!key) continue;
+    const score = scoreOf(key);
+    const group = GROUP_OF.get(key);
+    if (group) count(group, score);
+    else sum += score;
   }
+  for (const g of TAG_SCORE_GROUPS) {
+    if (g.named && named[g.named] && !groups.has(g)) count(g, scoreOf(tagKey(g.tags[0])));
+  }
+  for (const [high, low] of groups.values()) sum += high + low;
   return sum;
 }
 
@@ -71,7 +130,7 @@ export function hasFfm({ tags = [], title = '' }) {
 /**
  * The not-preferred themes a post names, by tags, title words and (when
  * given) its first post: a monster, feet, FFM. None keeps a post out; each
- * ranks it lower (RANKING.monster, RANKING.feet, RANKING.ffm).
+ * ranks it lower (its TAG_SCORE_GROUPS group).
  *
  * @param {{tags?: string[], title?: string, text?: string}} post
  */
@@ -95,36 +154,33 @@ export function isHentaiOnly({ tags = [], title = '' }) {
   return tags.some((t) => FLAT_HENTAI_TAGS.has(t)) && !tags.some((t) => THREE_D_TAGS.has(t)) && !THREE_D_TITLE.test(title);
 }
 
-/** Ranking score; higher downloads first. */
-export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false, monster = false, feet = false, ffm = false }) {
+/** The RANKING part of the score (everything but the tags); higher downloads first. */
+export function scoreCandidate({ vr = false, artistInLibrary = false, multiAxis = false, likes = 0, hentaiOnly = false }) {
   return (vr ? RANKING.vr : 0)
-    + (music ? RANKING.music : 0)
     + (artistInLibrary ? RANKING.artistInLibrary : 0)
-    + (preferred.length ? RANKING.preferred + RANKING.preferredExtra * (preferred.length - 1) : 0)
     + (multiAxis ? RANKING.multiAxis : 0)
     + Math.min(RANKING.likesMax, likes / RANKING.likesPer)
-    - (hentaiOnly ? RANKING.hentaiOnly : 0)
-    - (monster ? RANKING.monster : 0)
-    - (feet ? RANKING.feet : 0)
-    - (ffm ? RANKING.ffm : 0);
+    - (hentaiOnly ? RANKING.hentaiOnly : 0);
 }
 
 /**
  * Score of a saved candidate (either scout) or a library scene under the
- * current RANKING, from what the list keeps, so a weight change reorders
- * lists saved before it, plus the user's tag scores over its tags. Monster /
- * feet / FFM come from its tags and title, the first-post flags saved with
- * it (`monster`, `feet`, `ffm`), or an older `--recheck` mark. Two decimals.
+ * current RANKING and tag scores, from what the list keeps, so a weight
+ * change reorders lists saved before it. Monster / feet / FFM named outside
+ * the tags come from its title, the first-post flags saved with it
+ * (`monster`, `feet`, `ffm`), or an older `--recheck` mark. Two decimals.
  *
  * @param {object} c
- * @param {Object<string, number>} [tagScores] `library.tagScores` (tag → score)
+ * @param {Object<string, number>} [tagScores] `library.tagScores` (the user's changes)
  */
 export function candidateScore(c, tagScores) {
   const named = lessPreferred(c);
   return +(scoreCandidate({
-    vr: !!c.vr, music: !!c.music, artistInLibrary: !!(c.artistInLibrary || c.favourite), preferred: c.preferred || [],
-    multiAxis: c.axisType === 'multi', likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
-    monster: named.monster || !!c.monster || c.contentBreak === 'monster', feet: named.feet || !!c.feet || c.contentBreak === 'feet',
+    vr: !!c.vr, artistInLibrary: !!(c.artistInLibrary || c.favourite), multiAxis: c.axisType === 'multi',
+    likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
+  }) + tagScoreSum(c.tags, tagScores, {
+    monster: named.monster || !!c.monster || c.contentBreak === 'monster',
+    feet: named.feet || !!c.feet || c.contentBreak === 'feet',
     ffm: named.ffm || !!c.ffm,
-  }) + tagScoreSum(c.tags, tagScores)).toFixed(2);
+  })).toFixed(2);
 }

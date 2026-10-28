@@ -6,14 +6,14 @@
 //   • vr: the backend's VR decision (`GET /api/media/vr-flags`, through
 //     vr-detect.js, which also applies VR Format and Mark as VR/Flat)
 //   • multi-axis: axis kind `handmade` from `GET /api/media/axis-flags`
-//   • tags: the post tags in `library.scriptTags` (EroScripts / FapTap);
-//     music, preferred acts, 2D hentai, monsters and feet from them and the
-//     title (the file name), as the scouts judge a post
+//   • tags: the post tags in `library.scriptTags` (EroScripts / FapTap),
+//     scored with the tag scores (TAG_SCORE_GROUPS defaults plus the user's
+//     changes in `library.tagScores`, set from the web remote); 2D hentai,
+//     monsters, feet and FFM also from the title (the file name), as the
+//     scouts judge a post
 //   • artist in library: the video's artist folder (artist-playlists.js) is
 //     a favourite or holds at least MIN_ARTIST_VIDEOS videos
 //   • likes: from the post record when it holds them, else 0
-//   • tag scores: the user's score per post tag (`library.tagScores`, set
-//     from the web remote), summed over the scene's tags
 // Scenes without post tags still get a score from VR, axes and the title.
 //
 // Derived and recomputed after each scan, when the backend's VR / axis
@@ -23,12 +23,23 @@
 // sent to the backend for the web remote and the headsets.
 
 import { artistOf } from './artist-playlists.js';
-import { MIN_ARTIST_VIDEOS, MUSIC_TAGS, PREFERRED_TAGS } from './content-preferences.js';
-import { candidateScore } from './preference-score.js';
+import { MIN_ARTIST_VIDEOS } from './content-preferences.js';
+import { candidateScore, effectiveTagScores, tagScoreInfo } from './preference-score.js';
 import { SCRIPT_TAGS_KEY } from './script-tags.js';
 
 export const PREFERENCE_SCORES_KEY = 'library.preferenceScores';
 export const TAG_SCORES_KEY = 'library.tagScores';
+
+/**
+ * The tag-score part of a backend registration (`/api/media/register`):
+ * every tag's score, defaults included (`tagScores`), and the groups and
+ * built-in weights the web remote's Tags view shows (`tagScoreInfo`).
+ *
+ * @param {object} data DataService (get)
+ */
+export function tagScoreRegistration(data) {
+  return { tagScores: effectiveTagScores(data.get(TAG_SCORES_KEY)), tagScoreInfo: tagScoreInfo() };
+}
 
 const fold = (s) => String(s || '').normalize('NFC').trim().toLocaleLowerCase();
 const titleOf = (p) => (String(p).split(/[\\/]/).pop() || '').replace(/\.[^/.]+$/, '');
@@ -51,8 +62,6 @@ export function sceneCandidate({ title = '', tags = [], likes = 0, vr = false, a
     tags: t,
     likes: Number(likes) || 0,
     vr: !!vr,
-    music: t.some((x) => MUSIC_TAGS.has(x)),
-    preferred: t.filter((x) => PREFERRED_TAGS.has(x)),
     axisType: axisKind === 'handmade' ? 'multi' : 'single',
     artistInLibrary: !!artistInLibrary,
   };

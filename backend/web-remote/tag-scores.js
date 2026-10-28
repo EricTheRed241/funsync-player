@@ -1,6 +1,8 @@
-// Tag scores from the phone: the user's own score per post tag
-// (`library.tagScores` on the desktop; a tag without one counts 0), added to
-// every video's ◆ preference score, plus Recalculate scores.
+// Tag scores from the phone: every post tag's score (the desktop's starting
+// scores, changed by the user; a tag without one counts 0), added to every
+// video's ◆ preference score, plus Recalculate scores. Tags of one group
+// (riding, cowgirl …) count once per video; the built-in weights that
+// aren't about a tag (VR, hand-made axes …) are shown read-only.
 //
 // Like triage, the phone never edits the library: each change is a library
 // edit the desktop applies (queued while it isn't connected), and the desktop
@@ -37,11 +39,31 @@ export function parseTagScores(data) {
   for (const [tag, score] of Object.entries(data?.scores || {})) {
     if (typeof score === 'number' && Number.isFinite(score)) scores[tag] = score;
   }
+  const groups = {};
+  for (const [tag, name] of Object.entries(data?.groups || {})) {
+    if (typeof name === 'string' && name) groups[tag] = name;
+  }
+  const rules = {};
+  for (const [id, score] of Object.entries(data?.rules || {})) {
+    if (typeof score === 'number' && Number.isFinite(score)) rules[id] = score;
+  }
   return {
     scores,
+    groups,
+    rules,
     pending: new Set(Array.isArray(data?.pending) ? data.pending : []),
     recalculating: data?.recalculating === true,
   };
+}
+
+// Built-in weights in the order the Tags view lists them.
+const RULE_ORDER = ['multiAxis', 'vr', 'artistInLibrary', 'likes', 'hentaiOnly'];
+
+/** The built-in weights as one line (`Hand-made axes +4 · VR +3 …`); '' when none are known. */
+export function formatRules(rules = {}) {
+  return RULE_ORDER.filter((id) => typeof rules[id] === 'number' && rules[id] !== 0)
+    .map((id) => t(`webRemote.tagScores.rules.${id}`, { score: formatTagScore(rules[id]) }))
+    .join(' · ');
 }
 
 /** Current tag scores; throws on an HTTP or network error. */

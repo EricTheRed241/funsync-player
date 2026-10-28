@@ -9,7 +9,7 @@
 // favourite / known artists, likes, and the stored map.
 import { describe, it, expect } from 'vitest';
 import {
-  candidateScore, normalizeTagScore, tagKey, tagScoreSum, TAG_SCORE_MAX, TAG_SCORE_STEP,
+  candidateScore, DEFAULT_TAG_SCORES as D, effectiveTagScores, normalizeTagScore, tagKey, tagScoreSum, TAG_SCORE_MAX, TAG_SCORE_STEP,
 } from '../../renderer/js/preference-score.js';
 import * as scout from '../../scripts/eroscripts-scout-lib.mjs';
 import {
@@ -29,10 +29,8 @@ describe('one ranking for scouts and library', () => {
 
   it('scores a library scene as the scouts score the same post', () => {
     const post = { title: 'Tracer rides', tags: ['animation', '3d', 'riding', 'creampie', 'pmv'], likes: 40, vr: true, axisType: 'multi', artistInLibrary: true };
-    const music = true;
-    const preferred = ['riding', 'creampie'];
     expect(score({ title: post.title, tags: post.tags, likes: 40, vr: true, axisKind: 'handmade', artistInLibrary: true }))
-      .toBe(candidateScore({ ...post, music, preferred }));
+      .toBe(candidateScore(post));
   });
 });
 
@@ -55,16 +53,20 @@ describe('scoring boundaries', () => {
     expect(score({ title: '[SFM] Scene', tags: ['hentai'] })).toBe(0);
   });
 
-  it('takes 0.5 off a monster and 0.5 off feet, by tag or title', () => {
-    expect(score({ title: 'Scene', tags: ['tentacle'] })).toBe(-RANKING.monster);
-    expect(score({ title: 'Werewolf WW scene' })).toBe(-RANKING.monster);
-    expect(score({ title: 'Scene - footjob' })).toBe(-RANKING.feet);
-    expect(score({ title: 'Orc footjob', tags: ['feet'] })).toBe(-(RANKING.monster + RANKING.feet));
+  it('takes the monster and feet scores off, by tag or title, once per group', () => {
+    expect(score({ title: 'Scene', tags: ['tentacle'] })).toBe(D.tentacle);
+    expect(score({ title: 'Werewolf WW scene' })).toBe(D.monster);
+    expect(score({ title: 'Scene - footjob' })).toBe(D.footjob);
+    expect(score({ title: 'Orc footjob', tags: ['feet'] })).toBe(D.monster + D.feet);
+    expect(score({ title: 'Tentacle monster', tags: ['tentacle', 'monster', 'monstergirls'] })).toBe(D.monster);
   });
 
-  it('adds music and preferred acts from the tags, whatever their case', () => {
-    expect(score({ title: 'Scene', tags: ['PMV'] })).toBe(RANKING.music);
-    expect(score({ title: 'Scene', tags: ['Creampie', 'riding', 'riding'] })).toBe(RANKING.preferred + RANKING.preferredExtra);
+  it('starts creampie, riding, music and POV tags positive; synonyms count once, groups add up, whatever their case', () => {
+    expect([D.creampie, D.riding, D.pmv, D.pov].every((s) => s > 0)).toBe(true);
+    expect(score({ title: 'Scene', tags: ['PMV'] })).toBe(D.pmv);
+    expect(score({ title: 'Scene', tags: ['pmv', 'hmv', 'cock-hero'] })).toBe(D.pmv);
+    expect(score({ title: 'Scene', tags: ['Creampie', 'anal-creampie', 'riding', 'cowgirl', 'reverse-cowgirl'] })).toBe(D.creampie + D.riding);
+    expect(score({ title: 'Scene', tags: ['pov', 'male-pov'] })).toBe(D.pov);
   });
 
   it('counts likes from the record, capped', () => {
@@ -108,10 +110,10 @@ describe('planPreferenceScores', () => {
       vrOf: (p) => p === a,
       axisFlags: { [a]: 'handmade', [b]: 'generated' },
     });
-    expect(s[a]).toBe(RANKING.vr + RANKING.multiAxis + RANKING.preferred + 3);
+    expect(s[a]).toBe(RANKING.vr + RANKING.multiAxis + D.creampie + 3);
     expect(s[b]).toBe(-RANKING.hentaiOnly);
     // No post tags: still scored from the title.
-    expect(s[c]).toBe(-(RANKING.monster + RANKING.feet));
+    expect(s[c]).toBe(D.monster + D.feet);
   });
 
   it('keeps the stored score of a scripted video whose axes the backend has not decided yet', () => {
@@ -143,7 +145,7 @@ describe('applyPreferenceScores', () => {
     const a = scene('X', 'Scene');
     const data = store({ 'library.sources': SOURCES.map((path) => ({ path })), 'library.scriptTags': { [a]: { tags: ['riding'] } } });
     const first = applyPreferenceScores(data, [video(a)], { axisFlags: { [a]: 'handmade' } });
-    expect(first).toEqual({ scores: { [a]: RANKING.multiAxis + RANKING.preferred }, changed: true });
+    expect(first).toEqual({ scores: { [a]: RANKING.multiAxis + D.riding }, changed: true });
     expect(data.get(PREFERENCE_SCORES_KEY)).toEqual(first.scores);
     expect(applyPreferenceScores(data, [video(a)], { axisFlags: { [a]: 'handmade' } }).changed).toBe(false);
     expect(data.writes).toBe(1);
@@ -158,16 +160,40 @@ describe('applyPreferenceScores', () => {
 });
 
 describe('tag scores', () => {
-  it('adds up the scores of a post\'s distinct tags, negative ones too; tags without a score count 0', () => {
-    const scores = { riding: 2, monstergirl: -1.5, pmv: 0.5 };
-    expect(tagScoreSum(['riding', 'pmv', 'monstergirl', '3d'], scores)).toBe(1);
-    expect(tagScoreSum(['riding', 'Riding', ' RIDING '], scores)).toBe(2);
-    expect(tagScoreSum(['3d', 'sfm'], scores)).toBe(0);
+  it('adds up ungrouped tags one by one, negative ones too; tags without a score count 0', () => {
+    const scores = { blowjob: 2, ahegao: -1.5, '3d': 0.5 };
+    expect(tagScoreSum(['blowjob', '3d', 'ahegao', 'sfm'], scores)).toBe(1);
+    expect(tagScoreSum(['blowjob', 'Blowjob', ' BLOWJOB '], scores)).toBe(2);
+    expect(tagScoreSum(['3d', 'sfm'], {})).toBe(0);
     expect(tagScoreSum([], scores)).toBe(0);
-    expect(tagScoreSum(['riding'], {})).toBe(0);
-    expect(tagScoreSum(['riding'], undefined)).toBe(0);
+    expect(tagScoreSum(['sfm'], undefined)).toBe(0);
     expect(tagScoreSum(undefined, scores)).toBe(0);
     expect(tagScoreSum(['toString', 'constructor'], {})).toBe(0);
+  });
+
+  it('counts a group once: its highest positive plus its lowest negative score', () => {
+    expect(tagScoreSum(['riding', 'cowgirl'], { cowgirl: 3 })).toBe(3);
+    expect(tagScoreSum(['riding', 'cowgirl'], { riding: 1 })).toBe(D.cowgirl);
+    expect(tagScoreSum(['riding', 'cowgirl'], { cowgirl: -1 })).toBe(D.riding - 1);
+    expect(tagScoreSum(['riding', 'cowgirl', 'reverse-cowgirl'], { cowgirl: -1, 'reverse-cowgirl': -2 })).toBe(D.riding - 2);
+    expect(tagScoreSum(['creampie', 'riding', 'blowjob'], { blowjob: 1 })).toBe(D.creampie + D.riding + 1);
+  });
+
+  it('starts every grouped tag at its group score; the user\'s change wins, an explicit 0 included', () => {
+    expect(effectiveTagScores({})).toEqual(D);
+    expect(effectiveTagScores(undefined)).toEqual(D);
+    const e = effectiveTagScores({ Creampie: 0, ahegao: -2, pov: 'x' });
+    expect([e.creampie, e.ahegao, e.pov]).toEqual([undefined, -2, D.pov]);
+    expect(tagScoreSum(['creampie'], { creampie: 0 })).toBe(0);
+    expect(tagScoreSum(['creampie', 'anal-creampie'], { creampie: 0 })).toBe(D['anal-creampie']);
+  });
+
+  it('counts a group the title or first post names at its first tag\'s score, unless one of its tags is there', () => {
+    expect(tagScoreSum([], {}, { monster: true })).toBe(D.monster);
+    expect(tagScoreSum([], { monster: -2 }, { monster: true })).toBe(-2);
+    expect(tagScoreSum(['tentacle'], { tentacle: -3 }, { monster: true })).toBe(-3);
+    expect(tagScoreSum([], {}, { feet: true, ffm: true })).toBe(D.footjob + D.ffm);
+    expect(tagScoreSum([], {}, { monster: false })).toBe(0);
   });
 
   it('rounds scores to 0.5 steps (halves up) and clamps them to ±TAG_SCORE_MAX; anything else is not a score', () => {
@@ -176,37 +202,38 @@ describe('tag scores', () => {
       .toEqual([1.5, 1, 1.5, -1, -1.5, 0, 2.5, 10, -10, 10, -10]);
     expect(Object.is(normalizeTagScore(-0.2), 0)).toBe(true);
     expect([NaN, Infinity, '', ' ', 'x', null, undefined, true, {}, []].map(normalizeTagScore)).toEqual(Array(10).fill(null));
-    expect(tagScoreSum(['riding', 'pmv'], { riding: 25, pmv: 'abc' })).toBe(10);
+    expect(tagScoreSum(['blowjob', 'ahegao'], { blowjob: 25, ahegao: 'abc' })).toBe(10);
   });
 
   it('keys tags trimmed and lower case', () => {
     expect([tagKey(' Riding '), tagKey('PMV'), tagKey(3), tagKey(null)]).toEqual(['riding', 'pmv', '', '']);
   });
 
-  it('adds the tag scores on top of the RANKING score, and changes nothing without any', () => {
-    const post = { title: 'Tracer rides', tags: ['3d', 'riding', 'pmv'], likes: 30, vr: true, music: true, preferred: ['riding'], axisType: 'multi' };
+  it('adds the tag scores on top of the RANKING score', () => {
+    const post = { title: 'Tracer rides', tags: ['3d', 'riding', 'ahegao'], likes: 30, vr: true, axisType: 'multi' };
     const base = candidateScore(post);
     expect(candidateScore(post, {})).toBe(base);
     expect(candidateScore(post, { blowjob: 4 })).toBe(base);
-    expect(candidateScore(post, { riding: 2.5, pmv: -1 })).toBeCloseTo(base + 1.5, 10);
-    expect(candidateScore(post, { riding: -20 })).toBeCloseTo(base - 10, 10);
+    expect(candidateScore(post, { ahegao: 1.5 })).toBeCloseTo(base + 1.5, 10);
+    expect(candidateScore(post, { riding: 4 })).toBeCloseTo(base + 4 - D.riding, 10);
+    expect(candidateScore(post, { '3d': -20 })).toBeCloseTo(base - 10, 10);
   });
 
   it('scores library scenes with library.tagScores', () => {
     const a = scene('X', 'Riding scene');
     const b = scene('Y', 'Other scene');
-    const scriptTags = { [a]: { tags: ['riding', 'Monstergirl'] }, [b]: { tags: ['3d'] } };
+    const scriptTags = { [a]: { tags: ['riding', 'Ahegao'] }, [b]: { tags: ['3d'] } };
     const base = { videos: [video(a), video(b)], sourcePaths: SOURCES, scriptTags, axisFlags: { [a]: 'generated', [b]: 'generated' } };
     const without = planPreferenceScores(base);
-    const withScores = planPreferenceScores({ ...base, tagScores: { riding: 1, monstergirl: -3, '3d': 0.5 } });
-    expect(withScores[a]).toBe(without[a] - 2);
+    const withScores = planPreferenceScores({ ...base, tagScores: { riding: 1, ahegao: -3, '3d': 0.5 } });
+    expect(withScores[a]).toBe(without[a] + (1 - D.riding) - 3);
     expect(withScores[b]).toBe(without[b] + 0.5);
 
     const store = { 'library.sources': SOURCES.map((path) => ({ path })), 'library.scriptTags': scriptTags };
     const data = { get: (k) => store[k], set: (k, v) => { store[k] = v; } };
     applyPreferenceScores(data, base.videos, { axisFlags: base.axisFlags });
     expect(store[PREFERENCE_SCORES_KEY]).toEqual(without);
-    store[TAG_SCORES_KEY] = { riding: 1, monstergirl: -3, '3d': 0.5 };
+    store[TAG_SCORES_KEY] = { riding: 1, ahegao: -3, '3d': 0.5 };
     expect(applyPreferenceScores(data, base.videos, { axisFlags: base.axisFlags })).toEqual({ scores: withScores, changed: true });
   });
 });
