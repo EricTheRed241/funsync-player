@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator,
+  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 
@@ -36,7 +36,7 @@ describe('screenTopic', () => {
   it('takes monster and feet posts, favourites too; they only rank lower', () => {
     expect(screenTopic(topic(['sfm', 'riding'], 'Solace2K - Mercy X Horseguy'), { favourites: ['Solace2K'] })).toMatchObject({ ok: true, favourite: 'Solace2K' });
     expect(screenTopic(topic(['animation', 'riding', 'footjob']))).toMatchObject({ ok: true });
-    expect(screenTopic(topic(['mmd', 'sex'], '触手 セックス'))).toMatchObject({ ok: true });
+    expect(screenTopic(topic(['sfm', 'sex'], '触手 セックス'))).toMatchObject({ ok: true });
   });
 
   it('takes animated posts, including AI-generated video; live action only waits for the live quota', () => {
@@ -65,7 +65,7 @@ describe('screenTopic', () => {
 
   it('turns down posts tagged sfw or non-porn before reading them; the sex rule waits for the first post', () => {
     expect(screenTopic(topic(['animation', 'sfw'])).reason).toBe('not-sexual');
-    expect(screenTopic(topic(['mmd', 'dance', 'non-porn', 'riding'])).reason).toBe('not-sexual');
+    expect(screenTopic(topic(['animation', 'dance', 'non-porn', 'riding'])).reason).toBe('not-sexual');
     expect(screenTopic(topic(['animation', 'titjob'], 'Rio Paizuri'))).toMatchObject({ ok: true });
   });
 
@@ -119,6 +119,22 @@ describe('blocked creators', () => {
     const c = (id, title, author) => ({ id, title, author, tags: ['sfm', 'riding'], axisType: 'multi', score: 1, scenes: [{ axes: ['twist'] }] });
     expect(contentRuleBreak(c(1, 'Mavuika and Xilonen', 'AidenHet'))).toBe('blocked');
     expect(downloadQueue([c(1, '[AidenHet] Mavuika', 'x'), c(2, 'Tracer rides', 'y'), c(3, 'Kafka', 'aidenhet')]).map((x) => x.id)).toEqual([2]);
+  });
+});
+
+describe('blocked tags (MMD)', () => {
+  it('blocks the mmd tag and MMD as a title word, not words containing it', () => {
+    expect(hasBlockedTag({ tags: ['mmd', 'riding'] })).toBe(true);
+    expect(hasBlockedTag({ tags: ['3d'], title: '[MMD] Idol - Reine' })).toBe(true);
+    expect(hasBlockedTag({ tags: ['3d'], title: 'Bengugu MMD - 2 Phut Hon HMV' })).toBe(true);
+    expect(hasBlockedTag({ tags: ['3d', 'mmd-like'], title: 'Hammdock riding' })).toBe(false);
+  });
+
+  it('keeps MMD posts out of new scans, picks and saved lists', () => {
+    expect(screenTopic(topic(['mmd', 'riding'], 'Hu Tao rides')).reason).toBe('blocked');
+    expect(screenPick(topic(['3d', 'riding'], 'MMD Hu Tao rides'), {}).reason).toBe('blocked');
+    const c = (id, title, tags) => ({ id, title, author: 'x', tags, axisType: 'multi', score: 1, scenes: [{ axes: ['twist'] }] });
+    expect(downloadQueue([c(1, 'Reine dance sex', ['mmd', 'sex']), c(2, 'Tracer rides', ['sfm', 'riding'])]).map((x) => x.id)).toEqual([2]);
   });
 });
 

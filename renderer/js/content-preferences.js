@@ -22,6 +22,10 @@
 export const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
 /** Creators never taken by either scout (picks included): named in the title, as the poster / uploader, or as a performer. Case, spaces and punctuation don't matter. */
 export const BLOCKED_CREATORS = ['AidenHet'];
+/** Tags never taken by either scout (picks and favourites included): MMD animations, by the `mmd` tag (FapTap's slug too) … */
+export const BLOCKED_TAGS = new Set(['mmd']);
+/** … or MMD as a word in the title. */
+export const BLOCKED_TITLE = /(?<![\p{L}\p{N}])mmd(?![\p{L}\p{N}])/iu;
 /** FapTap tags that are furry without saying so. */
 export const FURRY_TAGS = new Set([
   'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
@@ -80,8 +84,8 @@ export const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダ�
 
 // ── Discovery: scripts and axes ─────────────────────────────────────────
 
-/** EroScripts feeds the scout lists (Free Scripts tagged …). No hentai feed: hentai comes in through the others. */
-export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm', 'mmd'];
+/** EroScripts feeds the scout lists (Free Scripts tagged …). No hentai feed: hentai comes in through the others; no mmd feed: MMD is blocked (BLOCKED_TAGS). */
+export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm'];
 /** PMV / HMV / Cock Hero / Fap Hero, by tag … */
 export const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
 /** … or by title. */

@@ -41,7 +41,7 @@ import path from 'node:path';
 import { favouriteIn } from './scout-live.mjs';
 import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, BLOCKED_CREATORS, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES,
+  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES,
   PMV_TAGS, PMV_TITLE, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
@@ -148,10 +148,15 @@ export function isBlockedCreator({ title = '', author = '', artist = '', perform
   return BLOCKED_CREATORS.map(compact).some((n) => people.has(n) || inTitle.includes(n));
 }
 
+/** True when a post or video carries a BLOCKED_TAGS tag or BLOCKED_TITLE in its title (MMD). */
+export function hasBlockedTag({ tags = [], title = '' }) {
+  return tags.some((t) => BLOCKED_TAGS.has(t)) || BLOCKED_TITLE.test(String(title || ''));
+}
+
 /**
  * Why a post or video breaks the content rules every scout list obeys
  * (favourites and picks included), judged by its tags and title, so a
- * saved candidate can be checked again: `blocked` (isBlockedCreator),
+ * saved candidate can be checked again: `blocked` (isBlockedCreator, hasBlockedTag),
  * `not-sexual` (see isSexual), a `contentBreak` `--recheck` saved, or null
  * when it doesn't. A candidate whose first post showed the sex
  * (`sexual: 'text'`) passes the sex rule. Monsters and feet only rank lower
@@ -160,7 +165,7 @@ export function isBlockedCreator({ title = '', author = '', artist = '', perform
  * @param {{tags?: string[], title?: string, author?: string, artist?: string, sexual?: string, contentBreak?: string}} post
  */
 export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', sexual, contentBreak }) {
-  if (isBlockedCreator({ title, author, artist })) return 'blocked';
+  if (isBlockedCreator({ title, author, artist }) || hasBlockedTag({ tags, title })) return 'blocked';
   if (contentBreak && !RETIRED_BREAKS.has(contentBreak)) return contentBreak;
   if (!isSexual({ tags, title }) && !(sexual === 'text' && !tags.some((t) => SFW_TAGS.has(t)))) return 'not-sexual';
   return null;
@@ -185,7 +190,7 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
   if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
-  if (isBlockedCreator({ title: topic.title })) return { ok: false, reason: 'blocked' };
+  if (isBlockedCreator({ title: topic.title }) || hasBlockedTag({ tags, title: topic.title })) return { ok: false, reason: 'blocked' };
   if (tags.some((t) => SFW_TAGS.has(t))) return { ok: false, reason: 'not-sexual' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;

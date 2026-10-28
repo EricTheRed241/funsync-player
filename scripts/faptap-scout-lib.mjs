@@ -48,7 +48,7 @@
 // `overwatch`.
 
 import {
-  candidateScore, contentRuleBreak, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
+  candidateScore, contentRuleBreak, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
   titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import {
@@ -257,7 +257,7 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)) {
     return { ok: false, reason: 'excluded' };
   }
-  if (isBlockedCreator({ title, author: video.user?.username, performers: (video.performers || []).map((p) => p?.name) })) {
+  if (isBlockedCreator({ title, author: video.user?.username, performers: (video.performers || []).map((p) => p?.name) }) || hasBlockedTag({ tags, title })) {
     return { ok: false, reason: 'blocked' };
   }
   const name = normName(title);
