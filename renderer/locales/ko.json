@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "평균 속도 빠른 순",
     "sortMaxSpeedAsc": "최대 속도 느린 순",
     "sortMaxSpeedDesc": "최대 속도 빠른 순",
+    "sortScoreDesc": "선호 점수 높은 순",
+    "sortScoreAsc": "선호 점수 낮은 순",
     "filterMatchStatus": "일치 상태",
     "filterAll": "전체",
     "filterMatched": "일치됨",
@@ -312,6 +314,7 @@
     "multiAxis": "멀티 축",
     "multiAxisCount": "{count, plural, other {멀티 축 (스크립트 #개)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "선호 점수: {score}",
     "flatBadge": "FLAT",
     "limitToFolder": "이 폴더로 제한",
     "searchableClear": "— 지우기 —",
@@ -802,11 +805,14 @@
       "maxSpeedDesc": "최대 속도 빠른-느린",
       "switchTo": "{order}(으)로 전환",
       "ratingDesc": "평점 높은 순",
-      "ratingAsc": "평점 낮은 순"
+      "ratingAsc": "평점 낮은 순",
+      "scoreDesc": "선호 점수 높은 순",
+      "scoreAsc": "선호 점수 낮은 순"
     },
     "badge": {
       "script": "스크립트",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "선호 점수: {score}"
     },
     "tags": {
       "aria": "카테고리 및 태그",

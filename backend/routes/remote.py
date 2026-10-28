@@ -31,6 +31,7 @@ from routes.media import (
     get_categories,
     get_video_categories,
     get_chip_tags,
+    get_preference_score,
     get_sources,
     bump_rescan_request,
     _path_to_id,
@@ -174,6 +175,9 @@ async def list_videos():
             # Triage state (0 = unrated), queued phone/headset edits included.
             "rating": library_edits.rating_entry(ratings, v.get("path"))[0],
             "favorite": library_edits.rating_entry(ratings, v.get("path"))[1],
+            # The desktop's preference score (renderer/js/library-scores.js:
+            # the scouts' ranking applied to the scene); null = not scored yet.
+            "score": get_preference_score(v.get("path")),
         })
     out.sort(key=lambda v: v["name"].lower())
     return {"videos": out}

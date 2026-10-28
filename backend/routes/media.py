@@ -9,6 +9,7 @@ import collections
 import concurrent.futures
 import hashlib
 import logging
+import math
 import mimetypes
 import os
 import secrets
@@ -54,6 +55,11 @@ _vr_format: dict[str, dict] = {}
 # Chip tags per video — videoPath → [tag, ...], the registered `scriptTags`
 # already filtered by `services.video_tags.chip_tags`.
 _chip_tags: dict[str, list[str]] = {}
+# Preference score per video — videoPath → number, the desktop's
+# `library.preferenceScores` (renderer/js/library-scores.js: the scouts'
+# ranking applied to each scene). Shown by the web remote and as the
+# headsets' `Score:` tag.
+_preference_scores: dict[str, float] = {}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -462,6 +468,21 @@ def register_script_tags(script_tags: dict):
     _chip_tags = chips_by_path
 
 
+def register_preference_scores(scores: dict):
+    """Register the preference score per video (videoPath → number).
+    Anything that isn't a finite number is dropped. Rebinds, like the
+    other maps, so a reader never sees it half rebuilt."""
+    global _preference_scores
+    _preference_scores = {
+        path: float(score)
+        for path, score in (scores.items() if isinstance(scores, dict) else ())
+        if isinstance(path, str)
+        and isinstance(score, (int, float))
+        and not isinstance(score, bool)
+        and math.isfinite(score)
+    }
+
+
 def register_sources(sources: list[dict]):
     """Register the library source folders (id/name/path per source).
     Filters out disabled sources — they don't belong in folder browse."""
@@ -509,6 +530,11 @@ def get_vr_projection(path) -> str | None:
 def get_chip_tags(path) -> list[str]:
     """Chip tags for `path` (sorted, noise dropped); [] when it has none."""
     return list(_chip_tags.get(path, ())) if path else []
+
+
+def get_preference_score(path) -> float | None:
+    """The desktop's preference score for `path`, or None when it has none."""
+    return _preference_scores.get(path) if path else None
 
 
 def get_sources() -> list[dict]:
@@ -815,8 +841,9 @@ async def register_library(request: Request):
 
     Also accepts collections/playlists/categories so the web remote can show
     the same groupings the desktop app does, plus `vrFormat` (videoPath →
-    {projection, ...}, the VR Format panel's choices) and `scriptTags`
-    (videoPath → [post tag, ...], kept as chip tags). Every field is
+    {projection, ...}, the VR Format panel's choices), `scriptTags`
+    (videoPath → [post tag, ...], kept as chip tags) and `preferenceScores`
+    (videoPath → number, the desktop's preference score). Every field is
     independent: omit a key to leave that slice untouched on the backend.
     That lets the renderer push groupings FAST (in-memory, no filesystem
     work) ahead of the slower video scan — the phone can render
@@ -864,6 +891,8 @@ def _apply_registration(data: dict):
         register_vr_format(data.get("vrFormat") or {})
     if "scriptTags" in data:
         register_script_tags(data.get("scriptTags") or {})
+    if "preferenceScores" in data:
+        register_preference_scores(data.get("preferenceScores") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

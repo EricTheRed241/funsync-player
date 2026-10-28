@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "平均速度（速い→遅い）",
     "sortMaxSpeedAsc": "最大速度（遅い→速い）",
     "sortMaxSpeedDesc": "最大速度（速い→遅い）",
+    "sortScoreDesc": "好みスコア 高い順",
+    "sortScoreAsc": "好みスコア 低い順",
     "filterMatchStatus": "一致ステータス",
     "filterAll": "すべて",
     "filterMatched": "一致あり",
@@ -312,6 +314,7 @@
     "multiAxis": "マルチ軸",
     "multiAxisCount": "{count, plural, other {マルチ軸 (# スクリプト)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "好みスコア: {score}",
     "flatBadge": "FLAT",
     "limitToFolder": "このフォルダに限定",
     "searchableClear": "— クリア —",
@@ -802,11 +805,14 @@
       "maxSpeedDesc": "最大速度 速→遅",
       "switchTo": "{order} に切り替え",
       "ratingDesc": "評価 高い順",
-      "ratingAsc": "評価 低い順"
+      "ratingAsc": "評価 低い順",
+      "scoreDesc": "好みスコア 高い順",
+      "scoreAsc": "好みスコア 低い順"
     },
     "badge": {
       "script": "スクリプト",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "好みスコア: {score}"
     },
     "tags": {
       "aria": "カテゴリーとタグ",

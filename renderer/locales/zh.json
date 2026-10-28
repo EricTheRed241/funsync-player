@@ -284,6 +284,8 @@
     "sortAvgSpeedDesc": "平均速度 快-慢",
     "sortMaxSpeedAsc": "最大速度 慢-快",
     "sortMaxSpeedDesc": "最大速度 快-慢",
+    "sortScoreDesc": "偏好分 从高到低",
+    "sortScoreAsc": "偏好分 从低到高",
     "filterMatchStatus": "匹配状态",
     "filterAll": "全部",
     "filterMatched": "已匹配",
@@ -312,6 +314,7 @@
     "multiAxis": "多轴",
     "multiAxisCount": "{count, plural, other {多轴 (# 个脚本)}}",
     "vrBadge": "VR",
+    "scoreBadgeTitle": "偏好分：{score}",
     "flatBadge": "FLAT",
     "limitToFolder": "仅限此文件夹",
     "searchableClear": "— 清除 —",
@@ -802,11 +805,14 @@
       "maxSpeedDesc": "最大速度 快-慢",
       "switchTo": "切换为 {order}",
       "ratingDesc": "评分 从高到低",
-      "ratingAsc": "评分 从低到高"
+      "ratingAsc": "评分 从低到高",
+      "scoreDesc": "偏好分 从高到低",
+      "scoreAsc": "偏好分 从低到高"
     },
     "badge": {
       "script": "脚本",
-      "vr": "VR"
+      "vr": "VR",
+      "scoreTitle": "偏好分：{score}"
     },
     "tags": {
       "aria": "分类和标签",

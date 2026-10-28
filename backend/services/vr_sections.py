@@ -24,6 +24,7 @@ never reaches the desktop's resume tracking, so watching a scene in
 HereSphere — the case this queue exists for — would leave it out.
 """
 
+import math
 import time
 
 from services import library_edits
@@ -83,6 +84,10 @@ PLAYLIST_TAG_PREFIX = 'Playlist:'
 CATEGORY_TAG_PREFIX = 'Category:'
 # `Tag:<tag>` scene tags, one per chip tag (`services.video_tags`).
 TAG_TAG_PREFIX = 'Tag:'
+# `Score:<n>` scene tag: the desktop's preference score to the nearest 0.5,
+# always with one decimal (`Score:7.5`, `Score:7.0`, `Score:-3.0`), so
+# scenes with near-equal scores share a tag the headset can filter on.
+SCORE_TAG_PREFIX = 'Score:'
 
 
 def _positive_number(value):
@@ -261,6 +266,14 @@ def chip_tag_names(chip_tags):
     """`Tag:<tag>` for every chip tag, in the given order. Read-only in the
     headset like `Category:`."""
     return [f'{TAG_TAG_PREFIX}{tag}' for tag in chip_tags or []]
+
+
+def score_tags(score):
+    """`[Score:<n>]` for a preference score (nearest 0.5, halves rounded up,
+    one decimal); [] when the video has none. Read-only like `Category:`."""
+    if score is None:
+        return []
+    return [f'{SCORE_TAG_PREFIX}{math.floor(score * 2 + 0.5) / 2:.1f}']
 
 
 def playlist_names_from_tags(tags):

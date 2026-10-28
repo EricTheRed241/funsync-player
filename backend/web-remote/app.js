@@ -180,6 +180,7 @@ const SORT_FIELDS = [
   { field: 'avgSpeed',  defaultDir: 'desc' },
   { field: 'maxSpeed',  defaultDir: 'desc' },
   { field: 'rating',    defaultDir: 'desc' },
+  { field: 'score',     defaultDir: 'desc' },
 ];
 
 // `field:dir` -> the existing directional string. Reused so a row still
@@ -197,6 +198,8 @@ const SORT_LABELS = {
   'maxSpeed:desc': 'webRemote.sortSheet.maxSpeedDesc',
   'rating:desc': 'webRemote.sortSheet.ratingDesc',
   'rating:asc': 'webRemote.sortSheet.ratingAsc',
+  'score:desc': 'webRemote.sortSheet.scoreDesc',
+  'score:asc': 'webRemote.sortSheet.scoreAsc',
 };
 
 const DEFAULT_SORT_DIRS = Object.fromEntries(SORT_FIELDS.map((o) => [o.field, o.defaultDir]));
@@ -1372,12 +1375,30 @@ function createCard(v) {
   // Speed badge (grid/card view only — matches desktop library)
   const speedBadge = createSpeedBadge(v, { withText: true });
   if (speedBadge) meta.appendChild(speedBadge);
+  const scoreBadge = createScoreBadge(v, 'card__badge card__badge--score');
+  if (scoreBadge) meta.appendChild(scoreBadge);
 
   body.appendChild(meta);
   const labels = createLabelsLine(v, 'card__tags');
   if (labels) body.appendChild(labels);
   card.appendChild(body);
   return card;
+}
+
+/**
+ * The desktop's preference score (`score` from /api/remote/videos, the
+ * scouts' ranking applied to the scene), one decimal. Null when the video
+ * has no score yet.
+ */
+function createScoreBadge(v, className) {
+  if (typeof v.score !== 'number') return null;
+  const shown = String(Math.round(v.score * 10) / 10);
+  const b = document.createElement('span');
+  b.className = className;
+  b.textContent = `◆ ${shown}`;
+  b.title = t('webRemote.badge.scoreTitle', { score: shown });
+  b.setAttribute('aria-label', t('webRemote.badge.scoreTitle', { score: shown }));
+  return b;
 }
 
 /**
@@ -1524,6 +1545,8 @@ function createRow(v) {
     b.setAttribute('aria-label', t('webRemote.triage.stars', { n: v.rating }));
     sub.appendChild(b);
   }
+  const scoreBadge = createScoreBadge(v, 'list__badge list__badge--score');
+  if (scoreBadge) sub.appendChild(scoreBadge);
   info.appendChild(sub);
   const labels = createLabelsLine(v, 'list__tags');
   if (labels) info.appendChild(labels);

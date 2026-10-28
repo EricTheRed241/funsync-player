@@ -41,10 +41,14 @@ import path from 'node:path';
 import { favouriteIn } from './scout-live.mjs';
 import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, DANCE_TITLE, EXCLUDED_TEXT, FEET_TAGS, FEET_TITLE, FLAT_HENTAI_TAGS, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MONSTER_TAGS,
-  MONSTER_TITLE, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, RANKING, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK,
-  SFW_TAGS, THREE_D_TAGS, THREE_D_TITLE, VR_MAX_FPS, VR_MAX_HEIGHT, WEREWOLF_TOKEN,
+  ANIMATION_TAGS, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES,
+  PMV_TAGS, PMV_TITLE, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
+import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
+
+// The ranking (renderer/js/preference-score.js, shared with the app's library
+// score) is part of this module's API for the scouts.
+export { candidateScore, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../renderer/js/preference-score.js';
 
 /** The minimum as words for messages: `2 min`. */
 export const MIN_VIDEO_LABEL = `${MIN_VIDEO_MS / 60_000} min`;
@@ -125,31 +129,6 @@ export function sameVideo(a, b) {
 /** True when text names excluded content (whole words, any script). */
 export function hasExcludedText(text) {
   return EXCLUDED_TEXT.test(String(text || ''));
-}
-
-/** True when a post's tags or title name a monster (tentacles, werewolves, horse guys, orcs …). */
-export function hasMonster({ tags = [], title = '' }) {
-  return tags.some((t) => MONSTER_TAGS.has(t)) || MONSTER_TITLE.test(title) || WEREWOLF_TOKEN.test(title);
-}
-
-/** True when a post's tags or title are about feet (footjob, soles, toes …). */
-export function hasFeet({ tags = [], title = '' }) {
-  return tags.some((t) => FEET_TAGS.has(t)) || FEET_TITLE.test(title);
-}
-
-/**
- * The not-preferred themes a post names, by tags, title words and (when
- * given) its first post: a monster, feet. Neither keeps a post out; each
- * ranks it lower (RANKING.monster, RANKING.feet).
- *
- * @param {{tags?: string[], title?: string, text?: string}} post
- */
-export function lessPreferred({ tags = [], title = '', text = '' }) {
-  const s = String(text || '');
-  return {
-    monster: hasMonster({ tags, title }) || MONSTER_TITLE.test(s) || WEREWOLF_TOKEN.test(s),
-    feet: hasFeet({ tags, title }) || FEET_TITLE.test(s),
-  };
 }
 
 // `contentBreak` values an older `--recheck` saved for monster / feet text, which no longer keep a post out.
@@ -307,49 +286,10 @@ export function isSexual(post) {
   return sexEvidence(post) !== null;
 }
 
-/**
- * True for 2D hentai: animation tags only hentai / 2d / anime, no 3D tag
- * (3d, sfm, vam, mmd, cgi, blender, koikatsu …) and no 3D / SFM / VaM / MMD
- * in the title. Such posts rank lower (RANKING.hentaiOnly).
- *
- * @param {{tags?: string[], title?: string}} post
- */
-export function isHentaiOnly({ tags = [], title = '' }) {
-  return tags.some((t) => FLAT_HENTAI_TAGS.has(t)) && !tags.some((t) => THREE_D_TAGS.has(t)) && !THREE_D_TITLE.test(title);
-}
-
 /** Last action time of a parsed funscript in ms; 0 when it has none. */
 export function scriptDurationMs(script) {
   const actions = Array.isArray(script?.actions) ? script.actions : [];
   return actions.reduce((max, a) => (Number.isFinite(a?.at) && a.at > max ? a.at : max), 0);
-}
-
-/** Ranking score; higher downloads first. */
-export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false, monster = false, feet = false }) {
-  return (vr ? RANKING.vr : 0)
-    + (music ? RANKING.music : 0)
-    + (artistInLibrary ? RANKING.artistInLibrary : 0)
-    + (preferred.length ? RANKING.preferred + RANKING.preferredExtra * (preferred.length - 1) : 0)
-    + (multiAxis ? RANKING.multiAxis : 0)
-    + Math.min(RANKING.likesMax, likes / RANKING.likesPer)
-    - (hentaiOnly ? RANKING.hentaiOnly : 0)
-    - (monster ? RANKING.monster : 0)
-    - (feet ? RANKING.feet : 0);
-}
-
-/**
- * Score of a saved candidate (either scout) under the current RANKING, from
- * what the list keeps, so a weight change reorders lists saved before it.
- * Monster / feet come from its tags and title, the first-post flags saved
- * with it (`monster`, `feet`), or an older `--recheck` mark.
- */
-export function candidateScore(c) {
-  const named = lessPreferred(c);
-  return +scoreCandidate({
-    vr: !!c.vr, music: !!c.music, artistInLibrary: !!(c.artistInLibrary || c.favourite), preferred: c.preferred || [],
-    multiAxis: c.axisType === 'multi', likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
-    monster: named.monster || !!c.monster || c.contentBreak === 'monster', feet: named.feet || !!c.feet || c.contentBreak === 'feet',
-  }).toFixed(2);
 }
 
 // ── Video variant ───────────────────────────────────────────────────────

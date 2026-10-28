@@ -465,6 +465,12 @@ describe('remapPaths', () => {
     expect(remapPaths([`${old}/Mona ${'パ'.normalize('NFD')}.mp4`, `${old}/${sub}`], moves).value)
       .toEqual(['/in/bubukuin/Bubukuin - Mona/Bubukuin - Mona.mp4', `/in/bubukuin/Bubukuin - Mona/${sub}`]);
   });
+
+  it('moves the path-keyed preference scores with their videos', () => {
+    const moves = [{ from: '/in/a/3', to: '/in/a/A - B', files: [{ from: '3.mp4', to: 'A - B.mp4' }] }];
+    const config = { settings: { library: { preferenceScores: { '/in/a/3/3.mp4': 7.5, '/in/b/x.mp4': -3 } } } };
+    expect(remapPaths(config, moves).value.settings.library.preferenceScores).toEqual({ '/in/a/A - B/A - B.mp4': 7.5, '/in/b/x.mp4': -3 });
+  });
 });
 
 describe('downloadQueue', () => {

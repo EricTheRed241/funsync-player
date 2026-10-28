@@ -212,12 +212,15 @@ export function computeSpeedStats(actions) {
  * Sort videos by a given criterion.
  *
  * @param {VideoEntry[]} videos — list to sort (not mutated)
- * @param {'name'|'duration'|'avgSpeed'|'maxSpeed'|'hasFunscript'|'rating'} sortBy — sort criterion
+ * @param {'name'|'duration'|'avgSpeed'|'maxSpeed'|'hasFunscript'|'rating'|'score'} sortBy — sort criterion
  * @param {'asc'|'desc'} [order='asc'] — sort direction
  * @param {object} [opts]
  * @param {(path: string) => number} [opts.ratingOf] — rating lookup for
  *   `'rating'` (0 = unrated). Unrated videos sort LAST in both directions:
  *   they are the ones without a value, not the lowest-rated ones.
+ * @param {(path: string) => number|undefined} [opts.scoreOf] — preference
+ *   score lookup for `'score'` (library-scores.js). Videos without a score
+ *   sort last in both directions; a score can be 0 or negative.
  * @returns {VideoEntry[]} sorted copy
  */
 export function sortVideos(videos, sortBy, order = 'asc', opts = {}) {
@@ -260,6 +263,19 @@ export function sortVideos(videos, sortBy, order = 'asc', opts = {}) {
       keyed.sort((a, b) => {
         if ((a.r === 0) !== (b.r === 0)) return a.r === 0 ? 1 : -1;
         return dir * (a.r - b.r) || compareNames(a.v.name, b.v.name);
+      });
+      return keyed.map((k) => k.v);
+    }
+
+    case 'score': {
+      const scoreOf = typeof opts.scoreOf === 'function' ? opts.scoreOf : () => undefined;
+      const keyed = sorted.map((v) => {
+        const s = scoreOf(v.path);
+        return { v, s: typeof s === 'number' ? s : null };
+      });
+      keyed.sort((a, b) => {
+        if ((a.s === null) !== (b.s === null)) return a.s === null ? 1 : -1;
+        return dir * ((a.s ?? 0) - (b.s ?? 0)) || compareNames(a.v.name, b.v.name);
       });
       return keyed.map((k) => k.v);
     }

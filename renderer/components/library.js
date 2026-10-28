@@ -48,6 +48,7 @@ import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js
 import { applyAutoCategories, applyAxisCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
 import { applyPlaylistCleanup } from '../js/playlist-cleanup.js';
+import { applyPreferenceScores, PREFERENCE_SCORES_KEY } from '../js/library-scores.js';
 import { FAVOURITES } from '../js/content-preferences.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
 
@@ -1904,6 +1905,8 @@ export class Library {
     { value: 'maxSpeed',  defaultDir: 'desc', isSpeed: true },
     // Highest first; unrated always last (library-search.js sortVideos).
     { value: 'rating',    defaultDir: 'desc' },
+    // Preference score (library-scores.js), highest first; unscored last.
+    { value: 'score',     defaultDir: 'desc' },
   ];
 
   // `field:dir` -> the existing directional string. Reused for the trigger
@@ -1923,6 +1926,8 @@ export class Library {
     'maxSpeed:desc': 'library.sortMaxSpeedDesc',
     'rating:desc': 'rating.sortDesc',
     'rating:asc': 'rating.sortAsc',
+    'score:desc': 'library.sortScoreDesc',
+    'score:asc': 'library.sortScoreAsc',
   };
 
   /**
@@ -2164,10 +2169,11 @@ export class Library {
     };
   }
 
-  /** Extra inputs `sortVideos` needs (the rating lookup for 'rating'). */
+  /** Extra inputs `sortVideos` needs (the rating and score lookups). */
   _sortOpts() {
     const ratings = this._settings.getRatings ? this._settings.getRatings() : {};
-    return { ratingOf: (p) => ratingOf(ratings, p) };
+    const scores = this._settings.get(PREFERENCE_SCORES_KEY) || {};
+    return { ratingOf: (p) => ratingOf(ratings, p), scoreOf: (p) => scores[p] };
   }
 
   /**
@@ -2528,6 +2534,9 @@ export class Library {
       vrBadge.textContent = vrOverride === 'vr' ? t('library.vrBadge') : t('library.flatBadge');
       badges.appendChild(vrBadge);
     }
+
+    const listScore = this._createScoreBadge(video.path);
+    if (listScore) badges.appendChild(listScore);
 
     if (video.avgSpeed > 0 || video.maxSpeed > 0) {
       this._addSpeedBadge(badges, { avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
@@ -2903,6 +2912,9 @@ export class Library {
       vrBadge.textContent = vrOverride === 'vr' ? t('library.vrBadge') : t('library.flatBadge');
       this._getOrCreateBadgesContainer(thumbnail).appendChild(vrBadge);
     }
+
+    const cardScore = this._createScoreBadge(video.path);
+    if (cardScore) this._getOrCreateBadgesContainer(thumbnail).appendChild(cardScore);
 
     // Category dot badges
     const catIds = this._settings.getVideoCategories(video.path);
@@ -6789,12 +6801,15 @@ export class Library {
     // agree with the desktop) and shows the tags as chips.
     const vrFormatAll = this._settings.get('library.vrFormat') || {};
     const scriptTagsAll = this._settings.get(SCRIPT_TAGS_KEY) || {};
+    const scoresAll = this._settings.get(PREFERENCE_SCORES_KEY) || {};
     const vrFormat = {};
     const scriptTags = {};
+    const preferenceScores = {};
     for (const v of this._videos) {
       if (vrFormatAll[v.path]) vrFormat[v.path] = vrFormatAll[v.path];
       const tags = scriptTagsAll[v.path]?.tags;
       if (Array.isArray(tags) && tags.length) scriptTags[v.path] = tags;
+      if (typeof scoresAll[v.path] === 'number') preferenceScores[v.path] = scoresAll[v.path];
     }
     const payload = {
       videos: videosWithOverride,
@@ -6811,6 +6826,9 @@ export class Library {
       ratings: this._settings.get('library.ratings') || {},
       vrFormat,
       scriptTags,
+      // Preference score per video (library-scores.js) for the web remote
+      // and the headsets' `Score:` tag.
+      preferenceScores,
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can
@@ -6862,6 +6880,7 @@ export class Library {
     if (!res.ok) throw new Error(`vr-flags ${res.status}`);
     const { flags = {}, pending = 0 } = await res.json();
     setDetectedVRFlags(flags);
+    this._refreshPreferenceScores();
     if (this._vrFilter && this._vrFilter !== 'all' && !this._scanning) this._applyFilters();
     const r = applyVRCategory(this._settings, flags);
     if (r.added || r.removed) {
@@ -6896,6 +6915,8 @@ export class Library {
     const res = await fetch(`http://127.0.0.1:${port}/api/media/axis-flags`);
     if (!res.ok) throw new Error(`axis-flags ${res.status}`);
     const { flags = {}, pending = 0 } = await res.json();
+    this._axisFlags = flags;
+    this._refreshPreferenceScores();
     const r = applyAxisCategories(this._settings, flags);
     if (r.added || r.removed) {
       console.log('[Library] Axis categories from the scripts:', r);
@@ -6909,6 +6930,26 @@ export class Library {
           .catch((err) => console.warn('[Library] Axis categories from the backend not applied:', err?.message || err));
       }, VR_FLAGS_RETRY_MS);
     }
+  }
+
+  /**
+   * Score every video (library-scores.js) with the backend's latest VR and
+   * axis decisions; on a change, store the scores, repaint the badges,
+   * re-sort when sorted by score and send them to the backend. Waits for
+   * the first axis decisions of the session: until then the stored scores
+   * stand.
+   */
+  _refreshPreferenceScores() {
+    if (!this._axisFlags || !this._videos?.length) return;
+    const { changed } = applyPreferenceScores(this._settings, this._videos, {
+      vrOf: (path) => isVRVideo({ path }),
+      axisFlags: this._axisFlags,
+      favourites: FAVOURITES,
+    });
+    if (!changed) return;
+    this._repaintScoreBadges();
+    if (this._sortParts()[0] === 'score' && !this._scanning) this._applyFilters();
+    this._registerWithBackend();
   }
 
   /**
@@ -7043,6 +7084,32 @@ export class Library {
     for (const card of cards) {
       const path = card.dataset.videoPath;
       if (path) this._updateCardCategoryDots(card, path);
+    }
+  }
+
+  /** The score badge for `videoPath`, or null when it has no score yet. */
+  _createScoreBadge(videoPath) {
+    const score = (this._settings.get(PREFERENCE_SCORES_KEY) || {})[videoPath];
+    if (typeof score !== 'number') return null;
+    const shown = String(Math.round(score * 10) / 10);
+    const badge = document.createElement('span');
+    badge.className = 'library__score-badge';
+    badge.textContent = shown;
+    badge.title = t('library.scoreBadgeTitle', { score: shown });
+    return badge;
+  }
+
+  /** Replace the score badge on every card currently in the DOM. */
+  _repaintScoreBadges() {
+    if (!this._container) return;
+    for (const card of this._container.querySelectorAll('[data-video-path]')) {
+      card.querySelector('.library__score-badge')?.remove();
+      const badge = this._createScoreBadge(card.dataset.videoPath);
+      if (!badge) continue;
+      const listBadges = card.querySelector('.library__list-badges');
+      const thumbnail = card.querySelector('.library__card-thumbnail');
+      if (listBadges) listBadges.appendChild(badge);
+      else if (thumbnail) this._getOrCreateBadgesContainer(thumbnail).appendChild(badge);
     }
   }
 

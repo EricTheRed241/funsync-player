@@ -150,6 +150,16 @@ export function sortVideos(videos, sortBy, order = 'asc') {
         return dir * (ra - rb) || (a.name || '').localeCompare(b.name || '');
       });
       break;
+    case 'score':
+      // `score` from /api/remote/videos: the desktop's preference score
+      // (null = not scored yet, always last). Ties by name, as on the desktop.
+      sorted.sort((a, b) => {
+        const sa = typeof a.score === 'number' ? a.score : null;
+        const sb = typeof b.score === 'number' ? b.score : null;
+        if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1;
+        return dir * ((sa ?? 0) - (sb ?? 0)) || (a.name || '').localeCompare(b.name || '');
+      });
+      break;
     default:
       break;
   }

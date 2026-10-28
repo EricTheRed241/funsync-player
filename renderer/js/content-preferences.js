@@ -122,7 +122,8 @@ export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
  * Candidate score; higher downloads first. Likes add likes / likesPer, up to
  * likesMax; 2D hentai only loses hentaiOnly, a monster post loses monster
  * and a feet post loses feet (both for one with both). multiAxis applies to
- * EroScripts only (FapTap has no multi-axis scripts).
+ * EroScripts only (FapTap has no multi-axis scripts). The app scores every
+ * library scene with the same weights (preference-score.js, library-scores.js).
  */
 export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3, monster: 0.5, feet: 0.5 };
 /** 2D hentai only: animation tags among these, no THREE_D_TAGS and no THREE_D_TITLE. */
