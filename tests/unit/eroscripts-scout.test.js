@@ -75,7 +75,7 @@ describe('screenTopic', () => {
   });
 });
 
-describe('lessPreferred and the monster / feet penalty', () => {
+describe('lessPreferred and the monster / feet / FFM penalty', () => {
   it.each([
     ['monster tag', { tags: ['tentacle'] }, { monster: true, feet: false }],
     ['horse-cock tag', { tags: ['horse-cock'] }, { monster: true, feet: false }],
@@ -87,19 +87,29 @@ describe('lessPreferred and the monster / feet penalty', () => {
     ['feet in the title', { title: 'Tifa feet and riding' }, { monster: false, feet: true }],
     ['a werewolf and soles in the first post', { title: 'X', text: 'a werewolf licks her soles' }, { monster: true, feet: true }],
     ['succubi, demons, elves and lookalike words', { title: 'Succubus demon elf at the Orchid trolley, Footloose Ww' }, { monster: false, feet: false }],
+    ['ffm tag', { tags: ['threesome', 'ffm'] }, { monster: false, feet: false, ffm: true }],
+    ['FFM in the title', { title: 'Tifa and Aerith - FFM Threesome' }, { monster: false, feet: false, ffm: true }],
+    ['FFM in the first post, not a plain threesome or a word containing it', { tags: ['threesome'], title: 'Staffmeeting', text: 'an ffm scene' }, { monster: false, feet: false, ffm: true }],
   ])('spots %s', (_, post, expected) => {
-    expect(lessPreferred(post)).toEqual(expected);
+    expect(lessPreferred(post)).toEqual({ ffm: false, ...expected });
   });
 
-  it('takes 0.5 off for a monster, 0.5 for feet, 1.0 for both', () => {
+  it('leaves a plain threesome and words containing ffm alone', () => {
+    expect(lessPreferred({ tags: ['threesome'], title: 'Staffmeeting' }).ffm).toBe(false);
+  });
+
+  it('takes 0.5 off for each of a monster, feet and FFM, and they add up', () => {
     const base = { title: 'Tracer rides', tags: ['animation', 'riding'], axisType: 'multi', likes: 20 };
     const plain = candidateScore(base);
     expect(candidateScore({ ...base, tags: [...base.tags, 'tentacle'] })).toBe(plain - RANKING.monster);
     expect(candidateScore({ ...base, title: 'Tracer rides - footjob' })).toBe(plain - RANKING.feet);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'ffm'] })).toBe(plain - RANKING.ffm);
+    expect(candidateScore({ ...base, ffm: true })).toBe(plain - 0.5);
     expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet'] })).toBe(plain - 1);
+    expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet', 'ffm'] })).toBe(plain - 1.5);
     expect(candidateScore({ ...base, monster: true })).toBe(plain - 0.5);
     expect(candidateScore({ ...base, contentBreak: 'feet' })).toBe(plain - 0.5);
-    expect(RANKING.monster + RANKING.feet).toBe(1);
+    expect(RANKING.monster + RANKING.feet + RANKING.ffm).toBe(1.5);
   });
 });
 
@@ -168,11 +178,11 @@ describe('sexEvidence and judgeFirstPost', () => {
 
   it('turns down a first post naming excluded content, then needs sex somewhere; monster / feet words only flag it', () => {
     expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'a loli edit')).toEqual({ ok: false, reason: 'excluded' });
-    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'with tentacles')).toEqual({ ok: true, sexual: 'tags', monster: true, feet: false });
-    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'soles and toes')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: true });
+    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'with tentacles')).toEqual({ ok: true, sexual: 'tags', monster: true, feet: false, ffm: false });
+    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'soles and toes')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: true, ffm: false });
     expect(judgeFirstPost({ tags: ['animation', 'titjob'], title: 'Rio Paizuri' }, 'paizuri only')).toEqual({ ok: false, reason: 'not-sexual' });
-    expect(judgeFirstPost({ tags: ['animation', 'blowjob'], title: 'Seraphine BJ' }, 'then she rides you')).toEqual({ ok: true, sexual: 'text', monster: false, feet: false });
-    expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, '')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: false });
+    expect(judgeFirstPost({ tags: ['animation', 'blowjob'], title: 'Seraphine BJ' }, 'then she rides you')).toEqual({ ok: true, sexual: 'text', monster: false, feet: false, ffm: false });
+    expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, 'an FFM threesome')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: false, ffm: true });
   });
 });
 
@@ -189,9 +199,9 @@ describe('recheck', () => {
 
   it('keeps sex shown by the text (flagging monster / feet), marks excluded text for good, and leaves the rest skipped', () => {
     const post = c('Silver Streaks', ['animation', 'straight']);
-    expect(recheckWithText(post, 'She ends up riding him')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: false, feet: false } });
-    expect(recheckWithText(post, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false } });
-    expect(recheckWithText({ ...post, contentBreak: 'monster' }, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false } });
+    expect(recheckWithText(post, 'She ends up riding him')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: false, feet: false, ffm: false } });
+    expect(recheckWithText(post, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false, ffm: false } });
+    expect(recheckWithText({ ...post, contentBreak: 'monster' }, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false, ffm: false } });
     expect(recheckWithText(post, 'a loli edit')).toEqual({ outcome: 'excluded', candidate: { ...post, contentBreak: 'excluded' } });
     expect(recheckWithText(post, 'a slow blowjob')).toEqual({ outcome: 'not-sexual', candidate: post });
   });

@@ -43,6 +43,9 @@ export const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
 /** Feet, by tag or title word (EroScripts also in the first post): not preferred, they rank lower (RANKING.feet) but still come in. */
 export const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
 export const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
+/** FFM (two women, one man), by tag or title word (EroScripts also in the first post): not preferred, ranks lower (RANKING.ffm) but still comes in. */
+export const FFM_TAGS = new Set(['ffm', 'f-f-m', 'ffm-threesome']);
+export const FFM_TITLE = /(?<![\p{L}\p{N}])ffm(?![\p{L}\p{N}])/iu;
 /** Tags that say a post has no porn in it: never taken. */
 export const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 'non-nude']);
 /** FapTap audio roleplays (erotic audio / ASMR over a still or a loop): never taken. */
@@ -126,12 +129,12 @@ export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-b
 export const PREFERRED_TAGS = new Set(['creampie', 'riding']);
 /**
  * Candidate score; higher downloads first. Likes add likes / likesPer, up to
- * likesMax; 2D hentai only loses hentaiOnly, a monster post loses monster
- * and a feet post loses feet (both for one with both). multiAxis applies to
+ * likesMax; 2D hentai only loses hentaiOnly, and a monster, feet or FFM post
+ * loses monster / feet / ffm each (they add up). multiAxis applies to
  * EroScripts only (FapTap has no multi-axis scripts). The app scores every
  * library scene with the same weights (preference-score.js, library-scores.js).
  */
-export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3, monster: 0.5, feet: 0.5 };
+export const RANKING = { vr: 3, music: 2, artistInLibrary: 2, preferred: 2, preferredExtra: 0.5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3, monster: 0.5, feet: 0.5, ffm: 0.5 };
 /** 2D hentai only: animation tags among these, no THREE_D_TAGS and no THREE_D_TITLE. */
 export const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
 export const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);

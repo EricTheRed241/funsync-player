@@ -8,7 +8,7 @@
 // in the scouting. Pure and renderer-safe: no Node imports.
 
 import {
-  FEET_TAGS, FEET_TITLE, FLAT_HENTAI_TAGS, MONSTER_TAGS, MONSTER_TITLE, RANKING, THREE_D_TAGS, THREE_D_TITLE, WEREWOLF_TOKEN,
+  FEET_TAGS, FEET_TITLE, FFM_TAGS, FFM_TITLE, FLAT_HENTAI_TAGS, MONSTER_TAGS, MONSTER_TITLE, RANKING, THREE_D_TAGS, THREE_D_TITLE, WEREWOLF_TOKEN,
 } from './content-preferences.js';
 
 /** True when a post's tags or title name a monster (tentacles, werewolves, horse guys, orcs …). */
@@ -21,10 +21,15 @@ export function hasFeet({ tags = [], title = '' }) {
   return tags.some((t) => FEET_TAGS.has(t)) || FEET_TITLE.test(title);
 }
 
+/** True when a post's tags or title say FFM (two women, one man). */
+export function hasFfm({ tags = [], title = '' }) {
+  return tags.some((t) => FFM_TAGS.has(t)) || FFM_TITLE.test(title);
+}
+
 /**
  * The not-preferred themes a post names, by tags, title words and (when
- * given) its first post: a monster, feet. Neither keeps a post out; each
- * ranks it lower (RANKING.monster, RANKING.feet).
+ * given) its first post: a monster, feet, FFM. None keeps a post out; each
+ * ranks it lower (RANKING.monster, RANKING.feet, RANKING.ffm).
  *
  * @param {{tags?: string[], title?: string, text?: string}} post
  */
@@ -33,6 +38,7 @@ export function lessPreferred({ tags = [], title = '', text = '' }) {
   return {
     monster: hasMonster({ tags, title }) || MONSTER_TITLE.test(s) || WEREWOLF_TOKEN.test(s),
     feet: hasFeet({ tags, title }) || FEET_TITLE.test(s),
+    ffm: hasFfm({ tags, title }) || FFM_TITLE.test(s),
   };
 }
 
@@ -48,7 +54,7 @@ export function isHentaiOnly({ tags = [], title = '' }) {
 }
 
 /** Ranking score; higher downloads first. */
-export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false, monster = false, feet = false }) {
+export function scoreCandidate({ vr = false, music = false, artistInLibrary = false, preferred = [], multiAxis = false, likes = 0, hentaiOnly = false, monster = false, feet = false, ffm = false }) {
   return (vr ? RANKING.vr : 0)
     + (music ? RANKING.music : 0)
     + (artistInLibrary ? RANKING.artistInLibrary : 0)
@@ -57,14 +63,15 @@ export function scoreCandidate({ vr = false, music = false, artistInLibrary = fa
     + Math.min(RANKING.likesMax, likes / RANKING.likesPer)
     - (hentaiOnly ? RANKING.hentaiOnly : 0)
     - (monster ? RANKING.monster : 0)
-    - (feet ? RANKING.feet : 0);
+    - (feet ? RANKING.feet : 0)
+    - (ffm ? RANKING.ffm : 0);
 }
 
 /**
  * Score of a saved candidate (either scout) or a library scene under the
  * current RANKING, from what the list keeps, so a weight change reorders
- * lists saved before it. Monster / feet come from its tags and title, the
- * first-post flags saved with it (`monster`, `feet`), or an older
+ * lists saved before it. Monster / feet / FFM come from its tags and title,
+ * the first-post flags saved with it (`monster`, `feet`, `ffm`), or an older
  * `--recheck` mark. Two decimals.
  */
 export function candidateScore(c) {
@@ -73,5 +80,6 @@ export function candidateScore(c) {
     vr: !!c.vr, music: !!c.music, artistInLibrary: !!(c.artistInLibrary || c.favourite), preferred: c.preferred || [],
     multiAxis: c.axisType === 'multi', likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c),
     monster: named.monster || !!c.monster || c.contentBreak === 'monster', feet: named.feet || !!c.feet || c.contentBreak === 'feet',
+    ffm: named.ffm || !!c.ffm,
   }).toFixed(2);
 }
