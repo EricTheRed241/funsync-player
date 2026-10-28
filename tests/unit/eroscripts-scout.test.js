@@ -8,7 +8,7 @@
 // (scripts/eroscripts-scout-lib.mjs). No forum, MEGA or pixeldrain.
 import { describe, it, expect } from 'vitest';
 import {
-  screenTopic, hasExcludedText, isSexual, scriptDurationMs, takesSingleAxis, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
+  screenTopic, hasExcludedText, isSexual, scriptDurationMs, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore,
@@ -468,11 +468,11 @@ describe('remapPaths', () => {
 });
 
 describe('downloadQueue', () => {
-  it('puts every multi-axis post before single-axis ones and drops posts without scenes', () => {
-    const allowed = { vr: true, tags: ['creampie', 'pmv'] };
-    const c = (id, axisType, likes, scenes = 1) => ({ id, axisType, likes, ...allowed, scenes: Array(scenes).fill({ axes: axisType === 'multi' ? ['twist'] : [] }) });
+  it('orders multi-axis posts by score and drops single-axis and empty ones, VR creampie PMVs too', () => {
+    const vrCreampiePmv = { vr: true, tags: ['creampie', 'pmv'], artistInLibrary: true };
+    const c = (id, axisType, likes, scenes = 1) => ({ id, axisType, likes, ...vrCreampiePmv, scenes: Array(scenes).fill({ axes: axisType === 'multi' ? ['twist'] : [] }) });
     const q = downloadQueue([c(1, 'single', 9), c(2, 'multi', 1), c(3, 'multi', 5), c(4, 'single', 2), c(5, 'multi', 8, 0)]);
-    expect(q.map((x) => x.id)).toEqual([3, 2, 1, 4]);
+    expect(q.map((x) => x.id)).toEqual([3, 2]);
   });
 
   it('drops single-axis scenes a saved list holds that the rules no longer want', () => {
@@ -520,20 +520,11 @@ describe('screenPick', () => {
   });
 });
 
-describe('takesSingleAxis', () => {
-  it('needs VR, creampie, and a known artist or a PMV / HMV', () => {
-    expect(takesSingleAxis({ vr: true, tags: ['creampie'], artistInLibrary: true })).toBe(true);
-    expect(takesSingleAxis({ vr: true, tags: ['anal-creampie', 'hmv'] })).toBe(true);
-    expect(takesSingleAxis({ vr: true, tags: ['creampie'], title: 'Overwatch PMV' })).toBe(true);
-    expect(takesSingleAxis({ vr: true, tags: ['creampie'] })).toBe(false);
-    expect(takesSingleAxis({ vr: false, tags: ['creampie', 'pmv'], artistInLibrary: true })).toBe(false);
-    expect(takesSingleAxis({ vr: true, tags: ['riding', 'pmv'], artistInLibrary: true })).toBe(false);
-  });
-
-  it('keeps multi-axis scenes of a post whatever the rule says about its single-axis ones', () => {
+describe('wantedScenes', () => {
+  it('takes only scenes with hand-made axes, VR creampie PMVs included', () => {
     const scenes = [{ axes: ['twist'] }, { axes: [] }];
-    expect(wantedScenes({ vr: false, tags: [], scenes })).toEqual([{ axes: ['twist'] }]);
-    expect(wantedScenes({ vr: true, tags: ['creampie', 'hmv'], scenes })).toEqual(scenes);
+    expect(wantedScenes({ scenes })).toEqual([{ axes: ['twist'] }]);
+    expect(wantedScenes({ vr: true, tags: ['creampie', 'hmv'], artistInLibrary: true, scenes })).toEqual([{ axes: ['twist'] }]);
   });
 });
 

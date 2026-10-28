@@ -25,8 +25,8 @@
 //     first post of those saved before the evidence was kept.
 //   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
 //     downloaded; shorter scenes fetched under older rules stay.
-//   • Multi-axis scenes only, except the single-axis cases `takesSingleAxis`
-//     allows.
+//   • Scenes with hand-made axes only (a partial set counts); single-axis
+//     scenes only as picks (`--add`).
 //   • Ranking: RANKING weights (VR, music, library creator, preferred acts,
 //     multi-axis, likes; 2D hentai only, monsters and feet rank lower).
 //     There's no hentai feed; hentai comes in through the other feeds.
@@ -43,7 +43,7 @@ import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
   ANIMATION_TAGS, DANCE_TITLE, EXCLUDED_TEXT, FEET_TAGS, FEET_TITLE, FLAT_HENTAI_TAGS, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MONSTER_TAGS,
   MONSTER_TITLE, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, RANKING, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK,
-  SFW_TAGS, SINGLE_AXIS_CREAMPIE_TITLE, THREE_D_TAGS, THREE_D_TITLE, VR_MAX_FPS, VR_MAX_HEIGHT, WEREWOLF_TOKEN,
+  SFW_TAGS, THREE_D_TAGS, THREE_D_TITLE, VR_MAX_FPS, VR_MAX_HEIGHT, WEREWOLF_TOKEN,
 } from '../renderer/js/content-preferences.js';
 
 /** The minimum as words for messages: `2 min`. */
@@ -264,26 +264,13 @@ export function liveOnQuota({ live, favourite, music, artist }) {
 }
 
 /**
- * Whether a post's single-axis scenes may be downloaded: only VR + creampie
- * + (a creator already in the library, or a PMV / HMV). Multi-axis scenes
- * don't need this.
+ * The scenes of a post worth downloading: those with hand-made axes (a
+ * partial set counts). Single-axis scenes come in only as picks.
  *
- * @param {{tags?: string[], title?: string, vr?: boolean, artistInLibrary?: boolean}} post
- */
-export function takesSingleAxis({ tags = [], title = '', vr = false, artistInLibrary = false }) {
-  const creampie = tags.some((t) => t === 'creampie' || t.endsWith('-creampie')) || SINGLE_AXIS_CREAMPIE_TITLE.test(title);
-  const pmv = tags.some((t) => PMV_TAGS.has(t)) || PMV_TITLE.test(title);
-  return vr && creampie && (artistInLibrary || pmv);
-}
-
-/**
- * The scenes of a post worth downloading: every multi-axis one, and the
- * single-axis ones only when `takesSingleAxis` allows them.
- *
- * @param {{tags?: string[], title?: string, vr?: boolean, artistInLibrary?: boolean, scenes: {axes: string[]}[]}} post
+ * @param {{scenes: {axes: string[]}[]}} post
  */
 export function wantedScenes(post) {
-  return takesSingleAxis(post) ? post.scenes : post.scenes.filter((sc) => sc.axes.length);
+  return post.scenes.filter((sc) => sc.axes.length);
 }
 
 /**
@@ -900,7 +887,7 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 export function downloadQueue(candidates) {
   const ok = candidates
     .filter((c) => !contentRuleBreak(c))
-    .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes({ ...c, artistInLibrary: !!c.artistInLibrary }) }))
+    .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes(c) }))
     .filter((c) => c.scenes.length);
   const byScore = (a, b) => candidateScore(b) - candidateScore(a);
   const own = ok.filter((c) => !c.liveQuota);

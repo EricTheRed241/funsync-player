@@ -11,6 +11,8 @@
 // untagged VR videos were missing. The backend decides per video (the VR
 // Format panel's projection, the Mark as VR/Flat override, filename markers,
 // then the frame shape) and the VR category follows that (`planVRCategory`).
+// The axis categories (Hand-made axes, Generated axes, Single-axis) follow
+// the backend's axis kind per video the same way (`planAxisCategories`).
 //
 // The user stays in charge: each category is created once (a deleted one is
 // not made again), an existing category with the same name is reused, and
@@ -145,6 +147,68 @@ export function planVRCategory({ categories = [], videoCategories = {}, flags = 
  */
 export function applyVRCategory(data, flags) {
   const plan = planVRCategory({
+    categories: data.getCategories(),
+    videoCategories: data._cache?.videoCategories || {},
+    flags: flags || {},
+    state: data.get(AUTO_CATEGORIES_KEY) || {},
+  });
+  if (plan.add.length) data.assignCategories(plan.add);
+  for (const [videoPath, catId] of plan.remove) data.unassignCategory(videoPath, catId);
+  const before = JSON.stringify(data.get(AUTO_CATEGORIES_KEY) || {});
+  if (JSON.stringify(plan.state) !== before) data.set(AUTO_CATEGORIES_KEY, plan.state);
+  return { added: plan.add.length, removed: plan.remove.length };
+}
+
+/**
+ * Put each scripted video in the category of its axis kind (`axisKind` of
+ * the AUTO_CATEGORIES entries) and take it out of the other two when the app
+ * put it there, so a scene that gains generated or hand-made axes moves.
+ * Taking a video out by hand sticks. Videos missing from `flags` (no script,
+ * or not decided yet) are left alone.
+ *
+ * @param {object} o
+ * @param {{id: string, name: string}[]} o.categories
+ * @param {Object<string, string[]>} o.videoCategories videoPath → category ids
+ * @param {Object<string, 'handmade'|'generated'|'single'>} o.flags videoPath → axis kind, from `GET /api/media/axis-flags`
+ * @param {{created?: string[], assigned?: Object<string, string[]>}} [o.state] `library.autoCategories`
+ * @returns {{add: [string, string][], remove: [string, string][], state: object}}
+ */
+export function planAxisCategories({ categories = [], videoCategories = {}, flags = {}, state = {} }) {
+  const defs = AUTO_CATEGORIES.filter((d) => d.axisKind)
+    .map((d) => ({ ...d, cat: categories.find((c) => nameKey(c.name) === nameKey(d.name)) }))
+    .filter((d) => d.cat);
+  const assigned = { ...(state.assigned || {}) };
+  const add = [];
+  const remove = [];
+  for (const [videoPath, kind] of Object.entries(flags)) {
+    let done = assigned[videoPath] || [];
+    const inCats = videoCategories[videoPath] || [];
+    for (const d of defs) {
+      const has = done.includes(d.key);
+      if (d.axisKind === kind) {
+        if (has) continue;
+        if (!inCats.includes(d.cat.id)) add.push([videoPath, d.cat.id]);
+        done = [...done, d.key];
+      } else if (has) {
+        if (inCats.includes(d.cat.id)) remove.push([videoPath, d.cat.id]);
+        done = done.filter((k) => k !== d.key);
+      }
+    }
+    if (done.length) assigned[videoPath] = done;
+    else delete assigned[videoPath];
+  }
+  return { add, remove, state: { ...state, assigned } };
+}
+
+/**
+ * Apply `planAxisCategories` to the library's categories.
+ *
+ * @param {object} data DataService (get, set, getCategories, assignCategories, unassignCategory, _cache.videoCategories)
+ * @param {Object<string, string>} flags
+ * @returns {{added: number, removed: number}}
+ */
+export function applyAxisCategories(data, flags) {
+  const plan = planAxisCategories({
     categories: data.getCategories(),
     videoCategories: data._cache?.videoCategories || {},
     flags: flags || {},

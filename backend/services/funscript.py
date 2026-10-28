@@ -105,25 +105,34 @@ def _split_axis_name(filename: str):
     return base, suffix.lower(), generated
 
 
-def has_handmade_companions(script_path: str, filenames) -> bool:
-    """True when `filenames` (one folder's listing) holds at least one
-    companion axis file of the main script `script_path` that is NOT a
-    `*.generated.<axis>.funscript`. macOS `._` AppleDouble files are ignored.
-    """
+def companion_axes(script_path: str, filenames):
+    """`(handmade, generated)`: sorted axis suffixes of the companion files of
+    the main script `script_path` in `filenames` (one folder's listing),
+    split into those a scripter made and `*.generated.<axis>.funscript` ones.
+    macOS `._` AppleDouble files are ignored."""
     main = _split_axis_name(script_path.replace('\\', '/').rsplit('/', 1)[-1])
     if main is None:
-        return False
+        return [], []
     main_base = main[0].lower()
+    handmade, generated = set(), set()
     for name in filenames:
         if name.startswith('._'):
             continue
         parts = _split_axis_name(name)
         if parts is None:
             continue
-        base, axis, generated = parts
-        if axis and not generated and base.lower() == main_base:
-            return True
-    return False
+        base, axis, is_generated = parts
+        if axis and base.lower() == main_base:
+            (generated if is_generated else handmade).add(axis)
+    return sorted(handmade), sorted(generated)
+
+
+def has_handmade_companions(script_path: str, filenames) -> bool:
+    """True when `filenames` (one folder's listing) holds at least one
+    companion axis file of the main script `script_path` that is NOT a
+    `*.generated.<axis>.funscript`. macOS `._` AppleDouble files are ignored.
+    """
+    return bool(companion_axes(script_path, filenames)[0])
 
 
 # --- Embedded multi-axis data ---------------------------------------------

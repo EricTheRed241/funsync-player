@@ -84,14 +84,13 @@ export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm', 'mmd'];
 export const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
 /** … or by title. */
 export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu;
-/**
- * EroScripts takes multi-axis scenes only. A single-axis scene comes in only
- * when the post is VR, has creampie (a `creampie` / `…-creampie` tag or this
- * title) and is by a creator already in the library or a PMV_TAGS / PMV_TITLE
- * video. Single-axis scenes that come in get generated twist / roll / pitch;
- * hand-made axes always win, and a partial multi-axis scene is left as made.
- */
-export const SINGLE_AXIS_CREAMPIE_TITLE = /(?<![\p{L}\p{N}])creampies?(?![\p{L}\p{N}])|中出し|内射/iu;
+// EroScripts takes scenes with hand-made axes only (a partial set counts and
+// is left as made). Single-axis scenes come in only as picks (`--add`), and
+// those get generated twist / roll / pitch; hand-made axes always win.
+// FapTap has no multi-axis scripts, so its scout is paused while the library
+// works towards about half hand-made scenes.
+/** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
+export const LIBRARY_MAX_VIDEOS = 500;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
 export const FAPTAP_FOCUS = [
   { name: 'PMV / HMV', tags: [...PMV_TAGS], title: PMV_TITLE },
@@ -175,7 +174,7 @@ export const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'ot
 
 // ── Auto categories ─────────────────────────────────────────────────────
 
-/** Categories filled from post tags after each scan (VR from the backend's VR decision instead). */
+/** Categories filled from post tags after each scan (VR and the axis kinds from the backend's decisions instead). */
 export const AUTO_CATEGORIES = [
   { key: 'creampie', name: 'Creampie', color: '#e94560', tags: ['creampie', 'anal-creampie', 'oral-creampie'] },
   { key: 'riding', name: 'Riding', color: '#f39c12', tags: ['riding', 'cowgirl', 'reverse-cowgirl'] },
@@ -191,6 +190,10 @@ export const AUTO_CATEGORIES = [
   { key: 'pmv', name: 'PMV / HMV', color: '#f39c12', tags: [...PMV_TAGS] },
   { key: 'vr', name: 'VR', color: '#3498db', tags: [] },
   { key: 'pov', name: 'POV', color: '#00cec9', tags: ['pov', 'male-pov'] },
+  // One of these per scripted video, by its axes (backend `GET /api/media/axis-flags`).
+  { key: 'axes-handmade', name: 'Hand-made axes', color: '#2ecc71', tags: [], axisKind: 'handmade' },
+  { key: 'axes-generated', name: 'Generated axes', color: '#95a5a6', tags: [], axisKind: 'generated' },
+  { key: 'axes-single', name: 'Single-axis', color: '#636e72', tags: [], axisKind: 'single' },
 ];
 
 // ── Auto collections ────────────────────────────────────────────────────
