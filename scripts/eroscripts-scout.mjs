@@ -226,7 +226,7 @@ function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, ho
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
     vr: s.vr, music: s.music, preferred, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, sexual: first.sexual,
-    ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(picked ? { picked } : {}),
+    ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(first.ffm ? { ffm: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
   return { ...c, score: lib.candidateScore(c) };
@@ -424,7 +424,7 @@ async function recheck({ api, userData }) {
         const r = changed.get(c.id);
         if (!r) return c;
         const { contentBreak, ...rest } = c;
-        const judged = Object.fromEntries(['sexual', 'contentBreak', 'monster', 'feet'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+        const judged = Object.fromEntries(['sexual', 'contentBreak', 'monster', 'feet', 'ffm'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
         return { ...rest, ...judged };
       });
       writeAtomic(file, JSON.stringify(saved, null, 1));
