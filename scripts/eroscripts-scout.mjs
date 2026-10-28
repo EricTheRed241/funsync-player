@@ -236,7 +236,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
   const { library, knownTopics, turnedDown, favourites } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
-  const rejected = { known: 0, excluded: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
+  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
   let listed = 0;
   let judged = 0;
@@ -265,6 +265,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const data = await api.getTopicData(t.id);
       const op = data?.post_stream?.posts?.[0];
       if (!op) { process.stderr.write(`! ${t.id} unreadable\n`); continue; }
+      if (lib.isBlockedCreator({ author: op.username })) { verdict('blocked'); continue; }
       const cooked = op.cooked || '';
       const text = cooked.replace(/<[^>]+>/g, ' ');
       const first = lib.judgeFirstPost(t, text);
@@ -342,6 +343,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       if (data.category_id !== lib.FREE_SCRIPTS_CATEGORY) { console.log(`✗ ${id} ${t.title}: not in Free Scripts`); continue; }
       const s = lib.screenPick(t, { knownTopics, creators: [...library.creators], sceneNames: library.sceneNames, favourites });
       if (!s.ok) { console.log(`✗ ${id} ${t.title}: ${s.reason}`); continue; }
+      if (lib.isBlockedCreator({ author: op.username })) { console.log(`✗ ${id} ${t.title}: blocked creator`); continue; }
       const cooked = op.cooked || '';
       const first = lib.judgeFirstPost(t, cooked.replace(/<[^>]+>/g, ' '));
       if (!first.ok) { console.log(`✗ ${id} ${t.title}: ${first.reason}`); continue; }
