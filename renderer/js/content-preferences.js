@@ -20,6 +20,8 @@
 
 /** Excluded content, by tag, title or first post / description. Hyphenated tags (`futa-on-male`) match, `Futaba` doesn't. */
 export const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
+/** Creators never taken by either scout (picks included): named in the title, as the poster / uploader, or as a performer. Case, spaces and punctuation don't matter. */
+export const BLOCKED_CREATORS = ['AidenHet'];
 /** FapTap tags that are furry without saying so. */
 export const FURRY_TAGS = new Set([
   'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',

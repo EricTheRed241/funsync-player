@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore,
+  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 
@@ -100,6 +100,25 @@ describe('lessPreferred and the monster / feet penalty', () => {
     expect(candidateScore({ ...base, monster: true })).toBe(plain - 0.5);
     expect(candidateScore({ ...base, contentBreak: 'feet' })).toBe(plain - 0.5);
     expect(RANKING.monster + RANKING.feet).toBe(1);
+  });
+});
+
+describe('blocked creators', () => {
+  it('matches a blocked name in the title, as poster or artist, whatever its case, spacing or brackets', () => {
+    expect(isBlockedCreator({ title: '[AidenHet] Rina - Lesson In Restraint' })).toBe(true);
+    expect(isBlockedCreator({ title: 'Ganyu by aiden het (VR)' })).toBe(true);
+    expect(isBlockedCreator({ title: 'Some scene', author: 'Aidenhet' })).toBe(true);
+    expect(isBlockedCreator({ title: 'Some scene', performers: ['AIDENHET'] })).toBe(true);
+    expect(isBlockedCreator({ title: 'Aiden - Het Party', author: 'Aiden' })).toBe(true);
+    expect(isBlockedCreator({ title: 'Aiden rides', author: 'Hetty' })).toBe(false);
+  });
+
+  it('keeps blocked posts out of new scans, picks and saved lists', () => {
+    expect(screenTopic(topic(['sfm', 'riding'], '[AidenHet] Belle and Zhu Yuan - Movie Night')).reason).toBe('blocked');
+    expect(screenPick(topic(['sfm', 'riding'], '[AidenHet] Belle'), {}).reason).toBe('blocked');
+    const c = (id, title, author) => ({ id, title, author, tags: ['sfm', 'riding'], axisType: 'multi', score: 1, scenes: [{ axes: ['twist'] }] });
+    expect(contentRuleBreak(c(1, 'Mavuika and Xilonen', 'AidenHet'))).toBe('blocked');
+    expect(downloadQueue([c(1, '[AidenHet] Mavuika', 'x'), c(2, 'Tracer rides', 'y'), c(3, 'Kafka', 'aidenhet')]).map((x) => x.id)).toEqual([2]);
   });
 });
 

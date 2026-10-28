@@ -48,7 +48,7 @@
 // `overwatch`.
 
 import {
-  candidateScore, contentRuleBreak, hasExcludedText, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
+  candidateScore, contentRuleBreak, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, normName, sameVideo, sceneTitle,
   titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import {
@@ -248,7 +248,7 @@ export function faptapSceneName(video, ctx = {}) {
  * @param {boolean} [ctx.picked] the user asked for this video by id
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
  *   focus: string[], preferred: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean, hentaiOnly: boolean}}
- *   reasons: excluded, audio-only, off-focus, not-sexual, short, in-library
+ *   reasons: excluded, blocked, audio-only, off-focus, not-sexual, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
   const tags = videoTags(video);
@@ -256,6 +256,9 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   const text = htmlText(video.description);
   if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)) {
     return { ok: false, reason: 'excluded' };
+  }
+  if (isBlockedCreator({ title, author: video.user?.username, performers: (video.performers || []).map((p) => p?.name) })) {
+    return { ok: false, reason: 'blocked' };
   }
   const name = normName(title);
   const words = ` ${name} `;
