@@ -134,6 +134,7 @@ function parseArgs(argv) {
 // ── Hosts ───────────────────────────────────────────────────────────────
 
 async function megaFiles(url) {
+  if (!lib.megaKeyOk(url)) throw new Error(`MEGA link with a broken key: ${url}`);
   const { File } = await import('megajs');
   const f = File.fromURL(url);
   await f.loadAttributes();
