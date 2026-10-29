@@ -12,6 +12,7 @@ import {
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
+  manualDownloads, manualListText, findLocalCopy,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
@@ -765,5 +766,37 @@ describe('addToDiscovery', () => {
     const config = { settings: { library: { sources: [{ path: '/in' }] } }, playlists: [{ id: 'p', name: ' discovery ', videoPaths: [] }] };
     expect(addToDiscovery(config, ['/in/x.mp4'], { folder: { name: 'FapTap', path: '/in' }, newId: () => 'new' }).playlistCreated).toBe(false);
     expect(config.playlists[0].videoPaths).toEqual(['/in/x.mp4']);
+  });
+});
+
+describe('files downloaded by hand', () => {
+  const pd = (name, id, size) => ({ name, host: 'pixeldrain', url: `https://pixeldrain.com/api/file/${id}?download`, ...(size ? { size } : {}) });
+  const post = (id, scenes) => ({ id, title: `Post ${id}`, url: `https://discuss.eroscripts.com/t/${id}`, scenes });
+
+  it('lists every pixeldrain script and video of a post once, with its viewer page, and skips fetched scenes and other hosts', () => {
+    const queue = [
+      post(1, [{ scripts: [pd('a.funscript', 'S1'), pd('a.roll.funscript', 'S2')], video: pd('a.mp4', 'V1', 5e8) }]),
+      post(2, [{ scripts: files('b.funscript'), video: { name: 'b.mp4', host: 'mega', url: 'https://mega.nz/file/x' } }]),
+      post(3, [
+        { scripts: [pd('c.funscript', 'S3')], video: pd('c1.mp4', 'V2') },
+        { scripts: [pd('c.funscript', 'S3')], video: pd('c2.mp4', 'V3') },
+      ]),
+    ];
+    const r = manualDownloads(queue, (id, video) => id === 3 && video === 'c1.mp4');
+    expect(r.map((p) => [p.id, p.files.map((f) => f.name)])).toEqual([
+      [1, ['a.funscript', 'a.roll.funscript', 'a.mp4']],
+      [3, ['c.funscript', 'c2.mp4']],
+    ]);
+    expect(r[0].files[2]).toEqual({ name: 'a.mp4', size: 5e8, page: 'https://pixeldrain.com/u/V1' });
+    expect(manualListText(r, { folder: '/Users/x/Downloads/for-fs', generatedAt: 'now' })).toContain('--fetch --ids 1,3');
+  });
+
+  it('takes a saved file by name whatever its Unicode form, and only at the listed size', () => {
+    const nfd = 'オーヴェルツィア.mp4'.normalize('NFD');
+    const entries = [{ name: nfd, path: `/d/${nfd}`, size: 100 }, { name: 'other.mp4', path: '/d/other.mp4', size: 100 }];
+    expect(findLocalCopy({ name: 'オーヴェルツィア.mp4'.normalize('NFC'), size: 100 }, entries)?.path).toBe(`/d/${nfd}`);
+    expect(findLocalCopy({ name: 'オーヴェルツィア.mp4', size: 99 }, entries)).toBe(null);
+    expect(findLocalCopy({ name: 'other.mp4' }, entries)?.path).toBe('/d/other.mp4');
+    expect(findLocalCopy({ name: 'missing.mp4' }, entries)).toBe(null);
   });
 });

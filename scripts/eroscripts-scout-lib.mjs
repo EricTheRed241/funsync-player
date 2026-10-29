@@ -918,3 +918,92 @@ export function addToDiscovery(config, videoPaths, { folder, newId, now = Date.n
 export function fetchedKey(topicId, videoName) {
   return `${topicId}|${videoName}`;
 }
+
+// ── Downloads by hand ───────────────────────────────────────────────────
+//
+// Some hosts can't be fetched by a script: pixeldrain answers 403
+// `file_rate_limited_captcha_required` once a file has hotlink protection,
+// and only its own page (with a CAPTCHA) serves it. The user downloads those
+// files in a browser; `--fetch` then takes them from the Downloads folder
+// instead of the network (any host: a MEGA file saved by hand counts too).
+
+/** Hosts whose files the user may have to download by hand. */
+export const MANUAL_HOSTS = new Set(['pixeldrain']);
+
+/** The page a person downloads `file` from: pixeldrain's file viewer, else the file's URL. */
+export function manualPageUrl(file) {
+  const id = String(file.url || '').match(/pixeldrain\.(?:com|net)\/api\/file\/([A-Za-z0-9]+)/)?.[1];
+  return id ? `https://pixeldrain.com/u/${id}` : file.url;
+}
+
+/**
+ * The posts of a download queue with files on MANUAL_HOSTS, in queue order:
+ * `[{id, title, url, files: [{name, size, page}]}]`, every script and video
+ * of the post's wanted scenes that sits on such a host. Scenes `isDone`
+ * (already fetched or turned down) are left out.
+ *
+ * @param {object[]} queue downloadQueue's result
+ * @param {(id: number, videoName: string) => boolean} [isDone]
+ */
+export function manualDownloads(queue, isDone = () => false) {
+  const out = [];
+  for (const c of queue) {
+    const files = new Map();
+    for (const sc of c.scenes || []) {
+      if (isDone(c.id, sc.video.name)) continue;
+      for (const f of [...(sc.scripts || []), sc.video]) {
+        if (f && MANUAL_HOSTS.has(f.host) && !files.has(f.name)) files.set(f.name, { name: f.name, size: f.size || null, page: manualPageUrl(f) });
+      }
+    }
+    if (files.size) out.push({ id: c.id, title: c.title, url: c.url, files: [...files.values()] });
+  }
+  return out;
+}
+
+/**
+ * The text of the download list for the user (`download-for-fs.txt`):
+ * instructions, then each post with its files' pages.
+ *
+ * @param {ReturnType<typeof manualDownloads>} posts
+ * @param {{folder: string, generatedAt?: string}} o folder: where the files go
+ */
+export function manualListText(posts, { folder, generatedAt = new Date().toISOString() }) {
+  const size = (n) => (n ? ` (${n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : `${Math.max(0.01, n / 1e6).toFixed(2)} MB`})` : '');
+  const total = posts.reduce((n, p) => n + p.files.reduce((m, f) => m + (f.size || 0), 0), 0);
+  const lines = [
+    'FunSync: files to download by hand',
+    `Made ${generatedAt} by: npm run eroscripts:scout -- --manual-list`,
+    '',
+    'pixeldrain blocks scripted downloads of these files (hotlink protection), but its',
+    'own page still serves them after a CAPTCHA.',
+    '',
+    'How:',
+    '  1. Open each link below in a browser on this Mac, press Download and solve the CAPTCHA.',
+    `  2. Save the file into ${folder} (or leave it in ~/Downloads). Keep the name exactly`,
+    '     as pixeldrain gives it: the scout matches files by name (and size).',
+    '  3. Download every file of a post (its scripts and its video), or the post is skipped.',
+    '  4. pixeldrain lets a free user download about 6 GB a day.',
+    '  5. Then tell omp "downloaded", or run:',
+    `       npm run eroscripts:scout -- --fetch --ids ${posts.map((p) => p.id).join(',') || '<ids>'}`,
+    '     Each file is moved into the library (EroScripts folder), the scene is named and',
+    '     added to Discovery as usual, and the file is taken out of Downloads.',
+    '',
+    `${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files${total ? `, about ${(total / 1e9).toFixed(1)} GB` : ''}`,
+  ];
+  posts.forEach((p, i) => {
+    lines.push('', `${i + 1}. ${p.title}`, `   Post: ${p.url}  (id ${p.id})`);
+    for (const f of p.files) lines.push(`   - ${f.name}${size(f.size)}`, `     ${f.page}`);
+  });
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * The copy of `file` the user saved by hand, from `entries` (`[{name, path,
+ * size}]`, the Downloads folder's files): the same name (Unicode form
+ * aside) and, when the list knows it, the same size. null when there's none.
+ */
+export function findLocalCopy(file, entries) {
+  const want = String(file?.name || '').normalize('NFC');
+  if (!want) return null;
+  return (entries || []).find((e) => String(e.name).normalize('NFC') === want && (!file.size || e.size === file.size)) || null;
+}

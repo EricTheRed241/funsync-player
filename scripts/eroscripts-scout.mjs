@@ -6,6 +6,7 @@
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --recheck    judge saved candidates' sex by their first post (one-off)
+//   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (sex required for
 // every post, favourites and picks too; monster, feet and 2D hentai posts
@@ -23,6 +24,7 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { Readable } from 'node:stream';
@@ -48,6 +50,7 @@ const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const FOLDER = 'EroScripts';
+const DOWNLOADS = path.join(os.homedir(), 'Downloads');
 
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
 Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.json):
@@ -71,6 +74,11 @@ Download:
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
+                         Files saved by hand (any host) are taken from --manual-dir or ~/Downloads first.
+By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
+  --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
+                         their pages and instructions (with --ids: only those posts); no login needed
+  --manual-dir <dir>     where files downloaded by hand are saved (default ~/Downloads/for-fs)
 Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
                          and the paths config.json keeps for them (app must be closed)
@@ -83,7 +91,7 @@ Both:
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
 
 function parseArgs(argv) {
-  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false };
+  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs') };
   const value = (i, flag) => {
     if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
     return argv[i + 1];
@@ -95,6 +103,8 @@ function parseArgs(argv) {
       case '--retitle': opts.retitle = true; break;
       case '--recheck': opts.recheck = true; break;
       case '--dry-run': opts.dryRun = true; break;
+      case '--manual-list': opts.manualList = true; break;
+      case '--manual-dir': opts.manualDir = path.resolve(value(i, a)); i++; break;
       case '--pages': opts.pages = Number(value(i, a)); i++; break;
       case '--anim-pages': opts.animPages = Number(value(i, a)); i++; break;
       case '--backfill': opts.backfill = Number(value(i, a)); i++; break;
@@ -449,18 +459,40 @@ for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 }
 
 /**
+ * Files saved by hand: the files directly in each of `dirs` (AppleDouble
+ * sidecars left out), as `[{name, path, size}]`.
+ */
+function localDownloads(dirs) {
+  const out = [];
+  for (const dir of dirs) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (!e.isFile() || e.name.startsWith('._')) continue;
+      const full = path.join(dir, e.name);
+      try { out.push({ name: e.name, path: full, size: fs.statSync(full).size }); } catch { /* gone meanwhile */ }
+    }
+  }
+  return out;
+}
+
+/**
  * Download `file` to `dest` through `<staging>/<name>.part`. Every attempt
  * starts from scratch, so a failed one deletes its `.part` rather than leave
- * it behind.
+ * it behind. A copy the user saved by hand (`local`, see localDownloads) is
+ * used instead of the network and removed from Downloads once it's in place.
  */
-async function download(api, file, dest, staging) {
+async function download(api, file, dest, staging, local = []) {
   if (fs.existsSync(dest)) return 'have';
   fs.mkdirSync(staging, { recursive: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = path.join(staging, `${path.basename(dest)}.part`);
+  const byHand = lib.findLocalCopy(file, local);
   activePart = tmp;
   try {
-    if (file.host === 'forum') {
+    if (byHand) {
+      fs.copyFileSync(byHand.path, tmp);
+    } else if (file.host === 'forum') {
       const r = await api.downloadFile(file.url, tmp, { overwrite: true });
       if (!r.success) throw new Error(`forum: ${r.error}`);
     } else if (file.host === 'mega') {
@@ -478,7 +510,7 @@ async function download(api, file, dest, staging) {
       await pipeline(node.download({}), fs.createWriteStream(tmp));
     } else if (file.host === 'pixeldrain') {
       const resp = await fetch(file.url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}${resp.status === 403 ? ' (download it by hand: --manual-list)' : ''}`);
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else {
       throw new Error(`unknown host ${file.host}`);
@@ -491,6 +523,11 @@ async function download(api, file, dest, staging) {
     throw err;
   } finally {
     activePart = null;
+  }
+  if (byHand) {
+    fs.rmSync(byHand.path, { force: true });
+    local.splice(local.indexOf(byHand), 1);
+    return 'local';
   }
   return 'ok';
 }
@@ -511,8 +548,10 @@ function fetchedScenes(incoming, userData) {
 }
 
 /** One pass over the queue; downloads at most `room` videos (the library cap). */
-async function fetchPass(queue, { api, userData, incoming, staging, room }) {
+async function fetchPass(queue, { api, userData, incoming, staging, room, manualDir }) {
   const done = fetchedScenes(incoming, userData);
+  // Read every pass: files the user saved since the last one count too.
+  const local = localDownloads([manualDir, DOWNLOADS]);
   let ok = 0; let failed = 0; let generated = 0; let short = 0; let waiting = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
@@ -531,7 +570,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room }) {
       // post's files and the current length rule don't apply to it.
       if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in Discovery from another post; left as is`); continue; }
       try {
-        for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging);
+        for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging, local);
         let lengthMs = null;
         try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
         if (lengthMs !== null && lengthMs < prefs.MIN_VIDEO_MS) {
@@ -545,7 +584,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room }) {
           short++;
           continue;
         }
-        await download(api, sc.video, video, staging);
+        const got = await download(api, sc.video, video, staging, local);
         fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
           topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
           video: sc.video.name, file: path.basename(video), scenes: c.scenes.length, at: new Date().toISOString(),
@@ -558,7 +597,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room }) {
         const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
         live.recordDownload(userData, !!c.liveQuota);
         const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
-        console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
+        console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}${listed ? '' : ' (playlist pending: app is open)'}`);
         ok++;
       } catch (err) {
         console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
@@ -569,7 +608,8 @@ async function fetchPass(queue, { api, userData, incoming, staging, room }) {
   return { ok, failed, generated, short, waiting, capped };
 }
 
-async function fetchAll(opts, { api, userData, config, incoming }) {
+/** The saved list as a download queue (content-rule breaks dropped, `--ids` applied). */
+function savedQueue(opts, { userData, config }) {
   const file = path.join(userData, 'eroscripts-scout.json');
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
   const { candidates } = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -581,7 +621,22 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
   const { favourites, scoring } = live.scoutPreferences(config);
-  const queue = lib.downloadQueue(candidates, scoring, favourites).filter((c) => !opts.ids || opts.ids.has(c.id));
+  return lib.downloadQueue(candidates, scoring, favourites).filter((c) => !opts.ids || opts.ids.has(c.id));
+}
+
+/** Write ~/Downloads/download-for-fs.txt: the waiting posts' files to download by hand. */
+function manualList(opts, { userData, config, incoming }) {
+  const done = fetchedScenes(incoming, userData);
+  const posts = lib.manualDownloads(savedQueue(opts, { userData, config }), (id, video) => done.has(lib.fetchedKey(id, video)));
+  fs.mkdirSync(opts.manualDir, { recursive: true });
+  const out = path.join(DOWNLOADS, 'download-for-fs.txt');
+  fs.writeFileSync(out, lib.manualListText(posts, { folder: opts.manualDir }));
+  console.log(`${out}: ${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files to download by hand into ${opts.manualDir}`);
+  return 0;
+}
+
+async function fetchAll(opts, { api, userData, config, incoming }) {
+  const queue = savedQueue(opts, { userData, config });
   const gb = queue.reduce((n, c) => n + c.scenes.reduce((m, sc) => m + (sc.video.size || 0), 0), 0) / 1e9;
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);
   if (opts.dryRun) {
@@ -596,7 +651,7 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
       break;
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
-    const r = await fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held });
+    const r = await fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir });
     console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (r.capped) break;
@@ -643,6 +698,7 @@ async function main() {
   const config = readConfig(userData);
   const incoming = downloadFolder(config, FOLDER, opts.incoming).path;
   if (opts.retitle) return retitle(opts, { userData, incoming });
+  if (opts.manualList) return manualList(opts, { userData, config, incoming });
   const session = config.settings?.eroscripts?.session || {};
   if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
 
