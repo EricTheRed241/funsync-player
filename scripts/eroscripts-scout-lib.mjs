@@ -271,12 +271,51 @@ export function liveOnQuota({ live, favourite, music, artist }) {
 
 /**
  * The scenes of a post worth downloading: those with hand-made axes (a
- * partial set counts). Single-axis scenes come in only as picks.
+ * partial set counts), and archives of a post tagged multi-axis (`packed`,
+ * see archiveScenes: their axes are known once unpacked). Single-axis
+ * scenes come in only as picks.
  *
- * @param {{scenes: {axes: string[]}[]}} post
+ * @param {{scenes: {axes: string[], packed?: boolean}[]}} post
  */
 export function wantedScenes(post) {
-  return post.scenes.filter((sc) => sc.axes.length);
+  return post.scenes.filter((sc) => sc.axes.length || sc.packed);
+}
+
+/** Archives the scout unpacks after downloading (unar, else bsdtar). */
+export const ARCHIVE_RE = /\.(rar|zip|7z)$/i;
+export const isArchiveName = (name) => ARCHIVE_RE.test(String(name || ''));
+
+/**
+ * A post that packs its scripts and videos in archives (RAR / ZIP / 7z on
+ * pixeldrain, MEGA or the forum) as scenes: one per archive, `packed`, with
+ * the archive as its `video` (so a fetched archive counts as done) and no
+ * scripts or axes until it is unpacked (unpackedScenes).
+ *
+ * @param {{name: string, size?: number, host: string}[]} files the post's files
+ */
+export function archiveScenes(files) {
+  const seen = new Set();
+  return files.filter((f) => isArchiveName(f.name) && !seen.has(f.name) && seen.add(f.name))
+    .map((f) => ({ base: f.name.replace(ARCHIVE_RE, ''), packed: true, axes: [], scripts: [], video: f, match: 0 }));
+}
+
+/**
+ * The scenes in an unpacked archive (`files`: every file in it, `{name,
+ * path, size}`), planned like a post's files (planScenes): scripts paired
+ * with videos, axes from their names. A picked post keeps single-axis
+ * scenes; otherwise only scenes with hand-made axes count.
+ *
+ * @param {{name: string, path: string, size?: number}[]} files
+ * @param {{vr?: boolean, picked?: boolean}} [o]
+ */
+export function unpackedScenes(files, { vr = false, picked = false } = {}) {
+  const local = files.filter((f) => !f.name.startsWith('._')).map((f) => ({ ...f, host: 'local' }));
+  const { scenes } = planScenes({
+    scripts: local.filter((f) => /\.funscript$/i.test(f.name)),
+    videos: local.filter((f) => isVideoName(f.name)),
+    vr,
+  });
+  return picked ? scenes : scenes.filter((sc) => sc.axes.length);
 }
 
 /**
@@ -982,6 +1021,7 @@ export function manualListText(posts, { folder, generatedAt = new Date().toISOSt
     `  2. Save the file into ${folder} (or leave it in ~/Downloads). Keep the name exactly`,
     '     as pixeldrain gives it: the scout matches files by name (and size).',
     '  3. Download every file of a post (its scripts and its video), or the post is skipped.',
+    '     RAR / ZIP / 7z files are unpacked by the scout; download them as they are.',
     '  4. pixeldrain lets a free user download about 6 GB a day.',
     '  5. Then tell omp "downloaded", or run:',
     `       npm run eroscripts:scout -- --fetch --ids ${posts.map((p) => p.id).join(',') || '<ids>'}`,
