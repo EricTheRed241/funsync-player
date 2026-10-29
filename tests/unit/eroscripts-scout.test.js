@@ -12,7 +12,7 @@ import {
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
-  manualDownloads, manualListText, findLocalCopy,
+  manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
@@ -798,5 +798,25 @@ describe('files downloaded by hand', () => {
     expect(findLocalCopy({ name: 'オーヴェルツィア.mp4', size: 99 }, entries)).toBe(null);
     expect(findLocalCopy({ name: 'other.mp4' }, entries)?.path).toBe('/d/other.mp4');
     expect(findLocalCopy({ name: 'missing.mp4' }, entries)).toBe(null);
+  });
+});
+
+describe('scenes packed in archives', () => {
+  const rar = (name, size = 1e9) => ({ name, size, host: 'pixeldrain', url: `https://pixeldrain.com/api/file/${name}?download` });
+
+  it('makes one packed scene per archive, which a multi-axis post keeps as wanted', () => {
+    const scenes = archiveScenes([rar('lucyhowsthis.rar'), rar('lucyhowsthis.rar'), { name: 'notes.txt', host: 'forum' }, rar('b.zip')]);
+    expect(scenes.map((s) => [s.base, s.packed, s.video.name])).toEqual([['lucyhowsthis', true, 'lucyhowsthis.rar'], ['b', true, 'b.zip']]);
+    expect(wantedScenes({ scenes: [...scenes, { axes: [], video: { name: 'x.mp4' } }] })).toHaveLength(2);
+    expect(isArchiveName('a.7z') && isArchiveName('A.RAR') && !isArchiveName('a.mp4')).toBe(true);
+  });
+
+  it('plans the unpacked files like a post: TCode channels become axes, single-axis only for picks', () => {
+    const f = (name) => ({ name, path: `/x/${name}`, size: 10 });
+    const files = [f('eve massage.funscript'), f('eve massage.L1.funscript'), f('eve massage.R2.funscript'), f('eve massage_8K_180_LR.mp4'), f('solo dance.funscript'), f('solo dance.mp4'), f('._eve massage.mp4')];
+    const scenes = unpackedScenes(files, { vr: true });
+    expect(scenes.map((s) => [s.video.name, s.axes])).toEqual([['eve massage_8K_180_LR.mp4', ['pitch', 'surge']]]);
+    expect(scenes[0].scripts.map((s) => s.path).sort()).toEqual(['/x/eve massage.L1.funscript', '/x/eve massage.R2.funscript', '/x/eve massage.funscript']);
+    expect(unpackedScenes(files, { vr: true, picked: true }).map((s) => s.video.name).sort()).toEqual(['eve massage_8K_180_LR.mp4', 'solo dance.mp4']);
   });
 });
