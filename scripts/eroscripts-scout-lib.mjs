@@ -470,6 +470,20 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
   return { scenes, inLibrary };
 }
 
+/**
+ * True when a MEGA link's key has the length MEGA uses: 16 bytes for a
+ * folder, 32 for a file (`#<key>` or `!<key>` after the id). A mistyped key
+ * (a character too many, say) makes megajs throw outside any promise, which
+ * would end the run, so such a link is skipped as unreadable instead.
+ */
+export function megaKeyOk(url) {
+  const m = String(url || '').match(/mega\.(?:nz|io)\/(?:(folder|file)\/[^#?]+#|#(F?)![^!]+!)([A-Za-z0-9_-]+)/);
+  if (!m) return false;
+  const folder = m[1] === 'folder' || m[2] === 'F';
+  const key = m[3];
+  return key.length % 4 !== 1 && Math.floor((key.length * 3) / 4) === (folder ? 16 : 32);
+}
+
 // ── Folders ─────────────────────────────────────────────────────────────
 
 const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
