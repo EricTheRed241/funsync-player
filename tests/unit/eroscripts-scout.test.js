@@ -820,3 +820,16 @@ describe('scenes packed in archives', () => {
     expect(unpackedScenes(files, { vr: true, picked: true }).map((s) => s.video.name).sort()).toEqual(['eve massage_8K_180_LR.mp4', 'solo dance.mp4']);
   });
 });
+
+describe('megaKeyOk', () => {
+  it.each([
+    ['https://mega.nz/folder/oQNGyIhS#vJHgymgVZaY-yh5iosOEAA', true],
+    ['https://mega.nz/folder/ZJsyzS7C#jpNRRnpWZQifEG95MuEXWg4', false],
+    ['https://mega.nz/file/jhNmXDIT#a0Z55-kDAyiD7fBXpBkRhASIcyaYeTUq1ast9XfJvA0', true],
+    ['https://mega.nz/file/jhNmXDIT#a0Z55-kDAyiD7fBXpBkRhASIcyaYeTUq1ast9XfJvA', false],
+    ['https://mega.nz/#F!abcdefgh!vJHgymgVZaY-yh5iosOEAA', true],
+    ['https://mega.nz/folder/oQNGyIhS', false],
+  ])('%s → %s', (url, ok) => {
+    expect(megaKeyOk(url)).toBe(ok);
+  });
+});
