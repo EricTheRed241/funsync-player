@@ -39,6 +39,12 @@ export function parseManualList(text) {
   return posts.filter((p) => p.url);
 }
 
+/** The post ids of a download list (its `--fetch --ids a,b,c` line), so it can be made again; [] when it has none. */
+export function listIds(text) {
+  const m = String(text || '').match(/--fetch --ids ([\d,]+)/);
+  return m ? m[1].split(',').map(Number).filter((n) => n > 0) : [];
+}
+
 /**
  * A browser's name for a second download of the same file: `name (1).mp4`
  * → `name.mp4`. Other names come back unchanged.
