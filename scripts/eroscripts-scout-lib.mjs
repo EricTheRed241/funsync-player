@@ -1031,7 +1031,9 @@ export function manualListText(posts, { folder, generatedAt = new Date().toISOSt
     'own page still serves them after a CAPTCHA.',
     '',
     'How:',
-    '  1. Open each link below in a browser on this Mac, press Download and solve the CAPTCHA.',
+    '  1. Run `npm run manual:open` in the repo: it opens each post next to its download pages,',
+    '     5 posts at a time (Enter for the next 5). Or open each link below by hand.',
+    '     On each pixeldrain page press Download and solve the CAPTCHA.',
     `  2. Save the file into ${folder} (or leave it in ~/Downloads). Keep the name exactly`,
     '     as pixeldrain gives it: the scout matches files by name (and size).',
     '  3. Download every file of a post (its scripts and its video), or the post is skipped.',
@@ -1059,5 +1061,9 @@ export function manualListText(posts, { folder, generatedAt = new Date().toISOSt
 export function findLocalCopy(file, entries) {
   const want = String(file?.name || '').normalize('NFC');
   if (!want) return null;
-  return (entries || []).find((e) => String(e.name).normalize('NFC') === want && (!file.size || e.size === file.size)) || null;
+  // A browser saves a second download of a name as `name (1).ext`.
+  const plain = (n) => String(n).normalize('NFC').replace(/ \(\d+\)(\.[^.]+)$/, '$1');
+  const sized = (e) => !file.size || e.size === file.size;
+  const list = entries || [];
+  return list.find((e) => String(e.name).normalize('NFC') === want && sized(e)) || list.find((e) => plain(e.name) === want && sized(e)) || null;
 }
