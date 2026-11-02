@@ -6,7 +6,7 @@
 // npm run manual:open — which posts and pages of the download list open,
 // in what order (scripts/manual-open-lib.mjs).
 import { describe, it, expect } from 'vitest';
-import { parseManualList, postsToOpen, batchUrls, withoutCopySuffix } from '../../scripts/manual-open-lib.mjs';
+import { parseManualList, postsToOpen, batchUrls, withoutCopySuffix, listIds } from '../../scripts/manual-open-lib.mjs';
 import { manualListText } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const posts = [
@@ -40,5 +40,12 @@ describe('manual:open', () => {
       'https://discuss.eroscripts.com/t/1', 'https://pixeldrain.com/u/A', 'https://pixeldrain.com/u/B',
       'https://discuss.eroscripts.com/t/2', 'https://pixeldrain.com/u/C',
     ]);
+  });
+});
+
+describe('listIds', () => {
+  it('reads the post ids from the list so it can be made again', () => {
+    expect(listIds(text)).toEqual([1, 2]);
+    expect(listIds('no ids here')).toEqual([]);
   });
 });
