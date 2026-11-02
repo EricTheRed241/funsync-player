@@ -375,17 +375,21 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
       // birthtimeMs on Linux ext4). Users typically want "recently appeared
       // in my folder", which matches mtime for fresh-dropped files.
       dateAdded: 0,
+      // File size in bytes, from the same stat pass (the library overview's
+      // capacity total); 0 when the stat failed.
+      size: 0,
     });
   }
 
-  // Batched stat pass to fill `dateAdded`. Runs all stats in parallel
-  // (libuv's thread pool naturally caps concurrency). Typical cost for
-  // 1000 videos: ~10-50ms on SSD, ~100-500ms on HDD. Failures fall back
-  // to 0 which sorts to the "oldest" end of the list.
+  // Batched stat pass to fill `dateAdded` and `size`. Runs all stats in
+  // parallel (libuv's thread pool naturally caps concurrency). Typical cost
+  // for 1000 videos: ~10-50ms on SSD, ~100-500ms on HDD. Failures fall back
+  // to 0, which sorts to the "oldest" end of the list.
   await Promise.all(videos.map(async (v) => {
     try {
       const st = await fs.promises.stat(v.path);
       v.dateAdded = st.mtimeMs || 0;
+      v.size = st.size || 0;
     } catch {
       v.dateAdded = 0;
     }

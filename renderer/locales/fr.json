@@ -125,6 +125,7 @@
     "library": "Bibliothèque",
     "playlists": "Listes de lecture",
     "categories": "Catégories",
+    "overview": "Aperçu",
     "back": "Retour",
     "home": "Accueil",
     "mainNavAria": "Navigation principale",
@@ -580,6 +581,43 @@
     "editCategory": "Modifier la catégorie",
     "iconEmojiSearch": "Rechercher des groupes",
     "iconEmojiNone": "Aucun résultat"
+  },
+  "overview": {
+    "title": "Aperçu",
+    "videoCount": "{count, plural, one {# vidéo} other {# vidéos}}",
+    "noMatch": "Rien ne correspond au filtre.",
+    "editFailed": "Non enregistré : {error}",
+    "capacity": {
+      "title": "Capacité de la bibliothèque",
+      "videos": "{count} / {cap} vidéos",
+      "percent": "{percent} %",
+      "size": "{size} sur le disque",
+      "free": "{count, plural, one {# place libre} other {# places libres}}",
+      "full": "Pleine : les scouts ne téléchargent plus rien",
+      "hint": "Les scouts EroScripts et FapTap arrêtent de télécharger à {cap} vidéos. Supprimez des scènes pour faire de la place.",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "Capacité de la bibliothèque : {count} sur {cap} vidéos ({percent} %), {size} sur le disque. Cliquez pour l’aperçu."
+    },
+    "ratings": {
+      "title": "Notes et favoris",
+      "keep": "Garder (4★+)",
+      "review": "À revoir (2½–3½★)",
+      "showInLibrary": "Afficher dans la bibliothèque",
+      "listTitle": "Vidéos notées et favorites ({count})",
+      "none": "Aucune vidéo n’est encore notée ni favorite. Notez avec les étoiles d’une carte, dans le lecteur, sur le téléphone ou dans HereSphere.",
+      "play": "Lire {name}"
+    },
+    "artists": {
+      "title": "Artistes favoris",
+      "favouriteCount": "{count, plural, one {# favori} other {# favoris}}",
+      "filter": "Filtrer les artistes"
+    },
+    "tags": {
+      "title": "Scores des tags",
+      "count": "{count, plural, one {# tag} other {# tags}}",
+      "filter": "Filtrer les tags",
+      "none": "Pas encore de tags : ils viennent des publications EroScripts et FapTap liées à vos vidéos."
+    }
   },
   "stroke": {
     "rangeLabel": "Plage de stroke",
@@ -1917,6 +1955,7 @@
     "library": "Bibliothèque",
     "playlists": "Listes de lecture",
     "categories": "Catégories",
+    "overview": "Aperçu",
     "playPause": "Lecture / Pause",
     "seek10s": "Reculer / Avancer de 10 s",
     "seek5s": "Reculer / Avancer de 5 s",

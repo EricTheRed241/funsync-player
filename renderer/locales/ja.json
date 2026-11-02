@@ -125,6 +125,7 @@
     "library": "ライブラリ",
     "playlists": "プレイリスト",
     "categories": "カテゴリ",
+    "overview": "概要",
     "back": "戻る",
     "home": "ホーム",
     "mainNavAria": "メインナビゲーション",
@@ -580,6 +581,43 @@
     "editCategory": "カテゴリを編集",
     "iconEmojiSearch": "グループを検索",
     "iconEmojiNone": "該当なし"
+  },
+  "overview": {
+    "title": "概要",
+    "videoCount": "{count} 本",
+    "noMatch": "フィルターに一致するものはありません。",
+    "editFailed": "保存できませんでした: {error}",
+    "capacity": {
+      "title": "ライブラリの容量",
+      "videos": "{count} / {cap} 本",
+      "percent": "{percent}%",
+      "size": "ディスク使用量 {size}",
+      "free": "残り {count} 本",
+      "full": "満杯: スカウトはこれ以上ダウンロードしません",
+      "hint": "EroScripts と FapTap のスカウトは {cap} 本でダウンロードを止めます。空きを作るにはシーンを削除してください。",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "ライブラリの容量: {cap} 本中 {count} 本 ({percent}%)、ディスク使用量 {size}。クリックで概要を表示。"
+    },
+    "ratings": {
+      "title": "評価とお気に入り",
+      "keep": "残す (4★以上)",
+      "review": "要確認 (2½–3½★)",
+      "showInLibrary": "ライブラリで表示",
+      "listTitle": "評価済み・お気に入りの動画 ({count})",
+      "none": "評価済みまたはお気に入りの動画はまだありません。カード、プレーヤー、スマホ、HereSphere の星で評価できます。",
+      "play": "{name} を再生"
+    },
+    "artists": {
+      "title": "お気に入りアーティスト",
+      "favouriteCount": "お気に入り {count} 人",
+      "filter": "アーティストを絞り込む"
+    },
+    "tags": {
+      "title": "タグのスコア",
+      "count": "{count} 個のタグ",
+      "filter": "タグを絞り込む",
+      "none": "タグはまだありません。動画にリンクされた EroScripts と FapTap の投稿から取得されます。"
+    }
   },
   "stroke": {
     "rangeLabel": "ストローク範囲",
@@ -1917,6 +1955,7 @@
     "library": "ライブラリ",
     "playlists": "プレイリスト",
     "categories": "カテゴリ",
+    "overview": "概要",
     "playPause": "再生 / 一時停止",
     "seek10s": "10 秒戻る / 進む",
     "seek5s": "5 秒戻る / 進む",

@@ -125,6 +125,7 @@
     "library": "Biblioteca",
     "playlists": "Listas de reproducción",
     "categories": "Categorías",
+    "overview": "Resumen",
     "back": "Atrás",
     "home": "Inicio",
     "mainNavAria": "Navegación principal",
@@ -580,6 +581,43 @@
     "editCategory": "Editar categoría",
     "iconEmojiSearch": "Buscar grupos",
     "iconEmojiNone": "Sin coincidencias"
+  },
+  "overview": {
+    "title": "Resumen",
+    "videoCount": "{count, plural, one {# vídeo} other {# vídeos}}",
+    "noMatch": "Nada coincide con el filtro.",
+    "editFailed": "No guardado: {error}",
+    "capacity": {
+      "title": "Capacidad de la biblioteca",
+      "videos": "{count} / {cap} vídeos",
+      "percent": "{percent} %",
+      "size": "{size} en disco",
+      "free": "{count, plural, one {Queda # hueco} other {Quedan # huecos}}",
+      "full": "Llena: los scouts ya no descargan nada",
+      "hint": "Los scouts de EroScripts y FapTap dejan de descargar a los {cap} vídeos. Borra escenas para hacer sitio.",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "Capacidad de la biblioteca: {count} de {cap} vídeos ({percent} %), {size} en disco. Haz clic para ver el resumen."
+    },
+    "ratings": {
+      "title": "Valoraciones y favoritos",
+      "keep": "Conservar (4★+)",
+      "review": "Revisar (2½–3½★)",
+      "showInLibrary": "Mostrar en la biblioteca",
+      "listTitle": "Vídeos valorados y favoritos ({count})",
+      "none": "Aún no hay vídeos valorados ni favoritos. Valora con las estrellas de una tarjeta, en el reproductor, en el móvil o en HereSphere.",
+      "play": "Reproducir {name}"
+    },
+    "artists": {
+      "title": "Artistas favoritos",
+      "favouriteCount": "{count, plural, one {# favorito} other {# favoritos}}",
+      "filter": "Filtrar artistas"
+    },
+    "tags": {
+      "title": "Puntuación de etiquetas",
+      "count": "{count, plural, one {# etiqueta} other {# etiquetas}}",
+      "filter": "Filtrar etiquetas",
+      "none": "Aún no hay etiquetas: vienen de las publicaciones de EroScripts y FapTap enlazadas a tus vídeos."
+    }
   },
   "stroke": {
     "rangeLabel": "Rango de stroke",
@@ -1917,6 +1955,7 @@
     "library": "Biblioteca",
     "playlists": "Listas de reproducción",
     "categories": "Categorías",
+    "overview": "Resumen",
     "playPause": "Reproducir / Pausar",
     "seek10s": "Retroceder / Avanzar 10 s",
     "seek5s": "Retroceder / Avanzar 5 s",

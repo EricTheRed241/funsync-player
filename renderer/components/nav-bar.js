@@ -1,6 +1,6 @@
 // NavBar — Persistent top navigation bar
 
-import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown, Link } from '../js/icons.js';
+import { icon, Library, ListVideo, Tag, ChartColumn, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown, Link } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 
@@ -35,6 +35,7 @@ export class NavBar {
       { id: 'library', labelKey: 'nav.library', iconNode: Library },
       { id: 'playlists', labelKey: 'nav.playlists', iconNode: ListVideo },
       { id: 'categories', labelKey: 'nav.categories', iconNode: Tag },
+      { id: 'overview', labelKey: 'nav.overview', iconNode: ChartColumn },
     ];
   }
 

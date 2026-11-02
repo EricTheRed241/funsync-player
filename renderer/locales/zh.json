@@ -125,6 +125,7 @@
     "library": "媒体库",
     "playlists": "播放列表",
     "categories": "分类",
+    "overview": "概览",
     "back": "返回",
     "home": "主页",
     "mainNavAria": "主导航",
@@ -580,6 +581,43 @@
     "editCategory": "编辑分类",
     "iconEmojiSearch": "搜索分组",
     "iconEmojiNone": "没有匹配项"
+  },
+  "overview": {
+    "title": "概览",
+    "videoCount": "{count} 个视频",
+    "noMatch": "没有符合筛选条件的内容。",
+    "editFailed": "未保存：{error}",
+    "capacity": {
+      "title": "媒体库容量",
+      "videos": "{count} / {cap} 个视频",
+      "percent": "{percent}%",
+      "size": "占用磁盘 {size}",
+      "free": "还剩 {count} 个位置",
+      "full": "已满：抓取工具不再下载",
+      "hint": "EroScripts 和 FapTap 抓取工具在 {cap} 个视频时停止下载。删除场景即可腾出空间。",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "媒体库容量：{count} / {cap} 个视频（{percent}%），占用磁盘 {size}。点击查看概览。"
+    },
+    "ratings": {
+      "title": "评分和收藏",
+      "keep": "保留（4★ 及以上）",
+      "review": "待复查（2½–3½★）",
+      "showInLibrary": "在媒体库中显示",
+      "listTitle": "已评分和收藏的视频（{count}）",
+      "none": "还没有已评分或收藏的视频。可在卡片、播放器、手机或 HereSphere 中用星星评分。",
+      "play": "播放 {name}"
+    },
+    "artists": {
+      "title": "收藏的作者",
+      "favouriteCount": "{count} 位收藏",
+      "filter": "筛选作者"
+    },
+    "tags": {
+      "title": "标签分数",
+      "count": "{count} 个标签",
+      "filter": "筛选标签",
+      "none": "还没有标签：标签来自与你的视频关联的 EroScripts 和 FapTap 帖子。"
+    }
   },
   "stroke": {
     "rangeLabel": "行程范围",
@@ -1917,6 +1955,7 @@
     "library": "媒体库",
     "playlists": "播放列表",
     "categories": "分类",
+    "overview": "概览",
     "playPause": "播放 / 暂停",
     "seek10s": "后退 / 前进 10 秒",
     "seek5s": "后退 / 前进 5 秒",

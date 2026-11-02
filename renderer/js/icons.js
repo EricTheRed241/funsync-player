@@ -122,6 +122,11 @@ export { default as TriangleAlert } from '../../node_modules/lucide/dist/esm/ico
 export { default as Star } from '../../node_modules/lucide/dist/esm/icons/star.js';
 export { default as Heart } from '../../node_modules/lucide/dist/esm/icons/heart.js';
 
+// Library overview (library-overview.js) and its nav item.
+export { default as ChartColumn } from '../../node_modules/lucide/dist/esm/icons/chart-column.js';
+export { default as Minus } from '../../node_modules/lucide/dist/esm/icons/minus.js';
+export { default as RefreshCw } from '../../node_modules/lucide/dist/esm/icons/refresh-cw.js';
+
 /**
  * Create an SVG element from a Lucide icon node.
  * @param {Array} iconNode — icon definition array (e.g. Play, Pause)
