@@ -833,3 +833,12 @@ describe('megaKeyOk', () => {
     expect(megaKeyOk(url)).toBe(ok);
   });
 });
+
+describe('findLocalCopy with a browser copy suffix', () => {
+  it('takes `name (1).ext` when the name itself isn\'t there, at the listed size', () => {
+    const entries = [{ name: 'Kunoichi Queens (1).mp4', path: '/d/k1', size: 5 }];
+    expect(findLocalCopy({ name: 'Kunoichi Queens.mp4', size: 5 }, entries)?.path).toBe('/d/k1');
+    expect(findLocalCopy({ name: 'Kunoichi Queens.mp4', size: 6 }, entries)).toBe(null);
+    expect(findLocalCopy({ name: 'Kunoichi Queens.mp4' }, [...entries, { name: 'Kunoichi Queens.mp4', path: '/d/k', size: 5 }])?.path).toBe('/d/k');
+  });
+});
