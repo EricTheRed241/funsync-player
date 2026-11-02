@@ -630,14 +630,20 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
   return { ok, failed, generated, short, waiting, capped };
 }
 
-/** Unpack `archive` into `out`: unar (RAR 5 included), else bsdtar. Throws when neither can. */
+/**
+ * Unpack `archive` into `out`: unar (RAR 5 included), else bsdtar. Throws
+ * when neither can. No stdin and a time limit: bsdtar asks for the password
+ * of an encrypted ZIP on the terminal and would wait for it forever.
+ */
 function unpack(archive, out) {
   const tries = [['unar', ['-q', '-f', '-D', '-o', out, archive]], ['bsdtar', ['-xf', archive, '-C', out]]];
   const errors = [];
   for (const [cmd, args] of tries) {
-    const r = spawnSync(cmd, args, { encoding: 'utf8' });
+    const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30 * 60 * 1000 });
     if (r.status === 0) return;
-    errors.push(`${cmd}: ${r.error?.code === 'ENOENT' ? 'not installed' : (r.stderr || r.stdout || '').trim().split('\n').pop()}`);
+    const why = r.error?.code === 'ENOENT' ? 'not installed' : r.error?.code === 'ETIMEDOUT' ? 'timed out' : (r.stderr || r.stdout || '').trim().split('\n').pop();
+    if (/password/i.test(why)) throw new Error(`${path.basename(archive)} is password-protected (the password is usually in the post); unpack it by hand`);
+    errors.push(`${cmd}: ${why}`);
   }
   throw new Error(`can't unpack ${path.basename(archive)} (${errors.join('; ')}); brew install unar`);
 }
