@@ -555,13 +555,19 @@ function fetchedScenes(incoming, userData) {
 /** One pass over the queue; downloads at most `room` videos (the library cap). */
 async function fetchPass(queue, { api, userData, incoming, staging, room, manualDir }) {
   const done = fetchedScenes(incoming, userData);
-  // Read every pass: files the user saved since the last one count too.
-  const local = localDownloads([manualDir, DOWNLOADS]);
+  // Files saved by hand: posts with one go first, and the folders are read
+  // again before every scene, so a file saved during a long pass is taken
+  // when its scene comes up, not a pass later.
+  const readLocal = () => localDownloads([manualDir, DOWNLOADS]);
+  const saved = readLocal();
+  const byHand = (c) => c.scenes.some((sc) => [sc.video, ...sc.scripts].some((f) => lib.findLocalCopy(f, saved)));
+  const order = [...queue].sort((a, b) => byHand(b) - byHand(a));
   let ok = 0; let failed = 0; let generated = 0; let short = 0; let waiting = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
-  for (const c of queue) {
+  for (const c of order) {
     if (capped) break;
     for (const sc of c.scenes) {
+      const local = readLocal();
       if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
       if (ok >= room) { capped = true; break; }
       if (sc.packed) {
