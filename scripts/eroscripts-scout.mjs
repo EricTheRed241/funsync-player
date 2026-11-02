@@ -681,6 +681,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
     if (!scenes.length) {
       reject(c.picked ? 'no-video' : 'single-axis');
       console.log(`${now()} – ${creator}/${sc.video.name}: no ${c.picked ? '' : 'multi-axis '}scene inside; skipped`);
+      fs.rmSync(archive, { force: true });
       return r;
     }
     const shared = c.scenes.length > 1 || scenes.length > 1;
