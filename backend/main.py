@@ -16,6 +16,7 @@ from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
 from routes.locale import router as locale_router, set_user_data_dir
+from routes.status import router as status_router
 from services import library_edits, video_info
 
 app = FastAPI(title="FunSync Backend", version="0.1.0")
@@ -36,6 +37,7 @@ app.include_router(vr_api_router, tags=["vr"])
 app.include_router(remote_router, prefix="/api/remote", tags=["remote"])
 app.include_router(remote_sync_router, prefix="/api/remote", tags=["remote-sync"])
 app.include_router(locale_router, prefix="/api/remote", tags=["locale"])
+app.include_router(status_router, prefix="/api", tags=["status"])
 
 # Web remote SPA served at /remote/ — static files live in backend/web-remote/.
 # Resolve relative to this file so it works both in dev (python main.py) and

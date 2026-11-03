@@ -31,6 +31,7 @@ multi-phone / multi-observer design see SCOPE-web-remote-v1.1.md.
 
 import json
 import logging
+import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from routes.media import apply_acked_edit, get_video_registry
@@ -58,6 +59,12 @@ _active_phone_video_id: str | None = None
 _last_state: dict | None = None  # last `state` event for observer catch-up
 
 _observer: WebSocket | None = None
+_observer_since: float | None = None
+
+# Latest `desktop-status` snapshot from the renderer (renderer/js/
+# desktop-status.js) and when it arrived; served by GET /api/status.
+_desktop_status: dict | None = None
+_desktop_status_at: float | None = None
 
 KICK_REPLACED = "Another device took over this session."
 KICK_OBSERVER_REPLACED = "Replaced by a newer observer."
@@ -251,7 +258,7 @@ async def observer_sync(ws: WebSocket) -> None:
     script-missing / script-loading payloads back, which the server forwards
     to the active phone.
     """
-    global _observer
+    global _observer, _observer_since, _desktop_status, _desktop_status_at
 
     await ws.accept()
 
@@ -263,6 +270,7 @@ async def observer_sync(ws: WebSocket) -> None:
         await _safe_close(old, code=4001, reason=KICK_OBSERVER_REPLACED)
 
     _observer = ws
+    _observer_since = time.time()
     log.info("[remote] Observer connected")
 
     # Catch-up snapshot so the renderer knows the current state even if it
@@ -296,6 +304,11 @@ async def observer_sync(ws: WebSocket) -> None:
             if msg.get("type") == "library-edit-ack":
                 _handle_edit_ack(msg)
                 continue
+            if msg.get("type") == "desktop-status":
+                if isinstance(msg.get("status"), dict):
+                    _desktop_status = msg["status"]
+                    _desktop_status_at = time.time()
+                continue
 
             # Forward to phone if one is connected
             if _active_phone is not None:
@@ -307,8 +320,30 @@ async def observer_sync(ws: WebSocket) -> None:
     finally:
         if _observer is ws:
             _observer = None
+            _observer_since = None
             log.info("[remote] Observer disconnected")
         await _safe_close(ws)
+
+
+def desktop_state() -> dict:
+    """Observer link and the latest desktop status snapshot, for /api/status."""
+    return {
+        "connected": _observer is not None,
+        "connected_since": _observer_since,
+        "status": _desktop_status,
+        "status_at": _desktop_status_at,
+    }
+
+
+def phone_state() -> dict:
+    """The active web-remote phone, for /api/status."""
+    return {
+        "connected": _active_phone is not None,
+        "ip": _active_phone_ip,
+        "video_id": _active_phone_video_id,
+        "video_path": _resolve_video_path(_active_phone_video_id),
+        "last_state": _last_state,
+    }
 
 
 # --- Test-only helpers ----------------------------------------------------
@@ -316,12 +351,15 @@ async def observer_sync(ws: WebSocket) -> None:
 def _reset_state_for_tests() -> None:
     """Reset module state between tests. Not part of the public API."""
     global _active_phone, _active_phone_ip, _active_phone_video_id
-    global _last_state, _observer
+    global _last_state, _observer, _observer_since, _desktop_status, _desktop_status_at
     _active_phone = None
     _active_phone_ip = None
     _active_phone_video_id = None
     _last_state = None
     _observer = None
+    _observer_since = None
+    _desktop_status = None
+    _desktop_status_at = None
     library_edits.queue.clear()
 
 

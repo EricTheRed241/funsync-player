@@ -84,6 +84,14 @@ export class RemoteBridge {
     this.sendToPhone(error ? { type: 'library-edit-ack', seq, error } : { type: 'library-edit-ack', seq });
   }
 
+  /**
+   * Desktop status snapshot (desktop-status.js) for the backend's
+   * GET /api/status. Consumed by the backend, not forwarded to the phone.
+   */
+  sendDesktopStatus(status) {
+    this.sendToPhone({ type: 'desktop-status', status });
+  }
+
   /** True when the observer socket is open. */
   get connected() {
     return !!this._ws && this._ws.readyState === WebSocket.OPEN;
