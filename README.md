@@ -141,6 +141,8 @@ A local desktop video player with device synchronization for funscript playback.
 - **The Handy** — HSSP cloud sync with automatic script upload, drift detection, 10-second cloud health check (catches BT-mode switches)
 - **Buttplug.io** — Connect to 700+ devices via Intiface Central (strokers, vibrators, rotators, e-stim)
 - **TCode (OSR2 / SR6 / MiraBot)** — USB serial, UDP (Wi-Fi) or WebSocket, with per-axis enable + min/max controls for all 10 axes (experimental). MiraBot's Wi-Fi firmware speaks UDP; its Bluetooth LE firmware is not supported
+  - **WebSocket reconnect.** Once a WebSocket device has connected, a dropped connection is retried every 5 seconds for 30 minutes, then every minute until it comes back or you disconnect. A first connect that fails is reported instead of retried.
+  - **WebSocket log** (`main.log`, `[TCode/ws]`): each connect, drop and reconnect with the URL, the device's IP (and the previous one when DHCP moved it), close code, time up or down, commands and bytes sent, and the attempt count. A failed attempt says why: the host doesn't resolve, the IP refuses or doesn't answer on the port, or TCP is open but the WebSocket handshake failed. The same failure repeated is logged once a minute (every 10 minutes after the first 30) with a count of the attempts in between.
 - **Autoblow Ultra / VacuGlide 2** — Cloud API (experimental)
 - **Auto-connect on startup** — Handy and Buttplug.io connect automatically if previously configured
 - Per-device offset controls + unified Sync tab showing total effective offset (VR + device stacking)

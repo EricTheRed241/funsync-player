@@ -195,14 +195,20 @@ MockWebSocket.instances = [];
 
 beforeEach(() => { MockWebSocket.instances.length = 0; });
 
+// Fake DNS and TCP probe: tests never touch the network.
+const NET = {
+  lookupImpl: async () => ({ address: '10.0.0.5', family: 4 }),
+  probeImpl: async () => ({ ok: false, code: 'ECONNREFUSED', ms: 1 }),
+};
+
 describe('WebsocketTransport — connect contract', () => {
   it('rejects without a url', async () => {
-    const t = new WebsocketTransport({ log: {}, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: {}, WebSocketImpl: MockWebSocket });
     expect((await t.connect({})).success).toBe(false);
   });
 
   it('rejects urls that are not ws:// or wss://', async () => {
-    const t = new WebsocketTransport({ log: {}, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: {}, WebSocketImpl: MockWebSocket });
     expect((await t.connect({ url: 'http://x' })).success).toBe(false);
     expect((await t.connect({ url: 'tcp://x' })).success).toBe(false);
     expect((await t.connect({ url: '' })).success).toBe(false);
@@ -210,7 +216,7 @@ describe('WebsocketTransport — connect contract', () => {
   });
 
   it('accepts wss:// for TLS receivers', async () => {
-    const t = new WebsocketTransport({ log: { info: () => {} }, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: { info: () => {} }, WebSocketImpl: MockWebSocket });
     const p = t.connect({ url: 'wss://device.local:443/tcode' });
     MockWebSocket.instances[0]._open();
     expect((await p).success).toBe(true);
@@ -218,15 +224,33 @@ describe('WebsocketTransport — connect contract', () => {
   });
 
   it('returns failure when the socket closes before opening', async () => {
-    const t = new WebsocketTransport({ log: { warn: () => {} }, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: { warn: () => {} }, WebSocketImpl: MockWebSocket });
     const p = t.connect({ url: 'ws://x' });
     MockWebSocket.instances[0]._failConnect();
     expect((await p).success).toBe(false);
     expect(t.connected).toBe(false);
   });
 
+  it('a failed first connect returns the cause and does not retry', async () => {
+    const t = new WebsocketTransport({
+      ...NET,
+      lookupImpl: async () => {
+        throw Object.assign(new Error('getaddrinfo ENOTFOUND mirabot.local'), { code: 'ENOTFOUND' });
+      },
+      log: { warn: () => {} },
+      WebSocketImpl: MockWebSocket,
+    });
+    const p = t.connect({ url: 'ws://mirabot.local:8888' });
+    MockWebSocket.instances[0]._failConnect();
+    const result = await p;
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/mirabot\.local does not resolve \(ENOTFOUND\)/);
+    expect(t.reconnecting).toBe(false);
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
   it('reports unavailable when no WebSocket runtime is present', async () => {
-    const t = new WebsocketTransport({ log: {}, WebSocketImpl: null });
+    const t = new WebsocketTransport({ ...NET, log: {}, WebSocketImpl: null });
     const result = await t.connect({ url: 'ws://x' });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/runtime/i);
@@ -235,7 +259,7 @@ describe('WebsocketTransport — connect contract', () => {
 
 describe('WebsocketTransport — send', () => {
   it('returns false before the socket opens', async () => {
-    const t = new WebsocketTransport({ log: {}, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: {}, WebSocketImpl: MockWebSocket });
     // Kick off the connect but do not open — readyState stays 0
     const p = t.connect({ url: 'ws://x' });
     expect(t.send('L0500\n')).toBe(false);
@@ -245,7 +269,7 @@ describe('WebsocketTransport — send', () => {
   });
 
   it('sends the formatted command string to the socket', async () => {
-    const t = new WebsocketTransport({ log: { info: () => {} }, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: { info: () => {} }, WebSocketImpl: MockWebSocket });
     const p = t.connect({ url: 'ws://x' });
     MockWebSocket.instances[0]._open();
     await p;
@@ -254,7 +278,7 @@ describe('WebsocketTransport — send', () => {
   });
 
   it('returns false after disconnect', async () => {
-    const t = new WebsocketTransport({ log: { info: () => {} }, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: { info: () => {} }, WebSocketImpl: MockWebSocket });
     const p = t.connect({ url: 'ws://x' });
     MockWebSocket.instances[0]._open();
     await p;
@@ -263,7 +287,7 @@ describe('WebsocketTransport — send', () => {
   });
 
   it('reports connected=false if readyState is not OPEN', async () => {
-    const t = new WebsocketTransport({ log: { info: () => {} }, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: { info: () => {} }, WebSocketImpl: MockWebSocket });
     const p = t.connect({ url: 'ws://x' });
     MockWebSocket.instances[0]._open();
     await p;
@@ -280,8 +304,7 @@ describe('WebsocketTransport — disconnect / errors', () => {
     // onDisconnect callback directly. The reconnect-on behaviour is
     // covered by `tcode-mfp-compat.test.js`.
     const t = new WebsocketTransport({
-      log: { info: () => {} }, WebSocketImpl: MockWebSocket,
-      reconnect: false,
+      ...NET, log: { info: () => {} }, WebSocketImpl: MockWebSocket, reconnect: false,
     });
     const onDisc = vi.fn();
     t.onDisconnect(onDisc);
@@ -293,7 +316,7 @@ describe('WebsocketTransport — disconnect / errors', () => {
   });
 
   it('destroy() does not fire onDisconnect', async () => {
-    const t = new WebsocketTransport({ log: { info: () => {} }, WebSocketImpl: MockWebSocket });
+    const t = new WebsocketTransport({ ...NET, log: { info: () => {} }, WebSocketImpl: MockWebSocket });
     const onDisc = vi.fn();
     t.onDisconnect(onDisc);
     const p = t.connect({ url: 'ws://x' });
