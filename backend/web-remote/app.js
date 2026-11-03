@@ -303,6 +303,7 @@ window.addEventListener('hashchange', navigateAndRestoreScroll);
 // strings — fail-loud — but the initial markup carries English defaults
 // so users see English in the worst case, never raw keys.
 window.addEventListener('load', async () => {
+  reportPageLoad();
   try {
     await initWebRemoteI18n();
     translatePage(document);
@@ -315,6 +316,29 @@ window.addEventListener('load', async () => {
   }
   navigateAndRestoreScroll();
 });
+
+// One line in main.log per page load ([remote-page]): how it was loaded
+// (navigate / reload / back_forward) and on which screen. The remote was
+// found reloading itself right after a player opened, which cut device sync;
+// this shows whether that still happens, on which device and browser.
+function reportPageLoad() {
+  try {
+    const nav = performance.getEntriesByType?.('navigation')?.[0];
+    const body = JSON.stringify({
+      type: nav?.type || 'unknown',
+      hash: location.hash.slice(0, 64),
+      standalone: window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true,
+      ua: navigator.userAgent.slice(0, 200),
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/remote/page-load', new Blob([body], { type: 'application/json' }));
+    } else {
+      fetch('/api/remote/page-load', {
+        method: 'POST', body, keepalive: true, headers: { 'Content-Type': 'application/json' },
+      }).catch(() => {});
+    }
+  } catch { /* diagnostics never break the remote */ }
+}
 
 /**
  * Fetch the library once, then cache. Subsequent navigations reuse it.
@@ -2879,7 +2903,10 @@ async function renderPlayer(id) {
   controlsToggle.addEventListener('click', () => {
     pendingResumeSec = videoEl.currentTime || 0;
     setNativeControls(!nativeControls);
-    renderPlayer(video.id);
+    // Through render(), not renderPlayer(): it closes this player's sync
+    // session first. Calling renderPlayer directly left the old session
+    // open next to the new one until the backend kicked it.
+    render();
   });
   wrap.appendChild(controlsToggle);
 
