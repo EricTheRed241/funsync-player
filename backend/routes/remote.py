@@ -21,7 +21,7 @@ duplication.
 import os
 import uuid
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from routes.media import (
     get_video_registry,
@@ -87,6 +87,28 @@ async def seek_timing(payload: dict = Body(default={})):
     print(
         f"[remote-seek] {kind} to={to_s:.1f}s d={delta:+.1f}s buffered={buffered} "
         f"seeked={seeked_ms:.0f}ms playing={playing_ms:.0f}ms",
+        flush=True,
+    )
+    return {"ok": True}
+
+
+@router.post("/page-load")
+async def page_load(request: Request, payload: dict = Body(default={})):
+    """Log one web-remote page load: `[remote-page] <ip> <type> #<hash> …`.
+
+    The phone's page was reloading itself right after a player opened, which
+    closed the sync session mid-start. `type` is the Navigation Timing type
+    (navigate / reload / back_forward), so a reload with a `#play/…` hash
+    straight after a player opened is that again. Printed like seek-timing,
+    so it lands in main.log.
+    """
+    def _s(key, n):
+        return str(payload.get(key, "?")).replace("\n", " ")[:n]
+
+    ip = request.client.host if request.client else "?"
+    standalone = "pwa" if payload.get("standalone") else "browser"
+    print(
+        f"[remote-page] {ip} {_s('type', 16)} #{_s('hash', 64).lstrip('#')} {standalone} ua={_s('ua', 200)}",
         flush=True,
     )
     return {"ok": True}

@@ -162,12 +162,23 @@ export class RemoteBridge {
         }
         break;
       case 'phone-replaced':
+        // The old session is over, so the new one's phone-connected must
+        // not be taken for its duplicate, even for the same phone + video.
+        this._forgetConnect(msg.oldIp);
+        this._forgetConnect(msg.newIp);
         if (this.onPhoneReplaced) this.onPhoneReplaced(msg.oldIp, msg.newIp);
         // The immediately-following `phone-connected` for the new phone will
         // hit onPhoneConnected via the normal path — don't fire here or we
         // double-fire.
         break;
       case 'phone-disconnected':
+        // The phone's page reloading right after the player opens (seen in
+        // main.log, 2026-11: on almost every video) closes the session and opens a new
+        // one for the same video within a second. That reconnect is a fresh
+        // session, not the hello/phone-connected pair the dedup is for:
+        // dropping it left device sync stopped until the user toggled the
+        // player controls.
+        this._forgetConnect(ip);
         if (this.onPhoneDisconnected) this.onPhoneDisconnected(ip);
         break;
       case 'state':
@@ -261,5 +272,14 @@ export class RemoteBridge {
       }
     }
     return true;
+  }
+
+  /** End of a phone session: its next connect is fresh, whatever the TTL. */
+  _forgetConnect(ip) {
+    if (!ip || !this._connectDedup) return;
+    const prefix = ip + '|';
+    for (const k of this._connectDedup.keys()) {
+      if (k.startsWith(prefix)) this._connectDedup.delete(k);
+    }
   }
 }
