@@ -123,6 +123,14 @@ export const FAPTAP_FOCUS_MIN = 2;
 export const FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle Mocap', 'Noodledude', 'NoFaceGirl', 'Candy Love', 'JJULEZ'];
 /** Other live action: one in every LIVE_QUOTA_EVERY Discovery downloads, counted across both scouts. */
 export const LIVE_QUOTA_EVERY = 20;
+/**
+ * Live action must be POV or VR (user, 2026-11-03: "not interested in any
+ * flat video which is live/real people which isn't POV"), favourites
+ * included; only posts the user picks by id (`--add`) skip it. POV is one of
+ * POV_TAGS or POV as a title word.
+ */
+export const POV_TAGS = new Set(['pov', 'male-pov']);
+export const POV_TITLE = /(?<![\p{L}\p{N}])pov(?![\p{L}\p{N}])/iu;
 
 // ── Discovery: ranking ──────────────────────────────────────────────────
 
@@ -153,7 +161,7 @@ export const TAG_SCORE_GROUPS = [
   { name: 'Creampie', score: 2, tags: ['creampie', 'anal-creampie'] },
   { name: 'Riding', score: 2, tags: ['riding', 'cowgirl', 'reverse-cowgirl', 'sitting-reverse-cowgirl'] },
   { name: 'Music', score: 2, tags: [...MUSIC_TAGS] },
-  { name: 'POV', score: 1, tags: ['pov', 'male-pov'] },
+  { name: 'POV', score: 1, tags: [...POV_TAGS] },
   { name: 'Monster', score: -0.5, tags: [...MONSTER_TAGS], named: 'monster' },
   { name: 'Feet', score: -0.5, tags: [...FEET_TAGS], named: 'feet' },
   { name: 'FFM', score: -0.5, tags: [...FFM_TAGS], named: 'ffm' },
@@ -222,7 +230,7 @@ export const AUTO_CATEGORIES = [
   { key: 'monster', name: 'Monster', color: '#9b59b6', tags: ['monster', 'monstergirls', 'tentacle', 'werewolf'] },
   { key: 'pmv', name: 'PMV / HMV', color: '#f39c12', tags: [...PMV_TAGS] },
   { key: 'vr', name: 'VR', color: '#3498db', tags: [] },
-  { key: 'pov', name: 'POV', color: '#00cec9', tags: ['pov', 'male-pov'] },
+  { key: 'pov', name: 'POV', color: '#00cec9', tags: [...POV_TAGS] },
   // One of these per scripted video, by its axes (backend `GET /api/media/axis-flags`).
   { key: 'axes-handmade', name: 'Hand-made axes', color: '#2ecc71', tags: [], axisKind: 'handmade' },
   { key: 'axes-generated', name: 'Generated axes', color: '#95a5a6', tags: [], axisKind: 'generated' },

@@ -94,20 +94,28 @@ describe('screenVideo', () => {
     expect(screenVideo(v)).toEqual({ ok: false, reason: 'excluded' });
   });
 
-  it('takes animated videos, FapTap tag spellings included; live action only waits for the live quota', () => {
+  it('takes animated videos, FapTap tag spellings included; POV or VR live action only waits for the live quota', () => {
     expect(screenVideo(video(['Animated 3d', ...FOCUS2]))).toMatchObject({ ok: true, live: false, liveQuota: false });
     expect(screenVideo(video(['animated 2d', ...FOCUS2])).live).toBe(false);
     expect(screenVideo(video(['ai-video', ...FOCUS2])).live).toBe(false);
-    expect(screenVideo(video(['Hentai', 'amateur anal', ...FOCUS2]))).toMatchObject({ ok: true, live: true, liveQuota: true });
-    expect(screenVideo(video(['Animation', 'OnlyFans', ...FOCUS2])).liveQuota).toBe(true);
+    expect(screenVideo(video(['Hentai', 'amateur anal', 'POV', ...FOCUS2]))).toMatchObject({ ok: true, live: true, liveQuota: true });
+    expect(screenVideo(video(['Animation', 'OnlyFans', ...FOCUS2], { vr: true })).liveQuota).toBe(true);
     expect(screenVideo(video(['POV', 'Creampie', 'HMV'])).liveQuota).toBe(true);
   });
 
-  it('takes live action by a favourite (title, uploader, performer or tag) without the quota or the focus rule', () => {
+  it('turns down flat live action that is not POV, favourites included; picks skip it', () => {
+    const favourites = ['Noodledude'];
+    expect(screenVideo(video(['Animation', 'OnlyFans', ...FOCUS2]))).toEqual({ ok: false, reason: 'live-not-pov' });
+    expect(screenVideo(video(['PMV', 'tiktok', 'Creampie'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toEqual({ ok: false, reason: 'live-not-pov' });
+    expect(screenVideo(video(['PMV', 'tiktok', 'Creampie'], { name: 'FOLLOW ME Noodledude POV' }), { favourites })).toMatchObject({ ok: true, favourite: 'Noodledude' });
+    expect(screenVideo(video(['Amateur', 'Riding'], { name: 'Fit babe rides' }), { picked: true })).toMatchObject({ ok: true, picked: true });
+  });
+
+  it('takes POV live action by a favourite (title, uploader, performer or tag) without the quota or the focus rule', () => {
     const favourites = ['Noodledude', 'NoFaceGirl', 'Candy Love'];
-    expect(screenVideo(video(['PMV', 'tiktok'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Noodledude', liveQuota: false });
+    expect(screenVideo(video(['PMV', 'tiktok', 'POV'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Noodledude', liveQuota: false });
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Fit babe rides', performers: [{ name: 'NoFaceGirl' }] }), { favourites }).favourite).toBe('NoFaceGirl');
-    expect(screenVideo(video(['Amateur', 'Blowjob', 'Riding', 'noodledude'], { name: 'IWYC' }), { favourites }).favourite).toBe('Noodledude');
+    expect(screenVideo(video(['Amateur', 'Blowjob', 'Riding', 'POV', 'noodledude'], { name: 'IWYC' }), { favourites }).favourite).toBe('Noodledude');
     expect(screenVideo(video(['Amateur', 'Blowjob', 'noodledude'], { name: 'IWYC' }), { favourites }).reason).toBe('not-sexual');
     expect(screenVideo(video(['Amateur', 'POV', 'Riding', 'Feet'], { name: 'Fit babe rides', performers: [{ name: 'NoFaceGirl' }] }), { favourites })).toMatchObject({ ok: true, favourite: 'NoFaceGirl' });
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Candy Lovers' }), { favourites }).reason).toBe('off-focus');
@@ -146,14 +154,14 @@ describe('screenVideo', () => {
     expect(screenVideo(video(['Hentai', ...FOCUS2, 'Audio', 'Audio Based'])).ok).toBe(true);
   });
 
-  it('takes a music video by a creator already in the library without an animation tag, outside the quota', () => {
-    const v = video(['PMV', 'Cock Hero', 'Creampie'], { name: 'Sunset Cock Hero', user: { username: 'Bastati' } });
+  it('takes a POV music video by a creator already in the library without an animation tag, outside the quota', () => {
+    const v = video(['PMV', 'Cock Hero', 'Creampie', 'POV'], { name: 'Sunset Cock Hero', user: { username: 'Bastati' } });
     expect(screenVideo(v, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, artist: 'bastati', liveQuota: false });
     expect(screenVideo(v, { creators: [] }).liveQuota).toBe(true);
   });
 
   it('does not take a genre folder (Cock Hero, PMV) for a creator', () => {
-    const v = video(['PMV', 'Blowjob', 'Creampie'], { name: 'NON STOP - Cock Hero', user: { username: 'someone' } });
+    const v = video(['PMV', 'Blowjob', 'Creampie', 'POV'], { name: 'NON STOP - Cock Hero', user: { username: 'someone' } });
     expect(screenVideo(v, { creators: ['cock hero', 'pmv'] })).toMatchObject({ artist: null, liveQuota: true });
   });
 
@@ -163,7 +171,8 @@ describe('screenVideo', () => {
       { name: 'Moecode', category: 'none' }, { name: 'Ava', category: 'model' },
     ]);
     expect(livePerformers).toEqual(['molly little', 'kendra sunderland']);
-    expect(screenVideo(video(['Animation', ...FOCUS2], { name: 'Molly Little Dirty Talk Blowjob' }), { livePerformers }).live).toBe(true);
+    expect(screenVideo(video(['Animation', ...FOCUS2], { name: 'Molly Little Dirty Talk Blowjob' }), { livePerformers }).reason).toBe('live-not-pov');
+    expect(screenVideo(video(['Animation', 'POV', ...FOCUS2], { name: 'Molly Little Dirty Talk Blowjob' }), { livePerformers }).live).toBe(true);
     expect(screenVideo(video(['Animation', ...FOCUS2], { name: 'Ava rides Ganondorf' }), { livePerformers }).live).toBe(false);
   });
 

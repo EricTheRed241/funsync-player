@@ -41,21 +41,33 @@ describe('screenTopic', () => {
     expect(screenTopic(topic(['sfm', 'sex'], '触手 セックス'))).toMatchObject({ ok: true });
   });
 
-  it('takes animated posts, including AI-generated video; live action only waits for the live quota', () => {
+  it('takes animated posts, including AI-generated video; POV or VR live action only waits for the live quota', () => {
     expect(screenTopic(topic(['animation', 'ai-video']))).toMatchObject({ ok: true, live: false, liveQuota: false });
-    expect(screenTopic(topic(['animation', 'real']))).toMatchObject({ ok: true, live: true, liveQuota: true });
+    expect(screenTopic(topic(['animation', 'real', 'vr']))).toMatchObject({ ok: true, live: true, liveQuota: true });
     expect(screenTopic(topic(['pov', 'blowjob', 'doggy']))).toMatchObject({ ok: true, live: true, liveQuota: true });
   });
 
-  it('takes live action by a favourite, named in the title or a tag, without the quota', () => {
-    const favourites = ['Candy Love', 'NoFaceGirl'];
-    expect(screenTopic(topic(['real', 'pov'], 'Candy Love rides POV'), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Candy Love', liveQuota: false });
-    expect(screenTopic(topic(['real', 'nofacegirl'], 'Reverse cowgirl'), { favourites })).toMatchObject({ favourite: 'NoFaceGirl', liveQuota: false });
-    expect(screenTopic(topic(['real', 'vaginal'], 'Candy Lovers'), { favourites })).toMatchObject({ favourite: null, liveQuota: true });
+  it('turns down flat live action that is not POV, favourites and library creators included; picks skip it', () => {
+    const favourites = ['Candy Love'];
+    expect(screenTopic(topic(['animation', 'real']))).toEqual({ ok: false, reason: 'live-not-pov' });
+    expect(screenTopic(topic(['real', 'vaginal'], 'Candy Love rides'), { favourites })).toEqual({ ok: false, reason: 'live-not-pov' });
+    expect(screenTopic(topic(['pmv', 'real'], '[Bastati] Yuria Boss Battle 1'), { creators: ['bastati'] }).reason).toBe('live-not-pov');
+    expect(screenTopic(topic(['real', 'riding'], 'Candy Love POV rides'), { favourites })).toMatchObject({ ok: true, favourite: 'Candy Love' });
+    expect(screenTopic(topic(['real', 'male-pov', 'riding']))).toMatchObject({ ok: true });
+    expect(screenTopic(topic(['real', 'vr', 'riding']))).toMatchObject({ ok: true, vr: true });
+    expect(screenTopic(topic(['real', 'riding'], 'Povertyline')).reason).toBe('live-not-pov');
+    expect(screenPick(topic(['real', 'vaginal'], 'Candy Love rides'), { favourites })).toMatchObject({ ok: true, picked: true });
   });
 
-  it('takes a music post by a creator already in the library even without an animation tag', () => {
-    const t = topic(['pmv', 'real'], '[Multi-axis] [Bastati] Yuria Boss Battle 1');
+  it('takes POV live action by a favourite, named in the title or a tag, without the quota', () => {
+    const favourites = ['Candy Love', 'NoFaceGirl'];
+    expect(screenTopic(topic(['real', 'pov'], 'Candy Love rides POV'), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Candy Love', liveQuota: false });
+    expect(screenTopic(topic(['real', 'pov', 'nofacegirl'], 'Reverse cowgirl'), { favourites })).toMatchObject({ favourite: 'NoFaceGirl', liveQuota: false });
+    expect(screenTopic(topic(['real', 'pov', 'vaginal'], 'Candy Lovers'), { favourites })).toMatchObject({ favourite: null, liveQuota: true });
+  });
+
+  it('takes a POV or VR music post by a creator already in the library even without an animation tag', () => {
+    const t = topic(['pmv', 'real', 'pov'], '[Multi-axis] [Bastati] Yuria Boss Battle 1');
     expect(screenTopic(t, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, vr: false, artist: 'bastati', liveQuota: false });
     expect(screenTopic(t, { creators: [] })).toMatchObject({ ok: true, liveQuota: true });
   });
@@ -165,6 +177,15 @@ describe('contentRuleBreak', () => {
     expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'feet' })).toBeNull();
     expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'monster' })).toBeNull();
     expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'excluded' })).toBe('excluded');
+  });
+
+  it('drops a saved flat live candidate that is not POV from the queue, unless picked', () => {
+    const c = (id, extra) => ({ id, title: 'Candy Love rides', author: 'x', tags: ['real', 'riding'], axisType: 'multi', score: 1, scenes: [{ axes: ['twist'] }], live: true, ...extra });
+    expect(contentRuleBreak(c(1, { favourite: 'Candy Love' }))).toBe('live-not-pov');
+    expect(contentRuleBreak(c(2, { vr: true }))).toBeNull();
+    expect(contentRuleBreak(c(3, { tags: ['real', 'riding', 'pov'] }))).toBeNull();
+    expect(contentRuleBreak(c(4, { picked: true }))).toBeNull();
+    expect(downloadQueue([c(1), c(2, { vr: true }), c(4, { picked: true })]).map((x) => x.id).sort()).toEqual([2, 4]);
   });
 });
 
