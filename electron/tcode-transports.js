@@ -22,11 +22,117 @@
 //   destroy(): void                  // hard teardown, idempotent
 
 const dgram = require('dgram');
+const dns = require('dns');
+const net = require('net');
 
 // Some Electron / Node sandboxes expose WebSocket globally (Node 22+).
 // Fall back gracefully — UDP can still be selected even if WS isn't
 // available in this environment.
 const HAS_GLOBAL_WS = typeof globalThis.WebSocket !== 'undefined';
+
+// WebSocket reconnect policy after a drop (user, 2026-11-03): retry every
+// 5 s for the first 30 minutes the device is gone, then every 60 s.
+const FAST_RETRY_MS = 5000;
+const FAST_WINDOW_MS = 30 * 60 * 1000;
+const SLOW_RETRY_MS = 60 * 1000;
+// The same failure repeated is logged at most this often (with a count of
+// the attempts in between); a different failure is logged at once.
+const FAST_FAILURE_LOG_MS = 60 * 1000;
+const SLOW_FAILURE_LOG_MS = 10 * 60 * 1000;
+// Diagnosis of a failed attempt. The runtime's WebSocket (undici) reports
+// every failure as a bare ErrorEvent plus close code 1006, so the cause
+// comes from our own DNS lookup and TCP probe of the same host and port.
+const LOOKUP_TIMEOUT_MS = 6000;
+const PROBE_TIMEOUT_MS = 3000;
+
+const CLOSE_CODES = {
+  1000: 'normal',
+  1001: 'going away',
+  1002: 'protocol error',
+  1003: 'unsupported data',
+  1005: 'no status',
+  1006: 'abnormal, no close frame',
+  1007: 'invalid data',
+  1008: 'policy violation',
+  1009: 'message too big',
+  1011: 'server error',
+  1012: 'service restart',
+  1013: 'try again later',
+  1015: 'TLS failure',
+};
+
+function fmtDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '?';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m${String(s % 60).padStart(2, '0')}s`;
+}
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function closeText(ev) {
+  const code = ev?.code;
+  const name = CLOSE_CODES[code];
+  const reason = ev?.reason ? ` reason=${JSON.stringify(ev.reason)}` : '';
+  const clean = typeof ev?.wasClean === 'boolean' ? ` clean=${ev.wasClean}` : '';
+  return `close=${code ?? '?'}${name ? ` (${name})` : ''}${reason}${clean}`;
+}
+
+function parseTarget(url) {
+  const u = new URL(url);
+  return {
+    host: u.hostname.replace(/^\[|\]$/g, ''),
+    port: Number(u.port) || (u.protocol === 'wss:' ? 443 : 80),
+  };
+}
+
+// IPv4 first: devices on the LAN (MiraBot over mDNS) answer on IPv4, and
+// `localhost` resolving to ::1 first would point the TCP probe at the
+// wrong socket.
+async function lookupHost(host) {
+  const all = await dns.promises.lookup(host, { all: true });
+  return all.find((a) => a.family === 4) || all[0];
+}
+
+/** TCP connect to host:port and hang up: `{ ok, code?, ms }`, never rejects. */
+function probeTcp(host, port, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let done = false;
+    const sock = net.connect({ host, port });
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      sock.destroy();
+      resolve({ ...result, ms: Date.now() - t0 });
+    };
+    sock.setTimeout(timeoutMs, () => finish({ ok: false, code: 'ETIMEDOUT' }));
+    sock.once('connect', () => finish({ ok: true }));
+    sock.once('error', (err) => finish({ ok: false, code: err.code || err.message }));
+  });
+}
+
+function describeTcpFailure(where, code) {
+  switch (code) {
+    case 'ECONNREFUSED':
+      return `${where} refused the connection (ECONNREFUSED): the device is up but its WebSocket server isn't listening`;
+    case 'ETIMEDOUT':
+      return `no answer from ${where} within ${fmtDuration(PROBE_TIMEOUT_MS)} (ETIMEDOUT)`;
+    case 'EHOSTUNREACH':
+    case 'EHOSTDOWN':
+    case 'ENETUNREACH':
+      return `${where} is unreachable (${code})`;
+    default:
+      return `TCP connect to ${where} failed (${code})`;
+  }
+}
 
 class SerialTransport {
   constructor({ log = console } = {}) {
@@ -225,11 +331,19 @@ class WebsocketTransport {
    * TCode device. Send is sync-returning-bool to match the contract;
    * delivery is best-effort (no ack model in the TCode protocol).
    *
-   * Auto-reconnects with exponential backoff when the remote drops the
-   * connection AFTER an initial successful open. This matters for
-   * MFP-protocol consumers like restim — if restim restarts while
-   * FunSync is playing, the user shouldn't have to manually disconnect
-   * and reconnect.
+   * Auto-reconnects when the remote drops the connection AFTER an initial
+   * successful open: every 5 s for the first 30 minutes of the outage,
+   * then every 60 s until it comes back or the user disconnects. Covers a
+   * MiraBot rebooting or leaving Wi-Fi, and MFP consumers like restim
+   * restarting mid-video. A first connect that fails is reported to the
+   * caller instead (the user may have typed a bad URL).
+   *
+   * Logging (electron-log → main.log): every connect, drop and reconnect
+   * carries the URL, resolved IP, close code, uptime / downtime, commands
+   * and bytes sent and the attempt count. A failed attempt is explained by
+   * a DNS lookup and a TCP probe of the same host:port (the runtime's
+   * WebSocket reports no cause); repeats of the same failure are folded
+   * into one line per minute (per 10 minutes once retries slow down).
    *
    * @param opts.WebSocketImpl optional override for tests — must match
    *   the browser WebSocket shape (constructor `(url)`, `.send(data)`,
@@ -237,19 +351,40 @@ class WebsocketTransport {
    * @param opts.setTimeoutImpl optional override for tests — must match
    *   the `setTimeout(fn, ms) -> id` shape.
    * @param opts.clearTimeoutImpl optional override for tests.
+   * @param opts.nowImpl optional clock override for tests (`() => ms`).
+   * @param opts.lookupImpl optional DNS override (`host -> {address, family}`).
+   * @param opts.probeImpl optional TCP probe override
+   *   (`(host, port, timeoutMs) -> {ok, code?, ms}`).
    * @param opts.reconnect (default true) — disable to keep tests simple.
    */
-  constructor({ log = console, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, reconnect = true } = {}) {
+  constructor({
+    log = console, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, reconnect = true,
+    nowImpl, lookupImpl, probeImpl,
+  } = {}) {
     this._ws = null;
     this._log = log;
     this._onDisconnect = null;
     this._url = null;
+    this._target = null;
     this._reconnectEnabled = !!reconnect;
     this._reconnectTimer = null;
     this._reconnectAttempts = 0;
+    this._nextDelay = null;
     this._stopped = false;
+    this._hasEverConnected = false;
+    // Outage bookkeeping: when the open connection dropped, whether the
+    // switch to slow retries was logged, and the failure-folding state.
+    this._downSince = null;
+    this._slowLogged = false;
+    this._failLog = null;
+    // Per-connection stats for the drop / disconnect lines.
+    this._session = null;
+    this._lastIp = null;
     this._setTimeout = setTimeoutImpl || ((typeof setTimeout !== 'undefined') ? setTimeout : null);
     this._clearTimeout = clearTimeoutImpl || ((typeof clearTimeout !== 'undefined') ? clearTimeout : null);
+    this._now = nowImpl || Date.now;
+    this._lookup = lookupImpl || lookupHost;
+    this._probe = probeImpl || probeTcp;
     // Distinguish "caller did not pass WebSocketImpl" (undefined → fall
     // back to global) from "caller explicitly passed null" (no runtime,
     // tested explicitly).
@@ -260,14 +395,10 @@ class WebsocketTransport {
     }
   }
 
-  /**
-   * Compute backoff for the Nth reconnect attempt (0-indexed). Capped
-   * at 30s to keep the wait bounded; the sequence is 1s, 2s, 4s, 8s,
-   * 16s, 30s, 30s, ... — matches the pattern used in
-   * `renderer/js/vr-bridge.js` for the VR companion. Exposed for tests.
-   */
-  _backoffMs(attempt) {
-    return Math.min(30000, 1000 * Math.pow(2, attempt));
+  /** Delay before the next reconnect: 5 s for the first 30 min down, then 60 s. */
+  _retryDelayMs() {
+    const down = this._downSince == null ? 0 : this._now() - this._downSince;
+    return down < FAST_WINDOW_MS ? FAST_RETRY_MS : SLOW_RETRY_MS;
   }
 
   async connect({ url } = {}) {
@@ -277,115 +408,266 @@ class WebsocketTransport {
     if (!url || typeof url !== 'string' || !/^wss?:\/\//.test(url)) {
       return { success: false, error: 'url must start with ws:// or wss://' };
     }
-    // User-initiated connect resets the stopped flag and attempt counter
-    // — clearing whatever state a prior `disconnect()` set. The internal
-    // reconnect path (`_openSocket`) skips this reset so backoff grows
-    // across consecutive failed reconnects.
+    let target;
+    try {
+      target = parseTarget(url);
+    } catch {
+      return { success: false, error: `invalid url: ${url}` };
+    }
+    // User-initiated connect starts from a clean slate; the internal
+    // reconnect path (`_openSocket`) keeps the outage state so the retry
+    // interval can slow down after 30 minutes.
     this._stopped = false;
     this._reconnectAttempts = 0;
     this._hasEverConnected = false;
-    if (this._reconnectTimer && this._clearTimeout) {
-      this._clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
+    this._downSince = null;
+    this._slowLogged = false;
+    this._failLog = null;
+    this._clearReconnectTimer();
     this._url = url;
-    return this._openSocket(url);
+    this._target = target;
+    return this._openSocket();
+  }
+
+  _clearReconnectTimer() {
+    if (this._reconnectTimer && this._clearTimeout) this._clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
   }
 
   /**
-   * Open a fresh WebSocket and resolve when it either opens or closes.
-   * Shared between user-initiated `connect()` and internal `_scheduleReconnect()` so
-   * the latter can grow the backoff across consecutive failures without
-   * `connect()` resetting state on every attempt.
+   * Open a fresh WebSocket and resolve when it either opens or fails.
+   * Shared between user-initiated `connect()` and the reconnect timer. A
+   * DNS lookup of the host runs alongside, for the IP in the log and to
+   * explain a failure. Handlers of a socket that is no longer current
+   * only settle its promise.
    */
-  async _openSocket(url) {
-    // Synchronous teardown of any prior socket — avoid awaiting so the
-    // new socket is constructed on the same tick.
+  _openSocket() {
+    const url = this._url;
     if (this._ws) {
       const prior = this._ws;
       this._ws = null;
       try { prior.close(); } catch {}
     }
+    const startedAt = this._now();
+    const diag = this._resolveHost();
+    let ws;
     try {
-      this._ws = new this._WebSocket(url);
-      return await new Promise((resolve) => {
-        const settle = (result) => {
-          if (resolved) return;
-          resolved = true;
-          resolve(result);
-        };
-        let resolved = false;
-        this._ws.onopen = () => {
-          this._log.info?.(`[TCode/ws] Connected ${url}`);
-          this._reconnectAttempts = 0;
-          this._hasEverConnected = true;
-          settle({ success: true });
-        };
-        this._ws.onclose = (ev) => {
-          const wasPreOpen = !resolved;
-          if (wasPreOpen) {
-            settle({ success: false, error: `closed before open (${ev?.code ?? ''})` });
-            this._ws = null;
-          } else {
-            this._log.info?.('[TCode/ws] Closed');
-            this._ws = null;
-          }
-          // Schedule a reconnect on remote-initiated drops AND on
-          // pre-open closes inside an active reconnect session (we'd
-          // already opened at least once). The very-first connect that
-          // closes before open is reported as a failure to the caller —
-          // user just typed a bad URL — no auto-retry.
-          const shouldRetry = this._reconnectEnabled
-            && !this._stopped
-            && (this._hasEverConnected || !wasPreOpen);
-          if (shouldRetry) {
-            this._scheduleReconnect();
-          } else if (!wasPreOpen && this._onDisconnect) {
-            this._onDisconnect();
-          }
-        };
-        this._ws.onerror = (ev) => {
-          this._log.warn?.('[TCode/ws] Socket error');
-          if (!resolved) settle({ success: false, error: ev?.message || 'connect failed' });
-        };
-      });
+      ws = new this._WebSocket(url);
     } catch (err) {
-      this._log.warn?.('[TCode/ws] Connect error:', err.message);
-      this._ws = null;
-      return { success: false, error: err.message };
+      this._log.warn?.(`[TCode/ws] Connect error: ${err.message} url=${url}`);
+      if (this._inReconnectSession()) this._scheduleReconnect();
+      return Promise.resolve({ success: false, error: err.message });
     }
+    this._ws = ws;
+    return new Promise((resolve) => {
+      let opened = false;
+      let settled = false;
+      const settle = (result) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      ws.onopen = () => {
+        if (this._ws !== ws) return;
+        opened = true;
+        this._onOpen(startedAt, diag);
+        settle({ success: true });
+      };
+      // undici's ErrorEvent carries no detail and is always followed by a
+      // close event; the close handler logs the explained failure.
+      ws.onerror = () => {};
+      ws.onclose = (ev) => {
+        if (this._ws !== ws) {
+          settle({ success: false, error: 'connection replaced or closed' });
+          return;
+        }
+        this._ws = null;
+        if (opened) {
+          this._onDrop(ev);
+          return;
+        }
+        if (this._inReconnectSession()) {
+          const attempt = this._reconnectAttempts;
+          this._scheduleReconnect();
+          this._explainFailure(diag, ev, startedAt)
+            .then((f) => this._logReconnectFailure(attempt, f));
+          settle({ success: false, error: 'reconnect attempt failed' });
+          return;
+        }
+        this._explainFailure(diag, ev, startedAt).then((f) => {
+          this._log.warn?.(`[TCode/ws] Connect failed: ${f.text} url=${url} ${f.meta}`);
+          settle({ success: false, error: f.text });
+        });
+      };
+    });
+  }
+
+  _inReconnectSession() {
+    return this._reconnectEnabled && this._hasEverConnected && !this._stopped;
+  }
+
+  /** DNS lookup of the target host, bounded: `{ ok, address?, family?, code?, ms }`. */
+  _resolveHost() {
+    const t0 = this._now();
+    const { host } = this._target;
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ ...result, ms: this._now() - t0 });
+      };
+      const timer = setTimeout(() => finish({ ok: false, code: 'lookup timeout' }), LOOKUP_TIMEOUT_MS);
+      timer.unref?.();
+      Promise.resolve()
+        .then(() => this._lookup(host))
+        .then(
+          (r) => finish({ ok: true, address: r.address, family: r.family }),
+          (err) => finish({ ok: false, code: err?.code || err?.message || 'lookup failed' }),
+        );
+    });
   }
 
   /**
-   * Schedule the next reconnect attempt. Called from the close handler
-   * when reconnection is enabled and the user didn't explicitly stop.
-   * Pulled out so tests can assert backoff timing without faking a
-   * full WebSocket lifecycle.
+   * Why did an attempt fail? `{ cause, text, meta }`: `cause` is the key
+   * repeated failures are folded by, `text` the human explanation (also the
+   * error a first connect returns), `meta` the numbers.
    */
+  async _explainFailure(diag, ev, startedAt) {
+    const tookMs = this._now() - startedAt;
+    const { host, port } = this._target;
+    const close = closeText(ev);
+    try {
+      const d = await diag;
+      if (!d.ok) {
+        return {
+          cause: `dns:${d.code}`,
+          text: `${host} does not resolve (${d.code}): the device is off or not on this network`,
+          meta: `${close} dns=${fmtDuration(d.ms)} took=${fmtDuration(tookMs)}`,
+        };
+      }
+      const where = `${d.address}:${port}`;
+      const p = await this._probe(d.address, port, PROBE_TIMEOUT_MS);
+      const meta = `ip=${d.address} ${close} dns=${fmtDuration(d.ms)} tcp=${fmtDuration(p.ms)} took=${fmtDuration(tookMs)}`;
+      if (p.ok) {
+        return {
+          cause: `ws:${ev?.code}@${d.address}`,
+          text: `TCP ${where} accepts connections but the WebSocket handshake failed`,
+          meta,
+        };
+      }
+      return { cause: `tcp:${p.code}@${d.address}`, text: describeTcpFailure(where, p.code), meta };
+    } catch (err) {
+      return {
+        cause: `diag:${err?.message}`,
+        text: `connection failed (diagnosis error: ${err?.message})`,
+        meta: `${close} took=${fmtDuration(tookMs)}`,
+      };
+    }
+  }
+
+  _onOpen(startedAt, diag) {
+    const now = this._now();
+    const openMs = now - startedAt;
+    const isReconnect = this._hasEverConnected;
+    const downMs = this._downSince == null ? null : now - this._downSince;
+    const attempts = this._reconnectAttempts;
+    const folded = this._failLog?.suppressed || 0;
+    this._hasEverConnected = true;
+    this._reconnectAttempts = 0;
+    this._downSince = null;
+    this._slowLogged = false;
+    this._failLog = null;
+    const session = { openedAt: now, ip: null, sent: 0, bytes: 0, lastSendAt: null, sendErrors: 0 };
+    this._session = session;
+    diag.then((d) => {
+      session.ip = d.ok ? d.address : null;
+      let ip = d.ok ? d.address : `? (${d.code})`;
+      if (d.ok && this._lastIp && this._lastIp !== d.address) ip += ` (was ${this._lastIp})`;
+      if (d.ok) this._lastIp = d.address;
+      if (isReconnect) {
+        const foldedText = folded ? ` (${folded} failed attempts not logged)` : '';
+        this._log.info?.(`[TCode/ws] Reconnected url=${this._url} ip=${ip} down=${fmtDuration(downMs)} attempts=${attempts} open=${fmtDuration(openMs)}${foldedText}`);
+      } else {
+        this._log.info?.(`[TCode/ws] Connected url=${this._url} ip=${ip} dns=${fmtDuration(d.ms)} open=${fmtDuration(openMs)}`);
+      }
+    });
+  }
+
+  _sessionText(now) {
+    const s = this._session;
+    if (!s) return '';
+    const lastSend = s.lastSendAt == null ? 'never' : `${fmtDuration(now - s.lastSendAt)} ago`;
+    const errors = s.sendErrors ? ` sendErrors=${s.sendErrors}` : '';
+    return `ip=${s.ip ?? '?'} up=${fmtDuration(now - s.openedAt)} sent=${s.sent} cmds/${fmtBytes(s.bytes)} lastSend=${lastSend}${errors}`;
+  }
+
+  /** The open connection closed without the user asking. */
+  _onDrop(ev) {
+    const now = this._now();
+    const stats = this._sessionText(now);
+    this._session = null;
+    const line = `[TCode/ws] Connection lost url=${this._url} ${closeText(ev)} ${stats}`;
+    if (this._reconnectEnabled && !this._stopped) {
+      this._downSince = now;
+      this._log.warn?.(`${line}; retrying every ${fmtDuration(FAST_RETRY_MS)} for ${fmtDuration(FAST_WINDOW_MS)}, then every ${fmtDuration(SLOW_RETRY_MS)}`);
+      this._scheduleReconnect();
+    } else {
+      this._log.warn?.(line);
+      if (this._onDisconnect) this._onDisconnect();
+    }
+  }
+
+  /** Log a failed reconnect, folding repeats of the same cause. */
+  _logReconnectFailure(attempt, f) {
+    if (this._stopped || this._downSince == null) return;
+    const now = this._now();
+    const interval = this._nextDelay === SLOW_RETRY_MS ? SLOW_FAILURE_LOG_MS : FAST_FAILURE_LOG_MS;
+    const prev = this._failLog;
+    if (prev && prev.cause === f.cause && now - prev.at < interval) {
+      prev.suppressed++;
+      return;
+    }
+    const folded = prev?.suppressed ? ` (+${prev.suppressed} similar not logged)` : '';
+    this._failLog = { cause: f.cause, at: now, suppressed: 0 };
+    this._log.warn?.(`[TCode/ws] Reconnect attempt ${attempt} failed: ${f.text} url=${this._url} ${f.meta} down=${fmtDuration(now - this._downSince)} next=${fmtDuration(this._nextDelay)}${folded}`);
+  }
+
   _scheduleReconnect() {
     if (!this._setTimeout) return;
-    const delay = this._backoffMs(this._reconnectAttempts);
+    const delay = this._retryDelayMs();
+    if (delay === SLOW_RETRY_MS && !this._slowLogged) {
+      this._slowLogged = true;
+      this._log.warn?.(`[TCode/ws] Still down after ${fmtDuration(this._now() - this._downSince)} (${this._reconnectAttempts} attempts) url=${this._url}: retrying every ${fmtDuration(SLOW_RETRY_MS)} from now on`);
+    }
     this._reconnectAttempts++;
-    this._log.info?.(`[TCode/ws] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
+    this._nextDelay = delay;
     this._reconnectTimer = this._setTimeout(() => {
       this._reconnectTimer = null;
       if (this._stopped || !this._url) return;
-      // Don't await — if it fails, the close handler fires again and
-      // schedules the next attempt with grown backoff. Call _openSocket
-      // directly so the user-initiated state reset in connect() doesn't
-      // wipe `_reconnectAttempts` on every retry.
-      this._openSocket(this._url).catch(() => {});
+      this._openSocket();
     }, delay);
+  }
+
+  /** Log what a user-initiated stop ends: an open connection or an outage. */
+  _logStop() {
+    const now = this._now();
+    if (this._session) {
+      this._log.info?.(`[TCode/ws] Closed by user url=${this._url} ${this._sessionText(now)}`);
+    } else if (this._downSince != null) {
+      this._log.info?.(`[TCode/ws] Reconnecting stopped by user url=${this._url} down=${fmtDuration(now - this._downSince)} attempts=${this._reconnectAttempts}`);
+    }
+    this._session = null;
+    this._downSince = null;
   }
 
   async disconnect() {
     // Mark as user-initiated so the close handler doesn't schedule
     // a reconnect.
     this._stopped = true;
-    if (this._reconnectTimer && this._clearTimeout) {
-      this._clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
+    this._clearReconnectTimer();
+    this._logStop();
     this._reconnectAttempts = 0;
     if (!this._ws) return;
     const ws = this._ws;
@@ -400,8 +682,15 @@ class WebsocketTransport {
     if (this._ws.readyState !== 1) return false;
     try {
       this._ws.send(command);
+      const s = this._session;
+      if (s) {
+        s.sent++;
+        s.bytes += command.length;
+        s.lastSendAt = this._now();
+      }
       return true;
     } catch (err) {
+      if (this._session) this._session.sendErrors++;
       this._log.debug?.('[TCode/ws] Send error:', err.message);
       return false;
     }
@@ -417,13 +706,12 @@ class WebsocketTransport {
   destroy() {
     this._onDisconnect = null;
     this._stopped = true;
-    if (this._reconnectTimer && this._clearTimeout) {
-      this._clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
+    this._clearReconnectTimer();
+    this._logStop();
     if (this._ws) {
-      try { this._ws.close(); } catch {}
+      const ws = this._ws;
       this._ws = null;
+      try { ws.close(); } catch {}
     }
   }
 }

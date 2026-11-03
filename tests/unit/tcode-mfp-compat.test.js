@@ -4,10 +4,12 @@
 //      Restim's parser is lenient (accepts either), but TCode-0.3-only
 //      firmware needs 4-digit; some consumers infer protocol version from
 //      digit count.
-//   2. Auto-reconnect with exponential backoff on the WebSocket transport.
-//      Restim users expect FunSync to follow them through a restart without
-//      a manual reconnect. The reconnect is gated on having had an initial
-//      successful open, and is cancelled when the user calls disconnect().
+//   2. Auto-reconnect on the WebSocket transport: every 5 s for the first
+//      30 minutes after a drop, then every 60 s. Restim users expect
+//      FunSync to follow them through a restart, and a MiraBot that
+//      reboots or leaves Wi-Fi should come back by itself. The reconnect is
+//      gated on having had an initial successful open, and is cancelled
+//      when the user calls disconnect().
 //   3. Stop now emits a portable neutral-position frame in addition to the
 //      non-standard DSTOP — MFP-protocol consumers ignore DSTOP and need
 //      explicit axis values.
@@ -195,7 +197,7 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
   });
 });
 
-// --- WebsocketTransport: auto-reconnect with backoff ----------------------
+// --- WebsocketTransport: auto-reconnect -----------------------------------
 
 class MockWebSocket {
   constructor(url) {
@@ -214,112 +216,111 @@ class MockWebSocket {
   }
   _open() { this.readyState = 1; if (this.onopen) this.onopen({}); }
   _serverDrop() {
-    // Remote closed the connection — simulate restim restart.
+    // Remote closed the connection (restim restart, MiraBot off Wi-Fi), or
+    // a reconnect attempt that never opened.
     this.readyState = 3;
-    if (this.onclose) this.onclose({ code: 1006 });
+    if (this.onclose) this.onclose({ code: 1006, reason: '', wasClean: false });
   }
 }
 MockWebSocket.instances = [];
 
 beforeEach(() => { MockWebSocket.instances.length = 0; });
 
-describe('WebsocketTransport — auto-reconnect with backoff', () => {
-  function makeFakeTimer() {
+const MIN = 60 * 1000;
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+describe('WebsocketTransport — auto-reconnect', () => {
+  // Fake timers, clock and network so each test drives the transport by hand.
+  function setup(extra = {}) {
     const timers = [];
-    const setT = (fn, ms) => { const id = timers.length + 1; timers.push({ id, fn, ms }); return id; };
-    const clearT = (id) => { const idx = timers.findIndex((t) => t.id === id); if (idx >= 0) timers.splice(idx, 1); };
-    return { setT, clearT, timers, run(id) {
-      const t = timers.find((x) => x.id === id);
-      if (!t) return;
-      timers.splice(timers.indexOf(t), 1);
-      t.fn();
-    } };
+    let nextId = 1;
+    const setT = (fn, ms) => { const id = nextId++; timers.push({ id, fn, ms }); return id; };
+    const clearT = (id) => { const idx = timers.findIndex((x) => x.id === id); if (idx >= 0) timers.splice(idx, 1); };
+    const clock = { now: 1_000_000 };
+    const lines = [];
+    const net = { probe: { ok: false, code: 'ECONNREFUSED', ms: 2 } };
+    const t = new WebsocketTransport({
+      log: {
+        info: (m) => lines.push(['info', m]),
+        warn: (m) => lines.push(['warn', m]),
+      },
+      WebSocketImpl: MockWebSocket,
+      setTimeoutImpl: setT,
+      clearTimeoutImpl: clearT,
+      nowImpl: () => clock.now,
+      lookupImpl: async () => ({ address: '10.0.0.5', family: 4 }),
+      probeImpl: async () => net.probe,
+      ...extra,
+    });
+    const latest = () => MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    // Fire the pending reconnect timer; the attempt it opens fails pre-open.
+    const fireAndFail = () => {
+      const tm = timers.shift();
+      tm.fn();
+      latest()._serverDrop();
+    };
+    const connectAndOpen = async () => {
+      const p = t.connect({ url: 'ws://mirabot.local:8888' });
+      latest()._open();
+      await p;
+    };
+    return { t, timers, clock, lines, net, latest, fireAndFail, connectAndOpen };
   }
 
-  it('schedules a reconnect after a server-side close', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-    });
-    const p = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p;
+  it('schedules a 5 s reconnect after a server-side close', async () => {
+    const { t, timers, latest, connectAndOpen } = setup();
+    await connectAndOpen();
     expect(t.connected).toBe(true);
 
-    MockWebSocket.instances[0]._serverDrop();
+    latest()._serverDrop();
     expect(t.connected).toBe(false);
     expect(t.reconnecting).toBe(true);
-    expect(timers[0].ms).toBe(1000);
+    expect(timers.map((x) => x.ms)).toEqual([5000]);
   });
 
-  it('backoff doubles each consecutive failed reconnect', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-    });
-    const p = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p;
+  it('keeps retrying every 5 s for the first 30 minutes down, then every 60 s', async () => {
+    const { timers, clock, latest, fireAndFail, connectAndOpen } = setup();
+    await connectAndOpen();
+    const droppedAt = clock.now;
+    latest()._serverDrop();
 
-    // First drop → 1000ms scheduled.
-    MockWebSocket.instances[0]._serverDrop();
-    expect(timers[0].ms).toBe(1000);
-    // Fire the reconnect timer; the inner connect() is async (awaits
-    // disconnect of prior socket etc.) so we need a microtask flush
-    // before the next MockWebSocket instance is observable. The reconnect
-    // attempt itself fails (server drops before open). The close handler
-    // should re-schedule with doubled backoff.
-    const firstReconnect = timers[0];
-    timers.length = 0;
-    firstReconnect.fn();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(MockWebSocket.instances[1]).toBeDefined();
-    MockWebSocket.instances[1]._open();   // succeed
-    MockWebSocket.instances[1]._serverDrop(); // then immediately drop again
-    expect(timers[0].ms).toBe(1000);  // success resets the counter
+    clock.now = droppedAt + 5000;
+    fireAndFail();
+    expect(timers[0].ms).toBe(5000);
 
-    // Failure-without-success path: the reconnect attempt closes pre-open.
-    const reconnectAttempt2 = timers[0];
-    timers.length = 0;
-    reconnectAttempt2.fn();
-    await Promise.resolve();
-    await Promise.resolve();
-    MockWebSocket.instances[2]._serverDrop(); // never opened — counts as a failed reconnect
-    expect(timers[0].ms).toBe(2000);
+    clock.now = droppedAt + 30 * MIN - 1;
+    fireAndFail();
+    expect(timers[0].ms).toBe(5000);
+
+    clock.now = droppedAt + 30 * MIN;
+    fireAndFail();
+    expect(timers[0].ms).toBe(60000);
+
+    clock.now = droppedAt + 5 * 60 * MIN;
+    fireAndFail();
+    expect(timers[0].ms).toBe(60000);
   });
 
-  it('successful reconnect resets the backoff counter', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-    });
-    const p = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p;
+  it('a successful reconnect restarts the 30-minute fast window', async () => {
+    const { timers, clock, latest, fireAndFail, connectAndOpen } = setup();
+    await connectAndOpen();
+    latest()._serverDrop();
+    clock.now += 40 * MIN;
+    fireAndFail();
+    expect(timers[0].ms).toBe(60000);
 
-    MockWebSocket.instances[0]._serverDrop();
-    timers[0].fn(); // fire the 1s reconnect
-    MockWebSocket.instances[1]._open(); // reconnect succeeds
-
-    // Server drops again — should schedule at 1s, not 2s.
-    MockWebSocket.instances[1]._serverDrop();
-    expect(timers[timers.length - 1].ms).toBe(1000);
+    // The next attempt opens, then the device drops again.
+    timers.shift().fn();
+    latest()._open();
+    clock.now += 10 * MIN;
+    latest()._serverDrop();
+    expect(timers.map((x) => x.ms)).toEqual([5000]);
   });
 
-  it('user-initiated disconnect cancels pending reconnect', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-    });
-    const p = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p;
-    MockWebSocket.instances[0]._serverDrop();
+  it('user-initiated disconnect cancels the pending reconnect', async () => {
+    const { t, timers, latest, connectAndOpen } = setup();
+    await connectAndOpen();
+    latest()._serverDrop();
     expect(t.reconnecting).toBe(true);
 
     await t.disconnect();
@@ -327,67 +328,90 @@ describe('WebsocketTransport — auto-reconnect with backoff', () => {
     expect(timers.length).toBe(0);
   });
 
-  it('disconnect during pending reconnect does not fire later', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-    });
-    const p = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p;
-    MockWebSocket.instances[0]._serverDrop();
-    await t.disconnect();
-    // Even if a stray scheduler tries to fire the cancelled timer, no
-    // new MockWebSocket instance should be constructed.
-    const before = MockWebSocket.instances.length;
-    // Nothing in `timers` so nothing to fire — just assert state.
-    expect(MockWebSocket.instances.length).toBe(before);
-  });
-
   it('reconnect disabled (option = false) leaves the socket closed without rescheduling', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-      reconnect: false,
-    });
+    const { t, timers, latest, connectAndOpen } = setup({ reconnect: false });
     const onDisc = vi.fn();
     t.onDisconnect(onDisc);
-    const p = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p;
-    MockWebSocket.instances[0]._serverDrop();
+    await connectAndOpen();
+    latest()._serverDrop();
     expect(t.reconnecting).toBe(false);
     expect(timers.length).toBe(0);
     expect(onDisc).toHaveBeenCalledTimes(1);
   });
 
-  it('a brand-new connect() call resets the stopped flag and counter', async () => {
-    const { setT, clearT, timers } = makeFakeTimer();
-    const t = new WebsocketTransport({
-      log: {}, WebSocketImpl: MockWebSocket,
-      setTimeoutImpl: setT, clearTimeoutImpl: clearT,
-    });
-    const p1 = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[0]._open();
-    await p1;
+  it('a brand-new connect() call resets the stopped flag', async () => {
+    const { t, latest, connectAndOpen } = setup();
+    await connectAndOpen();
     await t.disconnect();
     expect(t.reconnecting).toBe(false);
 
-    const p2 = t.connect({ url: 'ws://x' });
-    MockWebSocket.instances[1]._open();
-    await p2;
-    MockWebSocket.instances[1]._serverDrop();
+    await connectAndOpen();
+    latest()._serverDrop();
     expect(t.reconnecting).toBe(true);
   });
 
-  it('backoff is capped at 30s', () => {
-    const t = new WebsocketTransport({ log: {}, WebSocketImpl: MockWebSocket });
-    // 2^5 = 32s → capped at 30s
-    expect(t._backoffMs(5)).toBe(30000);
-    expect(t._backoffMs(10)).toBe(30000);
-    expect(t._backoffMs(0)).toBe(1000);
-    expect(t._backoffMs(3)).toBe(8000);
+  it('logs a repeated failure once a minute with a count, and a new cause at once', async () => {
+    const { clock, lines, net, latest, fireAndFail, connectAndOpen } = setup();
+    await connectAndOpen();
+    latest()._serverDrop();
+    const failures = () => lines.filter(([, m]) => m.includes('Reconnect attempt'));
+
+    // Attempts 1–13, 5 s apart: 1 is logged, 2–12 fall inside its minute.
+    for (let i = 1; i <= 13; i++) {
+      clock.now += 5000;
+      fireAndFail();
+      await flush();
+    }
+    expect(failures()).toHaveLength(2);
+    expect(failures()[0][1]).toMatch(/attempt 1 failed: 10\.0\.0\.5:8888 refused the connection \(ECONNREFUSED\)/);
+    expect(failures()[1][1]).toMatch(/attempt 13 failed: .*\(\+11 similar not logged\)/);
+
+    net.probe = { ok: false, code: 'ETIMEDOUT', ms: 3000 };
+    clock.now += 5000;
+    fireAndFail();
+    await flush();
+    expect(failures()).toHaveLength(3);
+    expect(failures()[2][1]).toMatch(/attempt 14 failed: no answer from 10\.0\.0\.5:8888 .*\(ETIMEDOUT\)/);
+  });
+
+  it('explains a host that stops resolving', async () => {
+    let resolves = true;
+    const { clock, lines, latest, fireAndFail, connectAndOpen } = setup({
+      lookupImpl: async () => {
+        if (resolves) return { address: '10.0.0.5', family: 4 };
+        throw Object.assign(new Error('getaddrinfo ENOTFOUND mirabot.local'), { code: 'ENOTFOUND' });
+      },
+    });
+    await connectAndOpen();
+    latest()._serverDrop();
+    resolves = false;
+    clock.now += 5000;
+    fireAndFail();
+    await flush();
+    const line = lines.find(([, m]) => m.includes('Reconnect attempt 1'))[1];
+    expect(line).toMatch(/mirabot\.local does not resolve \(ENOTFOUND\)/);
+  });
+
+  it('logs the dropped connection and the recovery with their numbers', async () => {
+    const { t, timers, clock, lines, latest, fireAndFail, connectAndOpen } = setup();
+    await connectAndOpen();
+    await flush();
+    t.send('L05000\n');
+    t.send('R05000\n');
+    clock.now += 90 * 1000;
+    latest()._serverDrop();
+    const lost = lines.find(([, m]) => m.includes('Connection lost'));
+    expect(lost[0]).toBe('warn');
+    expect(lost[1]).toMatch(/close=1006 .*ip=10\.0\.0\.5 up=1m30s sent=2 cmds\/14B/);
+
+    clock.now += 5000;
+    fireAndFail();
+    await flush();
+    clock.now += 5000;
+    timers.shift().fn();
+    latest()._open();
+    await flush();
+    const back = lines.find(([, m]) => m.includes('Reconnected'));
+    expect(back[1]).toMatch(/ip=10\.0\.0\.5 down=10\.0s attempts=2/);
   });
 });
