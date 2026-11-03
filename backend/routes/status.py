@@ -57,12 +57,17 @@ def _issues(desktop, status, headset_age, now):
     if state in ("waiting", "reconnecting", "connecting"):
         since = link.get("downSince")
         err = (link.get("lastError") or {}).get("text")
-        text = f"TCode {state} to {link.get('url')}"
+        doing = {
+            "waiting": "not answering yet",
+            "reconnecting": "connection lost, reconnecting",
+            "connecting": "connecting",
+        }[state]
+        text = f"TCode device {link.get('url')}: {doing}"
         if since:
             text += f" since {since}"
         text += f" ({link.get('attempts', 0)} attempts)"
         if err:
-            text += f": {err}"
+            text += f". Last failure: {err}"
         issues.append(text + ".")
     if not any((d or {}).get("connected") for d in devices.values()):
         issues.append("No device is connected.")
