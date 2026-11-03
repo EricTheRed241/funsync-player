@@ -13,10 +13,16 @@ const PRECISION_LIMITS = { 3: 999, 4: 9999 };
 export class TCodeManager {
   constructor() {
     this._connected = false;
+    // WebSocket only: the transport keeps trying to reach a device that
+    // isn't answering yet (or dropped). `_status` is main's latest link
+    // snapshot ({ state, url, ip, attempts, lastError, … }).
+    this._waiting = false;
+    this._status = null;
     this._transportKind = null; // 'serial' | 'udp' | 'websocket' — set on connect()
     this._portPath = '';
     this._baudRate = 115200;
     this._disconnectCleanup = null;
+    this._statusCleanup = null;
     this._precision = 3;       // digits per axis value
     this._valueMax = 999;      // derived from precision
 
@@ -24,6 +30,7 @@ export class TCodeManager {
     this.onConnect = null;
     this.onDisconnect = null;
     this.onError = null;
+    this.onStatus = null;      // (status|null) => {} — every link status change
   }
 
   /**
@@ -65,10 +72,12 @@ export class TCodeManager {
    * routes to serial — preserves the original call sites and any saved
    * scripts that hardcoded the old signature.
    *
-   * @returns {boolean} success
+   * @returns {boolean} success. False with `waiting` true when a WebSocket
+   *   device isn't answering yet: main keeps trying and `onConnect` fires
+   *   once it gets through.
    */
   async connect(kindOrPath, optsOrBaud = {}) {
-    if (this._connected) await this.disconnect();
+    if (this._connected || this._waiting) await this.disconnect();
 
     // Normalise the two call shapes into a single { kind, opts } pair so
     // the IPC payload + downstream state writes stay uniform.
@@ -94,27 +103,61 @@ export class TCodeManager {
 
     try {
       const result = await window.funsync.tcodeConnect(kind, opts);
+      const summary = this._describeTransport(kind, opts);
+      if (result.success || result.retrying) this._listen();
       if (result.success) {
         this._connected = true;
-
-        // Listen for unexpected disconnects from main process
-        this._disconnectCleanup = window.funsync.onTcodeDisconnected(() => {
-          this._connected = false;
-          if (this.onDisconnect) this.onDisconnect();
-        });
-
-        const summary = this._describeTransport(kind, opts);
         console.log(`[TCode] Connected via ${kind}: ${summary}`);
+        this._setStatus(result.status);
         if (this.onConnect) this.onConnect();
         return true;
-      } else {
-        this._emitError(`Connection failed: ${result.error}`);
+      }
+      if (result.retrying) {
+        this._waiting = true;
+        console.log(`[TCode] ${summary} not reachable yet (${result.error}); retrying until it answers`);
+        this._setStatus(result.status);
         return false;
       }
+      this._emitError(`Connection failed: ${result.error}`);
+      return false;
     } catch (err) {
       this._emitError(`Connection error: ${err.message}`);
       return false;
     }
+  }
+
+  /** Follow main's transport: final disconnects and link status changes. */
+  _listen() {
+    this._disconnectCleanup = window.funsync.onTcodeDisconnected(() => {
+      this._connected = false;
+      this._waiting = false;
+      this._setStatus(null);
+      if (this.onDisconnect) this.onDisconnect();
+    });
+    this._statusCleanup = window.funsync.onTcodeStatus?.((status) => this._onLinkStatus(status)) || null;
+  }
+
+  _onLinkStatus(status) {
+    const state = status?.state;
+    const up = state === 'connected' && !this._connected;
+    const down = state === 'reconnecting' && this._connected;
+    // Flags first, so onStatus listeners read the new state.
+    if (up) { this._connected = true; this._waiting = false; }
+    if (down) { this._connected = false; this._waiting = true; }
+    this._setStatus(status);
+    if (up) {
+      console.log(`[TCode] Device connected: ${status.url} (${status.ip || '?'})`);
+      if (this.onConnect) this.onConnect();
+    }
+    if (down) {
+      console.log(`[TCode] Device connection lost: ${status.url}; reconnecting`);
+      if (this.onDisconnect) this.onDisconnect();
+    }
+  }
+
+  _setStatus(status) {
+    this._status = status || null;
+    if (this.onStatus) this.onStatus(this._status);
   }
 
   /** Render a one-liner summary of the transport (for logs/UI). Pure. */
@@ -126,12 +169,16 @@ export class TCodeManager {
   }
 
   /**
-   * Disconnect from the serial port.
+   * Disconnect, and stop a WebSocket transport that is still trying.
    */
   async disconnect() {
     if (this._disconnectCleanup) {
       this._disconnectCleanup();
       this._disconnectCleanup = null;
+    }
+    if (this._statusCleanup) {
+      this._statusCleanup();
+      this._statusCleanup = null;
     }
 
     try {
@@ -141,6 +188,8 @@ export class TCodeManager {
     }
 
     this._connected = false;
+    this._waiting = false;
+    this._setStatus(null);
   }
 
   /**
@@ -224,6 +273,10 @@ export class TCodeManager {
   }
 
   get connected() { return this._connected; }
+  /** A WebSocket device isn't answering (yet, or since a drop); main keeps trying. */
+  get waiting() { return this._waiting; }
+  /** Main's latest link snapshot, null when no transport is active. */
+  get status() { return this._status; }
   get portPath() { return this._portPath; }
   get baudRate() { return this._baudRate; }
 

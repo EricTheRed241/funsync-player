@@ -166,6 +166,12 @@ contextBridge.exposeInMainWorld('funsync', {
     ipcRenderer.on('tcode-disconnected', callback);
     return () => ipcRenderer.removeListener('tcode-disconnected', callback);
   },
+  // Link state of a retrying (WebSocket) transport: { state, url, ip, … }.
+  onTcodeStatus: (callback) => {
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('tcode-status', handler);
+    return () => ipcRenderer.removeListener('tcode-status', handler);
+  },
 
   // VR Bridge
   vrConnect: (host, port) => ipcRenderer.invoke('vr-connect', host, port),

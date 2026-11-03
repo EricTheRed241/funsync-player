@@ -414,4 +414,33 @@ describe('WebsocketTransport — auto-reconnect', () => {
     const back = lines.find(([, m]) => m.includes('Reconnected'));
     expect(back[1]).toMatch(/ip=10\.0\.0\.5 down=10\.0s attempts=2/);
   });
+
+  it('reports each link change through onStatus', async () => {
+    const { t, clock, latest, fireAndFail, connectAndOpen } = setup();
+    const states = [];
+    t.onStatus((s) => states.push(s));
+    await connectAndOpen();
+    await flush();
+    expect(t.status()).toMatchObject({ state: 'connected', ip: '10.0.0.5', downSince: null });
+
+    const droppedAt = clock.now;
+    latest()._serverDrop();
+    expect(t.status()).toMatchObject({
+      state: 'reconnecting',
+      downSince: new Date(droppedAt).toISOString(),
+      attempts: 1,
+      retryEveryMs: 5000,
+      nextRetryAt: new Date(droppedAt + 5000).toISOString(),
+    });
+    expect(t.status().lastDisconnect.close).toMatch(/^close=1006/);
+
+    clock.now += 5000;
+    fireAndFail();
+    await flush();
+    expect(states.at(-1)).toMatchObject({ state: 'reconnecting', attempts: 2 });
+    expect(states.at(-1).lastError.text).toMatch(/ECONNREFUSED/);
+
+    await t.disconnect();
+    expect(states.at(-1).state).toBe('stopped');
+  });
 });

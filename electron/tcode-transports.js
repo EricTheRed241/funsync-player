@@ -45,6 +45,10 @@ const SLOW_FAILURE_LOG_MS = 10 * 60 * 1000;
 const LOOKUP_TIMEOUT_MS = 6000;
 const PROBE_TIMEOUT_MS = 3000;
 
+function retryPlanText() {
+  return `retrying every ${FAST_RETRY_MS / 1000}s for ${FAST_WINDOW_MS / 60000}m, then every ${SLOW_RETRY_MS / 1000}s`;
+}
+
 const CLOSE_CODES = {
   1000: 'normal',
   1001: 'going away',
@@ -331,12 +335,13 @@ class WebsocketTransport {
    * TCode device. Send is sync-returning-bool to match the contract;
    * delivery is best-effort (no ack model in the TCode protocol).
    *
-   * Auto-reconnects when the remote drops the connection AFTER an initial
-   * successful open: every 5 s for the first 30 minutes of the outage,
-   * then every 60 s until it comes back or the user disconnects. Covers a
-   * MiraBot rebooting or leaving Wi-Fi, and MFP consumers like restim
-   * restarting mid-video. A first connect that fails is reported to the
-   * caller instead (the user may have typed a bad URL).
+   * Keeps trying until the device answers or the user disconnects, from
+   * the first connect on: every 5 s for the first 30 minutes the device
+   * is unreachable, then every 60 s. Covers a MiraBot that is switched on
+   * later, rebooting or leaving Wi-Fi, and MFP consumers like restim
+   * restarting mid-video. A first connect that fails resolves with
+   * `{ success: false, retrying: true, error }` and the transport stays
+   * alive; `onStatus` reports when it gets through.
    *
    * Logging (electron-log → main.log): every connect, drop and reconnect
    * carries the URL, resolved IP, close code, uptime / downtime, commands
@@ -355,7 +360,8 @@ class WebsocketTransport {
    * @param opts.lookupImpl optional DNS override (`host -> {address, family}`).
    * @param opts.probeImpl optional TCP probe override
    *   (`(host, port, timeoutMs) -> {ok, code?, ms}`).
-   * @param opts.reconnect (default true) — disable to keep tests simple.
+   * @param opts.reconnect (default true) — false: no retries, a failed
+   *   connect or a drop is final.
    */
   constructor({
     log = console, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, reconnect = true,
@@ -380,6 +386,12 @@ class WebsocketTransport {
     // Per-connection stats for the drop / disconnect lines.
     this._session = null;
     this._lastIp = null;
+    // Live state for status(): latest DNS answer, last failure, last drop.
+    this._lastResolved = null;
+    this._lastError = null;
+    this._lastDrop = null;
+    this._nextRetryAt = null;
+    this._onStatus = null;
     this._setTimeout = setTimeoutImpl || ((typeof setTimeout !== 'undefined') ? setTimeout : null);
     this._clearTimeout = clearTimeoutImpl || ((typeof clearTimeout !== 'undefined') ? clearTimeout : null);
     this._now = nowImpl || Date.now;
@@ -423,10 +435,14 @@ class WebsocketTransport {
     this._downSince = null;
     this._slowLogged = false;
     this._failLog = null;
+    this._lastError = null;
+    this._lastDrop = null;
     this._clearReconnectTimer();
     this._url = url;
     this._target = target;
-    return this._openSocket();
+    const opening = this._openSocket();
+    this._emitStatus();
+    return opening;
   }
 
   _clearReconnectTimer() {
@@ -455,7 +471,7 @@ class WebsocketTransport {
       ws = new this._WebSocket(url);
     } catch (err) {
       this._log.warn?.(`[TCode/ws] Connect error: ${err.message} url=${url}`);
-      if (this._inReconnectSession()) this._scheduleReconnect();
+      if (this._inReconnectSession() && this._downSince != null) this._scheduleReconnect();
       return Promise.resolve({ success: false, error: err.message });
     }
     this._ws = ws;
@@ -488,10 +504,21 @@ class WebsocketTransport {
         }
         if (this._inReconnectSession()) {
           const attempt = this._reconnectAttempts;
+          const initial = this._downSince == null;
+          if (initial) this._downSince = this._now();
           this._scheduleReconnect();
-          this._explainFailure(diag, ev, startedAt)
-            .then((f) => this._logReconnectFailure(attempt, f));
-          settle({ success: false, error: 'reconnect attempt failed' });
+          this._explainFailure(diag, ev, startedAt).then((f) => {
+            this._lastError = { text: f.text, at: this._now() };
+            if (initial) {
+              this._failLog = { cause: f.cause, at: this._now(), suppressed: 0 };
+              this._log.warn?.(`[TCode/ws] Connect failed: ${f.text} url=${url} ${f.meta}; ${retryPlanText()}`);
+              settle({ success: false, retrying: true, error: f.text });
+            } else {
+              this._logReconnectFailure(attempt, f);
+            }
+            this._emitStatus();
+          });
+          if (!initial) settle({ success: false, error: 'reconnect attempt failed' });
           return;
         }
         this._explainFailure(diag, ev, startedAt).then((f) => {
@@ -503,7 +530,7 @@ class WebsocketTransport {
   }
 
   _inReconnectSession() {
-    return this._reconnectEnabled && this._hasEverConnected && !this._stopped;
+    return this._reconnectEnabled && !this._stopped;
   }
 
   /** DNS lookup of the target host, bounded: `{ ok, address?, family?, code?, ms }`. */
@@ -540,6 +567,7 @@ class WebsocketTransport {
     const close = closeText(ev);
     try {
       const d = await diag;
+      this._lastResolved = d.ok ? d.address : null;
       if (!d.ok) {
         return {
           cause: `dns:${d.code}`,
@@ -577,21 +605,26 @@ class WebsocketTransport {
     this._hasEverConnected = true;
     this._reconnectAttempts = 0;
     this._downSince = null;
+    this._nextRetryAt = null;
     this._slowLogged = false;
     this._failLog = null;
     const session = { openedAt: now, ip: null, sent: 0, bytes: 0, lastSendAt: null, sendErrors: 0 };
     this._session = session;
+    this._emitStatus();
     diag.then((d) => {
       session.ip = d.ok ? d.address : null;
       let ip = d.ok ? d.address : `? (${d.code})`;
       if (d.ok && this._lastIp && this._lastIp !== d.address) ip += ` (was ${this._lastIp})`;
       if (d.ok) this._lastIp = d.address;
+      const foldedText = folded ? ` (${folded} failed attempts not logged)` : '';
       if (isReconnect) {
-        const foldedText = folded ? ` (${folded} failed attempts not logged)` : '';
         this._log.info?.(`[TCode/ws] Reconnected url=${this._url} ip=${ip} down=${fmtDuration(downMs)} attempts=${attempts} open=${fmtDuration(openMs)}${foldedText}`);
+      } else if (downMs != null) {
+        this._log.info?.(`[TCode/ws] Connected url=${this._url} ip=${ip} after waiting ${fmtDuration(downMs)} attempts=${attempts} open=${fmtDuration(openMs)}${foldedText}`);
       } else {
         this._log.info?.(`[TCode/ws] Connected url=${this._url} ip=${ip} dns=${fmtDuration(d.ms)} open=${fmtDuration(openMs)}`);
       }
+      this._emitStatus();
     });
   }
 
@@ -609,14 +642,16 @@ class WebsocketTransport {
     const stats = this._sessionText(now);
     this._session = null;
     const line = `[TCode/ws] Connection lost url=${this._url} ${closeText(ev)} ${stats}`;
+    this._lastDrop = { at: now, close: closeText(ev) };
     if (this._reconnectEnabled && !this._stopped) {
       this._downSince = now;
-      this._log.warn?.(`${line}; retrying every ${fmtDuration(FAST_RETRY_MS)} for ${fmtDuration(FAST_WINDOW_MS)}, then every ${fmtDuration(SLOW_RETRY_MS)}`);
+      this._log.warn?.(`${line}; ${retryPlanText()}`);
       this._scheduleReconnect();
     } else {
       this._log.warn?.(line);
       if (this._onDisconnect) this._onDisconnect();
     }
+    this._emitStatus();
   }
 
   /** Log a failed reconnect, folding repeats of the same cause. */
@@ -643,8 +678,10 @@ class WebsocketTransport {
     }
     this._reconnectAttempts++;
     this._nextDelay = delay;
+    this._nextRetryAt = this._now() + delay;
     this._reconnectTimer = this._setTimeout(() => {
       this._reconnectTimer = null;
+      this._nextRetryAt = null;
       if (this._stopped || !this._url) return;
       this._openSocket();
     }, delay);
@@ -660,6 +697,54 @@ class WebsocketTransport {
     }
     this._session = null;
     this._downSince = null;
+    this._nextRetryAt = null;
+  }
+
+  /**
+   * Snapshot for the status API and the desktop UI. `state`:
+   * `connecting` (first attempt in flight), `connected`, `waiting` (never
+   * got through yet, retrying), `reconnecting` (was connected, retrying)
+   * or `stopped`.
+   */
+  status() {
+    const now = this._now();
+    const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
+    const s = this._session;
+    let state;
+    if (this._stopped || !this._url) state = 'stopped';
+    else if (this.connected) state = 'connected';
+    else if (this._downSince != null) state = this._hasEverConnected ? 'reconnecting' : 'waiting';
+    else state = 'connecting';
+    const retrying = state === 'waiting' || state === 'reconnecting';
+    return {
+      transport: 'websocket',
+      state,
+      url: this._url,
+      ip: s?.ip ?? this._lastResolved ?? this._lastIp,
+      connectedSince: iso(s?.openedAt),
+      downSince: iso(this._downSince),
+      attempts: this._reconnectAttempts,
+      retryEveryMs: retrying ? this._nextDelay : null,
+      nextRetryAt: retrying ? iso(this._nextRetryAt) : null,
+      lastError: this._lastError ? { text: this._lastError.text, at: iso(this._lastError.at) } : null,
+      lastDisconnect: this._lastDrop ? { at: iso(this._lastDrop.at), close: this._lastDrop.close } : null,
+      sent: s ? {
+        commands: s.sent,
+        bytes: s.bytes,
+        lastSendAgoMs: s.lastSendAt == null ? null : now - s.lastSendAt,
+        errors: s.sendErrors,
+      } : null,
+    };
+  }
+
+  /** Single subscriber, called with `status()` whenever it changes. */
+  onStatus(cb) { this._onStatus = cb; }
+
+  _emitStatus() {
+    if (!this._onStatus) return;
+    try { this._onStatus(this.status()); } catch (err) {
+      this._log.debug?.('[TCode/ws] status listener error:', err.message);
+    }
   }
 
   async disconnect() {
@@ -668,6 +753,7 @@ class WebsocketTransport {
     this._stopped = true;
     this._clearReconnectTimer();
     this._logStop();
+    this._emitStatus();
     this._reconnectAttempts = 0;
     if (!this._ws) return;
     const ws = this._ws;
@@ -705,6 +791,7 @@ class WebsocketTransport {
 
   destroy() {
     this._onDisconnect = null;
+    this._onStatus = null;
     this._stopped = true;
     this._clearReconnectTimer();
     this._logStop();

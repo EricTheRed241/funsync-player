@@ -223,30 +223,42 @@ describe('WebsocketTransport — connect contract', () => {
     expect(t.connected).toBe(true);
   });
 
-  it('returns failure when the socket closes before opening', async () => {
-    const t = new WebsocketTransport({ ...NET, log: { warn: () => {} }, WebSocketImpl: MockWebSocket });
+  it('returns failure when the socket closes before opening (reconnect off)', async () => {
+    const t = new WebsocketTransport({ ...NET, log: { warn: () => {} }, WebSocketImpl: MockWebSocket, reconnect: false });
     const p = t.connect({ url: 'ws://x' });
     MockWebSocket.instances[0]._failConnect();
-    expect((await p).success).toBe(false);
+    const result = await p;
+    expect(result.success).toBe(false);
+    expect(result.retrying).toBeUndefined();
     expect(t.connected).toBe(false);
+    expect(t.reconnecting).toBe(false);
   });
 
-  it('a failed first connect returns the cause and does not retry', async () => {
+  it('a failed first connect returns the cause and keeps trying every 5 s', async () => {
+    const timers = [];
     const t = new WebsocketTransport({
       ...NET,
       lookupImpl: async () => {
         throw Object.assign(new Error('getaddrinfo ENOTFOUND mirabot.local'), { code: 'ENOTFOUND' });
       },
-      log: { warn: () => {} },
+      log: { warn: () => {}, info: () => {} },
       WebSocketImpl: MockWebSocket,
+      setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeoutImpl: () => {},
     });
     const p = t.connect({ url: 'ws://mirabot.local:8888' });
     MockWebSocket.instances[0]._failConnect();
     const result = await p;
-    expect(result.success).toBe(false);
+    expect(result).toMatchObject({ success: false, retrying: true });
     expect(result.error).toMatch(/mirabot\.local does not resolve \(ENOTFOUND\)/);
-    expect(t.reconnecting).toBe(false);
-    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(t.status()).toMatchObject({ state: 'waiting', attempts: 1, retryEveryMs: 5000 });
+    expect(t.status().lastError.text).toMatch(/ENOTFOUND/);
+
+    // The device comes up: the next attempt opens.
+    timers.shift().fn();
+    MockWebSocket.instances[1]._open();
+    expect(t.connected).toBe(true);
+    expect(t.status()).toMatchObject({ state: 'connected', downSince: null, attempts: 0 });
   });
 
   it('reports unavailable when no WebSocket runtime is present', async () => {

@@ -144,6 +144,70 @@ describe('TCodeManager.connect — failure paths', () => {
   });
 });
 
+describe('TCodeManager — WebSocket device not answering yet', () => {
+  let emitStatus;
+
+  beforeEach(() => {
+    emitStatus = null;
+    global.window = {
+      funsync: {
+        tcodeConnect: vi.fn(async () => ({
+          success: false, retrying: true, error: 'mirabot.local does not resolve (ENOTFOUND)',
+          status: { state: 'waiting', url: 'ws://mirabot.local:8888', attempts: 1 },
+        })),
+        tcodeDisconnect: vi.fn(async () => ({ success: true })),
+        onTcodeDisconnected: vi.fn(() => () => {}),
+        onTcodeStatus: vi.fn((cb) => { emitStatus = cb; return () => { emitStatus = null; }; }),
+      },
+    };
+  });
+  afterEach(() => { delete global.window; });
+
+  it('waits without an error, then connects when main reports the device', async () => {
+    const m = new TCodeManager();
+    const errs = [];
+    const onConnect = vi.fn();
+    m.onError = (e) => errs.push(e);
+    m.onConnect = onConnect;
+
+    expect(await m.connect('websocket', { url: 'ws://mirabot.local:8888' })).toBe(false);
+    expect(m.waiting).toBe(true);
+    expect(m.connected).toBe(false);
+    expect(m.status.state).toBe('waiting');
+    expect(errs).toEqual([]);
+
+    emitStatus({ state: 'connected', url: 'ws://mirabot.local:8888', ip: '192.168.2.216' });
+    expect(m.connected).toBe(true);
+    expect(m.waiting).toBe(false);
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('a drop goes back to waiting and fires onDisconnect once', async () => {
+    const m = new TCodeManager();
+    const onDisconnect = vi.fn();
+    m.onDisconnect = onDisconnect;
+    await m.connect('websocket', { url: 'ws://mirabot.local:8888' });
+    emitStatus({ state: 'connected' });
+
+    emitStatus({ state: 'reconnecting', attempts: 1 });
+    emitStatus({ state: 'reconnecting', attempts: 2 });
+    expect(m.connected).toBe(false);
+    expect(m.waiting).toBe(true);
+    expect(m.status.attempts).toBe(2);
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnect stops waiting and stops following main', async () => {
+    const m = new TCodeManager();
+    await m.connect('websocket', { url: 'ws://mirabot.local:8888' });
+    await m.disconnect();
+    expect(window.funsync.tcodeDisconnect).toHaveBeenCalledTimes(1);
+    expect(m.waiting).toBe(false);
+    expect(m.status).toBe(null);
+    expect(emitStatus).toBe(null);
+  });
+});
+
 describe('TCodeManager._describeTransport', () => {
   let m;
   beforeEach(() => { m = new TCodeManager(); });

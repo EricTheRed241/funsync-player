@@ -141,13 +141,18 @@ A local desktop video player with device synchronization for funscript playback.
 - **The Handy** — HSSP cloud sync with automatic script upload, drift detection, 10-second cloud health check (catches BT-mode switches)
 - **Buttplug.io** — Connect to 700+ devices via Intiface Central (strokers, vibrators, rotators, e-stim)
 - **TCode (OSR2 / SR6 / MiraBot)** — USB serial, UDP (Wi-Fi) or WebSocket, with per-axis enable + min/max controls for all 10 axes (experimental). MiraBot's Wi-Fi firmware speaks UDP; its Bluetooth LE firmware is not supported
-  - **WebSocket reconnect.** Once a WebSocket device has connected, a dropped connection is retried every 5 seconds for 30 minutes, then every minute until it comes back or you disconnect. A first connect that fails is reported instead of retried.
+  - **WebSocket reconnect.** A WebSocket device is tried until it answers or you press Disconnect: every 5 seconds for the first 30 minutes it's unreachable, then every minute. That covers a first connect to a device that's switched off (the panel shows *Connecting…* and the button turns into *Disconnect*) and a connection that drops. It connects by itself as soon as the device is up, and sync starts if a script is loaded.
   - **WebSocket log** (`main.log`, `[TCode/ws]`): each connect, drop and reconnect with the URL, the device's IP (and the previous one when DHCP moved it), close code, time up or down, commands and bytes sent, and the attempt count. A failed attempt says why: the host doesn't resolve, the IP refuses or doesn't answer on the port, or TCP is open but the WebSocket handshake failed. The same failure repeated is logged once a minute (every 10 minutes after the first 30) with a count of the attempts in between.
 - **Autoblow Ultra / VacuGlide 2** — Cloud API (experimental)
-- **Auto-connect on startup** — Handy and Buttplug.io connect automatically if previously configured
+- **Auto-connect on startup** — Handy and Buttplug.io connect automatically if previously configured; a WebSocket TCode device (MiraBot) is reconnected to its saved URL and tried until it answers, unless you pressed Disconnect last time
 - Per-device offset controls + unified Sync tab showing total effective offset (VR + device stacking)
 - Device simulator overlay showing real-time stroke position
 - Works without any device connected — pure video playback is fully functional
+- **Status API: `GET /api/status`** on the backend port (`http://<mac>:5123/api/status`, reachable from the LAN unless `--local-only`). One JSON answer for diagnosing a session without reading the log:
+  - `issues`: what looks wrong, in plain words (desktop app not connected or its status stale, a TCode device waiting or reconnecting with the last failure reason and attempt count, no device connected, the headset asked for a scene in the last 15 minutes but the VR companion bridge isn't connected, or the bridge has had no packets for 5 seconds).
+  - `devices`: Handy, Buttplug (paired device names), TCode (`link`: state `connecting` / `connected` / `waiting` / `reconnecting` / `stopped`, URL, IP, connected or down since, attempts, retry interval and next retry, last error, last disconnect with close code, commands and bytes sent), Autoblow.
+  - `vrBridge` (connected, link state, player, host, jitter), `session` (web remote or VR: state, video, position), `player` (desktop video, playing, position), `headset` (last scene HereSphere / DeoVR asked for: when, which video, from which IP), `phone` (active web-remote phone), `backend` (pid, uptime, videos registered) and `desktop` (connected since, age of its last status).
+  - The desktop app sends its part over the web-remote observer socket on every device change and every 15 seconds; the backend keeps the latest one.
 
 ### Script Editor (Experimental)
 - OFS-style action graph with centered playhead and speed-colored lines
