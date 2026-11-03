@@ -246,7 +246,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
   const { library, knownTopics, turnedDown, favourites, scoring } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
-  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
+  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'live-not-pov': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
   let listed = 0;
   let judged = 0;

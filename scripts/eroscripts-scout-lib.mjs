@@ -16,7 +16,9 @@
 //   • Animated: an animation tag and no `real` tag. A music post by a
 //     creator already in the library is accepted as well. Live action by a
 //     favourite (title, tags or poster; scripts/scout-live.mjs) is taken;
-//     other live action waits for the live quota (both scouts).
+//     other live action waits for the live quota (both scouts). Live action
+//     must be POV or VR, favourites included (isPov, contentRuleBreak
+//     `live-not-pov`); only picks skip that.
 //   • Sex required, picks included: a penetrative sex tag or sex word in the
 //     title, else in the first post. A music video counts unless it's a
 //     dance or its title is about a non-sex act. Never a post tagged sfw /
@@ -47,7 +49,7 @@ import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
   ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES,
-  PMV_TAGS, PMV_TITLE, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
+  PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
 
@@ -158,21 +160,29 @@ export function hasBlockedTag({ tags = [], title = '' }) {
   return tags.some((t) => BLOCKED_TAGS.has(t)) || BLOCKED_TITLE.test(String(title || ''));
 }
 
+/** True when a post or video is POV: a POV_TAGS tag or POV as a title word. */
+export function isPov({ tags = [], title = '' }) {
+  return tags.some((t) => POV_TAGS.has(t)) || POV_TITLE.test(String(title || ''));
+}
+
 /**
  * Why a post or video breaks the content rules every scout list obeys
- * (favourites and picks included), judged by its tags and title, so a
- * saved candidate can be checked again: `blocked` (isBlockedCreator, hasBlockedTag),
- * `not-sexual` (see isSexual), a `contentBreak` `--recheck` saved, or null
- * when it doesn't. A candidate whose first post showed the sex
- * (`sexual: 'text'`) passes the sex rule. Monsters and feet only rank lower
- * (lessPreferred).
+ * (favourites and picks included, except where noted), judged by its tags
+ * and title, so a saved candidate can be checked again: `blocked`
+ * (isBlockedCreator, hasBlockedTag), a `contentBreak` `--recheck` saved,
+ * `not-sexual` (see isSexual), `live-not-pov` (live action that is neither
+ * VR nor POV; picks skip this one), or null when it doesn't. A candidate
+ * whose first post showed the sex (`sexual: 'text'`) passes the sex rule.
+ * Monsters and feet only rank lower (lessPreferred).
  *
- * @param {{tags?: string[], title?: string, author?: string, artist?: string, sexual?: string, contentBreak?: string}} post
+ * @param {{tags?: string[], title?: string, author?: string, artist?: string, sexual?: string, contentBreak?: string,
+ *   live?: boolean, vr?: boolean, picked?: boolean}} post
  */
-export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', sexual, contentBreak }) {
+export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', sexual, contentBreak, live, vr, picked }) {
   if (isBlockedCreator({ title, author, artist }) || hasBlockedTag({ tags, title })) return 'blocked';
   if (contentBreak && !RETIRED_BREAKS.has(contentBreak)) return contentBreak;
   if (!isSexual({ tags, title }) && !(sexual === 'text' && !tags.some((t) => SFW_TAGS.has(t)))) return 'not-sexual';
+  if (live && !vr && !picked && !isPov({ tags, title })) return 'live-not-pov';
   return null;
 }
 
@@ -187,11 +197,12 @@ export function contentRuleBreak({ tags = [], title = '', author = '', artist = 
  * @param {string[]} ctx.creators creator names in the library (lower case)
  * @param {string[]} ctx.sceneNames normName of every library scene folder
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
+ * @param {boolean} [ctx.picked] the user asked for this post by id: live action needn't be POV or VR
  * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null,
  *   live: boolean, favourite: string|null, liveQuota: boolean, hentaiOnly: boolean}}
- *   reasons: known, excluded, blocked, not-sexual, in-library
+ *   reasons: known, excluded, blocked, not-sexual, live-not-pov, in-library
  */
-export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [] } = {}) {
+export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [], picked = false } = {}) {
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
   if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
@@ -200,11 +211,13 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
   const live = !(tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real'));
+  const vr = tags.includes('vr');
+  if (live && !vr && !picked && !isPov({ tags, title: topic.title })) return { ok: false, reason: 'live-not-pov' };
   const music = tags.some((t) => MUSIC_TAGS.has(t));
   const favourite = favouriteIn([topic.title, ...tags], favourites);
   if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
   return {
-    ok: true, music, vr: tags.includes('vr'), artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }),
+    ok: true, music, vr, artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }),
     hentaiOnly: isHentaiOnly({ tags, title: topic.title }),
   };
 }
@@ -256,11 +269,11 @@ export const FREE_SCRIPTS_CATEGORY = 14;
  * Screen a post the user picked by id (`--add`): the exclusions, the
  * content rules (also on the first post, judgeFirstPost), posts the library
  * already links or the user turned down, and scenes the library already has
- * count. The animation and multi-axis rules don't apply, and a pick never
- * waits for the live quota.
+ * count. The animation, live POV-or-VR and multi-axis rules don't apply, and
+ * a pick never waits for the live quota.
  */
 export function screenPick(topic, ctx) {
-  const s = screenTopic(topic, ctx);
+  const s = screenTopic(topic, { ...ctx, picked: true });
   return s.ok ? { ...s, liveQuota: false, picked: true } : s;
 }
 
@@ -753,7 +766,7 @@ export function remapPaths(value, moves) {
 // `single-axis` post with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 6;
+export const RULES_VERSION = 7;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
