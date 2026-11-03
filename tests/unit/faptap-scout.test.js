@@ -103,12 +103,13 @@ describe('screenVideo', () => {
     expect(screenVideo(video(['POV', 'Creampie', 'HMV'])).liveQuota).toBe(true);
   });
 
-  it('turns down flat live action that is not POV, favourites included; picks skip it', () => {
+  it('turns down flat live action only when it shows it is not POV; favourites and picks pass', () => {
     const favourites = ['Noodledude'];
     expect(screenVideo(video(['Animation', 'OnlyFans', ...FOCUS2]))).toEqual({ ok: false, reason: 'live-not-pov' });
-    expect(screenVideo(video(['PMV', 'tiktok', 'Creampie'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toEqual({ ok: false, reason: 'live-not-pov' });
-    expect(screenVideo(video(['PMV', 'tiktok', 'Creampie'], { name: 'FOLLOW ME Noodledude POV' }), { favourites })).toMatchObject({ ok: true, favourite: 'Noodledude' });
-    expect(screenVideo(video(['Amateur', 'Riding'], { name: 'Fit babe rides' }), { picked: true })).toMatchObject({ ok: true, picked: true });
+    expect(screenVideo(video(['Amateur', 'Riding', 'Creampie', 'Reverse Cowgirl'], { name: 'Fit babe rides' }))).toMatchObject({ ok: true, live: true });
+    expect(screenVideo(video(['PMV', 'tiktok', 'Creampie'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toMatchObject({ ok: true, favourite: 'Noodledude' });
+    expect(screenVideo(video(['PMV', 'tiktok', 'Creampie'], { name: 'FOLLOW ME POV' }))).toMatchObject({ ok: true });
+    expect(screenVideo(video(['PMV', 'Amateur', 'Riding'], { name: 'Fit babe rides' }), { picked: true })).toMatchObject({ ok: true, picked: true });
   });
 
   it('takes POV live action by a favourite (title, uploader, performer or tag) without the quota or the focus rule', () => {

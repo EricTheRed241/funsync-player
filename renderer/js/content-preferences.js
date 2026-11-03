@@ -124,13 +124,18 @@ export const FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle M
 /** Other live action: one in every LIVE_QUOTA_EVERY Discovery downloads, counted across both scouts. */
 export const LIVE_QUOTA_EVERY = 20;
 /**
- * Live action must be POV or VR (user, 2026-11-03: "not interested in any
- * flat video which is live/real people which isn't POV"), favourites
- * included; only posts the user picks by id (`--add`) skip it. POV is one of
- * POV_TAGS or POV as a title word.
+ * Flat live action is turned down only when something shows it isn't POV
+ * (user, 2026-11-03: favourites exempt; "let's not bother if we don't have
+ * any indication a flat real post is not POV or a PMV or HMV or similar music
+ * compilation"): a NON_POV_TAGS tag, or a music compilation (PMV_TAGS, the
+ * `compilation` tag, PMV_TITLE or COMPILATION_TITLE). POV (POV_TAGS or POV as
+ * a title word) always passes, and so do VR, favourites and posts the user
+ * picks by id (`--add`). No indication either way passes.
  */
 export const POV_TAGS = new Set(['pov', 'male-pov']);
 export const POV_TITLE = /(?<![\p{L}\p{N}])pov(?![\p{L}\p{N}])/iu;
+export const NON_POV_TAGS = new Set(['non-pov', 'no-pov', 'not-pov']);
+export const COMPILATION_TITLE = /(?<![\p{L}\p{N}])compilations?(?![\p{L}\p{N}])/iu;
 
 // ── Discovery: ranking ──────────────────────────────────────────────────
 

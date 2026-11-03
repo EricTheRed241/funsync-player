@@ -25,9 +25,9 @@
 //     library is taken too; a library folder named after a genre (`Cock
 //     Hero`, `PMV`) is no creator. Live action by a favourite (title,
 //     uploader, performer or tag; scripts/scout-live.mjs) is taken; other
-//     live action waits for the live quota. Live action must be POV or VR,
-//     favourites included (isPov; also once performers make a video live,
-//     through contentRuleBreak `live-not-pov`).
+//     live action waits for the live quota. Flat live action that shows it
+//     isn't POV (liveNotPov, also once performers make a video live, through
+//     contentRuleBreak `live-not-pov`) is turned down; favourites skip that.
 //   • No audio roleplays.
 //   • Focus, except for favourites: at least FAPTAP_FOCUS_MIN of the
 //     FAPTAP_FOCUS themes.
@@ -52,7 +52,7 @@
 // `overwatch`.
 
 import {
-  candidateScore, contentRuleBreak, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isPov, isSexual, normName, sameVideo, sceneTitle,
+  candidateScore, contentRuleBreak, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, liveNotPov, normName, sameVideo, sceneTitle,
   titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import {
@@ -65,7 +65,7 @@ import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 7;
+export const FAPTAP_RULES_VERSION = 8;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -278,7 +278,7 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   const focus = focusOf({ tags, title, vr });
   if (!picked && !favourite && focus.length < FAPTAP_FOCUS_MIN) return { ok: false, reason: 'off-focus' };
   if (!isSexual({ tags, title })) return { ok: false, reason: 'not-sexual' };
-  if (live && !vr && !picked && !isPov({ tags, title })) return { ok: false, reason: 'live-not-pov' };
+  if (liveNotPov({ tags, title, live, vr, picked, favourite })) return { ok: false, reason: 'live-not-pov' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
   if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
