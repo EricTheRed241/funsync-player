@@ -9,8 +9,11 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { addToDiscovery, coreName, DISCOVERY_NAME, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
+
+const { rewriteVideoTagsFile } = createRequire(import.meta.url)('../electron/video-tags.js');
 
 const configPath = (userData) => path.join(userData, 'config.json');
 export const readConfig = (userData) => JSON.parse(fs.readFileSync(configPath(userData), 'utf8'));
@@ -103,8 +106,9 @@ export function renameWithSidecar(from, to) {
 /**
  * Carry out `retitlePlan` moves: rename each scene's files and folder (a
  * scene that fails is put back), point its sidecar's `file` at the new video
- * name, and rewrite every path config.json and the pending playlist adds
- * keep for it. The app must be closed (config.json).
+ * name, and rewrite every path config.json, the pending playlist adds and
+ * the video tags file (`video-tags.json`) keep for it. The app must be
+ * closed (config.json).
  *
  * @param {object[]} moves retitlePlan's result
  * @param {{userData: string, incoming: string, sidecar: string}} o sidecar: `eroscripts.json` / `faptap.json`
@@ -146,7 +150,8 @@ export function applyMoves(moves, { userData, incoming, sidecar }) {
     if (fs.existsSync(pendingFile)) {
       fs.writeFileSync(pendingFile, JSON.stringify(remapPaths(JSON.parse(fs.readFileSync(pendingFile, 'utf8')), done).value, null, 1));
     }
-    console.log(`Renamed ${done.length} scenes; ${changed} paths updated in config.json`);
+    const tagged = rewriteVideoTagsFile(userData, (data) => remapPaths(data, done));
+    console.log(`Renamed ${done.length} scenes; ${changed} paths updated in config.json${tagged ? `, ${tagged} in video-tags.json` : ''}`);
   }
   return failed ? 1 : 0;
 }

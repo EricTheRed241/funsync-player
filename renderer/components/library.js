@@ -45,6 +45,7 @@ import { matchesRatingFilter, ratingOf, rehomeRatings, RATING_FILTERS } from '..
 import { createRatingControl, updateRatingControl } from '../js/rating-stars.js';
 import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js';
+import { applyVideoTags } from '../js/video-tags.js';
 import { applyAutoCategories, applyAxisCategories, applyVRCategory } from '../js/auto-categories.js';
 import { applyArtistPlaylists } from '../js/artist-playlists.js';
 import { applyPlaylistCleanup } from '../js/playlist-cleanup.js';
@@ -881,26 +882,45 @@ export class Library {
     // `faptap.json` scene, attached by the scan), then links found by
     // `npm run eroscripts:sync` (written to a file in userData; the CLI
     // never touches config.json; a link replaces a FapTap record), then the
-    // categories made from those tags, then VR as the backend decides it
-    // (after the registration below). Off the scan's critical path:
-    // nothing below needs them.
+    // tags of the video tags file (`video-tags` CLI, on top of the post's),
+    // then the categories made from those tags, then VR as the backend
+    // decides it (after the registration below; the preference scores are
+    // recomputed there). Off the scan's critical path: nothing below needs
+    // them. When the links or the video tags changed the tags, the auto
+    // collections (made below, before these merges land) are refreshed and
+    // the library is sent to the backend again.
     const scout = mergeScoutPosts(this._settings.get(SCRIPT_TAGS_KEY) || {}, this._videos, Date.now());
     if (scout) {
       this._settings.set(SCRIPT_TAGS_KEY, scout.map);
       console.log('[Library] Discovery sources recorded:', { added: scout.added, updated: scout.updated });
     }
     this._startFaptapThumbnails();
+    let tagsChanged = false;
     applyEroscriptsLinks(this._settings, window.funsync)
-      .then((merged) => { if (merged) console.log('[Library] EroScripts links merged:', merged); })
+      .then((merged) => {
+        if (!merged) return;
+        tagsChanged = true;
+        console.log('[Library] EroScripts links merged:', merged);
+      })
       .catch((err) => console.warn('[Library] EroScripts links not merged:', err?.message || err))
+      .then(() => applyVideoTags(this._settings, window.funsync))
+      .then((merged) => {
+        if (!merged) return;
+        tagsChanged = true;
+        console.log('[Library] Video tags merged:', merged);
+      })
+      .catch((err) => console.warn('[Library] Video tags not merged:', err?.message || err))
       .then(() => applyAutoCategories(this._settings, (this._videos || []).map((v) => v.path)))
       .then((r) => {
-        if (!r.created && !r.assigned) return;
-        console.log('[Library] Categories from EroScripts tags:', r);
-        this._repaintAllCategoryDots();
+        const categoriesChanged = r.created || r.assigned;
+        if (categoriesChanged) {
+          console.log('[Library] Categories from EroScripts tags:', r);
+          this._repaintAllCategoryDots();
+        }
+        if (tagsChanged) this._applyAutoCollections({ register: false });
         // The post-scan registration may already be on its way without
         // them; send the library again so the phone and headset get them.
-        this._registerWithBackend();
+        if (categoriesChanged || tagsChanged) this._registerWithBackend();
       })
       .catch((err) => console.warn('[Library] Categories from EroScripts tags failed:', err?.message || err))
       .then(() => this._syncVRFromBackend({ fresh: true }))
@@ -930,16 +950,7 @@ export class Library {
 
     // Collections by medium, length, franchise and script style
     // (auto-collections.js). Durations come from the persistent cache.
-    try {
-      const r = applyAutoCollections(this._settings, (this._videos || []).map((v) => v.path));
-      if (r.created.length || r.extended) {
-        console.log('[Library] Auto collections:', r);
-        eventBus.emit('collections:changed', r);
-        this._registerWithBackend();
-      }
-    } catch (err) {
-      console.warn('[Library] Auto collections failed:', err?.message || err);
-    }
+    this._applyAutoCollections();
 
     // Restore cached durations from previous scans within the same session
     for (const video of this._videos) {
@@ -6984,6 +6995,28 @@ export class Library {
         this._syncAxesFromBackend()
           .catch((err) => console.warn('[Library] Axis categories from the backend not applied:', err?.message || err));
       }, VR_FLAGS_RETRY_MS);
+    }
+  }
+
+  /**
+   * Collections by medium, length, franchise and script style
+   * (auto-collections.js), from the library's tags and durations. Run after
+   * each scan and again when the post-scan tag merges (EroScripts links,
+   * video tags) changed the tags.
+   *
+   * @param {{register?: boolean}} [opts] `register`: send the library to the
+   *   backend on a change (false when the caller registers anyway)
+   */
+  _applyAutoCollections({ register = true } = {}) {
+    try {
+      const r = applyAutoCollections(this._settings, (this._videos || []).map((v) => v.path));
+      if (r.created.length || r.extended) {
+        console.log('[Library] Auto collections:', r);
+        eventBus.emit('collections:changed', r);
+        if (register) this._registerWithBackend();
+      }
+    } catch (err) {
+      console.warn('[Library] Auto collections failed:', err?.message || err);
     }
   }
 

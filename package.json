@@ -28,7 +28,8 @@
     "manual:open": "node scripts/manual-open.mjs",
     "faptap:scout": "node scripts/faptap-scout.mjs",
     "dedupe:scenes": "node scripts/dedupe-scenes.mjs",
-    "library:reorganize": "node scripts/library-reorganize.mjs"
+    "library:reorganize": "node scripts/library-reorganize.mjs",
+    "video:tags": "cargo run -q --release -p video-tags --"
   },
   "keywords": [
     "video-player",

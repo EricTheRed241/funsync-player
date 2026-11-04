@@ -19,9 +19,10 @@ Local desktop video player that plays funscripts on stroker and vibration device
 | Backend | `backend/` (FastAPI, Python 3.13, `backend/.venv`) | Port **5123**; `routes/` (media, remote, vr_api, …) and `services/` (vr_sections, library_edits, funscript, …) |
 | Web remote | `backend/web-remote/` | PWA served at `/remote/` |
 | CLIs | `scripts/*.mjs` | `eroscripts:sync`, `eroscripts:scout`, `faptap:scout`, `dedupe:scenes`, `upgrade:axes`, `prune:generated`, `eroscripts:preview-check`; the two scouts share `scripts/discovery-io.mjs` (config lock, library walk, Discovery playlist) and run `dedupe:scenes --apply` after downloads (`scripts/scene-dedupe-lib.mjs`: same video → one copy kept) |
+| Rust CLIs | `crates/<name>/` (Cargo workspace, root `Cargo.toml`) | `video:tags` (`crates/video-tags`): writes `<userData>/video-tags.json`, which the app merges into `library.scriptTags` after each scan (`renderer/js/video-tags.js`, on top of the post tags, `addedTags`) |
 
 Invariants:
-- **The desktop app owns the library.** The backend keeps view-only copies registered by the desktop (`POST /api/media/register`). Edits from the phone or headset go through `services/library_edits` and are applied by the desktop. CLIs write `config.json` only while the app is closed (check `SingletonLock` in userData), or they write side files the app merges (`eroscripts-links.json`).
+- **The desktop app owns the library.** The backend keeps view-only copies registered by the desktop (`POST /api/media/register`). Edits from the phone or headset go through `services/library_edits` and are applied by the desktop. CLIs write `config.json` only while the app is closed (check `SingletonLock` in userData), or they write side files the app merges (`eroscripts-links.json`, `video-tags.json`).
 - Backend networking: binds `0.0.0.0` by default; `--local-only` / `FUNSYNC_LOCAL_ONLY=1` binds `127.0.0.1`.
 - Axis files are `<stem>.<axis>.funscript` (`AXIS_SUFFIXES` in `library-scan.js`). Generated companions are `<stem>.generated.<axis>.funscript`. **Hand-made axes always win**: generators skip folders with hand-made axes.
 - Paths stored in config must use the filesystem's own spelling (Unicode NFC/NFD), because playlists and the headset match scan paths byte for byte.
@@ -39,10 +40,12 @@ Invariants:
 - Out of scope: the Electron app (`electron/`, `renderer/`) stays JS and the backend stays Python.
 - **Before porting anything that reads preferences** (both scouts, dedupe, `upgrade:axes`): move the values in `content-preferences.js` into a data file (e.g. JSON) that the JS and Rust code both load, so they keep a single source. Never copy rule constants into Rust.
 - Keep the CLI contract when porting: same flags, `--help`, exit codes 0 / 1 / 2 / 3, the same userData files and `SingletonLock` check, and forum pacing of ≥ 700 ms. Keep the `npm run <name>` entry pointing at the new binary.
+- **Layout:** a Cargo workspace at the repo root (`Cargo.toml`, `members = ["crates/*"]`, `Cargo.lock` committed, `/target` ignored). One crate per CLI in `crates/<name>/`: a library (`src/lib.rs`, logic split into modules with unit tests) plus a thin `src/main.rs`, and end-to-end tests in `crates/<name>/tests/` that run the binary (`CARGO_BIN_EXE_<name>`) against temp dirs. The npm script is `cargo run -q --release -p <name> --`. Keep dependencies minimal (no HTTP crate for a local request: `std::net::TcpStream`); format with `cargo fmt`, keep `cargo clippy --all-targets` clean.
 
 ## Tests
 - JS: `npx vitest run` (`tests/unit/**/*.test.js`, jsdom by default). Node-only tests start with the `@vitest-environment node` header block used in existing tests. Run one file with `npx vitest run tests/unit/<file>.test.js`.
 - Python: `cd backend && .venv/bin/python -m pytest` (`asyncio_mode = auto`).
+- Rust: `cargo test` at the repo root (all crates; one with `cargo test -p video-tags`), plus `cargo clippy --all-targets`.
 - Tests cover behaviour (filters, pairing, precedence, boundaries), not wiring. Never hit the network: fake the forum and hosts, and use temp dirs for scenes.
 - Smoke-test CLIs against a copied userData (`--user-data <tmp>`) and a temp folder, never the real `config.json`.
 

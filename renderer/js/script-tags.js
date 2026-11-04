@@ -77,3 +77,17 @@ export function getScriptTags(settings, videoPath) {
   if (!settings?.get || !videoPath) return null;
   return (settings.get(SCRIPT_TAGS_KEY) || {})[videoPath] || null;
 }
+
+/**
+ * A record's own tags: `tags` without the ones the video-tags file added
+ * (`addedTags`, see video-tags.js). The scan merges compare these against
+ * the sidecar or link, so an added tag never looks like a changed post.
+ *
+ * @param {{tags?: string[], addedTags?: string[]}|null|undefined} record
+ * @returns {string[]}
+ */
+export function baseTags(record) {
+  const tags = Array.isArray(record?.tags) ? record.tags : [];
+  const added = Array.isArray(record?.addedTags) ? new Set(record.addedTags) : null;
+  return added?.size ? tags.filter((tag) => !added.has(tag)) : tags;
+}

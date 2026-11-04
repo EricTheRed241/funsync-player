@@ -120,6 +120,7 @@ describe('library:reorganize CLI', () => {
       videoCategories: { [round]: ['c1'] },
     }, null, '\t'));
     put(path.join(userData, 'eroscripts-links.json'), JSON.stringify({ version: 1, links: { [one]: { topicId: 1 } }, review: {} }, null, 2));
+    put(path.join(userData, 'video-tags.json'), `${JSON.stringify({ version: 1, updatedAt: 'T', videos: { [round]: { tags: ['pov'], addedAt: 'T' } } }, null, 2)}\n`);
   });
 
   afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -149,6 +150,8 @@ describe('library:reorganize CLI', () => {
     expect(config.playlists[0].videoPaths).toEqual([one, yoga]);
     expect(config.videoCategories).toEqual({ [round]: ['c1'] });
     expect(Object.keys(readJson('eroscripts-links.json').links)).toEqual([one]);
+    expect(Object.keys(readJson('video-tags.json').videos)).toEqual([round]);
+    expect(fs.existsSync(path.join(userData, 'video-tags.json.bak-reorganize'))).toBe(true);
     expect(fs.readFileSync(path.join(userData, 'config.json.bak-reorganize'), 'utf8')).toBe(before);
 
     const log = fs.readdirSync(path.join(userData, 'logs')).find((n) => n.startsWith('library-reorganize-'));

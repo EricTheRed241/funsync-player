@@ -7,6 +7,9 @@ dist/
 build/
 backend-dist/
 
+# Rust (Cargo workspace, crates/*)
+/target
+
 # Python
 backend/__pycache__/
 backend/.venv/

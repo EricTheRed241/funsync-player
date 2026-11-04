@@ -8,7 +8,8 @@
 // `library.scriptTags`, where the rest of the app — the EroScripts preview
 // batch and the auto categories included — already looks for a video's tags.
 
-import { SCRIPT_TAGS_KEY } from './script-tags.js';
+import { SCRIPT_TAGS_KEY, baseTags } from './script-tags.js';
+import { VIDEO_TAGS_SOURCE } from './video-tags.js';
 
 /** `source` of scriptTags records that came from the sync CLI. */
 export const SYNC_SOURCE = 'eroscripts-sync';
@@ -29,12 +30,14 @@ function recordFromLink(link, now) {
   return record;
 }
 
+// `a` is the stored record: its tags added from the video tags file
+// (`addedTags`) don't count, the next merge (video-tags.js) puts them back.
 const sameRecord = (a, b) => a.topicId === b.topicId
   && a.topicUrl === b.topicUrl
   && a.confidence === b.confidence
   && a.matchedAt === b.matchedAt
   && (a.previewUrl || null) === (b.previewUrl || null)
-  && JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []);
+  && JSON.stringify(baseTags(a)) === JSON.stringify(b.tags || []);
 
 /**
  * Fold links into a scriptTags map.
@@ -43,7 +46,11 @@ const sameRecord = (a, b) => a.topicId === b.topicId
  *   post: `source: 'eroscripts'`) or the EroScripts scout's record of the
  *   post a scene came from always wins; the sync never replaces it.
  * - A FapTap scout record is replaced: the EroScripts post carries a topic
- *   id (previews, hand-made axes) the FapTap scene lacks.
+ *   id (previews, hand-made axes) the FapTap scene lacks. So is a record made
+ *   only for the video tags file (`source: 'video-tags'`).
+ * - Tags added from the video tags file (`addedTags`) don't count as a
+ *   difference; a replaced record is written without them and the video tags
+ *   merge, which runs next, adds them again.
  * - Only `confirmed` and `probable` links are applied; the review list stays
  *   in the file for the user.
  * - A sync record whose link has gone from the file is removed, so a link
@@ -65,7 +72,7 @@ export function mergeLinksIntoScriptTags(current, links, now) {
   for (const [videoPath, link] of Object.entries(links)) {
     if (!videoPath || link?.topicId == null || !APPLIED_CONFIDENCE.has(link.confidence)) continue;
     const existing = map[videoPath];
-    if (existing && existing.source !== SYNC_SOURCE && existing.source !== FAPTAP_SOURCE) continue;
+    if (existing && existing.source !== SYNC_SOURCE && existing.source !== FAPTAP_SOURCE && existing.source !== VIDEO_TAGS_SOURCE) continue;
     const next = recordFromLink(link, now);
     if (existing && sameRecord(existing, next)) continue;
     map[videoPath] = next;
@@ -116,14 +123,17 @@ const sameTags = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
  * electron/library-scan.js) into a scriptTags map.
  *
  * - `video.eroscripts`, the EroScripts post the scene was downloaded from:
- *   its record replaces a sync guess or a FapTap record; a record the app
- *   wrote itself (`source: 'eroscripts'`) still wins.
+ *   its record replaces a sync guess, a FapTap record or a video tags record;
+ *   a record the app wrote itself (`source: 'eroscripts'`) still wins.
  * - `video.faptap`, the FapTap scene (no EroScripts post, `topicId: null`):
- *   its record only fills a gap or refreshes an older FapTap record; any
- *   EroScripts record (app download, sync link, scout) wins. FapTap's
- *   thumbnail URL (`thumbnailUrl`) becomes the record's `previewUrl`.
+ *   its record only fills a gap (no record, or one made only for the video
+ *   tags file) or refreshes an older FapTap record; any EroScripts record
+ *   (app download, sync link, scout) wins. FapTap's thumbnail URL
+ *   (`thumbnailUrl`) becomes the record's `previewUrl`.
  *
- * Unchanged records are not rewritten.
+ * Unchanged records are not rewritten. Tags added from the video tags file
+ * (`addedTags`) don't count as a change; a replaced record is written
+ * without them and the video tags merge, which runs next, adds them again.
  *
  * @param {Object<string, object>} current scriptTags map
  * @param {{path: string,
@@ -149,15 +159,15 @@ export function mergeScoutPosts(current, videos, now) {
     if (post?.topicId != null) {
       if (existing?.source === 'eroscripts') continue;
       const tags = Array.isArray(post.tags) ? post.tags : [];
-      if (existing?.source === SCOUT_SOURCE && existing.topicId === post.topicId && sameTags(existing.tags, tags)) continue;
+      if (existing?.source === SCOUT_SOURCE && existing.topicId === post.topicId && sameTags(baseTags(existing), tags)) continue;
       put(v.path, existing, { tags, topicId: post.topicId, topicUrl: post.url || null, source: SCOUT_SOURCE, savedAt: now });
     } else if (scene?.faptapId != null && scene.faptapId !== '') {
-      if (existing && existing.source !== FAPTAP_SOURCE) continue;
+      if (existing && existing.source !== FAPTAP_SOURCE && existing.source !== VIDEO_TAGS_SOURCE) continue;
       const tags = Array.isArray(scene.tags) ? scene.tags : [];
       const faptapUrl = scene.url || null;
       const previewUrl = typeof scene.thumbnailUrl === 'string' && scene.thumbnailUrl ? scene.thumbnailUrl : null;
-      if (existing && existing.faptapId === scene.faptapId && (existing.faptapUrl || null) === faptapUrl
-        && (existing.previewUrl || null) === previewUrl && sameTags(existing.tags, tags)) continue;
+      if (existing?.source === FAPTAP_SOURCE && existing.faptapId === scene.faptapId && (existing.faptapUrl || null) === faptapUrl
+        && (existing.previewUrl || null) === previewUrl && sameTags(baseTags(existing), tags)) continue;
       const record = {
         tags, topicId: null, topicUrl: null, faptapId: scene.faptapId, faptapUrl, source: FAPTAP_SOURCE, savedAt: now,
       };
