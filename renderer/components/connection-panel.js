@@ -771,7 +771,11 @@ export class ConnectionPanel {
       this._onTCodeTransportChange();
 
       this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
-      this.tcodeManager.onDisconnect = () => this._updateTCodeStatus('disconnected');
+      this.tcodeManager.onDisconnect = () => this._updateTCodeStatus(this._tcodeLinkState());
+      // Every link change (also the start-up auto-connect, which doesn't go
+      // through this panel): a WebSocket device that isn't answering shows
+      // as connecting until it does.
+      this.tcodeManager.onStatus = () => this._updateTCodeStatus(this._tcodeLinkState());
 
       // Push saved axis ranges/enabled state into tcodeSync so they apply
       // as soon as the device connects — no need to open the panel first.
@@ -2105,8 +2109,10 @@ export class ConnectionPanel {
   async _onTCodeConnect() {
     if (!this.tcodeManager) return;
 
-    if (this.tcodeManager.connected) {
+    if (this.tcodeManager.connected || this.tcodeManager.waiting) {
       await this.tcodeManager.disconnect();
+      // Stays off at the next start until the user connects again.
+      this.settings.set('tcode.autoConnect', false);
       this._updateTCodeStatus('disconnected');
       return;
     }
@@ -2154,9 +2160,12 @@ export class ConnectionPanel {
 
     this._updateTCodeStatus('connecting');
     const success = await this.tcodeManager.connect(kind, opts);
+    const waiting = !success && this.tcodeManager.waiting;
 
-    if (success) {
+    if (success || waiting) {
       // Persist per-transport so the next launch restores the right inputs.
+      // A WebSocket device that isn't answering yet counts: the app keeps
+      // trying, and starts trying again at the next launch.
       this.settings.set('tcode.transport', kind);
       if (kind === 'serial') {
         this.settings.set('tcode.port', opts.path);
@@ -2166,8 +2175,17 @@ export class ConnectionPanel {
         this.settings.set('tcode.udpPort', opts.port);
       } else if (kind === 'websocket') {
         this.settings.set('tcode.wsUrl', opts.url);
+        this.settings.set('tcode.autoConnect', true);
       }
     }
+    if (waiting) this._updateTCodeStatus('connecting');
+  }
+
+  /** Panel status for the TCode manager's current link state. */
+  _tcodeLinkState() {
+    if (this.tcodeManager?.connected) return 'connected';
+    if (this.tcodeManager?.waiting) return 'connecting';
+    return 'disconnected';
   }
 
   async _refreshTCodePorts(selectPort) {
@@ -2212,7 +2230,9 @@ export class ConnectionPanel {
         : (this._tcodeEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
     }
     if (btn) {
-      btn.textContent = status === 'connected' ? t('connection.btn.disconnect') : t('connection.btn.connect');
+      // A WebSocket device being waited for can be stopped from here too.
+      const stoppable = status === 'connected' || (status === 'connecting' && this.tcodeManager?.waiting);
+      btn.textContent = stoppable ? t('connection.btn.disconnect') : t('connection.btn.connect');
     }
     if (axisSection) {
       axisSection.hidden = status !== 'connected';

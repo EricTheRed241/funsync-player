@@ -41,6 +41,7 @@ import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
+import { buildDesktopStatus } from './desktop-status.js';
 import { SessionCard } from '../components/session-card.js';
 import { openSessionHistory } from '../components/session-history-modal.js';
 import { SettingsPanel } from '../components/settings-panel.js';
@@ -876,6 +877,7 @@ class App {
             console.log('[Remote] re-registering the library with the backend');
             this.library._registerWithBackend();
           }
+          this._pushDesktopStatus();
         };
         this.remoteBridge.onBridgeClose = () => console.log('[Remote] observer bridge closed — will retry');
         this.remoteBridge.connect();
@@ -1134,6 +1136,14 @@ class App {
           this._updateDeviceIndicators();
           this._refreshOrgasmPlan();
         };
+
+        // Link status (WebSocket waiting / reconnecting / attempts / last
+        // error) goes to the backend's /api/status as it changes.
+        const panelTCodeStatus = this.tcodeManager.onStatus;
+        this.tcodeManager.onStatus = (status) => {
+          if (panelTCodeStatus) panelTCodeStatus(status);
+          this._pushDesktopStatus();
+        };
       }
 
       // Wire Autoblow connect/disconnect callbacks
@@ -1245,6 +1255,12 @@ class App {
       // Auto-connect to Buttplug/Intiface if previously used
       if (this.buttplugManager) {
         this._autoConnectButtplug();
+      }
+
+      // Reconnect the saved WebSocket TCode device (MiraBot) and keep
+      // trying until it answers.
+      if (this.tcodeManager) {
+        this._autoConnectTCode();
       }
 
     // Initialize EroScripts panel
@@ -1617,6 +1633,7 @@ class App {
       try {
         if (this._sourcePollingInterval) clearInterval(this._sourcePollingInterval);
         if (this._vrActivityInterval) clearInterval(this._vrActivityInterval);
+        clearInterval(this._desktopStatusInterval);
         if (this._rescanPollInterval) clearInterval(this._rescanPollInterval);
         if (this.syncEngine) this.syncEngine.stop();
         if (this.buttplugSync) this.buttplugSync.stop();
@@ -1655,6 +1672,11 @@ class App {
     // Poll VR activity every 2s (auto-connect companion bridge when Quest picks a video)
     this._vrActivityInterval = setInterval(() => this._pollVRActivity(), 2000);
     this._lastVrActivityTs = 0;
+
+    // Desktop status heartbeat for the backend's /api/status: keeps the
+    // player position and VR link fresh between device changes, and shows
+    // the renderer is alive (`at`).
+    this._desktopStatusInterval = setInterval(() => this._pushDesktopStatus(), 15000);
 
     // Piggyback the VR nav-bar tooltip off the same 2s tick so the user
     // can see reconnect progress without opening the VR modal. The VR
@@ -3861,6 +3883,23 @@ class App {
     // Top-bar canonical sync chip — aggregates device + script + play
     // state into a single human-readable label.
     this._updatePlayerSyncChip();
+    this._pushDesktopStatus();
+  }
+
+  /** Send the desktop status snapshot to the backend (GET /api/status). */
+  _pushDesktopStatus() {
+    if (!this.remoteBridge?.connected) return;
+    this.remoteBridge.sendDesktopStatus(buildDesktopStatus({
+      handyManager: this.handyManager,
+      buttplugManager: this.buttplugManager,
+      tcodeManager: this.tcodeManager,
+      tcodeSync: this.tcodeSync,
+      autoblowManager: this.autoblowManager,
+      vrBridge: this.vrBridge,
+      sessionTracker: this.sessionTracker,
+      videoPlayer: this.videoPlayer,
+      currentVideoPath: this._currentVideoPath,
+    }));
   }
 
   /**
@@ -4091,6 +4130,23 @@ class App {
     } catch (err) {
       // Silent failure — Intiface may not be running
       console.log('[Buttplug] Auto-connect skipped:', err.message);
+    }
+  }
+
+  /**
+   * Start-up connect for a saved WebSocket TCode device. Main keeps trying
+   * while it doesn't answer (switched off most of the time is normal), and
+   * the manager's onConnect starts sync once it does. Off after the user
+   * pressed Disconnect (`tcode.autoConnect` false) until they connect again.
+   */
+  async _autoConnectTCode() {
+    const url = this.settings.get('tcode.wsUrl');
+    if (this.settings.get('tcode.transport') !== 'websocket' || !url) return;
+    if (this.settings.get('tcode.autoConnect') === false) return;
+    console.log(`[TCode] Auto-connecting to ${url}...`);
+    const success = await this.tcodeManager.connect('websocket', { url });
+    if (!success && !this.tcodeManager.waiting) {
+      console.warn(`[TCode] Auto-connect to ${url} failed`);
     }
   }
 

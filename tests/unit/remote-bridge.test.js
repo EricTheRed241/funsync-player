@@ -251,6 +251,32 @@ describe('RemoteBridge — onPhoneConnected dedup', () => {
     expect(spy).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
+
+  it('a session that ends and reconnects within the TTL is a fresh event (page reload)', () => {
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    latest().simulateMessage({ type: 'phone-disconnected', ip: '10.0.0.5' });
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    // The reloaded page's own hello is still the duplicate of its connect.
+    latest().simulateMessage({ type: 'hello', ip: '10.0.0.5', videoId: 'abc' });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('a replaced session lets the same phone and video connect again within the TTL', () => {
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    latest().simulateMessage({ type: 'phone-replaced', oldIp: '10.0.0.5', newIp: '10.0.0.5' });
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('RemoteBridge — sendToPhone', () => {

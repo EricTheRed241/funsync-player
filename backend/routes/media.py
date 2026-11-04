@@ -686,6 +686,11 @@ def record_vr_activity(client_ip: str, video_id: str):
     _vr_activity["timestamp"] = time.time()
 
 
+def last_vr_activity() -> dict:
+    """Copy of the last headset scene request ({clientIp, videoId, timestamp})."""
+    return dict(_vr_activity)
+
+
 @router.get("/vr-activity")
 async def get_vr_activity():
     """Get the last VR scene request (polled by renderer for auto-connect)."""

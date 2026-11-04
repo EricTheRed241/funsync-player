@@ -246,7 +246,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
   const { library, knownTopics, turnedDown, favourites, scoring } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
-  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
+  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'live-not-pov': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
   const fresh = [];
   let listed = 0;
   let judged = 0;
@@ -732,7 +732,8 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
 function savedQueue(opts, { userData, config }) {
   const file = path.join(userData, 'eroscripts-scout.json');
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
-  const { candidates } = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const { favourites, scoring } = live.scoutPreferences(config);
+  const candidates = JSON.parse(fs.readFileSync(file, 'utf8')).candidates.map((c) => lib.withCurrentFavourite(c, favourites));
   const breaks = {};
   for (const c of candidates) {
     const rule = lib.contentRuleBreak(c);
@@ -740,7 +741,6 @@ function savedQueue(opts, { userData, config }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
-  const { favourites, scoring } = live.scoutPreferences(config);
   return lib.downloadQueue(candidates, scoring, favourites).filter((c) => !opts.ids || opts.ids.has(c.id));
 }
 

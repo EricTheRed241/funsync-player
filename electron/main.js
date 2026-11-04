@@ -1904,6 +1904,24 @@ function broadcastTcodeDisconnected() {
   BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tcode-disconnected'));
 }
 
+// Live link state of a retrying transport (WebSocket): connected, waiting
+// for the device, reconnecting… Feeds the connection panel and the
+// backend's /api/status via the renderer.
+function broadcastTcodeStatus(status) {
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tcode-status', status));
+}
+
+function tcodeStatusSnapshot() {
+  if (!tcodeTransport) return { connected: false, transport: null, state: 'stopped' };
+  const detail = typeof tcodeTransport.status === 'function' ? tcodeTransport.status() : null;
+  const connected = !!tcodeTransport.connected;
+  return {
+    ...(detail || { state: connected ? 'connected' : 'stopped' }),
+    connected,
+    transport: tcodeTransportKind,
+  };
+}
+
 async function tearDownActiveTcodeTransport() {
   if (!tcodeTransport) return;
   try { tcodeTransport.destroy(); } catch {}
@@ -1959,20 +1977,28 @@ ipcMain.handle('tcode-connect', async (_event, kindOrPath, optsOrBaud) => {
 
   await tearDownActiveTcodeTransport();
   try {
-    tcodeTransport = createTransport(kind, { log });
+    const transport = createTransport(kind, { log });
+    tcodeTransport = transport;
     tcodeTransportKind = kind;
-    tcodeTransport.onDisconnect(() => {
+    transport.onDisconnect(() => {
       tcodeTransport = null;
       tcodeTransportKind = null;
       broadcastTcodeDisconnected();
     });
-    const result = await tcodeTransport.connect(opts);
-    if (!result?.success) {
-      // Leave the slot empty so subsequent send() calls don't pretend to
-      // be connected.
+    if (typeof transport.onStatus === 'function') {
+      transport.onStatus(() => {
+        if (tcodeTransport === transport) broadcastTcodeStatus(tcodeStatusSnapshot());
+      });
+    }
+    const result = await transport.connect(opts);
+    // A WebSocket transport that couldn't reach the device yet keeps
+    // trying (`retrying`) and reports through `tcode-status` when it gets
+    // through. Anything else that failed leaves the slot empty so send()
+    // calls don't pretend to be connected.
+    if (!result?.success && !result?.retrying && tcodeTransport === transport) {
       await tearDownActiveTcodeTransport();
     }
-    return result;
+    return { ...result, status: tcodeTransport === transport ? tcodeStatusSnapshot() : null };
   } catch (err) {
     log.warn('[TCode] Connect error:', err.message);
     await tearDownActiveTcodeTransport();
@@ -1991,12 +2017,7 @@ ipcMain.handle('tcode-send', (_event, command) => {
   return tcodeTransport.send(command);
 });
 
-ipcMain.handle('tcode-status', () => {
-  return {
-    connected: !!(tcodeTransport && tcodeTransport.connected),
-    transport: tcodeTransportKind,
-  };
-});
+ipcMain.handle('tcode-status', () => tcodeStatusSnapshot());
 
 // --- IPC Handlers: VR Bridge (TCP) ---
 
