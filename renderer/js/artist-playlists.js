@@ -1,6 +1,6 @@
-// One playlist per artist with at least MIN_ARTIST_VIDEOS videos, and per
-// favourite artist from the first video, plus one FAVOURITES_PLAYLIST (the
-// values are in content-preferences.js).
+// One playlist per artist with at least MIN_ARTIST_VIDEOS videos, favourites
+// included (user, 2026-11-04), plus one FAVOURITES_PLAYLIST with every
+// favourite's videos from the first one (the values are in content-preferences.js).
 //
 // The library is laid out `<source>/<artist>/<scene>/<video>` (the scout
 // names Discovery's artist folders the same way), so a video's artist is the
@@ -8,9 +8,9 @@
 // holding at least MIN_ARTIST_VIDEOS videos, across all sources, gets a
 // playlist named after it, and new videos of that artist join it. A
 // favourite (favourite-artists.js: FAVOURITES with the user's changes),
-// matched to the folder name whatever its case or Unicode form, gets its
-// playlist from one video, and every favourite's videos also go into
-// FAVOURITES_PLAYLIST, grouped by artist.
+// matched to the folder name whatever its case or Unicode form, needs the
+// same MIN_ARTIST_VIDEOS for its own playlist, and every favourite's videos
+// go into FAVOURITES_PLAYLIST, grouped by artist, from the first one.
 //
 // The user stays in charge, as with the EroScripts categories: an existing
 // playlist of the same name is reused, a playlist is made once (a deleted
@@ -105,7 +105,7 @@ export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlis
   const favouritePaths = artists.filter((a) => a.favourite).flatMap((a) => a.paths);
   if (favouritePaths.length) plan(FAVOURITES_STATE_KEY, FAVOURITES_PLAYLIST, favouritePaths);
   for (const a of artists) {
-    if (a.favourite || a.paths.length >= MIN_ARTIST_VIDEOS) plan(a.key, a.name, a.paths);
+    if (a.paths.length >= MIN_ARTIST_VIDEOS) plan(a.key, a.name, a.paths);
   }
 
   const withdrawn = artists

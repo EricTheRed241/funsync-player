@@ -26,7 +26,7 @@ describe('planPlaylistCleanup', () => {
     expect(r.remove.map((x) => x.id)).toEqual(['k', 'g']);
   });
 
-  it('removes an app-made artist playlist below the threshold and forgets it, a favourite only when empty', () => {
+  it('removes an app-made artist playlist below the threshold and forgets it, a favourite\'s too; Favourite artists only when empty', () => {
     const lib = [...vids('Misiv', MIN_ARTIST_VIDEOS - 1), ...vids('Agapilord', 1)];
     const state = { created: ['misiv', 'agapilord', ':favourites'], added: { [vids('Misiv', 1)[0]]: ['misiv'], [vids('Agapilord', 1)[0]]: ['agapilord', ':favourites'] } };
     const r = planPlaylistCleanup({
@@ -37,11 +37,10 @@ describe('planPlaylistCleanup', () => {
       ],
       videoPaths: lib,
       state,
-      favourites: ['Agapilord'],
     });
-    expect(r.remove).toEqual([{ id: 'mi', name: 'Misiv', videos: MIN_ARTIST_VIDEOS - 1 }]);
-    expect(r.state.created).toEqual(['agapilord', ':favourites']);
-    expect(r.state.added).toEqual({ [vids('Agapilord', 1)[0]]: ['agapilord', ':favourites'] });
+    expect(r.remove).toEqual([{ id: 'mi', name: 'Misiv', videos: MIN_ARTIST_VIDEOS - 1 }, { id: 'ag', name: 'Agapilord', videos: 1 }]);
+    expect(r.state.created).toEqual([':favourites']);
+    expect(r.state.added).toEqual({ [vids('Agapilord', 1)[0]]: [':favourites'] });
   });
 
   it('lets a removed artist playlist come back, with every video, once the artist reaches the threshold', () => {

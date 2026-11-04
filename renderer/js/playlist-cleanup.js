@@ -4,8 +4,8 @@
 // • A playlist with no video left in the library goes, whoever made it. The
 //   Discovery and Review playlists are made again when a video needs them.
 // • An artist playlist the app made (artist-playlists.js) that holds fewer
-//   than MIN_ARTIST_VIDEOS videos still in the library goes too (a favourite's
-//   from one video, so only when empty). Its artist is forgotten in
+//   than MIN_ARTIST_VIDEOS videos still in the library goes too, a
+//   favourite's included (FAVOURITES_PLAYLIST only when empty). Its artist is forgotten in
 //   `library.artistPlaylists`, so the playlist is made again, with all the
 //   artist's videos, once the artist reaches the threshold.
 //
@@ -24,12 +24,10 @@ const fold = (s) => String(s || '').normalize('NFC').trim().toLocaleLowerCase();
  * @param {{id: string, name: string, videoPaths?: string[]}[]} o.playlists
  * @param {string[]} o.videoPaths the library's videos (this scan)
  * @param {{created?: string[], added?: Object<string, string[]>}} [o.state] `library.artistPlaylists`
- * @param {string[]} [o.favourites] favourite artist names
  * @returns {{remove: {id: string, name: string, videos: number}[], state: {created: string[], added: Object<string, string[]>}}}
  */
-export function planPlaylistCleanup({ playlists = [], videoPaths = [], state = {}, favourites = [] }) {
+export function planPlaylistCleanup({ playlists = [], videoPaths = [], state = {} }) {
   const inLibrary = new Set(videoPaths);
-  const favouriteKeys = new Set(favourites.map(fold));
   const created = new Set(state.created || []);
   const forget = new Set();
   const remove = [];
@@ -37,7 +35,7 @@ export function planPlaylistCleanup({ playlists = [], videoPaths = [], state = {
     const videos = (pl.videoPaths || []).filter((p) => inLibrary.has(p)).length;
     const key = fold(pl.name) === fold(FAVOURITES_PLAYLIST) ? FAVOURITES_STATE_KEY : fold(pl.name);
     const artistMade = created.has(key);
-    const min = !artistMade || key === FAVOURITES_STATE_KEY || favouriteKeys.has(key) ? 1 : MIN_ARTIST_VIDEOS;
+    const min = !artistMade || key === FAVOURITES_STATE_KEY ? 1 : MIN_ARTIST_VIDEOS;
     if (videos >= min) continue;
     remove.push({ id: pl.id, name: pl.name, videos });
     if (artistMade) forget.add(key);
@@ -56,12 +54,11 @@ export function planPlaylistCleanup({ playlists = [], videoPaths = [], state = {
  *
  * @param {object} data DataService (get, set, getPlaylists, deletePlaylist)
  * @param {string[]} videoPaths
- * @param {string[]} [favourites]
  * @returns {{removed: string[]}} names of the deleted playlists
  */
-export function applyPlaylistCleanup(data, videoPaths, favourites = []) {
+export function applyPlaylistCleanup(data, videoPaths) {
   const before = data.get(ARTIST_PLAYLISTS_KEY) || {};
-  const plan = planPlaylistCleanup({ playlists: data.getPlaylists(), videoPaths, state: before, favourites });
+  const plan = planPlaylistCleanup({ playlists: data.getPlaylists(), videoPaths, state: before });
   for (const r of plan.remove) data.deletePlaylist(r.id);
   if (plan.state !== before) data.set(ARTIST_PLAYLISTS_KEY, plan.state);
   return { removed: plan.remove.map((r) => r.name) };
