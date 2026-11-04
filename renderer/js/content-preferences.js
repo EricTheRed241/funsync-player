@@ -13,8 +13,13 @@
 // Tags are EroScripts slugs (FapTap tags are aliased to them first). Title
 // and text patterns match whole words only: `(?<![\p{L}\p{N}])…(?![\p{L}\p{N}])`.
 //
+// Values the Rust CLIs read too live in content-preferences.json next to this
+// file (the shared part of the preferences: Rust embeds it at compile time,
+// crates/age-screen). They're exported here like the rest; change them there.
 // One value has a copy outside JavaScript: TOP_RATED_MIN is mirrored in
 // backend/services/vr_sections.py.
+
+import data from './content-preferences.json' with { type: 'json' };
 
 // ── Discovery: what never comes in ──────────────────────────────────────
 
@@ -205,8 +210,8 @@ export const DEDUPE_SCRIPT_ORDER = ['hand-made axes', 'faster script'];
 
 // ── Ratings and triage ──────────────────────────────────────────────────
 
-/** Rated this or lower (and not a favourite): deleted from disk, scripts and axes too, and the scouts skip the post. */
-export const DELETE_AT_OR_BELOW = 2;
+/** Rated this or lower (and not a favourite): deleted from disk, scripts and axes too, and the scouts skip the post. Shared (content-preferences.json): the age screener skips these videos. */
+export const DELETE_AT_OR_BELOW = data.ratings.deleteAtOrBelow;
 /** Rated this or higher: kept (out of Review). In between: the REVIEW_PLAYLIST. */
 export const KEEP_FROM = 4;
 export const REVIEW_PLAYLIST = 'Review';
@@ -254,6 +259,18 @@ export const AUTO_CATEGORIES = [
  * Not a screening value: changing it needs no RULES_VERSION bump.
  */
 export const VIDEO_TAGGER_TAGS = ['vr', 'pov', 'creampie', 'riding'];
+
+// ── Underage screener ───────────────────────────────────────────────────
+
+/**
+ * The weekly underage screener (`npm run age:screen`, crates/age-screen;
+ * values in content-preferences.json). A judge rates each video's chance of
+ * depicting someone under 18 (`p_minor`, 0–1): at `purgeAt` or above it's
+ * rated 1★ (deleted; favourites go to the playlist instead), from `reviewAt`
+ * it goes to the `playlist` for the user to decide, below that it's clear.
+ * Runs every `intervalDays` with `--weekly`.
+ */
+export const AGE_SCREEN = data.ageScreen;
 
 // ── Auto collections ────────────────────────────────────────────────────
 
