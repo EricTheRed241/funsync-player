@@ -165,6 +165,13 @@ describe('blocked tags (MMD)', () => {
     const c = (id, title, tags) => ({ id, title, author: 'x', tags, axisType: 'multi', score: 1, scenes: [{ axes: ['twist'] }] });
     expect(downloadQueue([c(1, 'Reine dance sex', ['mmd', 'sex']), c(2, 'Tracer rides', ['sfm', 'riding'])]).map((x) => x.id)).toEqual([2]);
   });
+
+  it('blocks dildo riding by tag or dildo as a title word', () => {
+    expect(screenTopic(topic(['real', 'riding'], 'Dildo Ride [Cinemasian] [Multi-Axis]')).reason).toBe('blocked');
+    expect(screenTopic(topic(['real', 'dildo-riding', 'pov'], 'Fit girl rides')).reason).toBe('blocked');
+    expect(screenPick(topic(['real', 'riding'], 'Riding Dildos POV'), {}).reason).toBe('blocked');
+    expect(hasBlockedTag({ tags: ['animation', 'riding'], title: 'Mercy rides Reaper' })).toBe(false);
+  });
 });
 
 describe('contentRuleBreak', () => {
