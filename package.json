@@ -29,7 +29,8 @@
     "faptap:scout": "node scripts/faptap-scout.mjs",
     "dedupe:scenes": "node scripts/dedupe-scenes.mjs",
     "library:reorganize": "node scripts/library-reorganize.mjs",
-    "video:tags": "cargo run -q --release -p video-tags --"
+    "video:tags": "cargo run -q --release -p video-tags --",
+    "age:screen": "cargo run -q --release -p age-screen --"
   },
   "keywords": [
     "video-player",

@@ -1,0 +1,11 @@
+{
+  "ageScreen": {
+    "purgeAt": 0.8,
+    "reviewAt": 0.5,
+    "playlist": "Underage review",
+    "intervalDays": 7
+  },
+  "ratings": {
+    "deleteAtOrBelow": 2
+  }
+}
