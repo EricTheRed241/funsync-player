@@ -193,16 +193,15 @@ export const MIN_STREAM_HEIGHT = { flat: 720, vr: 1080 };
 // ── Duplicates: which copy stays ────────────────────────────────────────
 
 /**
- * One copy per video. The first difference decides (names are the reasons
- * scripts/scene-dedupe-lib.mjs prints): EroScripts or a library scene over
- * FapTap, hand-made axes over generated, passthrough over none, fewer
- * breaches of the VR caps, more pixels, more fps, the faster main script,
- * the higher bitrate.
+ * One copy per video (user, 2026-11-04: "always keep biggest video and
+ * fastest script"). The video that stays: within the VR caps, then the
+ * biggest file. The scripts it keeps: the copy with hand-made axes (they
+ * always win), then the fastest main script; when that's another copy's, its
+ * script set moves next to the kept video. The first difference decides
+ * (names are the reasons scripts/scene-dedupe-lib.mjs prints).
  */
-export const DEDUPE_KEEP_ORDER = [
-  'EroScripts over FapTap', 'hand-made axes', 'passthrough', 'within VR caps',
-  'higher resolution', 'higher fps', 'faster script', 'higher bitrate',
-];
+export const DEDUPE_KEEP_ORDER = ['within VR caps', 'bigger video'];
+export const DEDUPE_SCRIPT_ORDER = ['hand-made axes', 'faster script'];
 
 // ── Ratings and triage ──────────────────────────────────────────────────
 
