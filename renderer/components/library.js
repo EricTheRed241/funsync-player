@@ -942,7 +942,7 @@ export class Library {
       .then((r) => {
         const playlistsChanged = r.created.length || r.extended || r.withdrawn;
         if (playlistsChanged) console.log('[Library] Artist playlists:', r);
-        const c = scanComplete ? applyPlaylistCleanup(this._settings, scannedPaths, favourites) : { removed: [] };
+        const c = scanComplete ? applyPlaylistCleanup(this._settings, scannedPaths) : { removed: [] };
         if (c.removed.length) console.log('[Library] Playlists removed (empty or below the artist threshold):', c.removed);
         if (playlistsChanged || c.removed.length) this._registerWithBackend();
       })

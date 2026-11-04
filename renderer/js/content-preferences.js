@@ -215,7 +215,7 @@ export const TOP_RATED_MIN = 4;
 
 // ── Artist playlists ────────────────────────────────────────────────────
 
-/** An artist folder with at least this many videos gets a playlist; favourites from one. */
+/** An artist folder with at least this many videos gets a playlist, favourites too (they join "Favourite artists" from one). */
 export const MIN_ARTIST_VIDEOS = 5;
 export const FAVOURITES_PLAYLIST = 'Favourite artists';
 /** Folder names that hold videos of many artists (lower case). */

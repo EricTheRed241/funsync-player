@@ -54,14 +54,13 @@ describe('planArtistPlaylists', () => {
     expect(again).toMatchObject({ create: [], extend: [] });
   });
 
-  it('gives a favourite a playlist from one video, matched whatever the case or Unicode form; others still need MIN_ARTIST_VIDEOS', () => {
+  it('gives a favourite its own playlist only from MIN_ARTIST_VIDEOS, but Favourite artists from one video, matched whatever the case or Unicode form', () => {
     const videoPaths = [
-      ...vids('/GVP/Multi Generated', 'Eternal Enigma', 1),
-      ...vids('/GVP/_incoming', 'Cafe\u0301 Girl', 2),
-      ...vids('/GVP/Multi-Axis', 'Shayuki', MIN_ARTIST_VIDEOS - 1),
+      ...vids('/GVP/Multi Generated', 'Eternal Enigma', MIN_ARTIST_VIDEOS - 1),
+      ...vids('/GVP/_incoming', 'Cafe\u0301 Girl', MIN_ARTIST_VIDEOS),
     ];
     const r = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, favourites: ['eternal enigma', 'Café girl', 'Not Here'] });
-    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([[FAVOURITES_PLAYLIST, 3], ['Cafe\u0301 Girl', 2], ['Eternal Enigma', 1]]);
+    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([[FAVOURITES_PLAYLIST, 2 * MIN_ARTIST_VIDEOS - 1], ['Cafe\u0301 Girl', MIN_ARTIST_VIDEOS]]);
   });
 
   it('puts every favourite\'s videos in Favourite artists, grouped by artist, and adds new ones once', () => {
@@ -118,10 +117,10 @@ describe('applyArtistPlaylists', () => {
     expect(playlists[0].videoPaths).toHaveLength(12);
     expect(store[ARTIST_PLAYLISTS_KEY].created).toEqual(['cuddle mocap']);
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 0 });
-    expect(await applyArtistPlaylists(data, videoPaths, ['Shayuki'])).toEqual({ created: [FAVOURITES_PLAYLIST, 'Shayuki'], extended: 0, withdrawn: 0 });
-    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 4], ['Shayuki', 4]]);
+    expect(await applyArtistPlaylists(data, videoPaths, ['Shayuki'])).toEqual({ created: [FAVOURITES_PLAYLIST], extended: 0, withdrawn: 0 });
+    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 4]]);
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 4 });
-    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 0], ['Shayuki', 4]]);
+    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 0]]);
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 0 });
   });
 });
