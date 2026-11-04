@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 // npm run dedupe:scenes — find videos the library holds more than once and
-// keep the best copy (rules: scripts/scene-dedupe-lib.mjs).
+// keep one copy: the biggest video with the best scripts (rules:
+// scripts/scene-dedupe-lib.mjs).
 //
 //   npm run dedupe:scenes                  list duplicate groups and what would go
 //   npm run dedupe:scenes -- --apply       delete the extra copies
 //
 // Every enabled library source is read (Discovery included). Video lengths,
 // sizes and resolutions are cached in `<userData>/scene-probe-cache.json`.
-// An extra copy goes the way the app's triage deletes a scene
-// (electron/rejected-videos.js, reason `duplicate`), so the scouts don't
-// download it again; a second encode in the same folder as the copy that
-// stays loses only its video file, since the two share their scripts.
+// When the scripts that stay belong to another copy, that copy's main script
+// and its axis files are copied next to the kept video under its name,
+// replacing the kept video's own. An extra copy then goes the way the app's
+// triage deletes a scene (electron/rejected-videos.js, reason `duplicate`),
+// so the scouts don't download it again; a copy in the same folder as the
+// kept one loses its video and its own scripts (scripts the folder shares
+// stay).
 // Playlists drop the deleted paths while the app is closed; with the app
 // open they keep them, hidden (the app doesn't show missing files).
 //
@@ -31,7 +35,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./scene-dedupe-lib.mjs');
-const { DEDUPE_KEEP_ORDER } = await import('../renderer/js/content-preferences.js');
+const { DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER } = await import('../renderer/js/content-preferences.js');
 const { appRunning, readConfig, writeConfig } = await import('./discovery-io.mjs');
 const { defaultUserDataDir } = await import('./eroscripts-sync-lib.mjs');
 const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes, actionsHash, isStrokeScriptName } = await import('./handmade-scenes.mjs');
@@ -41,8 +45,9 @@ const rejectedVideos = require('../electron/rejected-videos.js');
 const run = promisify(execFile);
 
 const USAGE = `Usage: npm run dedupe:scenes -- [options]
-Find videos the library holds more than once (same length, same title, same picture or
-identical script) and keep one, by: ${DEDUPE_KEEP_ORDER.join(', ')}.
+Find videos the library holds more than once (same length and projection, and the same
+picture or identical script) and keep one: the video by ${DEDUPE_KEEP_ORDER.join(', ')};
+its scripts by ${DEDUPE_SCRIPT_ORDER.join(', ')} (moved over from another copy when needed).
   --apply                delete the extra copies (default: only list them)
   --quiet                print only the summary line (used after scout downloads)
   --user-data <dir>      app data folder (default: the desktop app's)`;
@@ -79,16 +84,42 @@ async function frames(scene) {
   return out;
 }
 
-async function sameFrames(a, b) {
-  const fa = await frames(a);
-  const fb = await frames(b);
-  let total = 0; let count = 0;
-  for (let i = 0; i < fa.length; i++) {
-    if (!fa[i].length || fa[i].length !== fb[i].length) return false;
-    for (let p = 0; p < fa[i].length; p++) total += Math.abs(fa[i][p] - fb[i][p]);
-    count += fa[i].length;
-  }
-  return count > 0 && total / count < lib.SAME_FRAMES_MAX;
+async function sameFrames(a, b, { strict = false } = {}) {
+  return lib.framesMatch(await frames(a), await frames(b), { strict });
+}
+
+// Axis files that go with a stroke script `<stem>.funscript`: `<stem>.<axis>.funscript`, generated ones too.
+const AXIS_TAIL = /^\.(generated\.)?[a-z0-9]+\.funscript$/i;
+
+/** A scene's script set: its main stroke script and that script's axis files (names in `scene.dir`). */
+function scriptSet(scene) {
+  const main = scene.scripts[0];
+  const stem = main.slice(0, -'.funscript'.length);
+  const names = fs.readdirSync(scene.dir).filter((n) => !n.startsWith('._'));
+  return { stem, files: names.filter((n) => n === main || (n.startsWith(stem) && AXIS_TAIL.test(n.slice(stem.length)))) };
+}
+
+/** Every script of a scene's own stroke scripts with their axis files (none when it uses the folder's). */
+function ownScriptFiles(scene) {
+  if (!scene.ownScripts) return [];
+  const names = fs.readdirSync(scene.dir).filter((n) => !n.startsWith('._'));
+  const stems = scene.scripts.map((s) => s.slice(0, -'.funscript'.length));
+  return names.filter((n) => stems.some((st) => n === `${st}.funscript` || (n.startsWith(st) && AXIS_TAIL.test(n.slice(st.length)))));
+}
+
+/**
+ * Give the kept video the script set of `donor`: its own scripts go, the
+ * donor's main script and axis files are copied in under the kept video's
+ * name. Returns the copied names.
+ */
+function takeScripts(keep, donor) {
+  const { stem, files } = scriptSet(donor);
+  const keepStem = keep.name.slice(0, -path.extname(keep.name).length);
+  const incoming = files.map((n) => [path.join(donor.dir, n), path.join(keep.dir, keepStem + n.slice(stem.length))]);
+  const staged = incoming.map(([from, to]) => { const tmp = `${to}.dedupe-tmp`; fs.copyFileSync(from, tmp); return [tmp, to]; });
+  for (const n of ownScriptFiles(keep)) fs.rmSync(path.join(keep.dir, n), { force: true });
+  for (const [tmp, to] of staged) fs.renameSync(tmp, to);
+  return staged.map(([, to]) => path.basename(to));
 }
 
 // ── Library ─────────────────────────────────────────────────────────────
@@ -129,6 +160,8 @@ async function readScenes(roots, cache) {
           scriptHash: actionsHash(main),
           words: lib.titleWords(stem, artist),
           name: v,
+          scripts,
+          ownScripts: own.length > 0,
         });
       }
     }
@@ -182,6 +215,7 @@ async function main() {
   if (!opts.quiet) {
     for (const g of groups) {
       console.log(`\nkeep   ${rel(g.keep.video)}  [${desc(g.keep)}]`);
+      if (g.script !== g.keep) console.log(`  scripts from ${rel(g.script.video)}  (${g.scriptReason})`);
       for (const r of g.remove) console.log(`remove ${rel(r.scene.video)}  [${desc(r.scene)}]  (${r.reason})`);
     }
     console.log('');
@@ -190,11 +224,28 @@ async function main() {
   const deleted = [];
   if (opts.apply) {
     for (const g of groups) {
+      // The kept video gets the scripts that stay under its own name (also
+      // when it only used the folder's, which a removed copy may own).
+      if (g.script !== g.keep || !g.keep.ownScripts) {
+        try {
+          const copied = takeScripts(g.keep, g.script);
+          if (!opts.quiet && g.script !== g.keep) console.log(`moved ${copied.length} script file(s) to ${rel(g.keep.dir)}`);
+        } catch (err) {
+          console.error(`! ${rel(g.keep.video)}: scripts not moved, copies kept: ${err.message}`);
+          continue;
+        }
+      }
       for (const { scene } of g.remove) {
         try {
           if (scene.dir === g.keep.dir) {
-            // Another encode of the kept video, sharing its scripts: only the video goes.
-            for (const n of [scene.name, `._${scene.name}`]) for (const form of new Set([n, n.normalize('NFC')])) fs.rmSync(path.join(scene.dir, form), { force: true });
+            // A copy in the kept video's folder: its video and its own scripts go; scripts the folder shares stay.
+            const keepStem = g.keep.name.slice(0, -path.extname(g.keep.name).length);
+            for (const n of [scene.name, ...ownScriptFiles(scene).filter((f) => !f.startsWith(`${keepStem}.`))]) {
+              for (const form of new Set([n, n.normalize('NFC')])) {
+                fs.rmSync(path.join(scene.dir, form), { force: true });
+                fs.rmSync(path.join(scene.dir, `._${form}`), { force: true });
+              }
+            }
           } else {
             rejectedVideos.deleteRejectedVideo(scene.video, { sources: roots, userDataDir: userData, reason: 'duplicate' });
           }
