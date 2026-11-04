@@ -1,0 +1,11 @@
+# Rust CLIs (AGENTS.md, "Rust migration"): one crate per CLI under crates/,
+# each a library (logic, unit tests) plus a thin binary; npm scripts run them
+# with `cargo run -q --release -p <crate> --`.
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false

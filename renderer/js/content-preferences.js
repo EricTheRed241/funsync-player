@@ -245,6 +245,16 @@ export const AUTO_CATEGORIES = [
   { key: 'axes-single', name: 'Single-axis', color: '#636e72', tags: [], axisKind: 'single' },
 ];
 
+// ── Video tags ──────────────────────────────────────────────────────────
+
+/**
+ * The vocabulary the video tagger may add to a scene (`<userData>/video-tags.json`,
+ * written by the `video-tags` CLI, merged into the scene's tags after each scan;
+ * renderer/js/video-tags.js). Tags in the file outside this list are ignored.
+ * Not a screening value: changing it needs no RULES_VERSION bump.
+ */
+export const VIDEO_TAGGER_TAGS = ['vr', 'pov', 'creampie', 'riding'];
+
 // ── Auto collections ────────────────────────────────────────────────────
 
 /**

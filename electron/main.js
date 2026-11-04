@@ -66,6 +66,7 @@ const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
 const { scanLibrary, isAppleDoubleSidecar } = require('./library-scan');
 const { readLinksFile } = require('./eroscripts-links');
+const { readVideoTagsFile } = require('./video-tags');
 const { deleteRejectedVideo } = require('./rejected-videos');
 
 const eroScripts = new EroScriptsAPI();
@@ -1141,6 +1142,9 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 // Video → EroScripts post links written by `npm run eroscripts:sync`.
 // Read on every library scan; the renderer merges them into scriptTags.
 ipcMain.handle('eroscripts-read-links', () => readLinksFile(app.getPath('userData')));
+// Video → tags written by the `video-tags` CLI (crates/video-tags). Read on
+// every library scan; the renderer merges them into scriptTags.
+ipcMain.handle('video-tags-read', () => readVideoTagsFile(app.getPath('userData')));
 
 ipcMain.handle('select-funscript', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

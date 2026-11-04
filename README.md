@@ -43,6 +43,17 @@ A local desktop video player with device synchronization for funscript playback.
   - **Tag scores:** every tag of the library's videos with its video count and group, plus every scored tag, each with a −/+ score (device, length and VR tags are left out as in the web remote, unless scored); the built-in weights; **Recalculate scores**.
   - Stars, the bonus, tag scores and Recalculate are applied as library edits, the same way as the web remote's (stored, the library scored again, the phone and the headsets updated). The view follows changes made on the phone or in the headset while it's open.
 
+### Video tags (video-tags.json)
+- **Tags that survive every scan.** `video-tags.json` in the app's data folder holds tags for single videos, e.g. what a video tagger saw in the picture (`pov`, `creampie` …): `{"version": 1, "updatedAt": …, "videos": {"<absolute video path>": {"tags": ["pov", "creampie"], "addedAt": …, "by": …}}}`. The library scan rebuilds each video's post tags from its sidecar and the EroScripts links, so tags written there directly would be lost; this file is merged on top after each scan instead.
+- **Only `VIDEO_TAGGER_TAGS` are applied** (`renderer/js/content-preferences.js`: `vr`, `pov`, `creampie`, `riding`); other tags in the file are ignored.
+- **Merge rules.** A video's post tags (EroScripts / FapTap) always stay; the file's tags the post lacks are added after them and remembered as `addedTags` in `library.scriptTags`, so the next scan neither loses nor duplicates them. A video with no post record (e.g. in `Other/`) gets a record of its own (`source: 'video-tags'`), which a post found later (a sidecar or an `eroscripts:sync` link) replaces, the file's tags added again on top. A video taken out of the file loses only the tags the file added. A missing or unreadable file changes nothing.
+- **Shown everywhere post tags are:** the auto categories (POV, Creampie, Riding), the preference score and tag scores, the web remote's chips and Tags view, and HereSphere / DeoVR `Tag:` and `Category:` scene tags. The VR category, VR score and VR filter keep following the backend's VR decision (the video, not the tags), and the chips hide `vr` as they hide it for posts.
+- **Edit it with `npm run video:tags`** (Rust, `crates/video-tags`; needs `cargo`). The app never writes the file, and the command never writes `config.json` or the library:
+  - `--list` prints the entries.
+  - `--proposals <file.json>` takes `{"videos": {"<path>": {"tags": [...]}}}` or `[{"path": ..., "tags": [...]}]` (an optional `by` per entry or for the whole file is stored; other fields are ignored) and adds the tags to each video's current ones; `--replace` sets them exactly (an empty list removes the entry). `--remove <path>` (repeatable) removes entries, also of videos already deleted.
+  - Every entry is checked first: tags must be slugs (`a-z`, `0-9`, `-`; lower-cased), the path absolute, an existing file, not an AppleDouble `._` file, and inside a library source. Each folder and file name is stored in the drive's own spelling (a name proposed in NFC whose folder lists it in NFD is stored as NFD, and the output says so). One invalid entry and nothing is written.
+  - It prints the change per video (`new`, `changed: + pov (kept creampie)`, `unchanged`, `removed`) and totals. It's a dry run unless `--apply` is given; `--apply` writes the file atomically, keeps the previous one as `video-tags.json.bak`, and asks the running app to rescan (`POST /api/remote/request-rescan`; `--no-rescan` skips it). `--user-data <dir>` picks another data folder. Exit codes: 0 done, 1 error or invalid input.
+
 ### Remote access
 - **Local-only mode** — start with `--local-only` (e.g. `npx electron . --local-only`) or set `FUNSYNC_LOCAL_ONLY=1` to bind the backend to `127.0.0.1`. The desktop app works as usual, but the web remote, HereSphere and DeoVR can't reach it from any other device. Without either, it listens on every interface so the phone and headsets can connect.
 - **Web Remote** — control FunSync from your phone on the same WiFi. Library, playback, device sync. Installable as a PWA from the phone's home screen.
@@ -283,7 +294,7 @@ cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.
 npm run build
 ```
 
-Requires Node.js 18+, Python 3.11+, and ffmpeg/ffprobe binaries in the `ffmpeg/` directory (or `ffmpeg-linux/` for Linux).
+Requires Node.js 18+, Python 3.11+, and ffmpeg/ffprobe binaries in the `ffmpeg/` directory (or `ffmpeg-linux/` for Linux). The `video:tags` command is Rust (a Cargo workspace at the repo root, `crates/*`) and needs `cargo` ([rustup](https://rustup.rs)); `cargo test` runs its tests.
 
 ---
 
