@@ -67,6 +67,7 @@ import { Modal } from '../components/modal.js';
 import { rankFunscriptMatches } from './fuzzy-match.js';
 import { Playlists } from '../components/playlists.js';
 import { Categories } from '../components/categories.js';
+import { LibraryOverview } from '../components/library-overview.js';
 import { ScriptEditor } from '../components/script-editor.js';
 import { DeviceSimulator } from '../components/device-simulator.js';
 import { GapSkipEngine } from './gap-skip.js';
@@ -495,6 +496,8 @@ class App {
       onAddToQueue: (path, position) => this.addToUserQueue(path, position),
       onPlayAll: (videoList, opts) => this._playAll(videoList, opts),
       onToggleQueue: () => this._toggleQueuePanel(),
+      // The capacity chip in the header opens the Overview.
+      onOpenOverview: () => this._navigateTo('overview'),
       settings: this.settings,
     });
 
@@ -516,6 +519,30 @@ class App {
       settings: this.settings,
       library: this.library,
       onPlayVideo: (videoData, funscriptData, subtitleData, variants) => this._playFromLibrary(videoData, funscriptData, subtitleData, variants),
+    });
+
+    // Library edits: ratings, playlists, tag scores, favourite artists and
+    // the bonus from the phone and the headset (remote bridge), and the
+    // Overview's own changes, applied one after another (library-edits.js).
+    // Only remote edits carry a `seq` to ack.
+    this._libraryEdits = new LibraryEditApplier({
+      data: this.settings,
+      publish: () => this._publishTriageState(),
+      ack: (seq, error) => this.remoteBridge?.ackLibraryEdit(seq, error),
+      recalculateScores: async () => (this.library ? this.library.recalculatePreferenceScores() : null),
+      favouritesChanged: async () => (this.library ? this.library.favouritesChanged() : null),
+    });
+
+    // Overview: capacity, ratings, favourite artists and tag scores.
+    this.overview = new LibraryOverview({
+      settings: this.settings,
+      library: this.library,
+      applyEdit: (edit) => this._libraryEdits.apply(edit),
+      onShowLibrary: (filter) => {
+        this.library.setRatingFilter(filter);
+        this._navigateTo('library');
+      },
+      onPlayVideo: (path) => this.library.playVideoByPath(path),
     });
 
     // Queue panel — right-side slide-in showing history, now-playing,
@@ -2427,14 +2454,8 @@ class App {
 
     // Ratings / favourites / playlist edits made on the phone or in
     // HereSphere, and the phone's tag scores, favourite artists, favourite
-    // artist bonus and Recalculate scores (see library-edits.js).
-    this._libraryEdits = new LibraryEditApplier({
-      data: this.settings,
-      publish: () => this._publishTriageState(),
-      ack: (seq, error) => this.remoteBridge.ackLibraryEdit(seq, error),
-      recalculateScores: async () => (this.library ? this.library.recalculatePreferenceScores() : null),
-      favouritesChanged: async () => (this.library ? this.library.favouritesChanged() : null),
-    });
+    // artist bonus and Recalculate scores, through the applier the Overview
+    // shares (see init and library-edits.js).
     this.remoteBridge.onLibraryEdit = (edit) => { this._libraryEdits.apply(edit); };
 
     // Desktop-side changes reach the headset sections and the phone too.
@@ -5267,6 +5288,7 @@ class App {
       'player': document.getElementById('player-container'),
       'playlists': document.getElementById('playlists-container'),
       'categories': document.getElementById('categories-container'),
+      'overview': document.getElementById('overview-container'),
     };
     return map[viewId] || null;
   }
@@ -5288,7 +5310,7 @@ class App {
     // keep the player container visible (it floats as a fixed corner
     // overlay over the target view) unless we're navigating INTO the
     // player, which expands it back to full and clears mini mode.
-    for (const vid of ['library', 'player', 'playlists', 'categories']) {
+    for (const vid of ['library', 'player', 'playlists', 'categories', 'overview']) {
       if (vid === 'player' && this._miniActive && viewId !== 'player') continue;
       const el = this._getViewEl(vid);
       if (el) el.hidden = true;
@@ -5374,6 +5396,8 @@ class App {
       this.playlists.show(this._getViewEl('playlists'));
     } else if (viewId === 'categories') {
       this.categories.show(this._getViewEl('categories'));
+    } else if (viewId === 'overview') {
+      this.overview.show(this._getViewEl('overview'));
     }
   }
 
@@ -5413,6 +5437,8 @@ class App {
       this.playlists.hide();
     } else if (viewId === 'categories') {
       this.categories.hide();
+    } else if (viewId === 'overview') {
+      this.overview.hide();
     }
   }
 

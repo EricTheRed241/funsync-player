@@ -36,6 +36,12 @@ A local desktop video player with device synchronization for funscript playback.
 - Multi-select for bulk playlist/category assignment
 - Script variant detection — `Title (Soft)`, `Title_hardcore` and `Title.intense` scripts next to `Title.mp4` become variants of that video
 - Ratings and favourites — half-star rating and a favourite heart on every card, list row and in the player; sort by rating and filter to Favorites, Top rated (4+) or Unrated. Ratings follow a moved file the same way script associations do.
+- **Overview** (nav bar after Categories, or Alt+4): the library at a glance, and the web remote's tag and artist settings on the desktop.
+  - **Library capacity:** videos in the enabled sources against the 500 the scouts download up to (`LIBRARY_MAX_VIDEOS`), as a share and a bar (orange from 90 %, red when full), with the size on disk and the same per source. The library header shows it as a chip (`469/500 · 544 GB`) that opens the Overview.
+  - **Ratings and favourites:** how many videos are favourites, Keep (4 stars and up), Review (2½–3½) and unrated, a count per star, and every rated or favourite video with its stars and heart (rate it there, or click the title to play it). Favourites, Keep and Unrated open the library with that rating filter.
+  - **Favourite artists:** every artist folder with its video count, favourites first, with a star to make an artist a favourite or not; add a name that isn't in the library yet; the favourite artist bonus (−/+).
+  - **Tag scores:** every tag of the library's videos with its video count and group, plus every scored tag, each with a −/+ score (device, length and VR tags are left out as in the web remote, unless scored); the built-in weights; **Recalculate scores**.
+  - Stars, the bonus, tag scores and Recalculate are applied as library edits, the same way as the web remote's (stored, the library scored again, the phone and the headsets updated). The view follows changes made on the phone or in the headset while it's open.
 
 ### Remote access
 - **Local-only mode** — start with `--local-only` (e.g. `npx electron . --local-only`) or set `FUNSYNC_LOCAL_ONLY=1` to bind the backend to `127.0.0.1`. The desktop app works as usual, but the web remote, HereSphere and DeoVR can't reach it from any other device. Without either, it listens on every interface so the phone and headsets can connect.

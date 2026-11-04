@@ -125,6 +125,7 @@
     "library": "Library",
     "playlists": "Playlists",
     "categories": "Categories",
+    "overview": "Overview",
     "back": "Back",
     "home": "Home",
     "mainNavAria": "Main navigation",
@@ -581,6 +582,43 @@
     "iconEmojiSearch": "Search groups",
     "iconEmojiNone": "Nothing matches"
   },
+  "overview": {
+    "title": "Overview",
+    "videoCount": "{count, plural, one {# video} other {# videos}}",
+    "noMatch": "Nothing matches the filter.",
+    "editFailed": "Not saved: {error}",
+    "capacity": {
+      "title": "Library capacity",
+      "videos": "{count} / {cap} videos",
+      "percent": "{percent}%",
+      "size": "{size} on disk",
+      "free": "{count, plural, one {# place left} other {# places left}}",
+      "full": "Full: the scouts download nothing more",
+      "hint": "The EroScripts and FapTap scouts stop downloading at {cap} videos. Delete scenes to make room.",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "Library capacity: {count} of {cap} videos ({percent}%), {size} on disk. Click for the overview."
+    },
+    "ratings": {
+      "title": "Ratings and favourites",
+      "keep": "Keep (4★+)",
+      "review": "Review (2½–3½★)",
+      "showInLibrary": "Show in the library",
+      "listTitle": "Rated and favourite videos ({count})",
+      "none": "No video is rated or a favourite yet. Rate with the stars on a card, in the player, on the phone or in HereSphere.",
+      "play": "Play {name}"
+    },
+    "artists": {
+      "title": "Favourite artists",
+      "favouriteCount": "{count, plural, one {# favourite} other {# favourites}}",
+      "filter": "Filter artists"
+    },
+    "tags": {
+      "title": "Tag scores",
+      "count": "{count, plural, one {# tag} other {# tags}}",
+      "filter": "Filter tags",
+      "none": "No tags yet: they come from the EroScripts and FapTap posts linked to your videos."
+    }
+  },
   "stroke": {
     "rangeLabel": "Stroke Range",
     "minAria": "Minimum stroke position",
@@ -667,6 +705,7 @@
     "library": "Library",
     "playlists": "Playlists",
     "categories": "Categories",
+    "overview": "Overview",
     "playPause": "Play / Pause",
     "seek10s": "Seek backward / forward 10s",
     "seek5s": "Seek backward / forward 5s",

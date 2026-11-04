@@ -95,6 +95,7 @@ export function getPlayerShortcutGroups() {
         ['Alt+1',         t('kbd.library')],
         ['Alt+2',         t('kbd.playlists')],
         ['Alt+3',         t('kbd.categories')],
+        ['Alt+4',         t('kbd.overview')],
       ],
     },
     {

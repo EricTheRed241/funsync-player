@@ -125,6 +125,7 @@
     "library": "라이브러리",
     "playlists": "재생 목록",
     "categories": "카테고리",
+    "overview": "개요",
     "back": "뒤로",
     "home": "홈",
     "mainNavAria": "기본 내비게이션",
@@ -580,6 +581,43 @@
     "editCategory": "카테고리 편집",
     "iconEmojiSearch": "그룹 검색",
     "iconEmojiNone": "일치하는 항목 없음"
+  },
+  "overview": {
+    "title": "개요",
+    "videoCount": "동영상 {count}개",
+    "noMatch": "필터와 일치하는 항목이 없습니다.",
+    "editFailed": "저장하지 못했습니다: {error}",
+    "capacity": {
+      "title": "라이브러리 용량",
+      "videos": "{count} / {cap}개 동영상",
+      "percent": "{percent}%",
+      "size": "디스크 사용량 {size}",
+      "free": "{count}개 남음",
+      "full": "가득 참: 스카우트가 더 이상 다운로드하지 않습니다",
+      "hint": "EroScripts 및 FapTap 스카우트는 동영상 {cap}개에서 다운로드를 멈춥니다. 공간을 만들려면 장면을 삭제하세요.",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "라이브러리 용량: {cap}개 중 {count}개 ({percent}%), 디스크 사용량 {size}. 클릭하면 개요가 열립니다."
+    },
+    "ratings": {
+      "title": "평점 및 즐겨찾기",
+      "keep": "유지 (4★ 이상)",
+      "review": "검토 (2½–3½★)",
+      "showInLibrary": "라이브러리에서 보기",
+      "listTitle": "평가했거나 즐겨찾기한 동영상 ({count})",
+      "none": "아직 평가했거나 즐겨찾기한 동영상이 없습니다. 카드, 플레이어, 휴대폰 또는 HereSphere의 별로 평가하세요.",
+      "play": "{name} 재생"
+    },
+    "artists": {
+      "title": "즐겨찾는 아티스트",
+      "favouriteCount": "즐겨찾기 {count}명",
+      "filter": "아티스트 필터"
+    },
+    "tags": {
+      "title": "태그 점수",
+      "count": "태그 {count}개",
+      "filter": "태그 필터",
+      "none": "아직 태그가 없습니다. 동영상에 연결된 EroScripts 및 FapTap 게시물에서 가져옵니다."
+    }
   },
   "stroke": {
     "rangeLabel": "스트로크 범위",
@@ -1917,6 +1955,7 @@
     "library": "라이브러리",
     "playlists": "재생목록",
     "categories": "카테고리",
+    "overview": "개요",
     "playPause": "재생 / 일시정지",
     "seek10s": "10초 뒤로 / 앞으로",
     "seek5s": "5초 뒤로 / 앞으로",

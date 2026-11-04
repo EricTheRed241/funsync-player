@@ -125,6 +125,7 @@
     "library": "Bibliothek",
     "playlists": "Playlists",
     "categories": "Kategorien",
+    "overview": "Übersicht",
     "back": "Zurück",
     "home": "Start",
     "mainNavAria": "Hauptnavigation",
@@ -580,6 +581,43 @@
     "editCategory": "Kategorie bearbeiten",
     "iconEmojiSearch": "Gruppen suchen",
     "iconEmojiNone": "Keine Treffer"
+  },
+  "overview": {
+    "title": "Übersicht",
+    "videoCount": "{count, plural, one {# Video} other {# Videos}}",
+    "noMatch": "Nichts passt zum Filter.",
+    "editFailed": "Nicht gespeichert: {error}",
+    "capacity": {
+      "title": "Bibliotheksbelegung",
+      "videos": "{count} / {cap} Videos",
+      "percent": "{percent} %",
+      "size": "{size} auf der Festplatte",
+      "free": "{count, plural, one {# Platz frei} other {# Plätze frei}}",
+      "full": "Voll: Die Scouts laden nichts mehr herunter",
+      "hint": "Die EroScripts- und FapTap-Scouts laden ab {cap} Videos nichts mehr herunter. Lösche Szenen, um Platz zu schaffen.",
+      "chip": "{count}/{cap} · {size}",
+      "chipTitle": "Bibliotheksbelegung: {count} von {cap} Videos ({percent} %), {size} auf der Festplatte. Klicken für die Übersicht."
+    },
+    "ratings": {
+      "title": "Bewertungen und Favoriten",
+      "keep": "Behalten (4★+)",
+      "review": "Prüfen (2½–3½★)",
+      "showInLibrary": "In der Bibliothek zeigen",
+      "listTitle": "Bewertete und favorisierte Videos ({count})",
+      "none": "Noch kein Video ist bewertet oder ein Favorit. Bewerte mit den Sternen auf einer Karte, im Player, auf dem Handy oder in HereSphere.",
+      "play": "{name} abspielen"
+    },
+    "artists": {
+      "title": "Lieblingskünstler",
+      "favouriteCount": "{count, plural, one {# Favorit} other {# Favoriten}}",
+      "filter": "Künstler filtern"
+    },
+    "tags": {
+      "title": "Tag-Punkte",
+      "count": "{count, plural, one {# Tag} other {# Tags}}",
+      "filter": "Tags filtern",
+      "none": "Noch keine Tags: Sie stammen aus den EroScripts- und FapTap-Beiträgen, die mit deinen Videos verknüpft sind."
+    }
   },
   "stroke": {
     "rangeLabel": "Stroke-Bereich",
@@ -1917,6 +1955,7 @@
     "library": "Bibliothek",
     "playlists": "Playlists",
     "categories": "Kategorien",
+    "overview": "Übersicht",
     "playPause": "Wiedergabe / Pause",
     "seek10s": "10 s zurück / vor",
     "seek5s": "5 s zurück / vor",

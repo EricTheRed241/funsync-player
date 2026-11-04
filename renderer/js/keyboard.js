@@ -48,14 +48,14 @@ export class KeyboardHandler {
     // Don't capture keys when typing in an input
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-    // Alt+1/2/3 — top-level nav between Library / Playlists / Categories.
+    // Alt+1/2/3/4 — top-level nav between Library / Playlists / Categories / Overview.
     // Slack/Discord/Notion convention; Nielsen #7 (flexibility for experts).
     // Skipped when the editor canvas owns input or a modal is on screen
     // (modals trap focus on themselves so the typical guard is a no-op,
     // but the editor handles its own keys without focusing — gate
     // explicitly).
     if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && this.onNavigate && !this.scriptEditor?.isOpen) {
-      const navMap = { '1': 'library', '2': 'playlists', '3': 'categories' };
+      const navMap = { '1': 'library', '2': 'playlists', '3': 'categories', '4': 'overview' };
       const target = navMap[e.key];
       if (target) {
         e.preventDefault();

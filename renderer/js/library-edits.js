@@ -1,6 +1,6 @@
-// Library edits from the backend — ratings, favourites and playlist changes
-// made in HereSphere or on the web remote, plus the web remote's tag scores,
-// favourite artists, favourite artist bonus and Recalculate scores.
+// Library edits — ratings, favourites and playlist changes made in HereSphere
+// or on the web remote, plus tag scores, favourite artists, favourite artist
+// bonus and Recalculate scores from the web remote or the desktop's Overview.
 //
 // The desktop owns the library (config.json is written only by Electron), so
 // the backend never applies these itself. It queues each one and sends it
@@ -10,7 +10,8 @@
 // updates live), re-registers ratings + playlists with the backend, and only
 // then acks `{type: 'library-edit-ack', seq}`. Edits are applied strictly in
 // arrival order — `apply` chains them — because "add to new playlist X" must
-// finish creating X before the next edit can find it.
+// finish creating X before the next edit can find it. The Overview's own
+// edits join the same chain without a `seq`, so nothing is acked for them.
 //
 // Every edit is idempotent, so the backend replaying an edit whose ack was
 // lost (desktop closed mid-flight) does no harm. Protocol and queue:

@@ -105,6 +105,14 @@ describe('scanLibrary', () => {
     }
   });
 
+  it("reports each video's size on disk (the Overview's capacity total)", async () => {
+    fs.writeFileSync(touch('In/Artist/Scene/Big.mp4'), Buffer.alloc(4096));
+    touch('In/Artist/Scene/Empty.mp4');
+    const byName = Object.fromEntries((await scanLibrary(path.join(tmp, 'In'))).videos.map((v) => [v.name, v]));
+    expect(byName['Big.mp4'].size).toBe(4096);
+    expect(byName['Empty.mp4'].size).toBe(0);
+  });
+
   it('reports a missing source instead of throwing', async () => {
     const r = await scanLibrary([path.join(tmp, 'missing')]);
     expect(r.failedPaths).toEqual([path.join(tmp, 'missing')]);
