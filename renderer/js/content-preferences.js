@@ -22,10 +22,14 @@
 export const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
 /** Creators never taken by either scout (picks included): named in the title, as the poster / uploader, or as a performer. Case, spaces and punctuation don't matter. */
 export const BLOCKED_CREATORS = ['AidenHet'];
-/** Tags never taken by either scout (picks and favourites included): MMD animations, by the `mmd` tag (FapTap's slug too) … */
-export const BLOCKED_TAGS = new Set(['mmd']);
-/** … or MMD as a word in the title. */
-export const BLOCKED_TITLE = /(?<![\p{L}\p{N}])mmd(?![\p{L}\p{N}])/iu;
+/**
+ * Tags never taken by either scout (picks and favourites included): MMD
+ * animations by the `mmd` tag (FapTap's slug too), and dildo riding (user,
+ * 2026-11-04: "no dildo riding videos") …
+ */
+export const BLOCKED_TAGS = new Set(['mmd', 'dildo-riding', 'riding-dildo', 'dildo-ride']);
+/** … or MMD / dildo as a word in the title. */
+export const BLOCKED_TITLE = /(?<![\p{L}\p{N}])(mmd|dildos?)(?![\p{L}\p{N}])/iu;
 /** FapTap tags that are furry without saying so. */
 export const FURRY_TAGS = new Set([
   'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
