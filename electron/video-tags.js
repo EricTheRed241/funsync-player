@@ -8,7 +8,9 @@
 // straight into scriptTags would be lost. The `video-tags` CLI
 // (crates/video-tags, Rust) writes this file instead; the app reads it on
 // every library scan and merges it into `library.scriptTags`
-// (renderer/js/video-tags.js).
+// (renderer/js/video-tags.js). The CLIs that rename scenes move its keys
+// with them (`rewriteVideoTagsFile`; `library:reorganize` rewrites every
+// JSON file in userData).
 
 const fs = require('fs');
 const path = require('path');
@@ -60,4 +62,31 @@ function readVideoTagsFile(userDataDir) {
   }
 }
 
-module.exports = { VIDEO_TAGS_FILE, VIDEO_TAGS_VERSION, videoTagsFilePath, readVideoTagsFile };
+/**
+ * Rewrite the file's content in place after scenes were renamed, e.g.
+ * `(data) => remapPaths(data, moves)`. Missing or unparsable: left alone.
+ * On a change the previous file is kept as `video-tags.json.bak` and the
+ * new one written atomically (temp file + rename), as the CLI does.
+ *
+ * @param {string} userDataDir
+ * @param {(data: object) => {value: object, changed: number}} update
+ * @returns {number} how many paths changed
+ */
+function rewriteVideoTagsFile(userDataDir, update) {
+  const file = videoTagsFilePath(userDataDir);
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return 0;
+  }
+  const { value, changed } = update(data);
+  if (!changed) return 0;
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+  fs.copyFileSync(file, `${file}.bak`);
+  fs.renameSync(tmp, file);
+  return changed;
+}
+
+module.exports = { VIDEO_TAGS_FILE, VIDEO_TAGS_VERSION, videoTagsFilePath, readVideoTagsFile, rewriteVideoTagsFile };

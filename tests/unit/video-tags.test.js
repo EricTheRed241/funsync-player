@@ -14,8 +14,9 @@ import { mergeVideoTags, applyVideoTags, VIDEO_TAGS_SOURCE } from '../../rendere
 import { mergeLinksIntoScriptTags, mergeScoutPosts, SCOUT_SOURCE, SYNC_SOURCE, FAPTAP_SOURCE } from '../../renderer/js/eroscripts-links.js';
 import { SCRIPT_TAGS_KEY, baseTags } from '../../renderer/js/script-tags.js';
 import { VIDEO_TAGGER_TAGS } from '../../renderer/js/content-preferences.js';
+import { remapPaths } from '../../scripts/eroscripts-scout-lib.mjs';
 
-const { readVideoTagsFile, videoTagsFilePath } = await import('../../electron/video-tags.js');
+const { readVideoTagsFile, rewriteVideoTagsFile, videoTagsFilePath } = await import('../../electron/video-tags.js');
 
 const NOW = Date.parse('2026-11-04T12:00:00Z');
 const LATER = NOW + 60_000;
@@ -195,5 +196,23 @@ describe('readVideoTagsFile', () => {
     expect(readVideoTagsFile(tmp)).toBe(null);
     fs.writeFileSync(videoTagsFilePath(tmp), JSON.stringify({ version: 1, videos: [] }));
     expect(readVideoTagsFile(tmp)).toBe(null);
+  });
+
+  it('moves keys after a rename, keeping the previous file as .bak; leaves a missing or unchanged file alone', () => {
+    const moves = [{ from: '/in/a/3', to: '/in/a/A - B', files: [{ from: '3.mp4', to: 'A - B.mp4' }] }];
+    const update = (data) => remapPaths(data, moves);
+    expect(rewriteVideoTagsFile(tmp, update)).toBe(0);
+    expect(fs.readdirSync(tmp)).toEqual([]);
+
+    const before = `${JSON.stringify(file({ '/in/a/3/3.mp4': { tags: ['pov'], addedAt: 'T' } }), null, 2)}\n`;
+    fs.writeFileSync(videoTagsFilePath(tmp), before);
+    expect(rewriteVideoTagsFile(tmp, update)).toBe(1);
+    expect(Object.keys(readVideoTagsFile(tmp).videos)).toEqual(['/in/a/A - B/A - B.mp4']);
+    expect(fs.readFileSync(`${videoTagsFilePath(tmp)}.bak`, 'utf8')).toBe(before);
+
+    const after = fs.readFileSync(videoTagsFilePath(tmp), 'utf8');
+    expect(rewriteVideoTagsFile(tmp, update)).toBe(0);
+    expect(fs.readFileSync(videoTagsFilePath(tmp), 'utf8')).toBe(after);
+    expect(fs.readdirSync(tmp).sort()).toEqual(['video-tags.json', 'video-tags.json.bak']);
   });
 });

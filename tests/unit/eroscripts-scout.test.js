@@ -548,6 +548,14 @@ describe('remapPaths', () => {
     const config = { settings: { library: { preferenceScores: { '/in/a/3/3.mp4': 7.5, '/in/b/x.mp4': -3 } } } };
     expect(remapPaths(config, moves).value.settings.library.preferenceScores).toEqual({ '/in/a/A - B/A - B.mp4': 7.5, '/in/b/x.mp4': -3 });
   });
+
+  it('moves the video tags file\'s keys with their videos', () => {
+    const moves = [{ from: '/in/a/3', to: '/in/a/A - B', files: [{ from: '3.mp4', to: 'A - B.mp4' }] }];
+    const tags = { version: 1, updatedAt: 'T', videos: { '/in/a/3/3.mp4': { tags: ['pov'], addedAt: 'T' }, '/in/b/x.mp4': { tags: ['vr'], addedAt: 'T' } } };
+    const { value, changed } = remapPaths(tags, moves);
+    expect(value.videos).toEqual({ '/in/a/A - B/A - B.mp4': { tags: ['pov'], addedAt: 'T' }, '/in/b/x.mp4': { tags: ['vr'], addedAt: 'T' } });
+    expect(changed).toBe(1);
+  });
 });
 
 describe('downloadQueue', () => {

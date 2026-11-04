@@ -1,6 +1,8 @@
-//! `<userData>/video-tags.json`: video path → tags. Written only by this CLI
-//! (temp file + rename, previous file kept as `video-tags.json.bak`), read
-//! by the app on every library scan (`electron/video-tags.js`).
+//! `<userData>/video-tags.json`: video path → tags. Written by this CLI
+//! (temp file + rename, previous file kept as `video-tags.json.bak`); the
+//! CLIs that rename scenes (`library:reorganize`, the scouts' `--retitle`)
+//! only move its keys. Read by the app on every library scan
+//! (`electron/video-tags.js`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
