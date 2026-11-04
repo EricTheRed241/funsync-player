@@ -33,6 +33,13 @@ Invariants:
 - CLIs that import `renderer/*.js` re-exec once with `--disable-warning=MODULE_TYPELESS_PACKAGE_JSON` (copy the block from an existing script).
 - Forum access is read-only and paced (`createPacer`, ≥ 700 ms). Silence electron-log in CLIs (`log.transports.*.level = false`).
 
+## Rust migration (user, 2026-11-04)
+- **Rust is the target language for CLIs and their tests**, for lower CPU and memory use. Migrate gradually: write *new* CLIs in Rust, and port an existing `scripts/*.mjs` CLI when it gets a substantial rewrite. Don't rewrite working CLIs just to switch language, and don't leave a CLI half in each language.
+- Tests follow the code they test: a Rust CLI gets Rust tests (`cargo test`); JS and Python code keep vitest and pytest until that code itself is ported.
+- Out of scope: the Electron app (`electron/`, `renderer/`) stays JS and the backend stays Python.
+- **Before porting anything that reads preferences** (both scouts, dedupe, `upgrade:axes`): move the values in `content-preferences.js` into a data file (e.g. JSON) that the JS and Rust code both load, so they keep a single source. Never copy rule constants into Rust.
+- Keep the CLI contract when porting: same flags, `--help`, exit codes 0 / 1 / 2 / 3, the same userData files and `SingletonLock` check, and forum pacing of ≥ 700 ms. Keep the `npm run <name>` entry pointing at the new binary.
+
 ## Tests
 - JS: `npx vitest run` (`tests/unit/**/*.test.js`, jsdom by default). Node-only tests start with the `@vitest-environment node` header block used in existing tests. Run one file with `npx vitest run tests/unit/<file>.test.js`.
 - Python: `cd backend && .venv/bin/python -m pytest` (`asyncio_mode = auto`).
