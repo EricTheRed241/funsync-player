@@ -45,10 +45,12 @@ export class UpNextEngine {
     this._tickTimer = null;
 
     // Optional resolver for a "priority next" — a user-queued item that
-    // plays before the context's own next (foobar2000-style queue insert).
+    // plays before the context's own next (foobar2000-style queue insert),
+    // or an auto-filled one where it replaces the library's next (app.js).
     // When it returns a path, that's the real next-up: the card, the
     // queue-panel countdown chip, and playNext() all target it, and the
     // context is never treated as end-of-list (a queued item follows).
+    // It also shows the card when there's no context list at all.
     this.getPriorityNext = null;    // () => path | null
 
     // Callbacks
@@ -202,8 +204,10 @@ export class UpNextEngine {
   }
 
   _shouldShow() {
-    if (!this._playContext || !this._playContext.list) return false;
-    if (this._playContext.index < 0) return false;
+    // No list to advance through (drag-drop / Open File) — a queued item
+    // still plays next, so the card shows for it.
+    const hasList = !!this._playContext?.list && this._playContext.index >= 0;
+    if (!hasList && !this._priorityNext()) return false;
 
     const durationMs = (this.player?.duration || 0) * 1000;
     if (!isFinite(durationMs) || durationMs <= 0) return false;

@@ -47,6 +47,8 @@
     "sectionNowPlaying": "Reproduciendo ahora",
     "sectionUserQueue": "En tu cola",
     "sectionUpcoming": "A continuación",
+    "sectionAutoFilled": "Añadidos automáticamente",
+    "skipAutoFilledAria": "Omitir (quitar del relleno automático)",
     "emptyNoLibrary": "La cola está vacía",
     "emptyEndOfList": "Fin de la lista — añade más vídeos a la cola",
     "openLibrary": "Abrir biblioteca",
@@ -813,7 +815,8 @@
       "categories": "Categorías",
       "tags": "Etiquetas",
       "artists": "Artistas",
-      "folders": "Carpetas"
+      "folders": "Carpetas",
+      "queue": "Cola"
     },
     "filterSheet": {
       "title": "Filtros",
@@ -959,7 +962,12 @@
       "avg": "Med",
       "max": "Máx",
       "speedUnit": "u/s",
-      "speedTooltip": "Med {avg} u/s • Máx {max} u/s"
+      "speedTooltip": "Med {avg} u/s • Máx {max} u/s",
+      "next": "Siguiente",
+      "autoplay": "Reproducción automática",
+      "nextName": "Siguiente: {name}",
+      "nothingNext": "No hay nada a continuación",
+      "upNext": "A continuación"
     },
     "triage": {
       "stars": "{n} estrellas",
@@ -985,6 +993,25 @@
         "top": "Mejor valorados (4+)",
         "unrated": "Sin valorar"
       }
+    },
+    "queue": {
+      "add": "Añadir a la cola",
+      "queued": "En la cola",
+      "removeFromQueue": "Quitar de la cola",
+      "added": "Añadido a la cola",
+      "removed": "Quitado de la cola",
+      "cleared": "Cola vaciada",
+      "clear": "Vaciar",
+      "skip": "Saltar",
+      "play": "Reproducir cola",
+      "autoFill": "Rellenar automáticamente",
+      "manualHeading": "Tu cola",
+      "autoHeading": "Rellenado automáticamente",
+      "emptyTitle": "La cola está vacía",
+      "emptyBody": "Añade vídeos con el botón de cola. Los vídeos automáticos aparecen aquí cuando la app de escritorio los ha elegido.",
+      "emptyBodyAutoFillOff": "Añade vídeos con el botón de cola o activa el relleno automático.",
+      "loadFailedTitle": "No se pudo cargar la cola",
+      "loadFailedBody": "Comprueba que FunSync se está ejecutando en tu escritorio e inténtalo de nuevo."
     }
   },
   "hevc": {
@@ -1163,6 +1190,10 @@
       "autoplayOnAdvanceLabel": "Reproducir automáticamente el siguiente vídeo",
       "autoplayOnAdvanceResetTitle": "Restablecer al predeterminado (desactivado)",
       "autoplayOnAdvanceResetAria": "Restablecer reproducción automática al predeterminado",
+      "queueAutoFillLabel": "Rellenar la cola automáticamente",
+      "queueAutoFillHint": "Completa la cola de reproducción (compartida con el control remoto web y HereSphere / DeoVR) hasta {size} vídeos con los que no has reproducido últimamente: primero los no valorados, luego por puntuación de preferencia, los más recientes primero. En la biblioteca, los vídeos añadidos automáticamente se reproducen antes que el siguiente de la biblioteca.",
+      "queueAutoFillResetTitle": "Restablecer al predeterminado (activado)",
+      "queueAutoFillResetAria": "Restablecer el relleno automático de la cola al predeterminado",
       "multiHeader": "Multi-eje",
       "fieldDefaultPlayback": "Reproducción predeterminada",
       "preferSingle": "Eje único (predeterminado)",

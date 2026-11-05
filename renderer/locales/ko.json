@@ -47,6 +47,8 @@
     "sectionNowPlaying": "재생 중",
     "sectionUserQueue": "내 대기열",
     "sectionUpcoming": "다음",
+    "sectionAutoFilled": "자동으로 채워짐",
+    "skipAutoFilledAria": "건너뛰기 (자동 채우기에서 제거)",
     "emptyNoLibrary": "대기열이 비어 있습니다",
     "emptyEndOfList": "목록 끝 — 대기열에 동영상을 더 추가하세요",
     "openLibrary": "라이브러리 열기",
@@ -813,7 +815,8 @@
       "categories": "카테고리",
       "tags": "태그",
       "artists": "아티스트",
-      "folders": "폴더"
+      "folders": "폴더",
+      "queue": "대기열"
     },
     "filterSheet": {
       "title": "필터",
@@ -959,7 +962,12 @@
       "avg": "평균",
       "max": "최대",
       "speedUnit": "유닛/초",
-      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초"
+      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초",
+      "next": "다음",
+      "autoplay": "자동 재생",
+      "nextName": "다음: {name}",
+      "nothingNext": "다음 동영상이 없습니다",
+      "upNext": "다음 동영상"
     },
     "triage": {
       "stars": "별 {n}개",
@@ -985,6 +993,25 @@
         "top": "높은 평점 (4+)",
         "unrated": "평가 안 함"
       }
+    },
+    "queue": {
+      "add": "대기열에 추가",
+      "queued": "대기열에 있음",
+      "removeFromQueue": "대기열에서 제거",
+      "added": "대기열에 추가했습니다",
+      "removed": "대기열에서 제거했습니다",
+      "cleared": "대기열을 비웠습니다",
+      "clear": "비우기",
+      "skip": "건너뛰기",
+      "play": "대기열 재생",
+      "autoFill": "자동 채우기",
+      "manualHeading": "내 대기열",
+      "autoHeading": "자동으로 채워짐",
+      "emptyTitle": "대기열이 비어 있습니다",
+      "emptyBody": "대기열 버튼으로 동영상을 추가하세요. 자동으로 채워지는 동영상은 데스크톱 앱이 고르면 여기에 표시됩니다.",
+      "emptyBodyAutoFillOff": "대기열 버튼으로 동영상을 추가하거나 자동 채우기를 켜세요.",
+      "loadFailedTitle": "대기열을 불러오지 못했습니다",
+      "loadFailedBody": "데스크톱에서 FunSync가 실행 중인지 확인한 뒤 다시 시도하세요."
     }
   },
   "hevc": {
@@ -1163,6 +1190,10 @@
       "autoplayOnAdvanceLabel": "다음 동영상 자동 재생",
       "autoplayOnAdvanceResetTitle": "기본값으로 재설정 (끔)",
       "autoplayOnAdvanceResetAria": "자동 재생을 기본값으로 재설정",
+      "queueAutoFillLabel": "대기열 자동 채우기",
+      "queueAutoFillHint": "재생 대기열(웹 리모컨 및 HereSphere / DeoVR과 공유)을 최근에 재생하지 않은 동영상으로 {size}개까지 채웁니다. 평가하지 않은 동영상이 먼저, 그다음 선호 점수 순, 최신 순입니다. 라이브러리에서는 자동으로 채워진 동영상이 라이브러리의 다음 동영상보다 먼저 재생됩니다.",
+      "queueAutoFillResetTitle": "기본값으로 재설정 (켬)",
+      "queueAutoFillResetAria": "대기열 자동 채우기를 기본값으로 재설정",
       "multiHeader": "다중 축",
       "fieldDefaultPlayback": "기본 재생",
       "preferSingle": "단일 축 (기본값)",

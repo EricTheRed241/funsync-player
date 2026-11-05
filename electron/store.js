@@ -30,6 +30,9 @@ const DEFAULTS = {
         mode: 'auto',
         countdownSec: 10,
       },
+      // Shared play queue (renderer/js/play-queue.js): append auto-filled
+      // videos after the user's own queue (`userQueue`). Default on.
+      queueAutoFill: true,
       preferMultiAxis: 'single',
       smoothing: 'linear',
       speedLimit: 0,

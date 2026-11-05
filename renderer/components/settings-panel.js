@@ -12,6 +12,7 @@ import { buildPreviewSample, drawFillerWaveform } from '../js/filler-preview.js'
 import { isUserEnabled, isToggleLocked, setUserEnabled } from '../js/source-state.js';
 import { eventBus } from '../js/event-bus.js';
 import { openFeedbackModal } from './feedback-modal.js';
+import { QUEUE_AUTOFILL } from '../js/content-preferences.js';
 
 // Canonical default values for each tunable Playback field. Used by the
 // per-field reset-to-default `↻` button (Shneiderman #6 reversibility)
@@ -26,6 +27,7 @@ const SETTINGS_DEFAULTS = {
   'player.upNext.mode': 'auto',
   'player.upNext.countdownSec': 10,
   'player.autoplayOnAdvance': false,
+  'player.queueAutoFill': true,
   'player.rangeExtender.enabled': false,
   'player.preferMultiAxis': 'single',
   'player.smoothing': 'linear',
@@ -912,6 +914,12 @@ export class SettingsPanel {
         <input type="checkbox" id="sp-random-variant" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-random-variant-hint">
       </div>
       <div class="settings-panel__hint" id="sp-random-variant-hint">${t('settingsPanel.playback.randomVariantHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-queue-auto-fill">${t('settingsPanel.playback.queueAutoFillLabel')}</label>
+        <input type="checkbox" id="sp-queue-auto-fill" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-queue-auto-fill-hint">
+        <button type="button" id="sp-queue-auto-fill-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.queueAutoFillResetTitle')}" aria-label="${t('settingsPanel.playback.queueAutoFillResetAria')}">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-queue-auto-fill-hint">${t('settingsPanel.playback.queueAutoFillHint', { size: QUEUE_AUTOFILL.size })}</div>
     `);
     panel.appendChild(upNextSection);
 
@@ -1387,6 +1395,20 @@ export class SettingsPanel {
         if (autoplayRow) autoplayRow.hidden = upNextMode.value === 'off';
       });
 
+      // Auto-fill the shared play queue. Read live by app.js (it listens
+      // for the setting), so no callback needed. Independent of Up Next:
+      // the phone and the headset use the queue too.
+      const queueAutoFill = panel.querySelector('#sp-queue-auto-fill');
+      const queueAutoFillSaved = this._settings.get('player.queueAutoFill');
+      if (queueAutoFill) {
+        queueAutoFill.checked = typeof queueAutoFillSaved === 'boolean'
+          ? queueAutoFillSaved
+          : SETTINGS_DEFAULTS['player.queueAutoFill'];
+      }
+      queueAutoFill?.addEventListener('change', () => {
+        this._settings.set('player.queueAutoFill', !!queueAutoFill.checked);
+      });
+
       // Multi-Axis default playback. Toggle from Single → Multi opens
       // a confirmation modal that surfaces the eligible-video count
       // because the action is one-way: switching back to Single does
@@ -1658,6 +1680,7 @@ export class SettingsPanel {
         refresh();
       };
       wireDefaultCheckbox(autoplayCheckbox, panel.querySelector('#sp-autoplay-on-advance-reset'), SETTINGS_DEFAULTS['player.autoplayOnAdvance']);
+      wireDefaultCheckbox(queueAutoFill, panel.querySelector('#sp-queue-auto-fill-reset'), SETTINGS_DEFAULTS['player.queueAutoFill']);
       wireDefaultCheckbox(rangeExtender, panel.querySelector('#sp-range-extender-reset'), SETTINGS_DEFAULTS['player.rangeExtender.enabled']);
     }, 0);
 

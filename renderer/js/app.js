@@ -35,6 +35,7 @@ import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
+import { autoFillQueue, applyQueueChange, reviewPlaylistPaths } from './play-queue.js';
 import { PREFERENCE_SCORES_KEY, tagScoreRegistration } from './library-scores.js';
 import { artistRegistration } from './favourite-artists.js';
 import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
@@ -114,6 +115,10 @@ import {
 /** Default opacity (percent) for the inline TL/HM overlays. */
 const INLINE_VIZ_OPACITY_DEFAULT = 80;
 const DEVICE_SIM_OPACITY_DEFAULT = 80;
+/** Settle time before the auto-filled queue is computed again and published. */
+const QUEUE_REFRESH_MS = 250;
+/** Settings the auto-filled queue depends on (besides the library scan, ratings and playlists events). */
+const QUEUE_INPUT_SETTINGS = new Set(['player.userQueue', 'player.queuePlayed', 'player.queueAutoFill', 'library.ratings', PREFERENCE_SCORES_KEY]);
 
 class App {
   constructor() {
@@ -161,7 +166,14 @@ class App {
     this._queueHistoryCap = 50;
     this._queueHistoryThresholdMs = 5000;
     this._queueHistoryPushedForCurrent = false;
-    this._userQueue = []; // hydrated from settings on boot
+    this._userQueue = []; // hydrated from settings on boot (_initPlayQueue)
+    // Shared play queue (play-queue.js): the auto-filled tail (computed,
+    // never stored), the played / skipped stamps (`player.queuePlayed`) and
+    // the last queue registration the backend accepted.
+    this._autoQueue = [];
+    this._queuePlayed = {};
+    this._queueRefreshTimer = null;
+    this._queueSentBody = null;
 
     this._navStack = ['library']; // navigation history stack — current view is last element
     this._miniActive = false; // mini-player docked (video plays in a corner overlay while browsing)
@@ -522,15 +534,23 @@ class App {
     });
 
     // Library edits: ratings, playlists, tag scores, favourite artists and
-    // the bonus from the phone and the headset (remote bridge), and the
-    // Overview's own changes, applied one after another (library-edits.js).
-    // Only remote edits carry a `seq` to ack.
+    // the bonus from the phone and the headset (remote bridge), the shared
+    // play queue's edits from both, and the Overview's own changes, applied
+    // one after another (library-edits.js). Only remote edits carry a `seq`
+    // to ack. Queue edits are silent here (no toast).
     this._libraryEdits = new LibraryEditApplier({
       data: this.settings,
       publish: () => this._publishTriageState(),
       ack: (seq, error) => this.remoteBridge?.ackLibraryEdit(seq, error),
       recalculateScores: async () => (this.library ? this.library.recalculatePreferenceScores() : null),
       favouritesChanged: async () => (this.library ? this.library.favouritesChanged() : null),
+      queue: {
+        add: (path, position) => this._changeQueue({ kind: 'add', path, position }),
+        remove: (path) => this._changeQueue({ kind: 'remove', path }),
+        played: (path) => this._changeQueue({ kind: 'played', path }),
+        clear: () => this._changeQueue({ kind: 'clear' }),
+        setAutoFill: (enabled) => this._changeQueue({ kind: 'auto-fill', enabled }),
+      },
     });
 
     // Overview: capacity, ratings, favourite artists and tag scores.
@@ -549,6 +569,7 @@ class App {
     // user queue (persistent), and upcoming (live from playlist or
     // library). See SCOPE-queue-panel.md. Must come after library so
     // the panel can resolve video metadata via library.getVideoByPath.
+    this._initPlayQueue();
     this._initQueuePanel();
 
     // Resume-position tracking. Bound to the local <video> for the sample
@@ -872,11 +893,16 @@ class App {
           // process started outside the app) with an empty registry, so the
           // phone and HereSphere would see nothing until the next rescan.
           // Push the last scan again. Before the first scan there is nothing
-          // to push; the scan registers it.
+          // to push; the scan registers it. The play queue goes with it,
+          // after the videos (a fresh backend knows none of its paths).
+          let registered = null;
           if (reconnected && this.library?._videos?.length > 0) {
             console.log('[Remote] re-registering the library with the backend');
-            this.library._registerWithBackend();
+            registered = this.library._registerWithBackend();
           }
+          Promise.resolve(registered)
+            .then(() => this._publishQueue({ force: true }))
+            .catch((err) => console.warn('[Queue] registration failed:', err?.message || err));
           this._pushDesktopStatus();
         };
         this.remoteBridge.onBridgeClose = () => console.log('[Remote] observer bridge closed — will retry');
@@ -2547,10 +2573,12 @@ class App {
    * backend (`/api/media/register` treats each key independently, so the
    * video registry is left alone). Keeps the headset sections, the
    * HereSphere scene state (`Playlist:` / `Category:` / `Score:` tags) and
-   * the phone current.
+   * the phone current. The play queue goes along (computed fresh, so the
+   * registration sent after a queue edit already reflects it).
    */
   async _publishTriageState() {
     const port = this.backendPort || this.settings.get('backend.port') || 5123;
+    const queue = this._queueRegistration();
     const res = await fetch(`http://127.0.0.1:${port}/api/media/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2562,9 +2590,124 @@ class App {
         preferenceScores: this.settings.get(PREFERENCE_SCORES_KEY) || {},
         ...tagScoreRegistration(this.settings),
         ...artistRegistration(this.settings),
+        queue,
       }),
     });
     if (!res.ok) throw new Error(`register ${res.status}`);
+    this._queueSentBody = JSON.stringify({ queue });
+  }
+
+  // --- Shared play queue (play-queue.js) ---
+
+  /**
+   * Hydrate the user queue and the played map, and recompute the
+   * auto-filled queue whenever something it depends on changes: the
+   * library scan, ratings, playlists (the age screener's review list),
+   * preference scores, the user queue, the played map and the setting.
+   */
+  _initPlayQueue() {
+    // Broken-path pruning happens lazily on first surface — we don't want
+    // to block boot on fileExists() calls for an arbitrary number of
+    // stored entries.
+    this._userQueue = (this.settings?.get?.('player.userQueue') || []).filter(
+      (p) => typeof p === 'string' && p.length > 0,
+    );
+    const played = this.settings?.get?.('player.queuePlayed');
+    this._queuePlayed = played && typeof played === 'object' && !Array.isArray(played) ? played : {};
+    const schedule = () => this._scheduleQueueRefresh();
+    eventBus.on('library:scanned', schedule);
+    eventBus.on('rating:changed', schedule);
+    eventBus.on('playlist:changed', schedule);
+    eventBus.on('settings:changed', ({ path } = {}) => {
+      if (QUEUE_INPUT_SETTINGS.has(path)) schedule();
+    });
+  }
+
+  _queueAutoFillOn() {
+    return this.settings?.get?.('player.queueAutoFill') !== false;
+  }
+
+  /** Compute the auto-filled queue now; true when it changed. */
+  _refreshAutoQueue() {
+    const videos = this.library?._videos;
+    const next = this._queueAutoFillOn() && videos?.length
+      ? autoFillQueue({
+          videos,
+          manual: this._userQueue,
+          ratings: this.settings.get('library.ratings') || {},
+          scores: this.settings.get(PREFERENCE_SCORES_KEY) || {},
+          played: this._queuePlayed,
+          reviewPaths: reviewPlaylistPaths(this.settings.getPlaylists ? this.settings.getPlaylists() : []),
+          currentPath: this._currentVideoPath,
+        })
+      : [];
+    const same = next.length === this._autoQueue.length && next.every((p, i) => p === this._autoQueue[i]);
+    if (!same) this._autoQueue = next;
+    return !same;
+  }
+
+  /** Debounced: recompute the auto-filled queue, repaint the panel, publish. */
+  _scheduleQueueRefresh() {
+    clearTimeout(this._queueRefreshTimer);
+    this._queueRefreshTimer = setTimeout(() => {
+      this._queueRefreshTimer = null;
+      if (this._refreshAutoQueue()) this._updateQueuePanelState();
+      this._publishQueue().catch(() => { /* backend down — the next change or reconnect sends it */ });
+    }, QUEUE_REFRESH_MS);
+  }
+
+  /** The `queue` key of a backend registration, computed fresh. */
+  _queueRegistration() {
+    if (this._refreshAutoQueue()) this._updateQueuePanelState();
+    return { manual: [...this._userQueue], auto: [...this._autoQueue], autoFill: this._queueAutoFillOn() };
+  }
+
+  /** Register the queue with the backend when it differs from the last one it accepted (or `force`). */
+  async _publishQueue({ force = false } = {}) {
+    const body = JSON.stringify({ queue: this._queueRegistration() });
+    if (!force && body === this._queueSentBody) return;
+    const port = this.backendPort || this.settings.get('backend.port') || 5123;
+    const res = await fetch(`http://127.0.0.1:${port}/api/media/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    if (!res.ok) throw new Error(`register ${res.status}`);
+    this._queueSentBody = body;
+  }
+
+  /**
+   * Apply one queue change (play-queue.js `applyQueueChange`) from the
+   * desktop, the phone or the headset: persist what changed, recompute the
+   * auto-filled queue at once (the edit applier publishes right after) and
+   * repaint the panel. Silent — callers toast if they want to.
+   */
+  _changeQueue(change) {
+    const before = { manual: this._userQueue, played: this._queuePlayed, autoFill: this._queueAutoFillOn() };
+    const after = applyQueueChange(before, change);
+    if (after.manual !== before.manual) {
+      this._userQueue = after.manual;
+      this._persistUserQueue();
+    }
+    if (after.played !== before.played) {
+      this._queuePlayed = after.played;
+      this.settings?.set?.('player.queuePlayed', after.played);
+    }
+    if (after.autoFill !== before.autoFill) this.settings?.set?.('player.queueAutoFill', after.autoFill);
+    this._refreshAutoQueue();
+    this._updateQueuePanelState();
+  }
+
+  /**
+   * The auto-filled item that plays next, or null. Auto-fill follows only
+   * the plain library (or no context at all), ahead of the library's own
+   * next; a Play All / playlist / category list plays out first.
+   */
+  _autoQueueNext() {
+    if (!this._queueAutoFillOn()) return null;
+    const source = this._currentPlayContext?.source;
+    if (source && source !== 'library') return null;
+    return this._autoQueue.find((p) => p !== this._currentVideoPath) || null;
   }
 
   /**
@@ -4884,9 +5027,13 @@ class App {
     this.videoPlayer.loadSource(videoUrl, file.name, loadOpts);
     this.progressBar.setVideoSource(videoUrl);
     this._updateCategoryDots();
-    // Refresh the queue panel state so the "Now playing" row updates
-    // and upcoming re-derives from the new context.
-    this._updateQueuePanelState();
+    // Playing a video consumes it from the shared play queue: it leaves
+    // the user queue and gets a played stamp so auto-fill moves past it.
+    // `_changeQueue` refreshes the queue panel ("Now playing" row,
+    // upcoming from the new context) as well.
+    if (this._currentVideoPath) this._changeQueue({ kind: 'played', path: this._currentVideoPath });
+    else this._updateQueuePanelState();
+    this._scheduleQueueRefresh();
 
     // Apply any saved VR-as-flat preference for this video. Two inputs:
     //   - per-video saved eye ('left' / 'right' / null) in
@@ -7645,10 +7792,12 @@ class App {
     };
     // Your own queue (foobar2000-style insert) plays before the context's
     // next, so it IS the real next-up — the engine targets its head for the
-    // countdown card + queue-panel chip. `_playUpNext` already honors this
-    // priority on advance; this keeps the display in agreement.
+    // countdown card + queue-panel chip. Then, in the plain library (or with
+    // no context), the shared queue's auto-filled items, ahead of the
+    // library's own next. `_playUpNext` honors the same order on advance;
+    // this keeps the display in agreement.
     this.upNextEngine.getPriorityNext = () => (
-      this._userQueue && this._userQueue.length > 0 ? this._userQueue[0] : null
+      this._userQueue && this._userQueue.length > 0 ? this._userQueue[0] : this._autoQueueNext()
     );
 
     // Video events → engine.check(). The engine is idempotent, so it's
@@ -7729,6 +7878,10 @@ class App {
       this._persistUserQueue();
       return this._jumpToVideoFromQueue(next);
     }
+    // Auto-filled queue: in the plain library (or with no context) it plays
+    // before the library's own next (`_autoQueueNext` says when it applies).
+    const autoNext = this._autoQueueNext();
+    if (autoNext) return this._jumpToVideoFromQueue(autoNext, { autoAdvance: true });
     // Queue source: advance through the queue mechanism so prev/next
     // buttons + queue indicator stay live and `_playFromLibrary`'s queue
     // reset doesn't tear down the Play All session mid-stream.
@@ -7786,20 +7939,13 @@ class App {
   // --- Queue panel (SCOPE-queue-panel.md) ---
 
   /**
-   * Initialise the queue panel component, hydrate user queue from
-   * settings, subscribe to relevant events. Called once during boot
-   * after library / dataService are ready.
+   * Initialise the queue panel component and subscribe to relevant
+   * events (the queue state itself is hydrated by `_initPlayQueue`).
+   * Called once during boot after library / dataService are ready.
    */
   _initQueuePanel() {
     const el = document.getElementById('queue-panel');
     if (!el) return;
-
-    // Hydrate the persistent user queue. Broken-path pruning happens
-    // lazily on first surface — we don't want to block boot on
-    // fileExists() calls for an arbitrary number of stored entries.
-    this._userQueue = (this.settings?.get?.('player.userQueue') || []).filter(
-      (p) => typeof p === 'string' && p.length > 0,
-    );
 
     this.queuePanel = new QueuePanel({
       element: el,
@@ -7871,6 +8017,9 @@ class App {
       history: this._queueHistory,
       nowPlaying: this._currentVideoPath || null,
       userQueue: [...this._userQueue],
+      autoQueue: this._autoQueue.filter((p) => p !== this._currentVideoPath),
+      // A Play All / playlist / category list plays out before auto-fill.
+      autoAfterUpcoming: !!this._currentPlayContext?.source && this._currentPlayContext.source !== 'library',
       upcoming: upcoming.items,
       hasContext: upcoming.hasContext || !!this._currentVideoPath,
     });
@@ -8025,7 +8174,7 @@ class App {
    * which handles all the existing wiring (funscript, subtitles,
    * variants, multi-axis, etc).
    */
-  async _jumpToVideoFromQueue(path) {
+  async _jumpToVideoFromQueue(path, { autoAdvance = false } = {}) {
     if (!path || !this.library) return;
     this._maybePushCurrentToHistory();
     // If the jumped-to path is in the user queue, remove it (we're
@@ -8039,6 +8188,11 @@ class App {
     if (!video) {
       showToast(t('toast.nextNotFound'), 'warn', 3000);
       return;
+    }
+    // An unattended advance (Up Next into an auto-filled item, which takes
+    // the library next's place) auto-plays like that next would have.
+    if (autoAdvance && this.settings?.get?.('player.autoplayOnAdvance')) {
+      video._autoPlayOnNextLoad = true;
     }
     await this.library._playVideo(video);
     this._updateQueuePanelState();
@@ -8054,29 +8208,19 @@ class App {
       showToast(t('queuePanel.toastAlreadyQueued'), 'info', 2000);
       return;
     }
-    if (position === 'next') {
-      this._userQueue.unshift(path);
-    } else {
-      this._userQueue.push(path);
-    }
-    this._persistUserQueue();
-    this._updateQueuePanelState();
+    this._changeQueue({ kind: 'add', path, position: position === 'next' ? 'next' : 'end' });
     showToast(t('queuePanel.toastAddedToQueue'), 'info', 1500);
   }
 
+  /** Remove from the user queue; an auto-filled item is skipped instead (play-queue.js). */
   _removeFromUserQueue(path) {
-    const idx = this._userQueue.indexOf(path);
-    if (idx < 0) return;
-    this._userQueue.splice(idx, 1);
-    this._persistUserQueue();
-    this._updateQueuePanelState();
+    if (!path) return;
+    this._changeQueue({ kind: 'remove', path });
   }
 
   _clearUserQueue() {
     if (this._userQueue.length === 0) return;
-    this._userQueue = [];
-    this._persistUserQueue();
-    this._updateQueuePanelState();
+    this._changeQueue({ kind: 'clear' });
   }
 
   _reorderUserQueue(fromIdx, toIdx) {

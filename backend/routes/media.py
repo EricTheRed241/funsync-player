@@ -80,6 +80,11 @@ _favourite_artists: list[str] = []
 # effective bonus and the built-in one (content-preferences.js RANKING);
 # None until the desktop registers it.
 _favourite_artist_score: dict = {"score": None, "default": None}
+# The shared play queue — {manual: [path], auto: [path], autoFill: bool}:
+# the paths the user queued, then the desktop's auto-fill after them
+# (`services.library_edits.apply_to_queue`). The desktop owns it; phone and
+# headset changes are queue edits.
+_queue: dict = {"manual": [], "auto": [], "autoFill": True}
 
 # Thumbnail cache directory
 _thumb_cache_dir = None
@@ -444,11 +449,24 @@ def register_ratings(ratings: dict):
         _ratings.update(ratings)
 
 
+def register_queue(play_queue: dict):
+    """Register the play queue ({manual, auto, autoFill}), cleaned by
+    `library_edits.clean_queue` (strings only, each path once, autoFill
+    True unless False)."""
+    global _queue
+    _queue = library_edits.clean_queue(play_queue)
+
+
 def apply_acked_edit(edit: dict):
     """The desktop applied `edit`: fold it into the registered state so it
     stays visible after it leaves the pending queue, even if the desktop's
     re-registration is slow. Idempotent — the registration that follows
-    replaces this with the desktop's own state anyway."""
+    replaces this with the desktop's own state anyway.
+
+    Queue edits are not folded: the desktop registers the queue BEFORE it
+    acks, and its answer isn't the edit replayed (a skipped auto-filled
+    video comes back at the end of the auto-fill, the auto-fill tops up),
+    so folding would undo part of the registration that just landed."""
     kind = edit.get("kind")
     if kind == library_edits.KIND_RATING:
         library_edits.apply_to_ratings(_ratings, edit)
@@ -462,6 +480,7 @@ def apply_acked_edit(edit: dict):
         _favourite_artist_score["score"] = library_edits.effective_favourite_score(
             _favourite_artist_score["score"], [edit],
         )
+    # Queue kinds: deliberately nothing (see the docstring).
 
 
 def register_categories(categories: list[dict], video_categories: dict):
@@ -638,6 +657,12 @@ def get_ratings() -> dict:
 def get_tag_scores() -> dict:
     """Registered tag scores with edits still waiting for the desktop applied."""
     return library_edits.effective_tag_scores(_tag_scores, library_edits.queue.pending())
+
+
+def get_queue() -> dict:
+    """The play queue ({manual, auto, autoFill}) with queue edits still
+    waiting for the desktop applied."""
+    return library_edits.effective_queue(_queue, library_edits.queue.pending())
 
 
 def get_categories() -> list[dict]:
@@ -980,9 +1005,10 @@ async def register_library(request: Request):
     (tag → number, every tag's score, defaults included), `tagScoreInfo`
     ({groups: {tag: group}, rules: {id: number}}), `artists` ([{name,
     videoPaths}], one per artist folder), `favouriteArtists` ([name], the
-    effective favourites) and `favouriteArtistScore` ({score, default}, the
-    favourite-artist bonus). Every field is independent: omit a key to leave
-    that slice untouched on the backend.
+    effective favourites), `favouriteArtistScore` ({score, default}, the
+    favourite-artist bonus) and `queue` ({manual: [path], auto: [path],
+    autoFill: bool}, the shared play queue). Every field is independent: omit
+    a key to leave that slice untouched on the backend.
     That lets the renderer push groupings FAST (in-memory, no filesystem
     work) ahead of the slower video scan — the phone can render
     Collections / Playlists / Categories tabs within ~100 ms of desktop
@@ -1041,6 +1067,8 @@ def _apply_registration(data: dict):
         register_favourite_artists(data.get("favouriteArtists") or [])
     if "favouriteArtistScore" in data:
         register_favourite_artist_score(data.get("favouriteArtistScore") or {})
+    if "queue" in data:
+        register_queue(data.get("queue") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

@@ -47,6 +47,8 @@
     "sectionNowPlaying": "正在播放",
     "sectionUserQueue": "你的队列",
     "sectionUpcoming": "即将播放",
+    "sectionAutoFilled": "自动填充",
+    "skipAutoFilledAria": "跳过 (从自动填充中移除)",
     "emptyNoLibrary": "队列为空",
     "emptyEndOfList": "列表结束 — 向队列添加更多视频",
     "openLibrary": "打开媒体库",
@@ -813,7 +815,8 @@
       "categories": "分类",
       "tags": "标签",
       "artists": "作者",
-      "folders": "文件夹"
+      "folders": "文件夹",
+      "queue": "队列"
     },
     "filterSheet": {
       "title": "筛选",
@@ -959,7 +962,12 @@
       "avg": "平均",
       "max": "最大",
       "speedUnit": "单位/秒",
-      "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒"
+      "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒",
+      "next": "下一个",
+      "autoplay": "自动播放",
+      "nextName": "下一个：{name}",
+      "nothingNext": "没有下一个视频",
+      "upNext": "接下来"
     },
     "triage": {
       "stars": "{n} 星",
@@ -985,6 +993,25 @@
         "top": "高分（4 星以上）",
         "unrated": "未评分"
       }
+    },
+    "queue": {
+      "add": "加入队列",
+      "queued": "已在队列中",
+      "removeFromQueue": "移出队列",
+      "added": "已加入队列",
+      "removed": "已移出队列",
+      "cleared": "队列已清空",
+      "clear": "清空",
+      "skip": "跳过",
+      "play": "播放队列",
+      "autoFill": "自动填充",
+      "manualHeading": "你的队列",
+      "autoHeading": "自动填充",
+      "emptyTitle": "队列为空",
+      "emptyBody": "用队列按钮添加视频。桌面应用选好自动填充的视频后，会显示在这里。",
+      "emptyBodyAutoFillOff": "用队列按钮添加视频，或开启自动填充。",
+      "loadFailedTitle": "无法加载队列",
+      "loadFailedBody": "请确认桌面上的 FunSync 正在运行，然后重试。"
     }
   },
   "hevc": {
@@ -1163,6 +1190,10 @@
       "autoplayOnAdvanceLabel": "自动播放下一个视频",
       "autoplayOnAdvanceResetTitle": "重置为默认 (关闭)",
       "autoplayOnAdvanceResetAria": "将自动播放重置为默认",
+      "queueAutoFillLabel": "自动填充队列",
+      "queueAutoFillHint": "用最近未播放的视频将播放队列（与网页遥控器和 HereSphere / DeoVR 共享）补足到 {size} 个：未评分的优先，然后按偏好分数、最新优先。在媒体库中，自动填充的视频会先于媒体库的下一个视频播放。",
+      "queueAutoFillResetTitle": "重置为默认 (开启)",
+      "queueAutoFillResetAria": "将队列自动填充重置为默认",
       "multiHeader": "多轴",
       "fieldDefaultPlayback": "默认播放",
       "preferSingle": "单轴 (默认)",

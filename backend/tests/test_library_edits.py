@@ -1,9 +1,10 @@
-"""Ratings, favourites and playlist edits from HereSphere and the web remote.
+"""Ratings, favourites, playlist and play-queue edits from HereSphere and the
+web remote.
 
 Covers the edit channel to the desktop (services/library_edits.py +
-routes/remote_sync.py), HereSphere's scene POST (routes/vr_api.py), the
-triage sections (services/vr_sections.py) and the web remote write
-endpoints (routes/remote.py).
+routes/remote_sync.py), HereSphere's scene POST and playback events
+(routes/vr_api.py), the triage and queue sections (services/vr_sections.py)
+and the web remote write endpoints (routes/remote.py).
 """
 
 import json
@@ -13,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from routes import media, remote_sync
+from routes import media, remote_sync, vr_api
 from routes.media import _path_to_id, register_playlists, register_ratings, register_videos
 from routes.vr_api import parse_heresphere_update
 from services import library_edits, vr_sections
@@ -36,6 +37,8 @@ def fresh_state():
     media.register_artists([])
     media.register_favourite_artists([])
     media.register_favourite_artist_score({})
+    media.register_queue({})
+    vr_api._reset_queue_state_for_tests()
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
@@ -46,6 +49,8 @@ def fresh_state():
     media.register_artists([])
     media.register_favourite_artists([])
     media.register_favourite_artist_score({})
+    media.register_queue({})
+    vr_api._reset_queue_state_for_tests()
     remote_sync._reset_state_for_tests()
 
 
@@ -719,3 +724,259 @@ class TestFavouriteArtists:
         q.enqueue(library_edits.make_favourite_score_edit(3))
         again = LibraryEditQueue(persist_dir=str(tmp_path))
         assert [e["kind"] for e in again.pending()] == ["favourite-artist", "favourite-score"]
+
+
+# --- Play queue ---------------------------------------------------------------------
+
+def _queue(manual=(), auto=(), auto_fill=True):
+    return {"manual": list(manual), "auto": list(auto), "autoFill": auto_fill}
+
+
+def _add(path, position="end"):
+    return library_edits.make_queue_edit(library_edits.KIND_QUEUE_ADD, path=path, position=position)
+
+
+def _edit(kind, **fields):
+    return library_edits.make_queue_edit(kind, **fields)
+
+
+class TestQueueOverlay:
+    def test_edit_validation(self):
+        with pytest.raises(ValueError):
+            library_edits.make_queue_edit("queue-shuffle", path=A)
+        with pytest.raises(ValueError):
+            library_edits.make_queue_edit(library_edits.KIND_QUEUE_ADD)
+        with pytest.raises(ValueError):
+            library_edits.make_queue_edit(library_edits.KIND_QUEUE_REMOVE, path="")
+        with pytest.raises(ValueError):
+            library_edits.make_queue_edit(library_edits.KIND_QUEUE_ADD, path=A, position="top")
+        for enabled in (None, "yes", 1):
+            with pytest.raises(ValueError):
+                library_edits.make_queue_edit(library_edits.KIND_QUEUE_AUTO_FILL, enabled=enabled)
+        assert _add(A, position=None) == {"kind": "queue-add", "path": A, "position": "end", "source": ""}
+        assert _edit(library_edits.KIND_QUEUE_CLEAR, source="remote") == {"kind": "queue-clear", "source": "remote"}
+
+    def test_add_end_next_and_move_to_front(self):
+        base = _queue(manual=[A], auto=[B, C])
+        out = library_edits.effective_queue(base, [_add(C)])
+        assert out == _queue(manual=[A, C], auto=[B])
+        out = library_edits.effective_queue(base, [_add(C), _add(B, "next")])
+        assert out == _queue(manual=[B, A, C], auto=[])
+        # `next` on a queued video moves it first; `end` leaves it where it is.
+        out = library_edits.effective_queue(base, [_add(C), _add(C, "next"), _add(A)])
+        assert out["manual"] == [C, A]
+        assert base == _queue(manual=[A], auto=[B, C])  # base untouched
+
+    def test_remove_and_played_leave_both_lists(self):
+        base = _queue(manual=[A, B], auto=[C])
+        out = library_edits.effective_queue(base, [
+            _edit(library_edits.KIND_QUEUE_REMOVE, path=A),
+            _edit(library_edits.KIND_QUEUE_PLAYED, path=C),
+            _edit(library_edits.KIND_QUEUE_REMOVE, path="/gone.mp4"),
+        ])
+        assert out == _queue(manual=[B], auto=[])
+
+    def test_clear_empties_manual_only(self):
+        out = library_edits.effective_queue(_queue(manual=[A, B], auto=[C]), [_edit(library_edits.KIND_QUEUE_CLEAR)])
+        assert out == _queue(manual=[], auto=[C])
+
+    def test_auto_fill_off_empties_auto(self):
+        base = _queue(manual=[A], auto=[B, C])
+        off = library_edits.effective_queue(base, [_edit(library_edits.KIND_QUEUE_AUTO_FILL, enabled=False)])
+        assert off == _queue(manual=[A], auto=[], auto_fill=False)
+        on = library_edits.effective_queue(_queue(auto_fill=False), [_edit(library_edits.KIND_QUEUE_AUTO_FILL, enabled=True)])
+        assert on["autoFill"] is True
+
+    def test_other_kinds_are_ignored(self):
+        base = _queue(manual=[A])
+        assert library_edits.effective_queue(base, [{"kind": KIND_RATING, "path": B, "rating": 3.0}]) == base
+
+
+class TestQueueRegistration:
+    def test_registration_is_cleaned(self, client):
+        client.post("/api/media/register", json={"queue": {
+            "manual": [A, A, 3, "", None, B], "auto": [B, C, C, {"x": 1}], "autoFill": "no",
+        }})
+        assert media.get_queue() == _queue(manual=[A, B], auto=[C], auto_fill=True)
+        client.post("/api/media/register", json={"queue": {"manual": "nope", "autoFill": False}})
+        assert media.get_queue() == _queue(auto_fill=False)
+        client.post("/api/media/register", json={"queue": None})
+        assert media.get_queue() == _queue()
+
+    def test_omitted_key_leaves_queue_alone(self, client):
+        media.register_queue(_queue(manual=[A]))
+        client.post("/api/media/register", json={"ratings": {}})
+        assert media.get_queue()["manual"] == [A]
+
+    def test_ack_keeps_the_desktops_registration(self, client, library):
+        # The desktop registers its answer to an edit before acking it; a
+        # skipped auto-filled video moves to the end of the auto-fill there,
+        # and the ack must not drop it again.
+        media.register_queue(_queue(manual=[C], auto=[A, B]))
+        client.post("/api/remote/queue/remove", json={"videoId": library["A"]})
+        with client.websocket_connect("/api/remote/sync/observe") as ws:
+            msg = ws.receive_json()
+            assert msg["edit"]["kind"] == "queue-remove" and msg["edit"]["path"] == A
+            client.post("/api/media/register", json={"queue": {"manual": [C], "auto": [B, A], "autoFill": True}})
+            _ack(ws, msg)
+            assert _wait_until(lambda: library_edits.queue.pending() == [])
+        assert media.get_queue() == _queue(manual=[C], auto=[B, A])
+
+
+class TestRemoteQueue:
+    def test_get_queue_lists_manual_then_auto(self, client, library):
+        media.register_queue(_queue(manual=[C, "/gone.mp4"], auto=[A, B], auto_fill=True))
+        assert client.get("/api/remote/queue").json() == {
+            "items": [
+                {"videoId": library["C"], "auto": False},
+                {"videoId": library["A"], "auto": True},
+                {"videoId": library["B"], "auto": True},
+            ],
+            "autoFill": True,
+        }
+
+    def test_add_is_visible_immediately(self, client, library):
+        media.register_queue(_queue(manual=[C], auto=[A, B]))
+        r = client.post("/api/remote/queue/add", json={"videoId": library["B"], "position": "next"})
+        assert r.status_code == 200
+        body = r.json()
+        assert (body["ok"], body["seq"], body["delivered"]) == (True, 1, False)
+        expected = [(library["B"], False), (library["C"], False), (library["A"], True)]
+        assert [(i["videoId"], i["auto"]) for i in body["queue"]["items"]] == expected
+        got = client.get("/api/remote/queue").json()
+        assert [(i["videoId"], i["auto"]) for i in got["items"]] == expected
+        [edit] = library_edits.queue.pending()
+        assert (edit["kind"], edit["path"], edit["position"], edit["source"]) == ("queue-add", B, "next", "remote")
+
+        r = client.post("/api/remote/queue/add", json={"videoId": library["A"]})
+        assert [i["videoId"] for i in r.json()["queue"]["items"]] == [library["B"], library["C"], library["A"]]
+        assert library_edits.queue.pending()[-1]["position"] == "end"
+
+    def test_remove_played_clear_and_auto_fill(self, client, library):
+        media.register_queue(_queue(manual=[A, B], auto=[C]))
+        r = client.post("/api/remote/queue/remove", json={"videoId": library["A"]})
+        assert [i["videoId"] for i in r.json()["queue"]["items"]] == [library["B"], library["C"]]
+        r = client.post("/api/remote/queue/played", json={"videoId": library["C"]})
+        assert [i["videoId"] for i in r.json()["queue"]["items"]] == [library["B"]]
+        r = client.post("/api/remote/queue/clear", json={})
+        assert r.json()["queue"] == {"items": [], "autoFill": True}
+        r = client.post("/api/remote/queue/auto-fill", json={"enabled": False})
+        assert r.json()["queue"]["autoFill"] is False
+        assert [e["kind"] for e in library_edits.queue.pending()] == [
+            "queue-remove", "queue-played", "queue-clear", "queue-auto-fill",
+        ]
+        assert library_edits.queue.pending()[-1]["enabled"] is False
+
+    @pytest.mark.parametrize("url", ["/api/remote/queue/add", "/api/remote/queue/remove", "/api/remote/queue/played"])
+    def test_unknown_video_is_404(self, client, library, url):
+        assert client.post(url, json={"videoId": "nope"}).status_code == 404
+        assert client.post(url, json={}).status_code == 404
+        assert library_edits.queue.pending() == []
+
+    @pytest.mark.parametrize("url, payload", [
+        ("/api/remote/queue/add", {"position": "top"}),
+        ("/api/remote/queue/add", {"position": 1}),
+        ("/api/remote/queue/auto-fill", {"enabled": "yes"}),
+        ("/api/remote/queue/auto-fill", {}),
+    ])
+    def test_bad_body_is_400(self, client, library, url, payload):
+        assert client.post(url, json={"videoId": library["A"], **payload}).status_code == 400
+        assert library_edits.queue.pending() == []
+
+
+class TestHereSphereQueue:
+    TAGGED = {"tags": [{"name": "Studio:Lib"}, {"name": " queue:up NEXT "}]}
+    UNTAGGED = {"tags": [{"name": "Studio:Lib"}]}
+
+    @pytest.mark.parametrize("body, served, expected", [
+        (TAGGED, False, [("queue-add", "end")]),
+        (UNTAGGED, True, [("queue-remove", None)]),
+        (TAGGED, True, []),
+        (UNTAGGED, False, []),
+        (TAGGED, None, []),      # never served: no record, nothing
+        (UNTAGGED, None, []),
+        ({"rating": 0}, True, []),  # no tag list
+    ])
+    def test_tag_counts_only_relative_to_served_state(self, body, served, expected):
+        edits = parse_heresphere_update(body, A, {}, [], served)
+        assert [(e["kind"], e.get("position")) for e in edits] == expected
+        assert all(e["source"] == "heresphere" and e["path"] == A for e in edits)
+
+    def test_scene_carries_queue_tag_and_event_server(self, client, library):
+        media.register_queue(_queue(manual=[A], auto=[C]))
+        for vid in (library["A"], library["C"]):
+            scene = client.get(f"/heresphere/{vid}").json()
+            assert "Queue:Up next" in [t["name"] for t in scene["tags"]]
+            assert scene["eventServer"] == f"http://testserver/heresphere/events/{vid}"
+        assert "Queue:Up next" not in [t["name"] for t in client.get(f"/heresphere/{library['B']}").json()["tags"]]
+        cats = [c["tag"]["name"] for c in client.get(f"/deovr/{library['C']}").json()["categories"]]
+        assert "Queue:Up next" in cats
+
+    def test_adding_and_removing_the_tag(self, client, library):
+        b = library["B"]
+        client.get(f"/heresphere/{b}")  # served without the tag
+        scene = client.post(f"/heresphere/{b}", json=self.TAGGED).json()
+        assert "Queue:Up next" in [t["name"] for t in scene["tags"]]
+        [edit] = library_edits.queue.pending()
+        assert (edit["kind"], edit["path"], edit["position"]) == ("queue-add", B, "end")
+
+        scene = client.post(f"/heresphere/{b}", json=self.UNTAGGED).json()
+        assert "Queue:Up next" not in [t["name"] for t in scene["tags"]]
+        assert [e["kind"] for e in library_edits.queue.pending()] == ["queue-add", "queue-remove"]
+
+    def test_no_served_record_changes_nothing(self, client, library):
+        client.post(f"/heresphere/{library['B']}", json=self.TAGGED)
+        assert library_edits.queue.pending() == []
+
+    def test_rating_after_consumed_while_open_does_not_requeue(self, client, library):
+        b = library["B"]  # in no playlist, so the tag list below changes nothing else
+        media.register_queue(_queue(manual=[B]))
+        client.get(f"/heresphere/{b}")  # served with the tag
+        client.post(f"/heresphere/events/{b}", json={"event": 1, "id": b})
+        # HereSphere still holds the old tag list when the user rates.
+        client.post(f"/heresphere/{b}", json={"rating": 4.0, **self.TAGGED})
+        assert [e["kind"] for e in library_edits.queue.pending()] == ["queue-played", "rating"]
+
+    def test_play_event_consumes_once(self, client, library):
+        a, b = library["A"], library["B"]
+        media.register_queue(_queue(manual=[A, B]))
+        r = client.post(f"/heresphere/events/{a}", json={"username": "", "id": a, "event": 1, "time": 0})
+        assert r.status_code == 200
+        client.post(f"/heresphere/events/{a}", json={"event": 2, "time": 5000})  # pause
+        client.post(f"/heresphere/events/{a}", json={"event": 1, "time": 5000})  # play again
+        [edit] = library_edits.queue.pending()
+        assert (edit["kind"], edit["path"], edit["source"]) == ("queue-played", A, "heresphere")
+        assert [i["videoId"] for i in client.get("/api/remote/queue").json()["items"]] == [b]
+
+        client.post(f"/heresphere/events/{b}", json={"event": 1})
+        client.post(f"/heresphere/events/{a}", json={"event": 1})  # back to A: a new play
+        assert [e["path"] for e in library_edits.queue.pending()] == [A, B, A]
+
+    @pytest.mark.parametrize("event", [0, 2, 3, True, "1", None])
+    def test_other_events_are_ignored(self, client, library, event):
+        r = client.post(f"/heresphere/events/{library['A']}", json={"event": event})
+        assert r.status_code == 200
+        assert library_edits.queue.pending() == []
+
+    def test_bad_body_and_unknown_video_answer_200(self, client, library):
+        assert client.post(f"/heresphere/events/{library['A']}", content=b"not json").status_code == 200
+        assert client.post(f"/heresphere/events/{library['A']}", json=[1]).status_code == 200
+        assert client.post("/heresphere/events/nope", json={"event": 1}).status_code == 200
+        assert library_edits.queue.pending() == []
+
+    def test_queue_section_first_in_queue_order(self, client, library):
+        media.register_queue(_queue(manual=[C], auto=[A, "/gone.mp4"]))
+        sections, names = _sections(client)
+        assert names[0] == "Queue"
+        assert _ids(sections["Queue"]) == [library["C"], library["A"]]
+        deo, deo_names = _sections(client, "/deovr")
+        assert deo_names[0] == "Queue"
+        assert [i["title"] for i in deo["Queue"]] == ["C", "A_180_sbs"]
+        vr, _ = _sections(client, "/heresphere?filter=vr")
+        assert _ids(vr["Queue"]) == [library["A"]]
+
+    def test_queue_section_reflects_pending_edits_and_is_omitted_when_empty(self, client, library):
+        assert "Queue" not in _sections(client)[1]
+        client.post("/api/remote/queue/add", json={"videoId": library["B"]})
+        sections, names = _sections(client)
+        assert names[0] == "Queue" and _ids(sections["Queue"]) == [library["B"]]

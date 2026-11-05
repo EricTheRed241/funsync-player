@@ -523,7 +523,7 @@ body::-webkit-scrollbar {
      nav whenever chrome retracted. In-flow placement ties the nav to
      #app's height — which is dynamic via `--app-vh` — so the nav
      always sits flush against the visible viewport bottom. */
-  /* Grid (not flex) so the six tabs are always exactly 1/6 of the
+  /* Grid (not flex) so the seven tabs are always exactly 1/7 of the
      container width. Flex with `flex: 1` was the prior choice but
      flex items default to `min-width: auto`, which prevents them
      from shrinking below their intrinsic content width — at narrow
@@ -533,7 +533,7 @@ body::-webkit-scrollbar {
      right edge. `minmax(0, 1fr)` is the grid equivalent of `flex: 1
      + min-width: 0` and just works. */
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   padding-bottom: var(--safe-bottom);
@@ -553,7 +553,9 @@ body::-webkit-scrollbar {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 8px 4px;
+  /* 1px sides: seven tabs on a 393px phone leave 56px each, and
+     "Collections" / "Categories" need 53px at the label size below. */
+  padding: 8px 1px;
   height: var(--nav-height);
   font-family: inherit;
   font-size: 11px;
@@ -580,8 +582,8 @@ body::-webkit-scrollbar {
 }
 
 .nav-tabs__label {
-  font-size: 11px;
-  letter-spacing: 0.1px;
+  font-size: 10px;
+  letter-spacing: -0.2px;
   /* Truncate long labels (Categories, Collections) on very narrow
      viewports instead of pushing the tab wider than its grid column. */
   max-width: 100%;
@@ -1764,7 +1766,7 @@ body::-webkit-scrollbar {
     background: var(--accent-soft);
   }
   .nav-tabs__icon svg { width: 20px; height: 20px; }
-  .nav-tabs__label { font-size: 14px; font-weight: 500; }
+  .nav-tabs__label { font-size: 14px; font-weight: 500; letter-spacing: 0.1px; }
 
   /* Main no longer needs bottom-nav clearance. */
   .main { padding-bottom: calc(24px + var(--safe-bottom)); }
@@ -2544,3 +2546,166 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
 
 .triage-toast[hidden] { display: none; }
 .triage-toast[data-kind="error"] { border-color: var(--accent); }
+
+/* ============================================================
+   Shared play queue — toggles, player queue bar, Queue view.
+   ============================================================ */
+.player__triage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.player__triage-add.queue-toggle--on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Icon-only toggle on cards (over the thumbnail) and rows (at the end). */
+.queue-toggle--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--tap-min, 44px);
+  height: var(--tap-min, 44px);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  -webkit-tap-highlight-color: transparent;
+}
+.queue-toggle--icon.queue-toggle--on { color: var(--accent); }
+.queue-toggle--icon:disabled { opacity: 0.5; }
+
+.card .queue-toggle--icon {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.card .queue-toggle--icon.queue-toggle--on { background: var(--accent); }
+
+/* Playlist detail rows carry an absolute remove button at the right edge. */
+.list__row.triage-removable { padding-right: 56px; }
+
+.player__queue-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 0;
+}
+.player__next-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.player__next-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: var(--tap-min, 44px);
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.queue-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: var(--tap-min, 44px);
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.queue-switch__input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+.queue-switch__track {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--border);
+  transition: background 150ms;
+}
+.queue-switch__track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 150ms;
+}
+.queue-switch__input:checked + .queue-switch__track { background: var(--accent); }
+.queue-switch__input:checked + .queue-switch__track::after { transform: translateX(16px); }
+.queue-switch__input:focus-visible + .queue-switch__track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.queue-switch__input:disabled + .queue-switch__track { opacity: 0.5; }
+
+.queue-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px 4px;
+}
+.queue-bar .queue-switch { margin-left: auto; }
+
+.queue-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 0;
+}
+.queue-section__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+}
+.queue-section__action {
+  min-height: var(--tap-min, 44px);
+  padding: 0 12px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.queue-section__action:disabled { opacity: 0.5; }
+.queue-list { padding-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .queue-switch__track,
+  .queue-switch__track::after { transition: none; }
+}
