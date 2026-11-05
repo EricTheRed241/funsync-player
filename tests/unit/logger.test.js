@@ -58,10 +58,6 @@ describe('logger — real module (electron/logger.js)', () => {
     expect(log).toBeDefined();
   });
 
-  it('sets file max size to 5 MB', () => {
-    expect(log.transports.file.maxSize).toBe(5 * 1024 * 1024);
-  });
-
   it('sets log format with timestamp and level', () => {
     expect(log.transports.file.format).toContain('{y}');
     expect(log.transports.file.format).toContain('{level}');

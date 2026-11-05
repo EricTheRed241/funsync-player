@@ -197,6 +197,7 @@ A local desktop video player with device synchronization for funscript playback.
   - `devices`: Handy, Buttplug (paired device names), TCode (`link`: state `connecting` / `connected` / `waiting` / `reconnecting` / `stopped`, URL, IP, connected or down since, attempts, retry interval and next retry, last error, last disconnect with close code, commands and bytes sent), Autoblow.
   - `vrBridge` (connected, link state, player, host, jitter), `session` (web remote or VR: state, video, position), `player` (desktop video, playing, position), `headset` (last scene HereSphere / DeoVR asked for: when, which video, from which IP), `phone` (active web-remote phone), `backend` (pid, uptime, videos registered) and `desktop` (connected since, age of its last status).
   - The desktop app sends its part over the web-remote observer socket on every device change and every 15 seconds; the backend keeps the latest one.
+- **Log file:** `main.log` (macOS `~/Library/Logs/funsync-player/`) holds the app, renderer and backend lines, and rotates to `main.old.log` at **1 GB**, so up to 2 GB of history is kept on disk.
 
 ### Script Editor (Experimental)
 - OFS-style action graph with centered playhead and speed-colored lines
