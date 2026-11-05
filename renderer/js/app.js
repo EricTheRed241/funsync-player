@@ -2278,6 +2278,8 @@ class App {
       const fsName = matched.funscriptPath.split(/[\\/]/).pop();
       await this.funscriptEngine.loadContent(content, fsName);
       if (gen !== this._vrMatchGeneration) return;
+      await this._loadLibraryAxes(matched, content);
+      if (gen !== this._vrMatchGeneration) return;
       showToast(t('toast.vrScriptLoaded', { name: fsName }), 'info', 3000);
 
       // Build a player-like wrapper around the VR proxy
@@ -2701,6 +2703,8 @@ class App {
     try {
       const fsName = video.funscriptPath.split(/[\\/]/).pop();
       await this.funscriptEngine.loadContent(content, fsName);
+      // Before the engines restart, so they start with this video's axes.
+      await this._loadLibraryAxes(video, content);
 
       // Populate the variant state for this phone-driven session so the
       // existing `_switchVariant(index)` flow works when the phone taps
@@ -6910,7 +6914,27 @@ class App {
     return axes === multi.axes ? multi : { ...multi, axes };
   }
 
-  async _loadMultiAxisScripts(config) {
+  /**
+   * Axes for a library video the phone or the headset plays. The desktop
+   * player gets them from `loadFunscript` (embedded axes) and
+   * `_playFromLibrary` (companion files); the remote and VR paths load the
+   * main script straight into the engine, so without this they drove the
+   * stroke only and kept the previous video's axes.
+   */
+  async _loadLibraryAxes(video, content) {
+    if (this.buttplugSync) {
+      this.buttplugSync.setVibrationActions(null);
+      this.buttplugSync.clearAxisActions();
+    }
+    this.tcodeSync?.clearAxisActions();
+    this._currentMultiAxis = video._multiAxis || null;
+    this._feedEmbeddedMultiAxis(content, video.path);
+    if (video._multiAxis) {
+      await this._loadMultiAxisScripts(this._withHandmadeAxes(video._multiAxis, content, video.path), video.path);
+    }
+  }
+
+  async _loadMultiAxisScripts(config, videoPath = this._currentVideoPath) {
     if (!config.axes) return;
 
     const axisEntries = Object.entries(config.axes); // e.g. { vib: 'path', twist: 'path', ... }
@@ -6938,7 +6962,7 @@ class App {
       try {
         // Resilient read covers users who reorganised their scripts —
         // dead axisPath gets recovered from a sibling-of-video lookup.
-        const read = await this._readScriptResilient(axisPath, this._currentVideoPath || null);
+        const read = await this._readScriptResilient(axisPath, videoPath || null);
         if (!read) continue;
         const content = read.content;
         if (read.recoveredPath) config.axes[suffix] = read.recoveredPath;
@@ -7047,7 +7071,7 @@ class App {
    * a combined-format script from the forum; only the up-down motion
    * worked because rotation axes were embedded, not companion-paired.
    */
-  _feedEmbeddedMultiAxis(rawContent) {
+  _feedEmbeddedMultiAxis(rawContent, videoPath = this._currentVideoPath) {
     if (!rawContent) return;
     let parsed;
     // Drag-drop path can pass content straight from `file.text()` which
@@ -7061,7 +7085,7 @@ class App {
     // read this cache so they don't re-parse the file.
     if (!this._embeddedAxesByPath) this._embeddedAxesByPath = new Map();
     if (!this._embeddedAxesToastShown) this._embeddedAxesToastShown = new Set();
-    const cacheKey = this._currentVideoPath || rawContent.slice(0, 64);
+    const cacheKey = videoPath || rawContent.slice(0, 64);
 
     if (extracted.size === 0) {
       this._embeddedAxesByPath.delete(cacheKey);
