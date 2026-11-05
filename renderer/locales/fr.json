@@ -47,6 +47,8 @@
     "sectionNowPlaying": "En cours de lecture",
     "sectionUserQueue": "Dans ta file",
     "sectionUpcoming": "À suivre",
+    "sectionAutoFilled": "Ajoutées automatiquement",
+    "skipAutoFilledAria": "Passer (retirer du remplissage automatique)",
     "emptyNoLibrary": "La file d'attente est vide",
     "emptyEndOfList": "Fin de la liste — ajoute d'autres vidéos à la file",
     "openLibrary": "Ouvrir la bibliothèque",
@@ -813,7 +815,8 @@
       "categories": "Catégories",
       "tags": "Tags",
       "artists": "Artistes",
-      "folders": "Dossiers"
+      "folders": "Dossiers",
+      "queue": "File d’attente"
     },
     "filterSheet": {
       "title": "Filtres",
@@ -959,7 +962,12 @@
       "avg": "Moy",
       "max": "Max",
       "speedUnit": "u/s",
-      "speedTooltip": "Moy {avg} u/s • Max {max} u/s"
+      "speedTooltip": "Moy {avg} u/s • Max {max} u/s",
+      "next": "Suivant",
+      "autoplay": "Lecture auto",
+      "nextName": "À suivre : {name}",
+      "nothingNext": "Rien à suivre",
+      "upNext": "À suivre"
     },
     "triage": {
       "stars": "{n} étoiles",
@@ -985,6 +993,25 @@
         "top": "Les mieux notés (4+)",
         "unrated": "Non notés"
       }
+    },
+    "queue": {
+      "add": "Ajouter à la file",
+      "queued": "Dans la file",
+      "removeFromQueue": "Retirer de la file",
+      "added": "Ajouté à la file d’attente",
+      "removed": "Retiré de la file d’attente",
+      "cleared": "File d’attente vidée",
+      "clear": "Vider",
+      "skip": "Passer",
+      "play": "Lire la file",
+      "autoFill": "Remplissage auto",
+      "manualHeading": "Votre file",
+      "autoHeading": "Ajoutés automatiquement",
+      "emptyTitle": "La file d’attente est vide",
+      "emptyBody": "Ajoutez des vidéos avec le bouton de file. Les vidéos ajoutées automatiquement apparaissent ici dès que l’app de bureau les a choisies.",
+      "emptyBodyAutoFillOff": "Ajoutez des vidéos avec le bouton de file, ou activez le remplissage auto.",
+      "loadFailedTitle": "Impossible de charger la file d’attente",
+      "loadFailedBody": "Vérifiez que FunSync est lancé sur votre ordinateur, puis réessayez."
     }
   },
   "hevc": {
@@ -1163,6 +1190,10 @@
       "autoplayOnAdvanceLabel": "Lire automatiquement la vidéo suivante",
       "autoplayOnAdvanceResetTitle": "Réinitialiser par défaut (désactivé)",
       "autoplayOnAdvanceResetAria": "Réinitialiser la lecture automatique par défaut",
+      "queueAutoFillLabel": "Remplir automatiquement la file d’attente",
+      "queueAutoFillHint": "Complète la file de lecture (partagée avec la télécommande web et HereSphere / DeoVR) jusqu’à {size} vidéos avec celles que tu n’as pas lues récemment : d’abord les non notées, puis par score de préférence, les plus récentes d’abord. Dans la bibliothèque, les vidéos ajoutées automatiquement passent avant la suivante de la bibliothèque.",
+      "queueAutoFillResetTitle": "Réinitialiser par défaut (activé)",
+      "queueAutoFillResetAria": "Réinitialiser le remplissage automatique de la file par défaut",
       "multiHeader": "Multi-axe",
       "fieldDefaultPlayback": "Lecture par défaut",
       "preferSingle": "Axe unique (par défaut)",

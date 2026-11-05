@@ -47,6 +47,8 @@
     "sectionNowPlaying": "再生中",
     "sectionUserQueue": "あなたのキュー",
     "sectionUpcoming": "次に再生",
+    "sectionAutoFilled": "自動補充",
+    "skipAutoFilledAria": "スキップ (自動補充から外す)",
     "emptyNoLibrary": "キューは空です",
     "emptyEndOfList": "リストの最後 — キューに動画を追加してください",
     "openLibrary": "ライブラリを開く",
@@ -813,7 +815,8 @@
       "categories": "カテゴリー",
       "tags": "タグ",
       "artists": "アーティスト",
-      "folders": "フォルダー"
+      "folders": "フォルダー",
+      "queue": "キュー"
     },
     "filterSheet": {
       "title": "フィルター",
@@ -959,7 +962,12 @@
       "avg": "平均",
       "max": "最大",
       "speedUnit": "ユニット/秒",
-      "speedTooltip": "平均 {avg} ユニット/秒 • 最大 {max} ユニット/秒"
+      "speedTooltip": "平均 {avg} ユニット/秒 • 最大 {max} ユニット/秒",
+      "next": "次へ",
+      "autoplay": "自動再生",
+      "nextName": "次: {name}",
+      "nothingNext": "次の動画はありません",
+      "upNext": "次の動画"
     },
     "triage": {
       "stars": "星{n}",
@@ -985,6 +993,25 @@
         "top": "高評価（4以上）",
         "unrated": "未評価"
       }
+    },
+    "queue": {
+      "add": "キューに追加",
+      "queued": "キューに追加済み",
+      "removeFromQueue": "キューから削除",
+      "added": "キューに追加しました",
+      "removed": "キューから削除しました",
+      "cleared": "キューをクリアしました",
+      "clear": "クリア",
+      "skip": "スキップ",
+      "play": "キューを再生",
+      "autoFill": "自動補充",
+      "manualHeading": "あなたのキュー",
+      "autoHeading": "自動補充",
+      "emptyTitle": "キューは空です",
+      "emptyBody": "キューボタンで動画を追加してください。自動補充の動画は、デスクトップアプリが選ぶとここに表示されます。",
+      "emptyBodyAutoFillOff": "キューボタンで動画を追加するか、自動補充をオンにしてください。",
+      "loadFailedTitle": "キューを読み込めませんでした",
+      "loadFailedBody": "デスクトップで FunSync が起動しているか確認して、もう一度お試しください。"
     }
   },
   "hevc": {
@@ -1163,6 +1190,10 @@
       "autoplayOnAdvanceLabel": "次の動画を自動再生",
       "autoplayOnAdvanceResetTitle": "デフォルトにリセット (オフ)",
       "autoplayOnAdvanceResetAria": "自動再生をデフォルトにリセット",
+      "queueAutoFillLabel": "キューを自動で補充",
+      "queueAutoFillHint": "再生キュー（Web リモートと HereSphere / DeoVR で共有）を、最近再生していない動画で {size} 本まで補充します。未評価の動画が先、次に好みスコアの高い順、新しい順です。ライブラリでは、自動補充された動画がライブラリの次の動画より先に再生されます。",
+      "queueAutoFillResetTitle": "デフォルトにリセット (オン)",
+      "queueAutoFillResetAria": "キューの自動補充をデフォルトにリセット",
       "multiHeader": "マルチ軸",
       "fieldDefaultPlayback": "デフォルトの再生",
       "preferSingle": "シングル軸 (デフォルト)",

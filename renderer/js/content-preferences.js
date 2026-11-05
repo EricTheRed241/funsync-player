@@ -5,7 +5,8 @@
 // scripts/faptap-scout-lib.mjs, scripts/scout-live.mjs), the duplicate
 // cleanup (scripts/scene-dedupe-lib.mjs) and the app (renderer/js/
 // reject-rule.js, ratings.js, artist-playlists.js, auto-categories.js,
-// auto-collections.js). Those modules hold the logic; the values live here.
+// auto-collections.js, play-queue.js). Those modules hold the logic; the
+// values live here.
 // Changing a screening rule here means bumping RULES_VERSION in
 // scripts/eroscripts-scout-lib.mjs (and FAPTAP_RULES_VERSION in
 // scripts/faptap-scout-lib.mjs) so judged posts are judged again.
@@ -225,6 +226,15 @@ export const MIN_ARTIST_VIDEOS = 5;
 export const FAVOURITES_PLAYLIST = 'Favourite artists';
 /** Folder names that hold videos of many artists (lower case). */
 export const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'others', 'new folder', 'cock hero', 'fap hero', 'pmv', 'hmv', 'compilation', 'compilations']);
+
+// ── Play queue ──────────────────────────────────────────────────────────
+
+/**
+ * The shared play queue's auto-fill (renderer/js/play-queue.js): videos are
+ * appended after the user's own queue until it holds `size` in total, and a
+ * video played or skipped from it comes back only after `replayAfterDays`.
+ */
+export const QUEUE_AUTOFILL = { size: 10, replayAfterDays: 30 };
 
 // ── Auto categories ─────────────────────────────────────────────────────
 

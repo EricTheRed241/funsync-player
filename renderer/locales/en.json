@@ -47,6 +47,8 @@
     "sectionNowPlaying": "Now playing",
     "sectionUserQueue": "Queued by you",
     "sectionUpcoming": "Up next",
+    "sectionAutoFilled": "Auto-filled",
+    "skipAutoFilledAria": "Skip (remove from auto-fill)",
     "emptyNoLibrary": "Queue is empty",
     "emptyEndOfList": "End of list — add more videos to the queue",
     "openLibrary": "Open library",
@@ -1063,6 +1065,10 @@
       "autoplayOnAdvanceLabel": "Auto-play the next video",
       "autoplayOnAdvanceResetTitle": "Reset to default (off)",
       "autoplayOnAdvanceResetAria": "Reset Auto-play to default",
+      "queueAutoFillLabel": "Auto-fill the queue",
+      "queueAutoFillHint": "Tops up the play queue (shared with the web remote and HereSphere / DeoVR) to {size} videos with ones you haven't played lately: unrated first, then by preference score, newest first. In the library, auto-filled videos play before the library's next one.",
+      "queueAutoFillResetTitle": "Reset to default (on)",
+      "queueAutoFillResetAria": "Reset Auto-fill the queue to default",
       "multiHeader": "Multi-Axis",
       "fieldDefaultPlayback": "Default playback",
       "preferSingle": "Single axis (default)",
@@ -1337,7 +1343,8 @@
       "categories": "Categories",
       "tags": "Tags",
       "artists": "Artists",
-      "folders": "Folders"
+      "folders": "Folders",
+      "queue": "Queue"
     },
     "filterSheet": {
       "title": "Filters",
@@ -1483,7 +1490,12 @@
       "avg": "Avg",
       "max": "Max",
       "speedUnit": "units/s",
-      "speedTooltip": "Avg {avg} units/s • Max {max} units/s"
+      "speedTooltip": "Avg {avg} units/s • Max {max} units/s",
+      "next": "Next",
+      "autoplay": "Autoplay",
+      "nextName": "Next: {name}",
+      "nothingNext": "Nothing up next",
+      "upNext": "Up next"
     },
     "triage": {
       "stars": "{n, plural, one {# star} other {# stars}}",
@@ -1509,6 +1521,25 @@
         "top": "Top rated (4+)",
         "unrated": "Unrated"
       }
+    },
+    "queue": {
+      "add": "Add to queue",
+      "queued": "Queued",
+      "removeFromQueue": "Remove from queue",
+      "added": "Added to the queue",
+      "removed": "Removed from the queue",
+      "cleared": "Queue cleared",
+      "clear": "Clear",
+      "skip": "Skip",
+      "play": "Play queue",
+      "autoFill": "Auto-fill",
+      "manualHeading": "Your queue",
+      "autoHeading": "Auto-filled",
+      "emptyTitle": "The queue is empty",
+      "emptyBody": "Add videos with the queue button. Auto-filled videos show up here once the desktop app has picked them.",
+      "emptyBodyAutoFillOff": "Add videos with the queue button, or turn on auto-fill.",
+      "loadFailedTitle": "Couldn't load the queue",
+      "loadFailedBody": "Check that FunSync is running on your desktop, then try again."
     }
   },
   "eroscripts": {

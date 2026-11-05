@@ -1,6 +1,8 @@
 // Library edits — ratings, favourites and playlist changes made in HereSphere
 // or on the web remote, plus tag scores, favourite artists, favourite artist
-// bonus and Recalculate scores from the web remote or the desktop's Overview.
+// bonus and Recalculate scores from the web remote or the desktop's Overview,
+// and the shared play queue's edits (add, remove, played, clear, auto-fill)
+// from the web remote and the headset.
 //
 // The desktop owns the library (config.json is written only by Electron), so
 // the backend never applies these itself. It queues each one and sends it
@@ -28,8 +30,22 @@ const KIND_TAG_SCORE = 'tag-score';
 const KIND_FAVOURITE_ARTIST = 'favourite-artist';
 const KIND_FAVOURITE_SCORE = 'favourite-score';
 const KIND_RECALCULATE_SCORES = 'recalculate-scores';
+const KIND_QUEUE_ADD = 'queue-add';
+const KIND_QUEUE_REMOVE = 'queue-remove';
+const KIND_QUEUE_PLAYED = 'queue-played';
+const KIND_QUEUE_CLEAR = 'queue-clear';
+const KIND_QUEUE_AUTO_FILL = 'queue-auto-fill';
+const QUEUE_POSITIONS = new Set(['end', 'next']);
 const PENDING_ID_PREFIX = 'pending:';
-const VIDEO_KINDS = new Set([KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE]);
+const VIDEO_KINDS = new Set([KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE, KIND_QUEUE_ADD, KIND_QUEUE_REMOVE, KIND_QUEUE_PLAYED]);
+/** Queue edit kind → the `queue` hook that applies it. */
+const QUEUE_HOOKS = {
+  [KIND_QUEUE_ADD]: 'add',
+  [KIND_QUEUE_REMOVE]: 'remove',
+  [KIND_QUEUE_PLAYED]: 'played',
+  [KIND_QUEUE_CLEAR]: 'clear',
+  [KIND_QUEUE_AUTO_FILL]: 'setAutoFill',
+};
 
 function sameName(a, b) {
   return String(a || '').trim().toLocaleLowerCase() === String(b || '').trim().toLocaleLowerCase();
@@ -87,16 +103,41 @@ export function setTagScore(data, tag, score) {
  *
  * @param {object} edit
  * @param {object} data — getPlaylists/addPlaylist/addVideoToPlaylist/removeVideoFromPlaylist/setRating/get/set
- * @param {{recalculateScores?: () => Promise<object|null>, favouritesChanged?: () => Promise<object|null>}} [hooks]
+ * @param {{recalculateScores?: () => Promise<object|null>, favouritesChanged?: () => Promise<object|null>, queue?: object}} [hooks]
  *   recalculateScores: score the library again (and store it); run after a
  *   tag score or the favourite artist bonus changes and on request.
  *   favouritesChanged: score again and refresh the artist playlists; run
- *   after a favourite artist changes
+ *   after a favourite artist changes.
+ *   queue: the play queue, held by the app (play-queue.js):
+ *   `{add(path, position), remove(path), played(path), clear(), setAutoFill(enabled)}`;
+ *   required by the queue kinds
  */
-export async function applyLibraryEdit(edit, data, { recalculateScores, favouritesChanged } = {}) {
+export async function applyLibraryEdit(edit, data, { recalculateScores, favouritesChanged, queue } = {}) {
   if (!edit) throw new Error('empty edit');
   if (VIDEO_KINDS.has(edit.kind) && (typeof edit.path !== 'string' || !edit.path)) throw new Error('edit without a video path');
+  const queueHook = Object.hasOwn(QUEUE_HOOKS, edit.kind) ? QUEUE_HOOKS[edit.kind] : null;
+  if (queueHook && typeof queue?.[queueHook] !== 'function') throw new Error(`${edit.kind}: no play queue to apply it to`);
   switch (edit.kind) {
+    case KIND_QUEUE_ADD: {
+      const position = edit.position ?? 'end';
+      if (!QUEUE_POSITIONS.has(position)) throw new Error(`queue-add: bad position ${JSON.stringify(edit.position)}`);
+      await queue.add(edit.path, position);
+      return `queued (${position})`;
+    }
+    case KIND_QUEUE_REMOVE:
+      await queue.remove(edit.path);
+      return 'removed from the queue';
+    case KIND_QUEUE_PLAYED:
+      await queue.played(edit.path);
+      return 'played from the queue';
+    case KIND_QUEUE_CLEAR:
+      await queue.clear();
+      return 'queue cleared';
+    case KIND_QUEUE_AUTO_FILL: {
+      if (typeof edit.enabled !== 'boolean') throw new Error('queue-auto-fill: enabled must be true or false');
+      await queue.setAutoFill(edit.enabled);
+      return `queue auto-fill ${edit.enabled ? 'on' : 'off'}`;
+    }
     case KIND_TAG_SCORE: {
       const { tag, score } = setTagScore(data, edit.tag, edit.score);
       const r = recalculateScores ? await recalculateScores() : null;
@@ -155,17 +196,18 @@ export async function applyLibraryEdit(edit, data, { recalculateScores, favourit
  *
  * @param {object} o
  * @param {object} o.data — DataService
- * @param {() => Promise<void>} [o.publish] — re-register ratings, playlists and scores
+ * @param {() => Promise<void>} [o.publish] — re-register ratings, playlists, scores and the queue
  * @param {(seq: number, error?: string) => void} o.ack
  * @param {() => Promise<object|null>} [o.recalculateScores] — see applyLibraryEdit
  * @param {() => Promise<object|null>} [o.favouritesChanged] — see applyLibraryEdit
+ * @param {object} [o.queue] — see applyLibraryEdit
  */
 export class LibraryEditApplier {
-  constructor({ data, publish, ack, recalculateScores, favouritesChanged }) {
+  constructor({ data, publish, ack, recalculateScores, favouritesChanged, queue }) {
     this._data = data;
     this._publish = publish || (async () => {});
     this._ack = ack;
-    this._hooks = { recalculateScores, favouritesChanged };
+    this._hooks = { recalculateScores, favouritesChanged, queue };
     this._chain = Promise.resolve();
   }
 

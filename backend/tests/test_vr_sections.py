@@ -180,6 +180,30 @@ class TestBuildSections:
             ("Unrated", ["a", "b", "c"]),
         ]
 
+    def test_queue_section_first_in_queue_order(self):
+        entries = [
+            ("a", {"path": "/v/a.mp4"}, True),
+            ("b", {"path": "/v/b.mp4"}, False),
+            ("c", {"path": "/v/c.mp4"}, False),
+        ]
+        queue = {"manual": ["/v/c.mp4", "/v/filtered-out.mp4"], "auto": ["/v/a.mp4"]}
+        sections = vr_sections.build_sections(entries, now_ms=0, queue_paths=vr_sections.queued_paths(queue))
+        assert sections[0] == ("Queue", ["c", "a"])
+        assert [name for name, _ in sections][1:] == ["VR", "Flat", "Unrated"]
+
+    def test_empty_queue_section_omitted(self):
+        entries = [("a", {"path": "/v/a.mp4"}, True)]
+        for queue_paths in (None, [], ["/v/other.mp4"]):
+            sections = vr_sections.build_sections(entries, now_ms=0, queue_paths=queue_paths)
+            assert "Queue" not in [name for name, _ in sections]
+
+    def test_queue_tag(self):
+        assert vr_sections.queue_tags("/v/a.mp4", {"/v/a.mp4"}) == ["Queue:Up next"]
+        assert vr_sections.queue_tags("/v/b.mp4", {"/v/a.mp4"}) == []
+        assert vr_sections.has_queue_tag([{"name": "Studio:x"}, {"name": "queue:UP next"}])
+        assert not vr_sections.has_queue_tag([{"name": "Queue:Later"}, "Queue:Up next", None])
+        assert not vr_sections.has_queue_tag(None)
+
     def test_section_order_is_the_approved_list(self):
         assert list(vr_sections.SECTION_ORDER) == ALL_SECTIONS
 

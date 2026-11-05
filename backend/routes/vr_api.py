@@ -2,19 +2,32 @@
 
 Serves FunSync's library in the JSON format that VR headset players expect.
 DeoVR: GET /deovr (library), GET /deovr/{id} (scene detail)
-HereSphere: GET /heresphere (library), GET|POST /heresphere/{id} (scene detail)
+HereSphere: GET /heresphere (library), GET|POST /heresphere/{id} (scene detail),
+POST /heresphere/events/{id} (playback events)
 
-HereSphere is two-way for ratings, favourites and playlists: the scene sets
-`writeRating` / `writeFavorite` / `writeTags`, and the edits HereSphere POSTs
-back become library edits for the desktop (`services.library_edits`). The
-request fields are the ones XBVR (`pkg/api/heresphere.go`,
-`HereSphereAuthRequest`) and stash-vr (`internal/api/heresphere/http.go`,
-`videoDataRequestDto`) read: `rating` (number, 0-5 in 0.5 steps),
-`isFavorite` (bool) and `tags` (`[{"name", "start", "end", "track"}]`, the
-full list). Only `Playlist:<name>` tags are acted on; every other tag edit
-is ignored (the generated `Studio:` / `Format:` / `Category:` / `Tag:` / `Score:` ...
-tags simply come back on the next load). `hsp` and `deleteFile` are ignored
-too (`writeHSP` stays false; nothing is ever deleted from the headset).
+HereSphere is two-way for ratings, favourites, playlists and the play
+queue: the scene sets `writeRating` / `writeFavorite` / `writeTags`, and the
+edits HereSphere POSTs back become library edits for the desktop
+(`services.library_edits`). The request fields are the ones XBVR
+(`pkg/api/heresphere.go`, `HereSphereAuthRequest`) and stash-vr
+(`internal/api/heresphere/http.go`, `videoDataRequestDto`) read: `rating`
+(number, 0-5 in 0.5 steps), `isFavorite` (bool) and `tags` (`[{"name",
+"start", "end", "track"}]`, the full list). Only `Playlist:<name>` and
+`Queue:Up next` tags are acted on; every other tag edit is ignored (the
+generated `Studio:` / `Format:` / `Category:` / `Tag:` / `Score:` ... tags
+simply come back on the next load). `hsp` and `deleteFile` are ignored too
+(`writeHSP` stays false; nothing is ever deleted from the headset).
+
+The play queue (`routes.media.get_queue`) is the first section of both
+listings, and every queued scene carries `Queue:Up next`. HereSphere sends
+the full tag list with every save, including a rating made after the video
+left the queue while it was open, so a `Queue:Up next` change only counts
+relative to what the scene detail last SERVED for that path
+(`_served_queue_tag`): added → `queue-add` at the end, removed →
+`queue-remove`, unchanged or never served → nothing. The scene's
+`eventServer` points at `/heresphere/events/{id}`; a play event there
+(`event` 1) consumes the video from the queue (`queue-played`), once per
+video in a row since HereSphere sends play again after every pause.
 
 Whether a video is VR follows the desktop first (VR Format panel
 projection, then the manual toggle), then the filename, then the frame
@@ -33,7 +46,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
+from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
 from routes.remote_sync import submit_library_edit
 from services import library_edits, video_info, vr_sections
 from services.network import get_local_ip
@@ -473,13 +486,15 @@ def _filtered_videos(registry, vr_filter):
         yield vid_id, video, is_3d
 
 
-def _scene_tag_names(video, is_3d, playlists):
+def _scene_tag_names(video, is_3d, playlists, queued=()):
     """Scene-detail tags, the same for HereSphere and DeoVR:
     `Studio:<source>`, `Feature:Is scripted`, the filter tags (`Format:`,
-    `Speed:`, `Length:`, hand-made multi-axis), then `Playlist:<name>` per
-    playlist holding the video (two-way in HereSphere), `Category:<name>`
-    per desktop category, `Tag:<tag>` per chip tag and `Score:<n>` for the
-    preference score (all three read-only)."""
+    `Speed:`, `Length:`, hand-made multi-axis), `Queue:Up next` when the
+    video's path is in `queued` (two-way in HereSphere), then
+    `Playlist:<name>` per playlist holding the video (two-way in
+    HereSphere), `Category:<name>` per desktop category, `Tag:<tag>` per
+    chip tag and `Score:<n>` for the preference score (all three
+    read-only)."""
     tags = []
     path = video.get('path', '')
     source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
@@ -488,6 +503,7 @@ def _scene_tag_names(video, is_3d, playlists):
     if video.get('hasFunscript'):
         tags.append('Feature:Is scripted')
     tags.extend(vr_sections.filter_tags(video, is_3d))
+    tags.extend(vr_sections.queue_tags(path, queued))
     tags.extend(vr_sections.playlist_tags(path, playlists))
     tags.extend(vr_sections.category_tags(path, get_categories(), get_video_categories()))
     tags.extend(vr_sections.chip_tag_names(get_chip_tags(path)))
@@ -495,7 +511,31 @@ def _scene_tag_names(video, is_3d, playlists):
     return tags
 
 
-def parse_heresphere_update(body, path, ratings, playlists):
+# HereSphere playback events (`eventServer`): 0 open, 1 play, 2 pause, 3 close.
+HERESPHERE_EVENT_PLAY = 1
+
+# path → whether the HereSphere scene detail last served for it carried
+# `Queue:Up next`. Only a tag change relative to this is a queue edit.
+_served_queue_tag: dict[str, bool] = {}
+# Path of the last video HereSphere reported playing; a play event for the
+# same path again (after a pause) is not another `queue-played`.
+_last_headset_played: str | None = None
+
+
+def _reset_queue_state_for_tests() -> None:
+    """Forget served queue tags and the last headset play. Not public API."""
+    global _last_headset_played
+    _served_queue_tag.clear()
+    _last_headset_played = None
+
+
+def served_queue_tag(path):
+    """Whether the scene detail last served for `path` carried the queue
+    tag; None when none was served."""
+    return _served_queue_tag.get(path)
+
+
+def parse_heresphere_update(body, path, ratings, playlists, served_queue=None):
     """Library edits for one HereSphere scene POST body.
 
     HereSphere POSTs the scene URL both to load it (body: credentials only)
@@ -508,7 +548,11 @@ def parse_heresphere_update(body, path, ratings, playlists):
       - `tags` (the full list) → `playlist-add` per `Playlist:<name>` tag
         not matching a playlist the video is in (case-insensitive; a new
         name creates the playlist), `playlist-remove` per playlist the video
-        is in that has no tag. Any other tag is ignored.
+        is in that has no tag. `Queue:Up next` is compared with
+        `served_queue`, whether the scene detail last served for `path`
+        carried it (None: never served): present now but not then →
+        `queue-add` at the end, absent now but present then →
+        `queue-remove`. Any other tag is ignored.
     """
     if not isinstance(body, dict) or not path:
         return []
@@ -551,6 +595,14 @@ def parse_heresphere_update(body, path, ratings, playlists):
                     library_edits.KIND_PLAYLIST_REMOVE, path,
                     playlist_id=p.get('id'), name=name, source='heresphere',
                 ))
+        if served_queue is not None:
+            tagged = vr_sections.has_queue_tag(tags)
+            if tagged and not served_queue:
+                edits.append(library_edits.make_queue_edit(
+                    library_edits.KIND_QUEUE_ADD, path=path, source='heresphere'))
+            elif served_queue and not tagged:
+                edits.append(library_edits.make_queue_edit(
+                    library_edits.KIND_QUEUE_REMOVE, path=path, source='heresphere'))
     return edits
 
 
@@ -561,7 +613,8 @@ async def _apply_heresphere_update(request: Request, path):
         body = await request.json()
     except Exception:
         return
-    for edit in parse_heresphere_update(body, path, get_ratings(), get_playlists()):
+    edits = parse_heresphere_update(body, path, get_ratings(), get_playlists(), served_queue_tag(path))
+    for edit in edits:
         try:
             await submit_library_edit(edit)
         except library_edits.QueueFull as e:
@@ -599,7 +652,10 @@ async def deovr_library(request: Request):
         entries.append((item, video, is_3d))
     entries.sort(key=lambda e: e[0]['title'].lower())
 
-    sections = vr_sections.build_sections(entries, ratings=get_ratings(), playlists=get_playlists())
+    sections = vr_sections.build_sections(
+        entries, ratings=get_ratings(), playlists=get_playlists(),
+        queue_paths=vr_sections.queued_paths(get_queue()),
+    )
     scenes = [{'name': name, 'list': items} for name, items in sections]
 
     # DeoVR requires Content-Length (chunked encoding breaks its JSON parser)
@@ -694,7 +750,9 @@ async def deovr_scene(video_id: str, request: Request):
         'isScripted': bool(fs_path),
         'categories': [
             {'tag': {'id': i, 'name': name}}
-            for i, name in enumerate(_scene_tag_names(video, is_3d, get_playlists()), start=1)
+            for i, name in enumerate(_scene_tag_names(
+                video, is_3d, get_playlists(), set(vr_sections.queued_paths(get_queue())),
+            ), start=1)
         ],
         'isFavorite': library_edits.rating_entry(get_ratings(), path)[1],
         'fullVideoReady': True,
@@ -736,7 +794,10 @@ async def heresphere_library(request: Request):
 
     library = [
         {'name': name, 'list': urls}
-        for name, urls in vr_sections.build_sections(entries, ratings=get_ratings(), playlists=get_playlists())
+        for name, urls in vr_sections.build_sections(
+            entries, ratings=get_ratings(), playlists=get_playlists(),
+            queue_paths=vr_sections.queued_paths(get_queue()),
+        )
     ]
 
     return JSONResponse(
@@ -827,11 +888,14 @@ async def heresphere_scene(video_id: str, request: Request):
             'url': f'{base_url}/api/media/script/{video_id}',
         })
 
-    # Tags: studio, scripted, filter tags, then Playlist: (removing one in
-    # the headset takes the video out of that playlist, adding
-    # `Playlist:<name>` puts it in, creating it), Category:, Tag: and Score:
-    # (all read-only); chapters follow.
-    tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists)]
+    # Tags: studio, scripted, filter tags, then Queue:Up next (adding /
+    # removing it in the headset queues / unqueues the video), Playlist:
+    # (removing one in the headset takes the video out of that playlist,
+    # adding `Playlist:<name>` puts it in, creating it), Category:, Tag: and
+    # Score: (all read-only); chapters follow.
+    queued = set(vr_sections.queued_paths(get_queue()))
+    tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists, queued)]
+    _served_queue_tag[path] = path in queued
 
     # Auto-generate chapter tags for navigation (every 5 min)
     if duration > 300:
@@ -883,6 +947,7 @@ async def heresphere_scene(video_id: str, request: Request):
         'writeRating': True,
         'writeTags': True,
         'writeHSP': False,
+        'eventServer': f'{base_url}/heresphere/events/{video_id}',
     }
 
     return JSONResponse(
@@ -892,3 +957,29 @@ async def heresphere_scene(video_id: str, request: Request):
             'HereSphere-JSON-Version': '1',
         },
     )
+
+
+@router.post("/heresphere/events/{video_id}")
+async def heresphere_event(video_id: str, request: Request):
+    """HereSphere playback event: `{username, id, title, event, time, speed,
+    utc, connectionKey}`, `event` 0 open, 1 play, 2 pause, 3 close. A play
+    consumes the video from the play queue (`queue-played`) unless it is
+    the video HereSphere last reported playing (play repeats after every
+    pause). Always 200: a bad body or an unknown video changes nothing."""
+    global _last_headset_played
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    video = get_video_registry().get(video_id)
+    path = video.get('path') if video else None
+    event = body.get('event') if isinstance(body, dict) else None
+    is_play = not isinstance(event, bool) and isinstance(event, (int, float)) and event == HERESPHERE_EVENT_PLAY
+    if is_play and path and path != _last_headset_played:
+        try:
+            await submit_library_edit(library_edits.make_queue_edit(
+                library_edits.KIND_QUEUE_PLAYED, path=path, source='heresphere'))
+            _last_headset_played = path
+        except library_edits.QueueFull as e:
+            log.warning('[heresphere] Played edit dropped: %s', e)
+    return JSONResponse(content={}, headers={'Access-Control-Allow-Origin': '*'})

@@ -1,6 +1,7 @@
-// QueuePanel — right-side slide-in showing playback context as 4 sections:
+// QueuePanel — right-side slide-in showing playback context as 5 sections:
 // History (session-bounded), Now playing, User queue (persistent, drag-
-// reorderable), Up next (live-derived from playlist or library).
+// reorderable), Auto-filled (the shared play queue's computed tail,
+// play-queue.js), Up next (live-derived from playlist or library).
 //
 // See notes/features/SCOPE-queue-panel.md for the design contract.
 //
@@ -43,7 +44,7 @@ export class QueuePanel {
    * @param {HTMLElement} opts.element — root container (#queue-panel)
    * @param {Object} opts.library — library reference for getVideoByPath / capture
    * @param {Function} opts.onJump — (path) => void; play this video, current → history
-   * @param {Function} opts.onRemoveFromQueue — (path) => void; remove from user queue
+   * @param {Function} opts.onRemoveFromQueue — (path) => void; remove from user queue, or skip an auto-filled item
    * @param {Function} opts.onReorderQueue — (fromIdx, toIdx) => void
    * @param {Function} opts.onClearQueue — () => void
    * @param {Function} opts.onClose — () => void; user clicked × or pressed Esc
@@ -82,6 +83,8 @@ export class QueuePanel {
       history: [],
       nowPlaying: null,
       userQueue: [],
+      autoQueue: [],
+      autoAfterUpcoming: false,
       upcoming: [],
       hasContext: false,
     };
@@ -165,6 +168,9 @@ export class QueuePanel {
    *        wants them played (head plays next)
    * @param {string[]} state.upcoming — paths from playlist or library,
    *        head plays after user queue
+   * @param {string[]} [state.autoQueue] — auto-filled paths, in play order
+   * @param {boolean} [state.autoAfterUpcoming] — the context's own list
+   *        (Play All / playlist / category) plays before the auto-filled items
    * @param {boolean} state.hasContext — false when no library / playlist
    *        is driving (drag-drop, Browse, Open Recent)
    */
@@ -173,6 +179,8 @@ export class QueuePanel {
       history: Array.isArray(state.history) ? state.history : [],
       nowPlaying: state.nowPlaying || null,
       userQueue: Array.isArray(state.userQueue) ? state.userQueue : [],
+      autoQueue: Array.isArray(state.autoQueue) ? state.autoQueue : [],
+      autoAfterUpcoming: !!state.autoAfterUpcoming,
       upcoming: Array.isArray(state.upcoming) ? state.upcoming : [],
       hasContext: !!state.hasContext,
     };
@@ -222,7 +230,7 @@ export class QueuePanel {
 
   _render() {
     if (!this._el) return;
-    const { history, nowPlaying, userQueue, upcoming, hasContext } = this._state;
+    const { history, nowPlaying, userQueue, autoQueue, autoAfterUpcoming, upcoming, hasContext } = this._state;
 
     const sections = [];
 
@@ -257,6 +265,17 @@ export class QueuePanel {
       }));
     }
 
+    // Auto-filled — what plays after your own queue (before the library's
+    // next; after a Play All / playlist / category list). Remove = skip.
+    const autoSection = autoQueue.length > 0
+      ? this._renderSection({
+          label: t('queuePanel.sectionAutoFilled'),
+          items: autoQueue,
+          kind: 'auto-queue',
+        })
+      : null;
+    if (autoSection && !autoAfterUpcoming) sections.push(autoSection);
+
     // Upcoming — only if context exists and there are upcoming items.
     // Shuffle action re-rolls the not-yet-played tail (needs 2+ to be
     // meaningful).
@@ -274,9 +293,10 @@ export class QueuePanel {
           : null,
       }));
     }
+    if (autoSection && autoAfterUpcoming) sections.push(autoSection);
 
     // Body content — if no sections at all and no context, show empty state
-    const body = (!hasContext && !nowPlaying && userQueue.length === 0)
+    const body = (!hasContext && !nowPlaying && userQueue.length === 0 && autoQueue.length === 0)
       ? this._renderEmptyState()
       : (sections.length > 0
           ? `<div class="queue-panel__sections">${sections.join('')}</div>`
@@ -352,14 +372,16 @@ export class QueuePanel {
   _renderRow(path, kind, idx) {
     const meta = this._resolveMeta(path);
     const isUserQueue = kind === 'user-queue';
+    const isAutoQueue = kind === 'auto-queue';
     const isNowPlaying = kind === 'now-playing';
     const isHistory = kind === 'history';
 
     const dragHandle = isUserQueue
       ? `<button type="button" class="queue-panel__drag-handle" aria-label="${_esc(t('queuePanel.dragHandleAria'))}" data-queue-drag-handle></button>`
       : '';
-    const removeBtn = isUserQueue
-      ? `<button type="button" class="queue-panel__remove" aria-label="${_esc(t('queuePanel.removeAria'))}" data-queue-remove></button>`
+    const removeLabel = isAutoQueue ? t('queuePanel.skipAutoFilledAria') : t('queuePanel.removeAria');
+    const removeBtn = isUserQueue || isAutoQueue
+      ? `<button type="button" class="queue-panel__remove" aria-label="${_esc(removeLabel)}" title="${_esc(removeLabel)}" data-queue-remove></button>`
       : '';
 
     // Badges — mirror library card affordances. Color tokens reuse the
@@ -465,7 +487,7 @@ export class QueuePanel {
         }
       });
 
-      // Remove button (user-queue only)
+      // Remove button (user queue; skip on auto-filled rows)
       const removeBtn = row.querySelector('[data-queue-remove]');
       if (removeBtn) {
         removeBtn.appendChild(icon(X, { width: 12, height: 12 }));

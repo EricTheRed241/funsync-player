@@ -803,5 +803,20 @@ describe('UpNextEngine', () => {
       engine.getPriorityNext = () => { throw new Error('boom'); };
       expect(engine._nextPath()).toBe('b');
     });
+
+    it('shows the card for a queued item when there is no context list', () => {
+      const player = mockVideoPlayer({ currentTime: 118, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(null); // drag-drop / Open File
+      const shown = [];
+      engine.onShowNext = (path) => shown.push(path);
+      engine.check();
+      expect(shown).toEqual([]);
+      engine.getPriorityNext = () => 'queued.mp4';
+      engine.check();
+      expect(shown).toEqual(['queued.mp4']);
+      expect(engine.endOfListShown).toBe(false);
+    });
   });
 });

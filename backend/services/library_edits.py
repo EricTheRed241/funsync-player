@@ -15,6 +15,11 @@ cannot be stored here. It becomes an EDIT:
     {"seq": 11, "kind": "recalculate-scores", ...}
     {"seq": 12, "kind": "favourite-artist", "artist": "Mira", "favourite": true, ...}
     {"seq": 13, "kind": "favourite-score", "score": 5.0, ...}
+    {"seq": 14, "kind": "queue-add", "path": "/v/a.mp4", "position": "end" | "next", ...}
+    {"seq": 15, "kind": "queue-remove", "path": "/v/a.mp4", ...}
+    {"seq": 16, "kind": "queue-played", "path": "/v/a.mp4", ...}
+    {"seq": 17, "kind": "queue-clear", ...}
+    {"seq": 18, "kind": "queue-auto-fill", "enabled": false, ...}
 
 A tag score is the user's weight for a post tag; the backend holds every
 tag's score as the desktop registers it (starting scores included, absent =
@@ -24,6 +29,15 @@ A favourite-artist edit marks an artist (matched case-insensitively, see
 `artist_key`) as a favourite or not; a favourite-score edit sets the bonus a
 favourite artist's scenes get (renderer/js/favourite-artists.js). None of
 these names a video.
+
+The `queue-*` edits change the shared play queue the desktop owns:
+`{manual, auto, autoFill}` (`manual` the paths the user queued, `auto` the
+desktop's auto-fill after them, see `apply_to_queue`). Adding puts a video
+at the end of `manual` (or the front for `next`, which also moves a queued
+one there); removing takes it out of `manual`, or makes the desktop skip an
+auto-filled one; `played` does both for a video that started playing;
+`clear` empties `manual`; `auto-fill` turns the auto part on or off.
+QUEUE_KINDS lists them.
 
 Edits wait in one ordered queue (`queue`). The renderer's observer socket
 (`routes/remote_sync.py`) receives each as `{"type": "library-edit", "edit":
@@ -35,8 +49,8 @@ made while the desktop was down is lost.
 
 Every edit is idempotent (set a rating, add-if-missing, remove-if-present,
 create-by-name-if-missing, set a tag score, recalculate, set or clear a
-favourite artist, set the favourite bonus), so a replay after a lost ack is
-harmless.
+favourite artist, set the favourite bonus, queue add / remove / clear, set
+auto-fill), so a replay after a lost ack is harmless.
 
 The queue is mirrored to `<userData>/pending-library-edits.json` when the
 backend knows the userData dir, so it also survives a backend restart. That
@@ -69,10 +83,21 @@ KIND_TAG_SCORE = "tag-score"
 KIND_RECALCULATE_SCORES = "recalculate-scores"
 KIND_FAVOURITE_ARTIST = "favourite-artist"
 KIND_FAVOURITE_SCORE = "favourite-score"
+KIND_QUEUE_ADD = "queue-add"
+KIND_QUEUE_REMOVE = "queue-remove"
+KIND_QUEUE_PLAYED = "queue-played"
+KIND_QUEUE_CLEAR = "queue-clear"
+KIND_QUEUE_AUTO_FILL = "queue-auto-fill"
+QUEUE_KINDS = (KIND_QUEUE_ADD, KIND_QUEUE_REMOVE, KIND_QUEUE_PLAYED, KIND_QUEUE_CLEAR, KIND_QUEUE_AUTO_FILL)
 KINDS = (
     KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE, KIND_TAG_SCORE, KIND_RECALCULATE_SCORES,
     KIND_FAVOURITE_ARTIST, KIND_FAVOURITE_SCORE,
-)
+) + QUEUE_KINDS
+
+# Where `queue-add` puts a video that isn't queued yet.
+QUEUE_POSITION_END = "end"
+QUEUE_POSITION_NEXT = "next"
+QUEUE_POSITIONS = (QUEUE_POSITION_END, QUEUE_POSITION_NEXT)
 
 MAX_PENDING = 1000
 RATING_MAX = 5
@@ -300,6 +325,69 @@ def effective_favourite_score(base_score, pending):
     return score
 
 
+def clean_queue(raw):
+    """A registered play queue as `{"manual": [path], "auto": [path],
+    "autoFill": bool}`: non-empty strings only, each path once (a path in
+    `manual` is dropped from `auto`), `autoFill` True unless it is False."""
+    raw = raw if isinstance(raw, dict) else {}
+    seen = set()
+    lists = {}
+    for key in ("manual", "auto"):
+        items = raw.get(key)
+        out = []
+        for path in items if isinstance(items, list) else []:
+            if isinstance(path, str) and path and path not in seen:
+                seen.add(path)
+                out.append(path)
+        lists[key] = out
+    return {"manual": lists["manual"], "auto": lists["auto"], "autoFill": raw.get("autoFill") is not False}
+
+
+def apply_to_queue(play_queue, edit):
+    """Apply one queue edit to a `{manual, auto, autoFill}` play queue in
+    place:
+
+      - add: leaves `auto`; not in `manual` → appended (`end`) or put first
+        (`next`); already in `manual` → `next` moves it first, `end` keeps it.
+      - remove / played: out of `manual` and `auto`.
+      - clear: `manual` emptied.
+      - auto-fill: sets `autoFill`; off empties `auto`.
+    """
+    kind = edit.get("kind")
+    path = edit.get("path")
+    if kind == KIND_QUEUE_ADD and isinstance(path, str) and path:
+        play_queue["auto"] = [p for p in play_queue["auto"] if p != path]
+        manual = play_queue["manual"]
+        if edit.get("position") == QUEUE_POSITION_NEXT:
+            play_queue["manual"] = [path] + [p for p in manual if p != path]
+        elif path not in manual:
+            manual.append(path)
+    elif kind in (KIND_QUEUE_REMOVE, KIND_QUEUE_PLAYED) and isinstance(path, str):
+        play_queue["manual"] = [p for p in play_queue["manual"] if p != path]
+        play_queue["auto"] = [p for p in play_queue["auto"] if p != path]
+    elif kind == KIND_QUEUE_CLEAR:
+        play_queue["manual"] = []
+    elif kind == KIND_QUEUE_AUTO_FILL and isinstance(edit.get("enabled"), bool):
+        play_queue["autoFill"] = edit["enabled"]
+        if not edit["enabled"]:
+            play_queue["auto"] = []
+
+
+def effective_queue(base, pending):
+    """The registered play queue with the pending queue edits applied; a
+    new `{manual, auto, autoFill}`, `base` untouched."""
+    base = base or {}
+    out = {
+        "manual": list(base.get("manual") or []),
+        "auto": list(base.get("auto") or []),
+        "autoFill": base.get("autoFill") is not False,
+    }
+    for edit in pending:
+        if edit["kind"] in QUEUE_KINDS:
+            apply_to_queue(out, edit)
+    return out
+
+
 
 def make_rating_edit(path, rating=None, favorite=None, source=""):
     """Validated rating edit (without seq). Raises ValueError on a bad
@@ -366,6 +454,28 @@ def make_favourite_score_edit(score, source=""):
     if normalized is None:
         raise ValueError(f"invalid score {score!r}: a number, -{TAG_SCORE_MAX} to {TAG_SCORE_MAX} in steps of {TAG_SCORE_STEP}")
     return {"kind": KIND_FAVOURITE_SCORE, "score": normalized, "source": source}
+
+
+def make_queue_edit(kind, path=None, position=None, enabled=None, source=""):
+    """Validated play-queue edit (without seq). `path` is required by
+    add / remove / played, `position` (`end`, the default, or `next`) is
+    add's, `enabled` (a bool) is auto-fill's. Raises ValueError otherwise."""
+    if kind not in QUEUE_KINDS:
+        raise ValueError(f"unknown queue edit {kind!r}")
+    if kind == KIND_QUEUE_CLEAR:
+        return {"kind": kind, "source": source}
+    if kind == KIND_QUEUE_AUTO_FILL:
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be true or false")
+        return {"kind": kind, "enabled": enabled, "source": source}
+    if not isinstance(path, str) or not path:
+        raise ValueError("path required")
+    if kind != KIND_QUEUE_ADD:
+        return {"kind": kind, "path": path, "source": source}
+    position = QUEUE_POSITION_END if position is None else position
+    if position not in QUEUE_POSITIONS:
+        raise ValueError(f"invalid position {position!r}: end or next")
+    return {"kind": kind, "path": path, "position": position, "source": source}
 
 
 

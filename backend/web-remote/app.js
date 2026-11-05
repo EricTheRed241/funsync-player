@@ -20,6 +20,10 @@ import {
   setRating, addToPlaylist, removeFromPlaylist, reportResult, showToast,
 } from './triage.js';
 import {
+  fetchQueue, queueAdd, queueRemove, queuePlayed, queueClear, queueSetAutoFill, queueFromResult,
+  manualIds, autoIds, nextUp, getAutoplay, setAutoplay,
+} from './queue.js';
+import {
   createTagScoreEditor, updateTagScoreEditor, fetchTagScores, setTagScore, requestRecalculation, pollTagScores, formatRules,
   formatTagScore,
 } from './tag-scores.js';
@@ -52,6 +56,58 @@ function startPhoneQueue(videos, { shuffled = false, balance = false, label = ''
   }
   phoneQueue = { ids: ordered.map(v => v.id), index: 0, label };
   location.hash = `play/${ordered[0].id}`;
+}
+
+/* ============================================================
+   Shared play queue (queue.js). The desktop owns it; the phone keeps
+   the last known state, which drives every queue button, and adopts
+   the queue each write answers with. Next = manual items → Play All
+   list → auto-filled items (nextUp).
+   ============================================================ */
+let sharedQueue = null;        // { items: [{videoId, auto}], autoFill } once read
+let sharedQueueVersion = 0;    // bumped on adopt: a slower GET never overwrites a write's answer
+let sharedQueueLoading = null; // in-flight GET, shared by concurrent callers
+let queueAdvance = null;       // {id, source} the player advances to via Next (keeps Play All alive)
+let queueChangeHook = null;    // the open view's repaint; reset on every navigation
+let queueRefreshTimer = null;
+
+function adoptSharedQueue(q) {
+  sharedQueue = q;
+  sharedQueueVersion++;
+  for (const btn of document.querySelectorAll('.queue-toggle[data-video-id]')) renderQueueToggle(btn);
+  queueChangeHook?.();
+}
+
+/** The queue a write answered with, adopted; null when the answer had none. */
+function adoptResultQueue(result) {
+  const q = queueFromResult(result);
+  if (q) adoptSharedQueue(q);
+  return q;
+}
+
+function loadSharedQueue() {
+  if (!sharedQueueLoading) {
+    const version = sharedQueueVersion;
+    sharedQueueLoading = fetchQueue().then((q) => {
+      sharedQueueLoading = null;
+      if (q && version === sharedQueueVersion) adoptSharedQueue(q);
+      return sharedQueue;
+    });
+  }
+  return sharedQueueLoading;
+}
+
+/**
+ * Re-read the queue shortly after a write the desktop answers by
+ * recomputing the auto-filled part (skip, auto-fill on).
+ */
+function scheduleQueueRefresh() {
+  clearTimeout(queueRefreshTimer);
+  queueRefreshTimer = setTimeout(() => { if (currentView === 'queue') loadSharedQueue(); }, 2000);
+}
+
+function isManuallyQueued(id) {
+  return manualIds(sharedQueue).includes(id);
 }
 
 // === Mobile viewport-height sync ===
@@ -147,6 +203,7 @@ document.getElementById('navPlaylistsIcon').appendChild(svgIcon('listMusic', 22)
 document.getElementById('navCategoriesIcon').appendChild(svgIcon('tag', 22));
 document.getElementById('navTagsIcon').appendChild(svgIcon('hash', 22));
 document.getElementById('navArtistsIcon').appendChild(svgIcon('user', 22));
+document.getElementById('navQueueIcon').appendChild(svgIcon('listVideo', 22));
 
 let library = null;       // cached list of video objects
 
@@ -173,8 +230,8 @@ let categories = null;    // cached list from /api/remote/categories
 // Null when not yet built; rebuilt on refresh.
 let searchContextMap = null;
 let _searchContextLoading = false;
-let currentView = 'list'; // 'list' | 'player' | 'groupings' | 'grouping-detail'
-let currentMode = 'library'; // 'library' | 'collections' | 'playlists' | 'categories' | 'tags' | 'artists'
+let currentView = 'list'; // 'list' | 'player' | 'groupings' | 'grouping-detail' | 'folders' | 'folder-detail' | 'queue'
+let currentMode = 'library'; // 'library' | 'queue' | 'collections' | 'playlists' | 'categories' | 'tags' | 'artists'
 let activeSyncClient = null;  // torn down on view change / unload
 
 // Persisted filter/sort state
@@ -529,11 +586,24 @@ async function render() {
   }
 
   const hash = location.hash.slice(1); // strip '#'
+  // Queue buttons on every view follow the shared queue; the ones already
+  // on screen update when it arrives.
+  queueChangeHook = null;
+  loadSharedQueue();
 
   if (hash.startsWith('play/')) {
     currentView = 'player';
     backBtn.hidden = false;
     await renderPlayer(hash.slice('play/'.length));
+    return;
+  }
+
+  if (hash === 'queue') {
+    currentMode = 'queue';
+    currentView = 'queue';
+    backBtn.hidden = true;
+    setBrandTitle();
+    await renderQueueView();
     return;
   }
 
@@ -1661,7 +1731,11 @@ function buildTriageRow(video) {
   addBtn.append(svgIcon('listPlus', 18), document.createTextNode(t('webRemote.triage.addToPlaylist')));
   addBtn.addEventListener('click', () => openPlaylistSheet(video));
 
-  row.append(control, addBtn);
+  const actions = document.createElement('div');
+  actions.className = 'player__triage-actions';
+  actions.append(addBtn, createQueueToggle(video, { pill: true }));
+
+  row.append(control, actions);
   return row;
 }
 
@@ -1714,6 +1788,192 @@ playlistSheetForm?.addEventListener('submit', (e) => {
   const name = playlistSheetInput.value.trim();
   if (name) addVideoToPlaylist({ name });
 });
+
+// --- Shared play queue: toggles + Queue view ----------------------------------
+
+/**
+ * Add to queue / Queued toggle. Labelled pill in the player, icon only on
+ * cards and rows (where it must not start playback).
+ */
+function createQueueToggle(video, { pill = false } = {}) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = pill ? 'player__triage-add queue-toggle' : 'queue-toggle queue-toggle--icon';
+  btn.dataset.videoId = video.id;
+  if (pill) btn.dataset.pill = '1';
+  renderQueueToggle(btn);
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    btn.disabled = true;
+    const queued = isManuallyQueued(video.id);
+    const result = queued ? await queueRemove(video.id) : await queueAdd(video.id);
+    btn.disabled = false;
+    reportResult(result, t(queued ? 'webRemote.queue.removed' : 'webRemote.queue.added'));
+    adoptResultQueue(result);
+  });
+  return btn;
+}
+
+function renderQueueToggle(btn) {
+  const queued = isManuallyQueued(btn.dataset.videoId);
+  btn.classList.toggle('queue-toggle--on', queued);
+  btn.setAttribute('aria-pressed', queued ? 'true' : 'false');
+  btn.setAttribute('aria-label', t('webRemote.queue.add'));
+  btn.title = t(queued ? 'webRemote.queue.removeFromQueue' : 'webRemote.queue.add');
+  btn.replaceChildren(svgIcon(queued ? 'listChecks' : 'listEnd', 18));
+  if (btn.dataset.pill) {
+    btn.append(document.createTextNode(t(queued ? 'webRemote.queue.queued' : 'webRemote.queue.add')));
+  }
+}
+
+/** Labelled on/off switch (a checkbox with role="switch"). */
+function createSwitch(text, checked, onChange) {
+  const label = document.createElement('label');
+  label.className = 'queue-switch';
+  const name = document.createElement('span');
+  name.className = 'queue-switch__label';
+  name.textContent = text;
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'queue-switch__input';
+  input.setAttribute('role', 'switch');
+  input.checked = !!checked;
+  const track = document.createElement('span');
+  track.className = 'queue-switch__track';
+  track.setAttribute('aria-hidden', 'true');
+  label.append(name, input, track);
+  input.addEventListener('change', () => onChange(input.checked, input));
+  return label;
+}
+
+async function renderQueueView() {
+  toolbarEl.classList.add('toolbar--hidden');
+  syncControlsUI();
+  renderBreadcrumb([{ label: getModeTitle('queue') }]);
+  renderSkeletons('row', 4);
+  let videos;
+  try {
+    videos = await loadLibrary();
+  } catch { return; }
+  const shared = await loadSharedQueue();
+  await awaitSkeletonMinDwell();
+  if (currentView !== 'queue') return; // navigated away meanwhile
+  if (!shared) {
+    countEl.textContent = '';
+    mainEl.innerHTML = `
+      <div class="empty">
+        <div class="empty__title">${escapeHtml(t('webRemote.queue.loadFailedTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.queue.loadFailedBody'))}</div>
+      </div>`;
+    return;
+  }
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  queueChangeHook = () => paintQueueView(byId);
+  paintQueueView(byId);
+}
+
+function paintQueueView(byId) {
+  const shared = sharedQueue || { items: [], autoFill: true };
+  const manual = manualIds(shared).map((id) => byId.get(id)).filter(Boolean);
+  const auto = autoIds(shared).map((id) => byId.get(id)).filter(Boolean);
+  const total = manual.length + auto.length;
+  countEl.textContent = total ? `${total}` : '';
+  mainEl.replaceChildren();
+
+  const bar = document.createElement('div');
+  bar.className = 'queue-bar';
+  if (total > 0) {
+    const playBtn = document.createElement('button');
+    playBtn.type = 'button';
+    playBtn.className = 'playall-bar__btn playall-bar__btn--primary';
+    playBtn.append(svgIcon('play', 16), document.createTextNode(t('webRemote.queue.play')));
+    playBtn.addEventListener('click', () => { location.hash = `play/${(manual[0] || auto[0]).id}`; });
+    bar.appendChild(playBtn);
+  }
+  bar.appendChild(createSwitch(t('webRemote.queue.autoFill'), shared.autoFill, async (on, input) => {
+    input.disabled = true;
+    const result = await queueSetAutoFill(on);
+    input.disabled = false;
+    reportResult(result);
+    if (!result.ok) { input.checked = !on; return; }
+    if (!adoptResultQueue(result)) {
+      const items = on ? shared.items : shared.items.filter((it) => !it.auto);
+      adoptSharedQueue({ items, autoFill: on });
+    }
+    if (on) scheduleQueueRefresh();
+  }));
+  mainEl.appendChild(bar);
+
+  if (total === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    const title = document.createElement('div');
+    title.className = 'empty__title';
+    title.textContent = t('webRemote.queue.emptyTitle');
+    const body = document.createElement('div');
+    body.textContent = t(shared.autoFill ? 'webRemote.queue.emptyBody' : 'webRemote.queue.emptyBodyAutoFillOff');
+    empty.append(title, body);
+    mainEl.appendChild(empty);
+    return;
+  }
+
+  const section = (heading, videos, isAuto) => {
+    const head = document.createElement('div');
+    head.className = 'queue-section__head';
+    const h = document.createElement('h2');
+    h.className = 'queue-section__title';
+    h.textContent = heading;
+    head.appendChild(h);
+    if (!isAuto) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'queue-section__action';
+      clearBtn.textContent = t('webRemote.queue.clear');
+      clearBtn.addEventListener('click', async () => {
+        clearBtn.disabled = true;
+        const result = await queueClear();
+        clearBtn.disabled = false;
+        reportResult(result, t('webRemote.queue.cleared'));
+        if (result.ok && !adoptResultQueue(result)) {
+          adoptSharedQueue({ ...shared, items: shared.items.filter((it) => it.auto) });
+        }
+        if (result.ok) scheduleQueueRefresh();
+      });
+      head.appendChild(clearBtn);
+    }
+    mainEl.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'list queue-list';
+    for (const v of videos) {
+      const row = createRow(v, { queueToggle: false });
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'triage-remove';
+      btn.appendChild(svgIcon('x', 16));
+      btn.setAttribute('aria-label', t(isAuto ? 'webRemote.queue.skip' : 'webRemote.queue.removeFromQueue'));
+      btn.title = btn.getAttribute('aria-label');
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        btn.disabled = true;
+        const result = await queueRemove(v.id);
+        reportResult(result);
+        if (!result.ok) { btn.disabled = false; return; }
+        if (!adoptResultQueue(result)) {
+          adoptSharedQueue({ ...shared, items: shared.items.filter((it) => it.videoId !== v.id) });
+        }
+        // The desktop fills the gap with its next candidate.
+        scheduleQueueRefresh();
+      });
+      row.classList.add('triage-removable');
+      row.appendChild(btn);
+      list.appendChild(row);
+    }
+    mainEl.appendChild(list);
+  };
+  if (manual.length) section(t('webRemote.queue.manualHeading'), manual, false);
+  if (auto.length) section(t('webRemote.queue.autoHeading'), auto, true);
+}
 
 /**
  * Build a clickable "In folder: X" bar for views that have a well-defined
@@ -1806,6 +2066,7 @@ function createCard(v) {
     dur.textContent = formatDuration(v.duration);
     thumbWrap.appendChild(dur);
   }
+  thumbWrap.appendChild(createQueueToggle(v));
   card.appendChild(thumbWrap);
 
   const body = document.createElement('div');
@@ -1950,7 +2211,7 @@ function createSpeedBadge(v, { withText = false } = {}) {
   return b;
 }
 
-function createRow(v) {
+function createRow(v, { queueToggle = true } = {}) {
   const row = document.createElement('div');
   row.className = 'list__row';
   row.addEventListener('click', () => { location.hash = `play/${v.id}`; });
@@ -2013,6 +2274,7 @@ function createRow(v) {
   const labels = createLabelsLine(v, 'list__tags');
   if (labels) info.appendChild(labels);
   row.appendChild(info);
+  if (queueToggle) row.appendChild(createQueueToggle(v));
   return row;
 }
 
@@ -2344,7 +2606,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   if (currentView === 'list' || currentView === 'groupings' ||
       currentView === 'grouping-detail' || currentView === 'folders' ||
-      currentView === 'folder-detail') {
+      currentView === 'folder-detail' || currentView === 'queue') {
     library = null;
     sources = null;
     folderIndex = null;
@@ -2609,6 +2871,7 @@ function rerenderCurrent() {
     const detail = parseGroupingDetailHash(location.hash.slice(1));
     if (detail) return renderGroupingDetail(detail.kind, detail.id);
   }
+  if (currentView === 'queue') return renderQueueView();
   if (currentView === 'folders') return renderFolderRoot();
   if (currentView === 'folder-detail') {
     const hash = location.hash.slice(1);
@@ -2886,11 +3149,76 @@ async function renderPlayer(id) {
 
   wrap.appendChild(videoWrap);
 
+  // ---- Next: shared queue + Play All (F1) ----
+  // Sync Play All's index to this render. Navigating to a video outside
+  // the list cancels it (manual navigation wins). Next to a shared-queue
+  // item leaves Play All where it was, to carry on after that item.
+  const advanced = queueAdvance?.id === video.id ? queueAdvance : null;
+  queueAdvance = null;
+  if (phoneQueue && !(advanced && advanced.source !== 'playAll')) {
+    const qIdx = phoneQueue.ids.indexOf(video.id);
+    if (qIdx >= 0) phoneQueue.index = qIdx;
+    else phoneQueue = null;
+  }
+  // Resolved lazily: the queue is re-read at the end and on every Next
+  // press, so edits from the desktop or the headset count.
+  const isCurrentPlayer = () => videoEl.isConnected && location.hash.slice(1) === `play/${video.id}`;
+  let countdownTimer = null;
+  const resolveNext = async () => {
+    await loadSharedQueue();
+    return nextUp({ currentId: video.id, shared: sharedQueue, phoneQueue });
+  };
+  const goNext = (next) => {
+    clearInterval(countdownTimer);
+    queueAdvance = next;
+    location.hash = `play/${next.id}`;
+  };
+  const playNextNow = async () => {
+    const next = await resolveNext();
+    if (!isCurrentPlayer()) return;
+    if (next) goNext(next);
+    else showToast(t('webRemote.player.nothingNext'));
+  };
+
   // Custom control overlay (V4) — center play, seek bar with chapter
   // markers, A-B loop, gap skip, mute, fullscreen. Skipped entirely in
   // native mode: the point of the fallback is that nothing of ours sits
   // between the finger and the video element.
-  if (!nativeControls) buildPlayerControls(videoWrap, videoEl, video);
+  if (!nativeControls) buildPlayerControls(videoWrap, videoEl, video, { onNext: playNextNow });
+
+  // What plays next + Autoplay. Next lives here too with the browser's own
+  // controls, which have no Next of their own.
+  const queueBar = document.createElement('div');
+  queueBar.className = 'player__queue-bar';
+  const nextHint = document.createElement('div');
+  nextHint.className = 'player__next-hint';
+  queueBar.appendChild(nextHint);
+  if (nativeControls) {
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'player__next-btn';
+    nextBtn.append(svgIcon('skipForward', 18), document.createTextNode(t('webRemote.player.next')));
+    nextBtn.addEventListener('click', playNextNow);
+    queueBar.appendChild(nextBtn);
+  }
+  queueBar.appendChild(createSwitch(t('webRemote.player.autoplay'), getAutoplay(), (on) => setAutoplay(on)));
+  wrap.appendChild(queueBar);
+  const showNextHint = () => {
+    const next = nextUp({ currentId: video.id, shared: sharedQueue, phoneQueue });
+    const nextVideo = next && videos.find((v) => v.id === next.id);
+    nextHint.textContent = nextVideo ? t('webRemote.player.nextName', { name: nextVideo.name }) : '';
+  };
+  showNextHint();
+  queueChangeHook = showNextHint;
+
+  // Playing a video consumes it from the shared queue (and moves auto-fill
+  // past it): once, when it actually starts.
+  let playedSent = false;
+  videoEl.addEventListener('playing', () => {
+    if (playedSent) return;
+    playedSent = true;
+    queuePlayed(video.id).then(adoptResultQueue);
+  });
 
   // Mode toggle. Lives in the player view because that is where someone is
   // standing when they decide the player is not working for them.
@@ -2967,61 +3295,56 @@ async function renderPlayer(id) {
   document.addEventListener('visibilitychange', onHidden);
   window.addEventListener('pagehide', orgasmRelease);
 
-  // ---- Queue auto-advance + Up Next (F1) ----
-  // Sync the queue's index to this render: navigating to a video outside
-  // the queue cancels it (manual navigation wins).
-  if (phoneQueue) {
-    const qIdx = phoneQueue.ids.indexOf(video.id);
-    if (qIdx >= 0) phoneQueue.index = qIdx;
-    else phoneQueue = null;
-  }
-  if (phoneQueue && phoneQueue.index < phoneQueue.ids.length - 1) {
-    const nextId = phoneQueue.ids[phoneQueue.index + 1];
-    const nextVideo = videos.find(v => v.id === nextId);
-    const upNext = document.createElement('div');
-    upNext.className = 'up-next-phone';
-    upNext.hidden = true;
-    const upTitle = document.createElement('div');
-    upTitle.className = 'up-next-phone__title';
-    const upName = document.createElement('div');
-    upName.className = 'up-next-phone__name';
-    upName.textContent = nextVideo ? nextVideo.name : '';
-    const upActions = document.createElement('div');
-    upActions.className = 'up-next-phone__actions';
-    const playNowBtn = document.createElement('button');
-    playNowBtn.className = 'up-next-phone__btn up-next-phone__btn--primary';
-    playNowBtn.textContent = t('webRemote.player.upNextPlayNow');
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'up-next-phone__btn';
-    cancelBtn.textContent = t('webRemote.player.upNextCancel');
-    upActions.append(playNowBtn, cancelBtn);
-    upNext.append(upTitle, upName, upActions);
-    videoWrap.appendChild(upNext);
+  // ---- Up Next card (F1): at the end, for whatever plays next ----
+  // Autoplay on: 8 s countdown, then advance. Off: the card waits for a tap.
+  const upNext = document.createElement('div');
+  upNext.className = 'up-next-phone';
+  upNext.hidden = true;
+  const upTitle = document.createElement('div');
+  upTitle.className = 'up-next-phone__title';
+  const upName = document.createElement('div');
+  upName.className = 'up-next-phone__name';
+  const upActions = document.createElement('div');
+  upActions.className = 'up-next-phone__actions';
+  const playNowBtn = document.createElement('button');
+  playNowBtn.className = 'up-next-phone__btn up-next-phone__btn--primary';
+  playNowBtn.textContent = t('webRemote.player.upNextPlayNow');
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'up-next-phone__btn';
+  cancelBtn.textContent = t('webRemote.player.upNextCancel');
+  upActions.append(playNowBtn, cancelBtn);
+  upNext.append(upTitle, upName, upActions);
+  videoWrap.appendChild(upNext);
 
-    let countdownTimer = null;
-    const advance = () => {
-      clearInterval(countdownTimer);
-      location.hash = `play/${nextId}`;
-    };
-    playNowBtn.addEventListener('click', advance);
-    cancelBtn.addEventListener('click', () => {
-      clearInterval(countdownTimer);
-      upNext.hidden = true;
-      phoneQueue = null; // cancelled — stop the queue entirely
-    });
-    videoEl.addEventListener('ended', () => {
-      if (!phoneQueue) return;
-      let remaining = 8;
+  let pendingNext = null;
+  playNowBtn.addEventListener('click', () => { if (pendingNext) goNext(pendingNext); });
+  cancelBtn.addEventListener('click', () => {
+    clearInterval(countdownTimer);
+    upNext.hidden = true;
+    pendingNext = null;
+    phoneQueue = null; // cancelled — stop Play All entirely
+  });
+  videoEl.addEventListener('ended', async () => {
+    const next = await resolveNext();
+    if (!next || !isCurrentPlayer() || !videoEl.ended) return;
+    pendingNext = next;
+    const nextVideo = videos.find((v) => v.id === next.id);
+    upName.textContent = nextVideo ? nextVideo.name : '';
+    upNext.hidden = false;
+    clearInterval(countdownTimer);
+    if (!getAutoplay()) {
+      upTitle.textContent = t('webRemote.player.upNext');
+      return;
+    }
+    let remaining = 8;
+    upTitle.textContent = t('webRemote.player.upNextIn', { seconds: remaining });
+    countdownTimer = setInterval(() => {
+      if (!isCurrentPlayer()) { clearInterval(countdownTimer); return; }
+      remaining--;
+      if (remaining <= 0) { goNext(next); return; }
       upTitle.textContent = t('webRemote.player.upNextIn', { seconds: remaining });
-      upNext.hidden = false;
-      clearInterval(countdownTimer);
-      countdownTimer = setInterval(() => {
-        remaining--;
-        if (remaining <= 0) { advance(); return; }
-        upTitle.textContent = t('webRemote.player.upNextIn', { seconds: remaining });
-      }, 1000);
-    });
-  }
+    }, 1000);
+  });
 
   // Track whether we paused the video for a desktop-side re-upload, so
   // we know whether to auto-resume when `script-ready` arrives. Without
@@ -3371,6 +3694,9 @@ async function renderPlayer(id) {
 
   mainEl.innerHTML = '';
   mainEl.appendChild(wrap);
+  // Arrived through Next or Up Next: keep playing. A browser that wants a
+  // fresh tap first refuses quietly and the play button stays up.
+  if (advanced) videoEl.play().catch(() => {});
 }
 
 /* ============================================================
@@ -3457,7 +3783,13 @@ function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
   btnRow.className = 'pcx__btnrow';
   const spacer = document.createElement('div');
   spacer.className = 'pcx__spacer';
-  btnRow.append(playBtn, muteBtn, spacer, fsBtn);
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'pcx__btn';
+  nextBtn.setAttribute('aria-label', t('webRemote.player.next'));
+  nextBtn.title = t('webRemote.player.next');
+  nextBtn.appendChild(svgIcon('skipForward', 20));
+  nextBtn.addEventListener('click', () => opts.onNext?.());
+  btnRow.append(playBtn, ...(opts.onNext ? [nextBtn] : []), muteBtn, spacer, fsBtn);
 
   bar.append(seekRow, btnRow);
   overlay.appendChild(bar);

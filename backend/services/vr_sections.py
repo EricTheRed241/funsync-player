@@ -5,6 +5,11 @@ named sections, and the scene details carry tags the headset can filter
 on. Both endpoints take their rules from here so the two players always
 agree.
 
+The first section is `Queue`: the shared play queue (the videos the user
+queued, then the desktop's auto-fill), in queue order. The headset's own
+next / previous walk the section a video was opened from, so starting from
+Queue plays through it. Every queued scene carries the `Queue:Up next` tag.
+
 Section names are plain text: HereSphere renders emoji as empty boxes.
 
 Everything here works on fields already on the registry entry
@@ -53,6 +58,7 @@ SECTION_RECENT = 'Recently Added'
 SECTION_FAVORITES = 'Favorites'
 SECTION_TOP_RATED = 'Top Rated'
 SECTION_UNRATED = 'Unrated'
+SECTION_QUEUE = 'Queue'
 PLAYLIST_SECTION_PREFIX = 'Playlist: '
 
 # Same threshold as the desktop (TOP_RATED_MIN in renderer/js/content-preferences.js).
@@ -76,6 +82,9 @@ SECTION_ORDER = (
 TRIAGE_SECTION_ORDER = (SECTION_FAVORITES, SECTION_TOP_RATED, SECTION_UNRATED)
 
 TAG_HANDMADE_AXES = 'Feature:Hand-made multi-axis'
+# `Queue:Up next` scene tag on every queued video. Adding / removing it in
+# HereSphere queues / unqueues the video.
+QUEUE_TAG = 'Queue:Up next'
 
 # Scene tag per playlist the video is in. Adding / removing one of these in
 # HereSphere adds the video to / removes it from that playlist.
@@ -204,15 +213,16 @@ def rating_sections(video, ratings):
     return names
 
 
-def build_sections(entries, now_ms=None, ratings=None, playlists=None):
+def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_paths=None):
     """Group listing items into sections.
 
     `entries` yields `(item, video, is_3d)`. Returns `[(name, [item, ...])]`:
+    `Queue` first (the entries named by `queue_paths`, in that order), then
     SECTION_ORDER, then Favorites / Top Rated / Unrated from `ratings`
     (videoPath → {rating, favorite}), then one `Playlist: <name>` per entry
     of `playlists` in the given order. Empty sections are omitted. Items keep
-    the order they came in, except playlist sections, which follow the
-    playlist's own order.
+    the order they came in, except the queue and playlist sections, which
+    follow their own order.
     """
     if now_ms is None:
         now_ms = time.time() * 1000
@@ -225,12 +235,38 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None):
         path = (video or {}).get('path')
         if path:
             by_path[path] = item
-    out = [(name, grouped[name]) for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name]]
+    out = []
+    queued = [by_path[p] for p in queue_paths or [] if p in by_path]
+    if queued:
+        out.append((SECTION_QUEUE, queued))
+    out.extend((name, grouped[name]) for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name])
     for playlist in playlists or []:
         items = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
         if items:
             out.append((playlist_section_name(playlist.get('name')), items))
     return out
+
+
+def queued_paths(play_queue):
+    """The play queue's paths in queue order: manual, then auto."""
+    play_queue = play_queue or {}
+    return list(play_queue.get('manual') or []) + list(play_queue.get('auto') or [])
+
+
+def queue_tags(path, queued):
+    """`[Queue:Up next]` when `path` is in `queued` (a collection of
+    paths), else []."""
+    return [QUEUE_TAG] if path and path in queued else []
+
+
+def has_queue_tag(tags):
+    """True when a HereSphere tag list (`[{"name": ...}, ...]`) carries
+    `Queue:Up next` (trimmed, case-insensitive)."""
+    key = QUEUE_TAG.casefold()
+    return any(
+        isinstance(tag, dict) and isinstance(tag.get('name'), str) and tag['name'].strip().casefold() == key
+        for tag in tags or []
+    )
 
 
 def playlist_section_name(name):

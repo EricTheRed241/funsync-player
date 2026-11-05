@@ -3,8 +3,9 @@
 The SPA itself lives in `backend/web-remote/` and is served via a
 `StaticFiles` mount on `/remote/` (wired up in `main.py`). This module
 exposes the JSON endpoints the SPA calls: the flat video list, the
-collection/playlist/category/artist groupings, and the triage writes (rating,
-favourite, add to / remove from a playlist, tag scores, favourite artists).
+collection/playlist/category/artist groupings, the shared play queue, and the
+triage writes (rating, favourite, add to / remove from a playlist, tag scores,
+favourite artists, queue add / remove / played / clear / auto-fill).
 
 The writes never touch the library here: the desktop owns it. Each becomes
 a library edit (`services.library_edits`) delivered to the desktop over the
@@ -37,6 +38,7 @@ from routes.media import (
     get_artists,
     get_favourite_artists,
     get_favourite_artist_score,
+    get_queue,
     get_sources,
     bump_rescan_request,
     _path_to_id,
@@ -507,6 +509,71 @@ async def set_favourite_score(payload: dict = Body(default={})):
         raise HTTPException(status_code=400, detail=str(e))
     result = await _submit(edit)
     return {**result, "score": edit["score"]}
+
+
+def _queue_body() -> dict:
+    """`{items: [{videoId, auto}], autoFill}`: the effective play queue,
+    manual items then auto-filled ones, unregistered paths skipped."""
+    play_queue = get_queue()
+    items = [{"videoId": vid_id, "auto": False} for vid_id in _video_ids_from_paths(play_queue["manual"])]
+    items += [{"videoId": vid_id, "auto": True} for vid_id in _video_ids_from_paths(play_queue["auto"])]
+    return {"items": items, "autoFill": play_queue["autoFill"]}
+
+
+async def _submit_queue_edit(kind: str, **fields) -> dict:
+    """Validate and submit one queue edit; 400 on a bad field. Answers
+    `{ok, seq, delivered, queue}` with the queue as `GET /queue` shows it."""
+    try:
+        edit = library_edits.make_queue_edit(kind, source="remote", **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    result = await _submit(edit)
+    return {**result, "queue": _queue_body()}
+
+
+@router.get("/queue")
+async def get_play_queue():
+    """The shared play queue: `{items: [{videoId, auto}], autoFill}`, the
+    videos the user queued (desktop, phone, headset) then the desktop's
+    auto-fill (`auto: true`), with edits still waiting for the desktop
+    applied."""
+    return _queue_body()
+
+
+@router.post("/queue/add")
+async def queue_add(payload: dict = Body(default={})):
+    """Queue a video: `{videoId, position?}`, `end` (default) or `next`
+    (also moves an already queued video to the front)."""
+    path = _video_path_or_404(payload.get("videoId"))
+    return await _submit_queue_edit(library_edits.KIND_QUEUE_ADD, path=path, position=payload.get("position"))
+
+
+@router.post("/queue/remove")
+async def queue_remove(payload: dict = Body(default={})):
+    """Take a video out of the queue: `{videoId}`. An auto-filled one is
+    skipped, so the desktop fills in the next candidate."""
+    path = _video_path_or_404(payload.get("videoId"))
+    return await _submit_queue_edit(library_edits.KIND_QUEUE_REMOVE, path=path)
+
+
+@router.post("/queue/played")
+async def queue_played(payload: dict = Body(default={})):
+    """A video started playing on the phone: `{videoId}`. It leaves the
+    queue and auto-fill moves past it."""
+    path = _video_path_or_404(payload.get("videoId"))
+    return await _submit_queue_edit(library_edits.KIND_QUEUE_PLAYED, path=path)
+
+
+@router.post("/queue/clear")
+async def queue_clear():
+    """Empty the user's part of the queue (auto-fill stays)."""
+    return await _submit_queue_edit(library_edits.KIND_QUEUE_CLEAR)
+
+
+@router.post("/queue/auto-fill")
+async def queue_auto_fill(payload: dict = Body(default={})):
+    """Turn auto-fill on or off: `{enabled}` (a bool)."""
+    return await _submit_queue_edit(library_edits.KIND_QUEUE_AUTO_FILL, enabled=payload.get("enabled"))
 
 
 @router.get("/categories")

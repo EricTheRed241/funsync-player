@@ -39,8 +39,14 @@ describe('svgIcon namespace', () => {
   });
 
   it('every player-control icon resolves', () => {
-    for (const n of ['play', 'pause', 'volume', 'volumeOff', 'maximize']) {
+    for (const n of ['play', 'pause', 'volume', 'volumeOff', 'maximize', 'skipForward']) {
       expect(svgIcon(n, 20).tagName.toLowerCase()).toBe('svg');
+    }
+  });
+
+  it('every play-queue icon resolves', () => {
+    for (const n of ['listEnd', 'listChecks', 'listVideo']) {
+      expect(svgIcon(n, 18).tagName.toLowerCase()).toBe('svg');
     }
   });
 });

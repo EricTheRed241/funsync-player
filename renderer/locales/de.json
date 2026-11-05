@@ -47,6 +47,8 @@
     "sectionNowPlaying": "Wird gerade abgespielt",
     "sectionUserQueue": "Von dir eingereiht",
     "sectionUpcoming": "Demnächst",
+    "sectionAutoFilled": "Automatisch aufgefüllt",
+    "skipAutoFilledAria": "Überspringen (aus dem Auffüllen entfernen)",
     "emptyNoLibrary": "Warteschlange ist leer",
     "emptyEndOfList": "Ende der Liste — füge weitere Videos zur Warteschlange hinzu",
     "openLibrary": "Bibliothek öffnen",
@@ -680,7 +682,8 @@
       "categories": "Kategorien",
       "tags": "Tags",
       "artists": "Künstler",
-      "folders": "Ordner"
+      "folders": "Ordner",
+      "queue": "Warteschlange"
     },
     "filterSheet": {
       "title": "Filter",
@@ -826,7 +829,12 @@
       "avg": "Ø",
       "max": "Max",
       "speedUnit": "Einheiten/s",
-      "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s"
+      "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s",
+      "next": "Nächstes",
+      "autoplay": "Autoplay",
+      "nextName": "Als Nächstes: {name}",
+      "nothingNext": "Kein nächstes Video",
+      "upNext": "Als Nächstes"
     },
     "triage": {
       "stars": "{n} Sterne",
@@ -852,6 +860,25 @@
         "top": "Top bewertet (4+)",
         "unrated": "Nicht bewertet"
       }
+    },
+    "queue": {
+      "add": "Zur Warteschlange",
+      "queued": "In Warteschlange",
+      "removeFromQueue": "Aus der Warteschlange entfernen",
+      "added": "Zur Warteschlange hinzugefügt",
+      "removed": "Aus der Warteschlange entfernt",
+      "cleared": "Warteschlange geleert",
+      "clear": "Leeren",
+      "skip": "Überspringen",
+      "play": "Warteschlange abspielen",
+      "autoFill": "Automatisch füllen",
+      "manualHeading": "Deine Warteschlange",
+      "autoHeading": "Automatisch gefüllt",
+      "emptyTitle": "Die Warteschlange ist leer",
+      "emptyBody": "Füge Videos mit der Warteschlangen-Taste hinzu. Automatisch gewählte Videos erscheinen hier, sobald die Desktop-App sie ausgesucht hat.",
+      "emptyBodyAutoFillOff": "Füge Videos mit der Warteschlangen-Taste hinzu oder schalte „Automatisch füllen“ ein.",
+      "loadFailedTitle": "Warteschlange konnte nicht geladen werden",
+      "loadFailedBody": "Prüfe, ob FunSync auf deinem Desktop läuft, und versuche es erneut."
     }
   },
   "hevc": {
@@ -1163,6 +1190,10 @@
       "autoplayOnAdvanceLabel": "Nächstes Video automatisch abspielen",
       "autoplayOnAdvanceResetTitle": "Auf Standard zurücksetzen (aus)",
       "autoplayOnAdvanceResetAria": "Autoplay auf Standard zurücksetzen",
+      "queueAutoFillLabel": "Warteschlange automatisch auffüllen",
+      "queueAutoFillHint": "Füllt die Wiedergabe-Warteschlange (geteilt mit der Web-Fernbedienung und HereSphere / DeoVR) mit Videos, die du länger nicht abgespielt hast, auf {size} auf: zuerst unbewertete, dann nach Präferenz-Score, neueste zuerst. In der Bibliothek laufen aufgefüllte Videos vor dem nächsten Bibliotheksvideo.",
+      "queueAutoFillResetTitle": "Auf Standard zurücksetzen (an)",
+      "queueAutoFillResetAria": "Automatisches Auffüllen auf Standard zurücksetzen",
       "multiHeader": "Mehrachsig",
       "fieldDefaultPlayback": "Standard-Wiedergabe",
       "preferSingle": "Einzelachse (Standard)",
