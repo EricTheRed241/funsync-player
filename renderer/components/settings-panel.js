@@ -26,7 +26,7 @@ const SETTINGS_DEFAULTS = {
   'player.gapSkip.thresholdSec': 10,
   'player.upNext.mode': 'auto',
   'player.upNext.countdownSec': 10,
-  'player.autoplayOnAdvance': false,
+  'player.autoplayOnAdvance': true,
   'player.queueAutoFill': true,
   'player.rangeExtender.enabled': false,
   'player.preferMultiAxis': 'single',

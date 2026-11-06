@@ -30,6 +30,9 @@ const DEFAULTS = {
         mode: 'auto',
         countdownSec: 10,
       },
+      // Up Next / queue advances start playing the next video (renderer
+      // `_autoplayOnAdvance`). Default on.
+      autoplayOnAdvance: true,
       // Shared play queue (renderer/js/play-queue.js): append auto-filled
       // videos after the user's own queue (`userQueue`). Default on.
       queueAutoFill: true,
