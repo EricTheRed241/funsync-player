@@ -54,7 +54,7 @@ from starlette.responses import Response
 
 from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
 from routes.remote_sync import submit_library_edit
-from services import library_edits, video_info, vr_sections
+from services import library_edits, stereo_detect, video_info, vr_sections
 from services.network import get_local_ip
 
 router = APIRouter()
@@ -291,15 +291,20 @@ def detect_vr_format_for_video(video, dims=None):
          default (`mkx200` SBS) so HereSphere has a projection to play with.
       3. Filename heuristics (`detect_vr_format`).
 
-    `dims` is an optional `(width, height)` tuple. When the filename gives
-    no VR signal AND the desktop decided nothing, a conservative
-    resolution/aspect heuristic (`_dims_suggest_vr`) upgrades the video to
-    VR SBS so an untagged VR master isn't served flat. Callers pass dims
-    from cached ffprobe results — never triggering a probe just to group
-    the library (see the library-listing loops, which use cached-only dims).
+    When the filename gives no VR signal AND the desktop decided nothing,
+    the frames decide next (`services.stereo_detect`, looked at in the
+    background since registration): two eyes side by side make it VR —
+    180° equirectangular (`dome`), the layout VaM / SFM renders use, or flat
+    3D (`flat` + `sbs`) when each eye is wider than 1.5:1 (3840×1080,
+    7680×2160); one picture makes it flat even when its frame is VR-shaped.
+    Until the frames have been looked at, `dims` (an optional `(width,
+    height)` from cached ffprobe results) may still upgrade it to VR SBS by
+    a conservative resolution/aspect heuristic (`_dims_suggest_vr`). Never
+    probes or reads a frame itself.
     """
     video = video or {}
-    projection = get_vr_projection(video.get('path'))
+    path = video.get('path')
+    projection = get_vr_projection(path)
     if projection == 'flat':
         return 'flat', 'off', False
     if projection in _PROJECTION_FORMATS:
@@ -316,9 +321,18 @@ def detect_vr_format_for_video(video, dims=None):
     if projection or override == 'vr':
         return (*_DEFAULT_VR_FORMAT, True)
 
-    # Resolution/aspect fallback — only when filename said flat and the
-    # user hasn't set an override either way. Matches the manual 'vr'
-    # default projection (mkx200 SBS).
+    if override is None:
+        layout = stereo_detect.cached_layout(path)
+        if layout == 'sbs':
+            if dims and dims[1] and (dims[0] / 2) / dims[1] > 1.5:
+                return 'flat', 'sbs', True
+            return 'dome', 'sbs', True
+        if layout == 'mono':
+            return screen, stereo, is_3d
+
+    # Resolution/aspect fallback — only when filename said flat, the frames
+    # haven't been looked at and the user hasn't set an override either
+    # way. Matches the manual 'vr' default projection (mkx200 SBS).
     if override is None and dims and _dims_suggest_vr(*dims):
         return (*_DEFAULT_VR_FORMAT, True)
 
@@ -334,7 +348,8 @@ def vr_decision(vid_id, video):
     if is_3d or dims is not None:
         return is_3d
     video = video or {}
-    if get_vr_projection(video.get('path')) or video.get('manualVRType') is not None:
+    if (get_vr_projection(video.get('path')) or video.get('manualVRType') is not None
+            or stereo_detect.cached_layout(video.get('path'))):
         return False
     return None
 
@@ -447,18 +462,22 @@ def queue_dims_warmup(registry) -> int:
     it (called at registration). Videos whose VR status hinges on their
     dimensions — no filename VR tag, no desktop decision (VR Format panel
     projection or manual toggle) — are probed first; the rest only feed the
-    scene-detail media block. Returns the number of videos queued for
-    probing."""
-    first, later = [], []
+    scene-detail media block. The same undecided videos get their frames
+    looked at (`services.stereo_detect`). Returns the number of videos
+    queued for probing."""
+    first, later, frames = [], [], []
     for vid_id, video in registry.items():
-        if video.get('width') and video.get('height'):
-            continue
         path = video.get('path')
         if not path:
             continue
-        _, _, tagged = detect_vr_format_for_video(video)
+        _, _, tagged = detect_vr_format(video.get('name', '') or '')
         decided = tagged or video.get('manualVRType') or get_vr_projection(path)
+        if not decided:
+            frames.append((path, video.get('duration') or 0))
+        if video.get('width') and video.get('height'):
+            continue
         (later if decided else first).append((vid_id, path))
+    stereo_detect.queue_checks(frames)
     return video_info.queue_warmup(first + later)
 
 
