@@ -78,9 +78,11 @@ export function autoIds(shared) {
  * What plays after `currentId`: `{id, source}` with source 'manual' (the
  * user's queue), 'playAll' (the phone's Play All list, `{ids, index}`) or
  * 'auto' (auto-filled), or null when nothing is up next. The video being
- * played is never its own next.
+ * played is never its own next. `skipAuto(id)` true passes over an
+ * auto-filled item (the phone skips VR ones, which are for the headset);
+ * what the user queued or put in Play All always plays.
  */
-export function nextUp({ currentId = null, shared = null, phoneQueue = null } = {}) {
+export function nextUp({ currentId = null, shared = null, phoneQueue = null, skipAuto = null } = {}) {
   const manual = manualIds(shared).find((id) => id !== currentId);
   if (manual) return { id: manual, source: 'manual' };
 
@@ -90,7 +92,7 @@ export function nextUp({ currentId = null, shared = null, phoneQueue = null } = 
     if (next) return { id: next, source: 'playAll' };
   }
 
-  const auto = autoIds(shared).find((id) => id !== currentId);
+  const auto = autoIds(shared).find((id) => id !== currentId && !skipAuto?.(id));
   if (auto) return { id: auto, source: 'auto' };
   return null;
 }

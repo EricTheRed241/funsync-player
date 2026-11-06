@@ -45,7 +45,7 @@ describe('svgIcon namespace', () => {
   });
 
   it('every play-queue icon resolves', () => {
-    for (const n of ['listEnd', 'listChecks', 'listVideo']) {
+    for (const n of ['listEnd', 'listChecks', 'listVideo', 'listStart']) {
       expect(svgIcon(n, 18).tagName.toLowerCase()).toBe('svg');
     }
   });

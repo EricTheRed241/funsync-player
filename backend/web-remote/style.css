@@ -2703,6 +2703,11 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
   font-weight: 600;
 }
 .queue-section__action:disabled { opacity: 0.5; }
+.queue-section__note {
+  padding: 0 16px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
 .queue-list { padding-top: 0; }
 
 @media (prefers-reduced-motion: reduce) {

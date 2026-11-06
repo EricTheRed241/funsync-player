@@ -2627,6 +2627,11 @@ class App {
     return this.settings?.get?.('player.queueAutoFill') !== false;
   }
 
+  /** "Auto-play the next video" (Settings → Playback → Up Next); on unless turned off. */
+  _autoplayOnAdvance() {
+    return this.settings?.get?.('player.autoplayOnAdvance') !== false;
+  }
+
   /** Compute the auto-filled queue now; true when it changed. */
   _refreshAutoQueue() {
     const videos = this.library?._videos;
@@ -7876,7 +7881,7 @@ class App {
       const next = this._userQueue[0];
       this._userQueue = this._userQueue.slice(1);
       this._persistUserQueue();
-      return this._jumpToVideoFromQueue(next);
+      return this._jumpToVideoFromQueue(next, { autoAdvance: true });
     }
     // Auto-filled queue: in the plain library (or with no context) it plays
     // before the library's own next (`_autoQueueNext` says when it applies).
@@ -7930,7 +7935,7 @@ class App {
     // (Queue / Play All already auto-plays via _playQueueItem's default
     // autoPlay:true, so this flag only matters for library / playlist /
     // category sources that route through _playFromLibrary.)
-    if (this.settings?.get?.('player.autoplayOnAdvance')) {
+    if (this._autoplayOnAdvance()) {
       video._autoPlayOnNextLoad = true;
     }
     await this.library._playVideo(video);
@@ -8189,9 +8194,9 @@ class App {
       showToast(t('toast.nextNotFound'), 'warn', 3000);
       return;
     }
-    // An unattended advance (Up Next into an auto-filled item, which takes
-    // the library next's place) auto-plays like that next would have.
-    if (autoAdvance && this.settings?.get?.('player.autoplayOnAdvance')) {
+    // An unattended advance (Up Next into a queued or auto-filled item)
+    // auto-plays like the library's next would have.
+    if (autoAdvance && this._autoplayOnAdvance()) {
       video._autoPlayOnNextLoad = true;
     }
     await this.library._playVideo(video);
@@ -10057,7 +10062,7 @@ class App {
       // Keep the mini-player docked across this auto-advance (see _playUpNext).
       // _jumpToVideoFromQueue is async; hold the flag until its load settles.
       this._autoAdvancing = true;
-      Promise.resolve(this._jumpToVideoFromQueue(next))
+      Promise.resolve(this._jumpToVideoFromQueue(next, { autoAdvance: true }))
         .finally(() => { this._autoAdvancing = false; });
       return true;
     }

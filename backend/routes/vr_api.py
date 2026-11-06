@@ -29,6 +29,12 @@ relative to what the scene detail last SERVED for that path
 (`event` 1) consumes the video from the queue (`queue-played`), once per
 video in a row since HereSphere sends play again after every pause.
 
+`Playlist:<name>` tags follow the same rule (`_served_playlists`): only a tag
+added or removed relative to the served scene changes a playlist, so a save
+carrying older tags (the video was filed or unfiled on the phone meanwhile)
+leaves that alone. Without a served record (backend restarted since) the tag
+list is compared with the current playlists, as before.
+
 Whether a video is VR follows the desktop first (VR Format panel
 projection, then the manual toggle), then the filename, then the frame
 shape (`detect_vr_format_for_video`); `GET /api/media/vr-flags` reports
@@ -517,15 +523,21 @@ HERESPHERE_EVENT_PLAY = 1
 # path → whether the HereSphere scene detail last served for it carried
 # `Queue:Up next`. Only a tag change relative to this is a queue edit.
 _served_queue_tag: dict[str, bool] = {}
+# path → the playlists (case-folded names) whose `Playlist:` tags the scene
+# detail last served for it carried. Only a change relative to this is a
+# playlist edit, so a save from a headset showing older tags (the video was
+# filed elsewhere meanwhile) doesn't undo that.
+_served_playlists: dict[str, frozenset[str]] = {}
 # Path of the last video HereSphere reported playing; a play event for the
 # same path again (after a pause) is not another `queue-played`.
 _last_headset_played: str | None = None
 
 
 def _reset_queue_state_for_tests() -> None:
-    """Forget served queue tags and the last headset play. Not public API."""
+    """Forget served tags and the last headset play. Not public API."""
     global _last_headset_played
     _served_queue_tag.clear()
+    _served_playlists.clear()
     _last_headset_played = None
 
 
@@ -535,7 +547,13 @@ def served_queue_tag(path):
     return _served_queue_tag.get(path)
 
 
-def parse_heresphere_update(body, path, ratings, playlists, served_queue=None):
+def served_playlists(path):
+    """Case-folded names of the playlists whose tags the scene detail last
+    served for `path` carried; None when none was served."""
+    return _served_playlists.get(path)
+
+
+def parse_heresphere_update(body, path, ratings, playlists, served_queue=None, served_playlist_keys=None):
     """Library edits for one HereSphere scene POST body.
 
     HereSphere POSTs the scene URL both to load it (body: credentials only)
@@ -548,7 +566,10 @@ def parse_heresphere_update(body, path, ratings, playlists, served_queue=None):
       - `tags` (the full list) → `playlist-add` per `Playlist:<name>` tag
         not matching a playlist the video is in (case-insensitive; a new
         name creates the playlist), `playlist-remove` per playlist the video
-        is in that has no tag. `Queue:Up next` is compared with
+        is in that has no tag. With `served_playlist_keys` (the case-folded
+        playlist names the scene was last served with) only tags the user
+        changed count: an add needs a tag that wasn't served, a remove a
+        served tag that's gone. `Queue:Up next` is compared with
         `served_queue`, whether the scene detail last served for `path`
         carried it (None: never served): present now but not then →
         `queue-add` at the end, absent now but present then →
@@ -579,7 +600,8 @@ def parse_heresphere_update(body, path, ratings, playlists, served_queue=None):
         member_of = [p for p in playlists or [] if path in (p.get('videoPaths') or [])]
         member_keys = {(p.get('name') or '').strip().casefold() for p in member_of}
         for name in wanted:
-            if name.casefold() in member_keys:
+            key = name.casefold()
+            if key in member_keys or (served_playlist_keys is not None and key in served_playlist_keys):
                 continue
             existing = library_edits.find_playlist(playlists or [], name=name)
             edits.append(library_edits.make_playlist_edit(
@@ -590,11 +612,15 @@ def parse_heresphere_update(body, path, ratings, playlists, served_queue=None):
             ))
         for p in member_of:
             name = (p.get('name') or '').strip()
-            if name and name.casefold() not in wanted_keys:
-                edits.append(library_edits.make_playlist_edit(
-                    library_edits.KIND_PLAYLIST_REMOVE, path,
-                    playlist_id=p.get('id'), name=name, source='heresphere',
-                ))
+            key = name.casefold()
+            if not name or key in wanted_keys:
+                continue
+            if served_playlist_keys is not None and key not in served_playlist_keys:
+                continue
+            edits.append(library_edits.make_playlist_edit(
+                library_edits.KIND_PLAYLIST_REMOVE, path,
+                playlist_id=p.get('id'), name=name, source='heresphere',
+            ))
         if served_queue is not None:
             tagged = vr_sections.has_queue_tag(tags)
             if tagged and not served_queue:
@@ -613,7 +639,9 @@ async def _apply_heresphere_update(request: Request, path):
         body = await request.json()
     except Exception:
         return
-    edits = parse_heresphere_update(body, path, get_ratings(), get_playlists(), served_queue_tag(path))
+    edits = parse_heresphere_update(
+        body, path, get_ratings(), get_playlists(), served_queue_tag(path), served_playlists(path),
+    )
     for edit in edits:
         try:
             await submit_library_edit(edit)
@@ -896,6 +924,7 @@ async def heresphere_scene(video_id: str, request: Request):
     queued = set(vr_sections.queued_paths(get_queue()))
     tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists, queued)]
     _served_queue_tag[path] = path in queued
+    _served_playlists[path] = frozenset(n.casefold() for n in vr_sections.playlist_names_from_tags(tags))
 
     # Auto-generate chapter tags for navigation (every 5 min)
     if duration > 300:

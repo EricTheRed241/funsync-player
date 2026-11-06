@@ -65,6 +65,15 @@ describe('nextUp skips the video being played', () => {
   it('falls through when the current video is the only manual item', () => {
     expect(nextUp({ currentId: 'm1', shared: shared(['m1'], ['a1']) })).toEqual({ id: 'a1', source: 'auto' });
   });
+
+  it('passes over auto-filled items skipAuto rejects (VR on the phone), never manual or Play All ones', () => {
+    const isVR = (id) => id.startsWith('vr');
+    expect(nextUp({ currentId: 'x', shared: shared([], ['vr1', 'a1']), skipAuto: isVR })).toEqual({ id: 'a1', source: 'auto' });
+    expect(nextUp({ currentId: 'x', shared: shared([], ['vr1']), skipAuto: isVR })).toBeNull();
+    expect(nextUp({ currentId: 'x', shared: shared(['vr2'], ['a1']), skipAuto: isVR })).toEqual({ id: 'vr2', source: 'manual' });
+    expect(nextUp({ currentId: 'x', shared: shared([]), phoneQueue: { ids: ['x', 'vr3'], index: 0 }, skipAuto: isVR }))
+      .toEqual({ id: 'vr3', source: 'playAll' });
+  });
 });
 
 describe('nextUp with nothing up next', () => {

@@ -301,6 +301,31 @@ class TestHereSphereParsing:
     def test_absent_tags_leave_playlists_alone(self):
         assert parse_heresphere_update({"isFavorite": False}, A, {}, self.PLAYLISTS) == []
 
+    def test_with_served_playlists_only_user_changes_count(self):
+        # Served with Evening only. Since then the phone put A in Triage (so
+        # it's a member) and the headset's stale save lacks that tag: no remove.
+        playlists = [
+            {"id": "pl-1", "name": "Evening", "videoPaths": [A]},
+            {"id": "pl-2", "name": "Triage", "videoPaths": [A]},
+            {"id": "pl-3", "name": "Later", "videoPaths": []},
+        ]
+        stale = {"tags": [{"name": "Playlist:Evening"}]}
+        assert parse_heresphere_update(stale, A, {}, playlists, None, frozenset({"evening"})) == []
+        # The user deletes Evening and adds Later in the headset: both count.
+        edited = {"tags": [{"name": "Playlist:Later"}]}
+        edits = parse_heresphere_update(edited, A, {}, playlists, None, frozenset({"evening"}))
+        assert [(e["kind"], e["playlistId"]) for e in edits] == [
+            (KIND_PLAYLIST_ADD, "pl-3"), (KIND_PLAYLIST_REMOVE, "pl-1"),
+        ]
+
+    def test_with_served_playlists_a_stale_tag_does_not_refile(self):
+        # Served with Evening; the phone took A out of it since. A rating
+        # saved with the old tags must not put it back.
+        playlists = [{"id": "pl-1", "name": "Evening", "videoPaths": []}]
+        body = {"rating": 4, "tags": [{"name": "Playlist:Evening"}]}
+        edits = parse_heresphere_update(body, A, {}, playlists, None, frozenset({"evening"}))
+        assert [e["kind"] for e in edits] == [KIND_RATING]
+
 
 class TestHereSphereEndpoint:
     def test_scene_advertises_write_support_and_current_state(self, client, library):
@@ -342,6 +367,14 @@ class TestHereSphereEndpoint:
         assert "Playlist: Evening" in names  # C is still in it
         sections, _ = _sections(client)
         assert _ids(sections["Playlist: Evening"]) == [library["C"]]
+
+    def test_stale_save_after_phone_unfiles_does_not_refile(self, client, library):
+        a = library["A"]
+        client.get(f"/heresphere/{a}")  # served with Playlist:Evening
+        client.post("/api/remote/playlists/remove-video", json={"videoId": a, "playlistId": "pl-1"})
+        # The headset still shows Evening and saves a rating with it.
+        client.post(f"/heresphere/{a}", json={"rating": 4, "tags": [{"name": "Playlist:Evening"}]})
+        assert [e["kind"] for e in library_edits.queue.pending()] == [KIND_PLAYLIST_REMOVE, KIND_RATING]
 
     def test_post_with_non_json_body_still_loads(self, client, library):
         r = client.post(f"/heresphere/{library['A']}", content=b"not json")

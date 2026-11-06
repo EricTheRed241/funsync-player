@@ -1882,12 +1882,14 @@ function paintQueueView(byId) {
 
   const bar = document.createElement('div');
   bar.className = 'queue-bar';
-  if (total > 0) {
+  // The phone passes over auto-filled VR videos (they're for the headset).
+  const firstPlayable = manual[0] || auto.find((v) => !videoIsVR(v));
+  if (firstPlayable) {
     const playBtn = document.createElement('button');
     playBtn.type = 'button';
     playBtn.className = 'playall-bar__btn playall-bar__btn--primary';
     playBtn.append(svgIcon('play', 16), document.createTextNode(t('webRemote.queue.play')));
-    playBtn.addEventListener('click', () => { location.hash = `play/${(manual[0] || auto[0]).id}`; });
+    playBtn.addEventListener('click', () => { location.hash = `play/${firstPlayable.id}`; });
     bar.appendChild(playBtn);
   }
   bar.appendChild(createSwitch(t('webRemote.queue.autoFill'), shared.autoFill, async (on, input) => {
@@ -1942,11 +1944,41 @@ function paintQueueView(byId) {
       head.appendChild(clearBtn);
     }
     mainEl.appendChild(head);
+    if (isAuto && videos.some((v) => videoIsVR(v))) {
+      const note = document.createElement('div');
+      note.className = 'queue-section__note';
+      note.textContent = t('webRemote.queue.vrSkipped');
+      mainEl.appendChild(note);
+    }
 
     const list = document.createElement('div');
     list.className = 'list queue-list';
-    for (const v of videos) {
+    for (const [i, v] of videos.entries()) {
       const row = createRow(v, { queueToggle: false });
+      // Play next: to the front of the queue (an auto-filled one joins your
+      // queue there). The first of your queue is already next.
+      if (isAuto || i > 0) {
+        const nextBtn = document.createElement('button');
+        nextBtn.type = 'button';
+        nextBtn.className = 'queue-toggle queue-toggle--icon';
+        nextBtn.appendChild(svgIcon('listStart', 18));
+        nextBtn.setAttribute('aria-label', t('webRemote.queue.playNext'));
+        nextBtn.title = nextBtn.getAttribute('aria-label');
+        nextBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          nextBtn.disabled = true;
+          const result = await queueAdd(v.id, 'next');
+          nextBtn.disabled = false;
+          reportResult(result, t('webRemote.queue.movedNext', { name: v.name }));
+          if (!result.ok) return;
+          if (!adoptResultQueue(result)) {
+            const rest = shared.items.filter((it) => it.videoId !== v.id);
+            adoptSharedQueue({ ...shared, items: [{ videoId: v.id, auto: false }, ...rest] });
+          }
+          scheduleQueueRefresh();
+        });
+        row.appendChild(nextBtn);
+      }
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'triage-remove';
@@ -3164,9 +3196,11 @@ async function renderPlayer(id) {
   // press, so edits from the desktop or the headset count.
   const isCurrentPlayer = () => videoEl.isConnected && location.hash.slice(1) === `play/${video.id}`;
   let countdownTimer = null;
+  // Auto-filled VR videos are for the headset; the phone passes over them.
+  const skipAuto = (id) => { const v = videos.find((x) => x.id === id); return !!v && videoIsVR(v); };
   const resolveNext = async () => {
     await loadSharedQueue();
-    return nextUp({ currentId: video.id, shared: sharedQueue, phoneQueue });
+    return nextUp({ currentId: video.id, shared: sharedQueue, phoneQueue, skipAuto });
   };
   const goNext = (next) => {
     clearInterval(countdownTimer);
@@ -3204,7 +3238,7 @@ async function renderPlayer(id) {
   queueBar.appendChild(createSwitch(t('webRemote.player.autoplay'), getAutoplay(), (on) => setAutoplay(on)));
   wrap.appendChild(queueBar);
   const showNextHint = () => {
-    const next = nextUp({ currentId: video.id, shared: sharedQueue, phoneQueue });
+    const next = nextUp({ currentId: video.id, shared: sharedQueue, phoneQueue, skipAuto });
     const nextVideo = next && videos.find((v) => v.id === next.id);
     nextHint.textContent = nextVideo ? t('webRemote.player.nextName', { name: nextVideo.name }) : '';
   };
