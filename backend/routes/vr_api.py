@@ -231,9 +231,12 @@ _STUDIO_COMBO_RE = re.compile(r'^([A-Z]{2,8})(\d{2,5})$')
 
 # VR Format panel projections (`library.vrFormat[path].projection`, see
 # renderer/components/vr-format-panel.js) that name a geometry the headsets
-# can play. The side-by-side planar ones (`sbs-half`, `sbs-full`) say only
-# "stereo, side by side": they keep the filename's layout, or the default.
+# can play. `sbs-full` is flat 3D: two full pictures side by side (3840×1080,
+# 7680×2160), played on a flat screen in stereo ('flat' → HereSphere
+# `perspective` + `sbs`), never wrapped around as 180°. `sbs-half` says only
+# "stereo, side by side": it keeps the filename's layout, or the default.
 _PROJECTION_FORMATS = {
+    'sbs-full': ('flat', 'sbs'),
     'tb-half': ('dome', 'tb'),
     'tb-full': ('dome', 'tb'),
     'equirect-180': ('dome', 'sbs'),
