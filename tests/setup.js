@@ -9,6 +9,20 @@
 // the IPC/browser stubs without a ReferenceError killing the whole file.
 // Genuinely DOM-only patches (HTMLCanvasElement) are explicitly guarded.
 import { vi } from 'vitest';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// --- electron-log: keep tests out of the real log ---
+// Outside Electron, electron-log resolves its file to the app's real log
+// (~/Library/Logs/funsync-player/main.log on macOS, %APPDATA%/funsync-player/
+// logs/main.log on Windows), so any test that loads electron/logger.js, or a
+// module that requires it, would append there. Point the file transport at a
+// temp file before any test file runs. CommonJS `require` and Vitest's
+// `import` of electron-log both resolve through Node's module cache, so this
+// is the same instance electron/logger.js configures.
+createRequire(import.meta.url)('electron-log/main').transports.file.resolvePathFn = () =>
+  join(tmpdir(), 'funsync-player-vitest', 'main.log');
 
 // --- localStorage on Node 25+ ---
 // Node 25+ defines its own global `localStorage`, which is undefined unless
