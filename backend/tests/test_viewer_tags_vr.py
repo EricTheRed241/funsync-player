@@ -219,6 +219,17 @@ async def test_vr_format_projection_sets_the_headset_layout(client, probe, tmp_p
 
 
 @pytest.mark.anyio
+async def test_sbs_full_plays_as_flat_3d(client, probe, tmp_path):
+    # Two full 16:9 pictures side by side: stereo on a flat screen, not 180°.
+    wide = _make(tmp_path, probe, "Fap Hero 3D.mp4", FLAT_DIMS)
+    await _register(client, {"videos": [_video(wide)], "vrFormat": {wide: {"projection": "sbs-full"}}})
+    scene = (await client.get(f"/heresphere/{media._path_to_id(wide)}")).json()
+    assert (scene["projection"], scene["stereo"]) == ("perspective", "sbs")
+    deo = (await client.get(f"/deovr/{media._path_to_id(wide)}")).json()
+    assert (deo["screenType"], deo["stereoMode"], deo["is3d"]) == ("flat", "sbs", True)
+
+
+@pytest.mark.anyio
 async def test_register_stores_preference_scores(client, probe, tmp_path):
     a = _make(tmp_path, probe, "A.mp4", FLAT_DIMS)
     b = _make(tmp_path, probe, "B.mp4", FLAT_DIMS)
