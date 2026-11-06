@@ -191,6 +191,13 @@ describe('sweepRejected', () => {
     expect(r).toEqual({ removed: [{ path: '/b.mp4', reason: 'low-rating' }], failed: [] });
     expect(playlists[0].videoPaths).toEqual(['/a.mp4']);
   });
+
+  it('drops the script association of a deleted video, and only of a deleted one', async () => {
+    const ratings = { '/a.mp4': { rating: 1 }, '/b.mp4': { rating: 2 } };
+    const store = { 'library.associations': { '/a.mp4': { active: 'single', single: '/a.funscript' }, '/b.mp4': { active: 'single', single: '/b.funscript' }, '/c.mp4': { active: 'single', single: '/c.funscript' } } };
+    await sweepRejected({ data: data([], ratings, store), deleteVideo: async (p) => (p === '/b.mp4' ? { success: false, error: 'busy' } : { success: true }) });
+    expect(Object.keys(store['library.associations'])).toEqual(['/b.mp4', '/c.mp4']);
+  });
 });
 
 describe('syncReview', () => {

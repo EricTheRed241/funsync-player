@@ -23,7 +23,8 @@
 //      and only the first justifies touching a user's data.
 //
 // The governing rule, and the thing these tests defend:
-// AN ASSOCIATION IS ONLY EVER REMOVED BY AN EXPLICIT USER ACTION.
+// AN ASSOCIATION IS ONLY EVER REMOVED BY AN EXPLICIT USER ACTION, or when its
+// VIDEO is provably gone from a drive that answers (association-dead.test.js).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Library } from '../../renderer/components/library.js';
 

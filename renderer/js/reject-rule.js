@@ -2,7 +2,7 @@
 //
 // • Rated DELETE_AT_OR_BELOW or lower (a favourite never is): deleted from
 //   disk (electron/rejected-videos.js, through the `delete-rejected-video`
-//   IPC) and taken out of every playlist.
+//   IPC), taken out of every playlist and its script association dropped.
 // • Rated between that and KEEP_FROM: put in the REVIEW_PLAYLIST (made when
 //   needed).
 // • Rated KEEP_FROM or more: taken out of Review.
@@ -15,6 +15,8 @@ import { DELETE_AT_OR_BELOW, KEEP_FROM, REVIEW_PLAYLIST } from './content-prefer
 
 // Videos the startup sweep already put in Review, so taking one out by hand sticks.
 export const REVIEW_HISTORY_KEY = 'library.reviewAdded';
+
+const ASSOCIATIONS_KEY = 'library.associations';
 
 const sameName = (a, b) => String(a || '').trim().toLocaleLowerCase() === b.toLocaleLowerCase();
 
@@ -34,10 +36,11 @@ export function ratingVerdict(entry) {
 /**
  * Delete every video rated too low.
  * A video whose deletion fails stays where it is, so the next sweep tries
- * again; a deleted one leaves every playlist and loses its rating.
+ * again; a deleted one leaves every playlist, loses its rating and its
+ * script association.
  *
  * @param {object} o
- * @param {object} o.data DataService (getPlaylists, removeVideoFromPlaylist, getRatings, setRating)
+ * @param {object} o.data DataService (get, set, getPlaylists, removeVideoFromPlaylist, getRatings, setRating)
  * @param {(videoPath: string, reason: string) => Promise<{success: boolean, error?: string}>} o.deleteVideo
  * @returns {Promise<{removed: {path: string, reason: string}[], failed: {path: string, error: string}[]}>}
  */
@@ -59,6 +62,12 @@ export async function sweepRejected({ data, deleteVideo }) {
       if ((pl.videoPaths || []).includes(videoPath)) data.removeVideoFromPlaylist(pl.id, videoPath);
     }
     if (getRatingEntry(data.getRatings(), videoPath)) data.setRating(videoPath, { rating: 0, favorite: false });
+    const associations = data.get(ASSOCIATIONS_KEY);
+    if (associations && Object.hasOwn(associations, videoPath)) {
+      const next = { ...associations };
+      delete next[videoPath];
+      data.set(ASSOCIATIONS_KEY, next);
+    }
     removed.push({ path: videoPath, reason });
   }
   return { removed, failed };
