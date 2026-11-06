@@ -68,6 +68,7 @@ const { scanLibrary, isAppleDoubleSidecar } = require('./library-scan');
 const { readLinksFile } = require('./eroscripts-links');
 const { readVideoTagsFile } = require('./video-tags');
 const { deleteRejectedVideo } = require('./rejected-videos');
+const { pathState, pathReachable } = require('./path-state');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -1790,56 +1791,16 @@ ipcMain.handle('backup:open-folder', async () => {
   return err ? { success: false, error: err } : { success: true, path: paths.backupDir };
 });
 
-// --- File existence check ---
-
-/**
- * Default budget for an existence check, in ms.
- *
- * A DEAD MAPPED NETWORK DRIVE is the case this exists for. Windows keeps the
- * drive letter after a NAS goes offline, so the path looks real and the OS
- * blocks on an SMB round trip that can take seconds. lnlytrckr (EroScripts
- * #251/#255) saw the whole app freeze for ~5s every 20-30s because of it.
- *
- * External drives do NOT hit this: Windows removes the letter entirely, so the
- * check fails immediately.
- */
-const EXISTS_TIMEOUT_MS = 800;
-
-/**
- * Async, time-boxed existence check.
- *
- * Two deliberate changes from the old `fs.existsSync`:
- *
- *  1. ASYNC. `existsSync` runs on the main process's JS thread, so a blocking
- *     network stat froze the entire UI, not just the library. `fs.promises`
- *     work happens on libuv's threadpool and leaves the app responsive.
- *
- *  2. TIME-BOXED. We stop WAITING after the budget and report "not reachable".
- *     Note this does not cancel the underlying syscall — it cannot be
- *     cancelled — so the threadpool slot stays occupied until the OS gives up.
- *     That is acceptable because callers now skip disabled sources and cache
- *     results, so we issue few of these. If that ever changes, watch the
- *     4-slot default threadpool.
- */
-async function pathReachable(filePath, timeoutMs = EXISTS_TIMEOUT_MS) {
-  if (typeof filePath !== 'string' || filePath.length === 0) return false;
-  let timer;
-  try {
-    return await Promise.race([
-      fs.promises.access(filePath).then(() => true, () => false),
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// --- File existence check (time-boxed; see path-state.js) ---
 
 ipcMain.handle('file-exists', async (_event, filePath, timeoutMs) => {
   return pathReachable(filePath, Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined);
+});
+
+// Tri-state for callers that must tell "deleted" from "can't tell":
+// 'present' | 'absent' (ENOENT/ENOTDIR) | 'unknown' (timeout, other errors).
+ipcMain.handle('path-state', async (_event, filePath, timeoutMs) => {
+  return pathState(filePath, Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined);
 });
 
 /**

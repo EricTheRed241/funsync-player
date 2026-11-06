@@ -49,6 +49,7 @@ globalThis.funsync = {
   // File utilities
   fileExists: vi.fn().mockResolvedValue(true),
   filesExist: vi.fn(async (paths) => paths.map(() => false)),
+  pathState: vi.fn().mockResolvedValue('unknown'),
 
   // Data export/import
   exportData: vi.fn().mockResolvedValue({ success: true, path: '/tmp/backup.zip' }),

@@ -10,13 +10,16 @@
 // when the DRIVE it lives on demonstrably answers. On 2026-08-11 an absent
 // drive was mistaken for deleted files and 325 associations were destroyed
 // (see association-prune-safety.test.js). So an entry counts as dead only
-// when the video and its folder are absent AND some folder between them and
-// the volume's root still exists. An unmounted drive has no such folder:
-// `/Volumes/<name>` is absent, or (a stale mount point) present but empty,
-// and neither ever qualifies.
+// when some folder between the video and the volume's root is present AND
+// the OS says the video and its folder do not exist (ENOENT / ENOTDIR). An
+// unmounted drive has no such folder: `/Volumes/<name>` is absent, or (a
+// stale mount point) present but empty, and neither ever qualifies. A check
+// that timed out or failed any other way (a drive spinning up, a busy
+// threadpool, EACCES, EIO) is `'unknown'` and keeps the entry.
 //
-// Pure apart from the injected `exists`, so the rule is testable without a
-// filesystem and runnable from Node against a real one.
+// Pure apart from the injected `pathState` (electron/path-state.js through
+// `window.funsync.pathState`), so the rule is testable without a filesystem
+// and runnable from Node against a real one.
 
 /**
  * Split a path into its leading marker, segments, and how many segments make
@@ -64,15 +67,19 @@ export function splitVolumePath(p) {
 }
 
 /**
- * True only when `videoPath` and its folder are absent and a folder between
- * them and the volume root exists. Any doubt (unparseable path, an `exists`
- * that throws, nothing left above the folder but the root) answers false.
+ * True only when a folder between `videoPath` and its volume root is
+ * `'present'`, and the video and its folder are both `'absent'`. Any doubt
+ * (unparseable path, `'unknown'`, a `pathState` that throws, nothing above
+ * the folder but the root) answers false.
+ *
+ * The ancestor is asked first: it is the cheapest proof the drive answers,
+ * and asking it wakes a spun-down drive before the checks that matter.
  *
  * @param {string} videoPath
- * @param {(p: string) => boolean | Promise<boolean>} exists
+ * @param {(p: string) => ('present'|'absent'|'unknown') | Promise<'present'|'absent'|'unknown'>} pathState
  * @returns {Promise<boolean>}
  */
-export async function isVideoLocationGone(videoPath, exists) {
+export async function isVideoLocationGone(videoPath, pathState) {
   const split = splitVolumePath(videoPath);
   if (!split) return false;
   const { lead, sep, parts, rootDepth } = split;
@@ -80,14 +87,15 @@ export async function isVideoLocationGone(videoPath, exists) {
   // own folder, the video.
   if (parts.length < rootDepth + 3) return false;
   const at = (n) => lead + parts.slice(0, n).join(sep);
-  const check = async (p) => {
-    try { return !!(await exists(p)); } catch { return null; }
+  const state = async (p) => {
+    try { return await pathState(p); } catch { return 'unknown'; }
   };
 
-  if ((await check(videoPath)) !== false) return false;
-  if ((await check(at(parts.length - 1))) !== false) return false;
-  for (let n = parts.length - 2; n > rootDepth; n--) {
-    if ((await check(at(n))) === true) return true;
+  let driveAnswers = false;
+  for (let n = parts.length - 2; n > rootDepth && !driveAnswers; n--) {
+    driveAnswers = (await state(at(n))) === 'present';
   }
-  return false;
+  if (!driveAnswers) return false;
+  if ((await state(videoPath)) !== 'absent') return false;
+  return (await state(at(parts.length - 1))) === 'absent';
 }

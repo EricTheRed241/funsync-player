@@ -4006,12 +4006,13 @@ export class Library {
       // the association should still point at them.
       if (this._isUnderUnavailableSource(videoPath)) return;
 
-      // The video itself is gone, with its folder, from a drive that is
-      // mounted (a folder above it still answers). Nothing can ever play this
-      // entry again, so drop it whole. An unplugged drive never qualifies —
-      // see association-dead.js. Everything else falls through to the
-      // per-slot rules below, unchanged.
-      if (await isVideoLocationGone(videoPath, (p) => window.funsync.fileExists(p))) {
+      // The video itself is gone, with its folder (the OS said ENOENT), from
+      // a drive that is mounted (a folder above it answers). Nothing can ever
+      // play this entry again, so drop it whole. An unplugged drive, or a
+      // check that timed out or errored, never qualifies — see
+      // association-dead.js. Everything else falls through to the per-slot
+      // rules below, unchanged.
+      if (await isVideoLocationGone(videoPath, (p) => window.funsync.pathState(p))) {
         delete all[videoPath];
         removed++;
         return;

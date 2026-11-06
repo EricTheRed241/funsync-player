@@ -15,11 +15,16 @@ import { isVideoLocationGone, splitVolumePath } from '../../renderer/js/associat
 import { buildAssociationEntry } from '../../renderer/js/association-shape.js';
 import { Library } from '../../renderer/components/library.js';
 
-/** A fake filesystem: exactly these paths exist. */
-const fs = (...paths) => {
-  const set = new Set(paths);
-  return vi.fn(async (p) => set.has(p));
+/**
+ * A fake `pathState`: the listed paths are 'present', those in `unknown`
+ * (timed out, EACCES, EIO) are 'unknown', everything else is 'absent'.
+ */
+const state = (present, unknown = []) => {
+  const has = new Set(present);
+  const unsure = new Set(unknown);
+  return vi.fn(async (p) => (has.has(p) ? 'present' : unsure.has(p) ? 'unknown' : 'absent'));
 };
+const fs = (...paths) => state(paths);
 
 const OLD = '/Volumes/2TB/GVP/Multi Generated/Scene/Scene.mp4';
 const OLD_SCRIPT = '/Volumes/2TB/GVP/Multi Generated/Scene/Scene.funscript';
@@ -62,6 +67,18 @@ describe('isVideoLocationGone', () => {
     await expect(isVideoLocationGone('/Volumes/2TB/Scene/Scene.mp4', fs('/Volumes/2TB'))).resolves.toBe(false);
   });
 
+  it('a check that timed out or errored (EACCES, EIO) on the video or its folder keeps it', async () => {
+    const folder = '/Volumes/2TB/GVP/Multi Generated/Scene';
+    await expect(isVideoLocationGone(OLD, state(['/Volumes/2TB/GVP'], [OLD]))).resolves.toBe(false);
+    await expect(isVideoLocationGone(OLD, state(['/Volumes/2TB/GVP'], [folder]))).resolves.toBe(false);
+  });
+
+  it('asks the ancestor first, so a spun-down drive wakes before the checks that matter', async () => {
+    const ps = fs('/Volumes/2TB/GVP', '/Volumes/2TB/GVP/Multi Generated');
+    await isVideoLocationGone(OLD, ps);
+    expect(ps.mock.calls.map((c) => c[0])).toEqual(['/Volumes/2TB/GVP/Multi Generated', OLD, '/Volumes/2TB/GVP/Multi Generated/Scene']);
+  });
+
   it('knows where common mount roots end', () => {
     expect(splitVolumePath('/Volumes/X/a/b.mp4').rootDepth).toBe(2);
     expect(splitVolumePath('/media/dave/X/a/b.mp4').rootDepth).toBe(3);
@@ -81,10 +98,10 @@ describe('association validation', () => {
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  function host(associations, fileExists) {
+  function host(associations, pathState) {
     const store = { 'library.associations': associations };
     global.window = global.window || {};
-    window.funsync = { fileExists };
+    window.funsync = { pathState, fileExists: async (p) => (await pathState(p)) === 'present' };
     return {
       store,
       _settings: { get: (k) => store[k], set: (k, v) => { store[k] = v; } },
@@ -117,6 +134,16 @@ describe('association validation', () => {
     expect(h.store['library.associations']).toEqual({ [OLD]: before });
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringMatching(/removed/));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/LEFT 1 association/));
+  });
+
+  it('keeps the entry when the drive answers but the video or folder check times out (EACCES alike)', async () => {
+    const before = buildAssociationEntry('single', OLD_SCRIPT, null, null);
+    for (const unsure of [OLD, '/Volumes/2TB/GVP/Multi Generated/Scene']) {
+      const h = host({ [OLD]: before }, state(['/Volumes/2TB', '/Volumes/2TB/GVP', '/Volumes/2TB/GVP/Multi Generated'], [unsure]));
+      await h.validate();
+      expect(h.store['library.associations']).toEqual({ [OLD]: before });
+    }
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringMatching(/removed/));
   });
 
   it('video present, script missing in a folder that answers: drops the single slot as before', async () => {
