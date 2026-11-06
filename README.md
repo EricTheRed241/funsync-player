@@ -198,6 +198,7 @@ A local desktop video player with device synchronization for funscript playback.
   - `vrBridge` (connected, link state, player, host, jitter), `session` (web remote or VR: state, video, position), `player` (desktop video, playing, position), `headset` (last scene HereSphere / DeoVR asked for: when, which video, from which IP), `phone` (active web-remote phone), `backend` (pid, uptime, videos registered) and `desktop` (connected since, age of its last status).
   - The desktop app sends its part over the web-remote observer socket on every device change and every 15 seconds; the backend keeps the latest one.
 - **Log file:** `main.log` (macOS `~/Library/Logs/funsync-player/`) holds the app, renderer and backend lines, and rotates to `main.old.log` at **1 GB**, so up to 2 GB of history is kept on disk.
+- **Quiet polling:** successful `GET /health`, `/api/media/vr-activity` and `/api/media/rescan-request` requests from the desktop app itself (loopback) are not written to the log; the same requests from a phone/headset, and any failures, still are.
 
 ### Script Editor (Experimental)
 - OFS-style action graph with centered playhead and speed-colored lines

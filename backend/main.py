@@ -18,6 +18,7 @@ from routes.remote_sync import router as remote_sync_router
 from routes.locale import router as locale_router, set_user_data_dir
 from routes.status import router as status_router
 from services import library_edits, video_info
+import access_log
 
 app = FastAPI(title="FunSync Backend", version="0.1.0")
 
@@ -126,4 +127,6 @@ if __name__ == "__main__":
         # is listening (it is fire-and-forget) or after a backend restart.
         set_thumb_cache_dir(os.path.join(args.user_data_dir, "thumb-cache"))
 
+    # Keep the desktop's own 1 Hz polling out of main.log.
+    access_log.install()
     uvicorn.run(app, host=args.host, port=args.port)
