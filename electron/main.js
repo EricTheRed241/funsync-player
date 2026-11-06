@@ -1360,6 +1360,7 @@ ipcMain.handle('faptap-import-thumbnail', async (_event, videoPath, url) => {
       importBytes: (bytes) => importCustomThumbBytes(bytes, String(videoPath), 'faptap'),
     });
     if (res.status === 'failed') log.warn('[FapTap] Thumbnail import failed:', res.error);
+    else if (res.status === 'gone') log.info('[FapTap] Thumbnail no longer on FapTap, not tried again:', res.error);
     return res;
   } catch (err) {
     log.warn('[FapTap] Thumbnail import failed:', err.message);

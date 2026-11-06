@@ -108,9 +108,12 @@ describe('matchFaptapThumbnail', () => {
     expect(d.importBytes).not.toHaveBeenCalled();
   });
 
-  it('reports a failed download as a failure, not a no-match', async () => {
-    const d = deps({ distance: null, accepted: false, reason: 'Image download failed (404)' }, false);
-    expect(await matchFaptapThumbnail(VIDEO, WEBP, d)).toEqual({ status: 'failed', error: 'Image download failed (404)' });
+  it('reports a failed download as a failure, not a no-match; a 404 / 410 as gone', async () => {
+    const one = (reason) => matchFaptapThumbnail(VIDEO, WEBP, deps({ distance: null, accepted: false, reason }, false));
+    expect(await one('Image download failed (503)')).toEqual({ status: 'failed', error: 'Image download failed (503)' });
+    expect(await one('fetch failed')).toEqual({ status: 'failed', error: 'fetch failed' });
+    expect(await one('Image download failed (404)')).toEqual({ status: 'gone', error: 'Image download failed (404)' });
+    expect(await one('Image download failed (410)')).toEqual({ status: 'gone', error: 'Image download failed (410)' });
   });
 
   it('refuses other hosts before touching the video', async () => {

@@ -326,8 +326,10 @@ export function planFaptapThumbnails(settings, videos) {
 /**
  * Import FapTap's thumbnail of one video if it shows the video.
  *
- * @returns {Promise<{status: 'imported'|'skipped'|'no-match'|'failed',
+ * @returns {Promise<{status: 'imported'|'skipped'|'no-match'|'gone'|'failed',
  *   dataUrl?: string, matchScore?: number, distance?: number|null}>}
+ *   'gone' (FapTap no longer has the image) is remembered like 'no-match',
+ *   so the link isn't fetched again on every scan; 'failed' is retried.
  */
 export async function importFaptapThumbnail({ settings, api, videoPath, faptapId, url }) {
   const current = () => (settings.get(CUSTOM_THUMBS_KEY) || {})[videoPath];
@@ -339,6 +341,10 @@ export async function importFaptapThumbnail({ settings, api, videoPath, faptapId
     const distance = res.distance ?? null;
     rememberFaptapAttempt(settings, videoPath, { url, status: 'no-match', distance });
     return { status: 'no-match', distance };
+  }
+  if (res?.status === 'gone') {
+    rememberFaptapAttempt(settings, videoPath, { url, status: 'gone' });
+    return { status: 'gone' };
   }
   if (res?.status !== 'imported' || !res.path) return { status: 'failed' };
 
@@ -361,8 +367,8 @@ export async function importFaptapThumbnail({ settings, api, videoPath, faptapId
  * @param {AbortSignal} [args.signal]
  * @param {(ms: number) => Promise<void>} [args.sleep]
  * @param {number} [args.delayMs]
- * @returns {Promise<{total: number, imported: number, noMatch: number, skipped: number,
- *   failed: number, stopped: boolean}>}
+ * @returns {Promise<{total: number, imported: number, noMatch: number, gone: number,
+ *   skipped: number, failed: number, stopped: boolean}>}
  */
 export async function fetchFaptapThumbnails({
   settings, api, videos, signal,
@@ -370,7 +376,7 @@ export async function fetchFaptapThumbnails({
   delayMs = FAPTAP_DELAY_MS,
 }) {
   const pending = planFaptapThumbnails(settings, videos);
-  const summary = { total: pending.length, imported: 0, noMatch: 0, skipped: 0, failed: 0, stopped: false };
+  const summary = { total: pending.length, imported: 0, noMatch: 0, gone: 0, skipped: 0, failed: 0, stopped: false };
   for (const item of pending) {
     if (!signal?.aborted) await sleep(delayMs);
     if (signal?.aborted) {
@@ -380,6 +386,7 @@ export async function fetchFaptapThumbnails({
     const { status } = await importFaptapThumbnail({ settings, api, ...item });
     if (status === 'imported') summary.imported++;
     else if (status === 'no-match') summary.noMatch++;
+    else if (status === 'gone') summary.gone++;
     else if (status === 'skipped') summary.skipped++;
     else summary.failed++;
   }
