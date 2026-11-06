@@ -49,7 +49,8 @@ Options:
                        results/NN.json for every batches/NN.json
 
 A judge failure or a missing or invalid results file leaves those videos
-unscreened: the next run tries them again.
+unscreened: the next run tries them again. Applying a verdict waits up to 3
+minutes for an app that is restarting before that video counts as unscreened.
 
 Exit codes: 0 ok (or not due), 1 error, 2 backend not reachable or videos left
 unscreened.

@@ -1,6 +1,7 @@
 """FunSync Player — Python Backend (FastAPI)"""
 
 import argparse
+import logging
 import os
 import sys
 import uvicorn
@@ -19,6 +20,20 @@ from routes.locale import router as locale_router, set_user_data_dir
 from routes.status import router as status_router
 from services import library_edits, stereo_detect, video_info
 import access_log
+
+
+def install_app_logging() -> None:
+    """Give the backend's own loggers (`funsync.*`) a handler. Without one,
+    INFO never reached main.log and warnings came out without their level,
+    so the desktop logged them as errors. Same `LEVEL:` prefix as uvicorn's
+    lines, which the desktop maps back to the level (python-bridge.js)."""
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s:  [%(name)s] %(message)s"))
+    logger = logging.getLogger("funsync")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
 
 app = FastAPI(title="FunSync Backend", version="0.1.0")
 
@@ -107,6 +122,7 @@ async def network_info():
 
 
 if __name__ == "__main__":
+    install_app_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=5123)
     parser.add_argument("--host", type=str, default="0.0.0.0")

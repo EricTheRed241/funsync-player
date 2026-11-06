@@ -80,7 +80,10 @@ async function downloadFaptapThumbnail(url, { fetchImpl = fetch } = {}) {
  * @param {(url: string) => Promise<object>} [deps.download]
  * @returns {Promise<{status: 'imported', path: string, dataUrl: string, distance: number}
  *   | {status: 'no-match', distance: number|null, reason?: string|null}
+ *   | {status: 'gone', error: string}
  *   | {status: 'failed', error: string}>}
+ *   'gone': FapTap answered 404 / 410, the image no longer exists (trying
+ *   again won't help); 'failed': anything that might work next time.
  */
 async function matchFaptapThumbnail(videoPath, url, { scoreCandidates, importBytes, download = downloadFaptapThumbnail }) {
   if (!isFaptapThumbnailUrl(url)) return { status: 'failed', error: 'Unsupported image link' };
@@ -88,7 +91,10 @@ async function matchFaptapThumbnail(videoPath, url, { scoreCandidates, importByt
   if (!best) {
     const s = scored[0];
     // No bytes: the download failed, which says nothing about the image.
-    if (!s?.bytes) return { status: 'failed', error: s?.reason || 'Download failed' };
+    if (!s?.bytes) {
+      const error = s?.reason || 'Download failed';
+      return { status: /\((404|410)\)/.test(error) ? 'gone' : 'failed', error };
+    }
     return { status: 'no-match', distance: s.distance ?? null, reason: s.reason || null };
   }
   const imported = await importBytes(best.bytes);

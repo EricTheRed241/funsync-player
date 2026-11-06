@@ -3457,7 +3457,7 @@ export class Library {
         settings: this._settings, api: window.funsync, videos, signal: ctrl.signal,
       })))
       .then((r) => {
-        if (r && (r.imported || r.noMatch || r.failed)) console.log('[Library] FapTap thumbnails:', r);
+        if (r && (r.imported || r.noMatch || r.gone || r.failed)) console.log('[Library] FapTap thumbnails:', r);
       })
       .catch((err) => console.warn('[Library] FapTap thumbnails failed:', err?.message || err));
   }

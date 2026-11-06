@@ -129,20 +129,30 @@ describe('fetchFaptapThumbnails', () => {
     [SCRIPT_TAGS_KEY]: { '/a.mp4': faptapRecord('1', URL1), '/b.mp4': faptapRecord('2', URL2) },
   });
 
-  it('goes through the queue one video at a time and does not retry a no-match', async () => {
-    const settings = twoScenes();
+  it('goes through the queue one video at a time and does not retry a no-match or a gone image', async () => {
+    const settings = makeSettings({
+      [SCRIPT_TAGS_KEY]: {
+        '/a.mp4': faptapRecord('1', URL1), '/b.mp4': faptapRecord('2', URL2), '/c.mp4': faptapRecord('3', URL1),
+        '/d.mp4': faptapRecord('4', URL2),
+      },
+    });
     const api = makeApi();
     api.faptapImportThumbnail
       .mockResolvedValueOnce(imported)
-      .mockResolvedValueOnce({ status: 'no-match', distance: 30 });
+      .mockResolvedValueOnce({ status: 'no-match', distance: 30 })
+      .mockResolvedValueOnce({ status: 'gone', error: 'Image download failed (404)' })
+      .mockResolvedValueOnce({ status: 'failed', error: 'Image download failed (503)' });
     const sleep = vi.fn(async () => {});
-    const r = await fetchFaptapThumbnails({ settings, api, videos: videos('/a.mp4', '/b.mp4'), sleep });
-    expect(r).toEqual({ total: 2, imported: 1, noMatch: 1, skipped: 0, failed: 0, stopped: false });
-    expect(sleep).toHaveBeenCalledTimes(2);
+    const all = videos('/a.mp4', '/b.mp4', '/c.mp4', '/d.mp4');
+    const r = await fetchFaptapThumbnails({ settings, api, videos: all, sleep });
+    expect(r).toEqual({ total: 4, imported: 1, noMatch: 1, gone: 1, skipped: 0, failed: 1, stopped: false });
+    expect(sleep).toHaveBeenCalledTimes(4);
 
-    const again = await fetchFaptapThumbnails({ settings, api, videos: videos('/a.mp4', '/b.mp4'), sleep });
-    expect(again.total).toBe(0);
-    expect(api.faptapImportThumbnail).toHaveBeenCalledTimes(2);
+    // Only the 503 (might work next time) is tried again.
+    api.faptapImportThumbnail.mockResolvedValueOnce({ status: 'failed', error: 'Image download failed (503)' });
+    const again = await fetchFaptapThumbnails({ settings, api, videos: all, sleep });
+    expect(again.total).toBe(1);
+    expect(api.faptapImportThumbnail).toHaveBeenLastCalledWith('/d.mp4', URL2);
   });
 
   it('stops before the next video once aborted', async () => {

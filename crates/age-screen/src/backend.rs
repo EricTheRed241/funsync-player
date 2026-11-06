@@ -2,16 +2,25 @@
 //! the video list and VR flags it serves, and the remote edits (rating,
 //! playlist) the desktop applies. Raw HTTP/1.1 over a TcpStream: a few local
 //! requests need no HTTP crate.
+//!
+//! Writes come after minutes of judging, and the app may be restarting by
+//! then (the watchdog, an update): a write that finds nobody listening waits
+//! for the app to come back, up to `WRITE_WAIT`, before it counts as failed.
+//! Nothing was sent when the connection is refused, so retrying is safe.
 
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_URL: &str = "http://127.0.0.1:5123";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a write waits for an app that isn't answering (a restart takes
+/// about a minute).
+const WRITE_WAIT: Duration = Duration::from_secs(180);
+const WRITE_RETRY_EVERY: Duration = Duration::from_secs(5);
 
 /// Why a request failed: nobody answered (the app isn't running), or the
 /// backend answered with something unusable.
@@ -59,6 +68,8 @@ pub fn id_text(id: &Value) -> String {
 pub struct Backend {
     host: String,
     addr: SocketAddr,
+    write_wait: Duration,
+    retry_every: Duration,
 }
 
 impl Backend {
@@ -89,7 +100,16 @@ impl Backend {
         Ok(Backend {
             host: host.to_string(),
             addr,
+            write_wait: WRITE_WAIT,
+            retry_every: WRITE_RETRY_EVERY,
         })
+    }
+
+    /// Change how long a write waits for the app, and how often it tries.
+    pub fn with_write_wait(mut self, wait: Duration, every: Duration) -> Self {
+        self.write_wait = wait;
+        self.retry_every = every;
+        self
     }
 
     /// `GET /api/remote/videos`: `{videos: [...]}` or a bare list.
@@ -134,7 +154,15 @@ impl Backend {
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<Value, Error> {
-        self.request("POST", path, Some(body.to_string()))
+        let deadline = Instant::now() + self.write_wait;
+        loop {
+            match self.request("POST", path, Some(body.to_string())) {
+                Err(Error::Down(_)) if Instant::now() + self.retry_every <= deadline => {
+                    std::thread::sleep(self.retry_every)
+                }
+                result => return result,
+            }
+        }
     }
 
     fn request(&self, method: &str, path: &str, body: Option<String>) -> Result<Value, Error> {
@@ -302,5 +330,62 @@ mod tests {
         assert!(matches!(b.videos(), Err(Error::Down(_))));
         assert!(Backend::new("https://x:1").is_err());
         assert!(Backend::new("http://127.0.0.1:5123/api").is_err());
+    }
+
+    #[test]
+    fn a_write_waits_for_a_restarting_app() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        // The app comes back 300 ms after the write is first tried.
+        let server = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+            let (mut s, _) = listener.accept().unwrap();
+            // Read the whole request (head + body) before answering, or the
+            // early close resets the client's connection.
+            let mut req = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = s.read(&mut buf).unwrap();
+                req.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&req).to_string();
+                let done = text.split_once("\r\n\r\n").is_some_and(|(head, body)| {
+                    let len = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("Content-Length: "))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    body.len() >= len
+                });
+                if done || n == 0 {
+                    break;
+                }
+            }
+            s.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\n{\"ok\":true}")
+                .unwrap();
+        });
+        let b = Backend::new(&format!("http://127.0.0.1:{port}"))
+            .unwrap()
+            .with_write_wait(Duration::from_secs(5), Duration::from_millis(50));
+        assert_eq!(b.add_to_playlist(&json!("v1"), "Underage review"), Ok(()));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_write_gives_up_after_the_wait() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let b = Backend::new(&format!("http://127.0.0.1:{port}"))
+            .unwrap()
+            .with_write_wait(Duration::from_millis(200), Duration::from_millis(50));
+        let started = Instant::now();
+        assert!(matches!(b.rate(&json!("v1"), 1.0), Err(Error::Down(_))));
+        assert!(started.elapsed() >= Duration::from_millis(150));
     }
 }

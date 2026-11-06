@@ -212,7 +212,7 @@ async function startBackend() {
 
     pythonProcess.stderr.on('data', (data) => {
       const output = data.toString();
-      log.error(`[Backend] ${output}`);
+      log[stderrLevel(output)](`[Backend] ${output}`);
       // Uvicorn logs startup to stderr
       if (!started && output.includes('Uvicorn running')) {
         started = true;
@@ -391,7 +391,22 @@ async function restartBackend() {
   }
 }
 
+/**
+ * electron-log level for a chunk of backend stderr. Python logs everything
+ * to stderr, uvicorn's request lines and startup included, with a `LEVEL:`
+ * prefix (the backend's own `funsync.*` loggers use the same one); only
+ * unprefixed output — a traceback, a crash — is an error.
+ */
+function stderrLevel(output) {
+  const m = /^\s*(DEBUG|INFO|WARNING|ERROR|CRITICAL):/.exec(String(output));
+  if (!m) return 'error';
+  if (m[1] === 'WARNING') return 'warn';
+  if (m[1] === 'DEBUG' || m[1] === 'INFO') return 'info';
+  return 'error';
+}
+
 module.exports = {
+  stderrLevel,
   startBackend,
   stopBackend,
   getBackendPort,
