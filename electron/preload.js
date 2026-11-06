@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('funsync', {
   // File utilities
   fileExists: (filePath, timeoutMs) => ipcRenderer.invoke('file-exists', filePath, timeoutMs),
   filesExist: (filePaths, timeoutMs) => ipcRenderer.invoke('files-exist', filePaths, timeoutMs),
+  pathState: (filePath, timeoutMs) => ipcRenderer.invoke('path-state', filePath, timeoutMs),
 
   // Data export/import
   exportData: () => ipcRenderer.invoke('export-data'),

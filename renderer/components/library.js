@@ -41,6 +41,7 @@ import {
   hasConfigForMode,
 } from '../js/association-shape.js';
 import { planAssociationRehome } from '../js/association-rehome.js';
+import { isVideoLocationGone } from '../js/association-dead.js';
 import { matchesRatingFilter, ratingOf, rehomeRatings, RATING_FILTERS } from '../js/ratings.js';
 import { createRatingControl, updateRatingControl } from '../js/rating-stars.js';
 import { record, mark } from '../js/startup-timer.js';
@@ -3977,6 +3978,8 @@ export class Library {
     // Counted and logged so a near-miss is visible rather than silent.
     let skippedUnreachable = 0;
     let pruned = 0;
+    // Whole entries whose video is gone from a drive that demonstrably answers.
+    let removed = 0;
     const prunedPaths = [];
     const CONCURRENCY = 8;
 
@@ -4002,6 +4005,18 @@ export class Library {
       // the drive came back. On reconnect the files exist again, so
       // the association should still point at them.
       if (this._isUnderUnavailableSource(videoPath)) return;
+
+      // The video itself is gone, with its folder (the OS said ENOENT), from
+      // a drive that is mounted (a folder above it answers). Nothing can ever
+      // play this entry again, so drop it whole. An unplugged drive, or a
+      // check that timed out or errored, never qualifies — see
+      // association-dead.js. Everything else falls through to the per-slot
+      // rules below, unchanged.
+      if (await isVideoLocationGone(videoPath, (p) => window.funsync.pathState(p))) {
+        delete all[videoPath];
+        removed++;
+        return;
+      }
 
       // Normalize so we can walk slots uniformly. If the stored entry was
       // legacy-shape we mutate in place on `all` below.
@@ -4099,7 +4114,13 @@ export class Library {
         'because their script location was unreachable. Nothing was pruned for those.'
       );
     }
-    if (healed > 0 || pruned > 0) {
+    if (removed > 0) {
+      console.log(
+        `[Library] Association validation: removed ${removed} association(s) whose video and its folder ` +
+        'no longer exist on a mounted drive.'
+      );
+    }
+    if (healed > 0 || pruned > 0 || removed > 0) {
       this._settings.set('library.associations', all);
       console.log(
         `[Library] Association validation: healed ${healed}, pruned ${pruned}.`

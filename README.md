@@ -169,7 +169,7 @@ A local desktop video player with device synchronization for funscript playback.
 ### Funscript Support
 - Heatmap overlay on the seek bar (speed-colored)
 - Gap indicators on the seek bar showing idle sections
-- Manual funscript association with fuzzy-ranked suggestions
+- Manual funscript association with fuzzy-ranked suggestions. An association whose video is gone (deleted by triage, or its video and folder no longer exist on a drive that is mounted) is removed; one on an unplugged drive or unreachable share is never touched.
 - Script variations — switch between multiple script versions during playback (V key)
 - Multi-axis funscript support (TCode convention, 10 axes); switching variants also switches to that variant's own axis files
 - **Custom routing** — assign different scripts to different devices per video, stable across Intiface restarts (index-first matching with name auto-heal)
