@@ -40,23 +40,25 @@ describe('Edge Hold — app orchestration', () => {
     expect(APP).toContain('_onEdgeHold(active');
   });
 
-  it('activation stops the Handy DEVICE, not just the engine (HSSP plays device-side)', () => {
-    const body = APP.slice(APP.indexOf('_onEdgeHold(active'), APP.indexOf('_resumeHandyAfterEdge()'));
-    expect(body, 'engine stop alone leaves the device stroking to end of script')
-      .toContain('hsspStop');
+  it('activation idles the devices, not just their engines', () => {
+    const start = APP.indexOf('_onEdgeHold(active,');
+    const body = APP.slice(start, start + 4000);
     expect(body, 'sustained outputs must be zeroed (2026-08-14 lesson)')
       .toContain('stopSustainedOutputs');
     expect(body, 'local devices must be idled, not just their engines')
       .toContain('_stopAllDevicesIdle');
   });
 
-  it('release re-anchors the Handy with a forced resync (start() alone is unreliable)', () => {
-    const resume = APP.slice(APP.indexOf('async _resumeHandyAfterEdge'), APP.indexOf('async _restoreHandyAfterOrgasm'));
-    expect(resume).toContain('resync()');
+  it('release restarts the engines it stopped', () => {
+    const start = APP.indexOf('_onEdgeHold(active,');
+    const body = APP.slice(start, start + 4000);
+    expect(body).toContain('buttplugSync.start()');
+    expect(body).toContain('tcodeSync.start()');
   });
 
   it('never arms while the Orgasm Switch owns the devices', () => {
-    const body = APP.slice(APP.indexOf('_onEdgeHold(active'), APP.indexOf('_resumeHandyAfterEdge()'));
+    const start = APP.indexOf('_onEdgeHold(active,');
+    const body = APP.slice(start, start + 4000);
     expect(body).toContain('orgasmSwitch?.active');
   });
 
@@ -64,8 +66,6 @@ describe('Edge Hold — app orchestration', () => {
     const orgasm = APP.slice(APP.indexOf('_onOrgasmHold(active) {'), APP.indexOf('_onOrgasmHold(active) {') + 1500);
     expect(orgasm, 'else the finisher records no stopped engines and release strands them')
       .toContain('_onEdgeHold(false');
-    expect(orgasm, 'the Handy resume must be skipped — the finisher takes the Handy over')
-      .toContain('skipHandyResume');
   });
 });
 
@@ -75,7 +75,8 @@ describe('Edge Hold — app orchestration', () => {
 // `player.orgasmSwitchMode`. The overlay labels are covered behaviourally in
 // keyboard-help.test.js; what can only be pinned here is the orchestration.
 describe('Edge Hold — press-to-toggle mode', () => {
-  const body = APP.slice(APP.indexOf('_onEdgeHold(active'), APP.indexOf('_resumeHandyAfterEdge()'));
+  const start = APP.indexOf('_onEdgeHold(active,');
+  const body = APP.slice(start, start + 4000);
 
   it('reads the mode from settings', () => {
     expect(body).toContain("player.edgeHoldMode");

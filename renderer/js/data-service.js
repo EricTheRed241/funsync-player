@@ -6,14 +6,6 @@ import { applyRatingChange, getRatingEntry } from './ratings.js';
 import { eventBus } from './event-bus.js';
 
 const SETTINGS_DEFAULTS = {
-  handy: {
-    connectionKey: '',
-    defaultOffset: 0,
-    slideMin: 0,
-    slideMax: 100,
-    scriptHostMode: 'local',
-    syncRounds: 30,
-  },
   player: {
     volume: 80,
     theme: 'dark',
@@ -24,7 +16,6 @@ const SETTINGS_DEFAULTS = {
     localIp: 'auto',
   },
   library: {
-    directory: '',
     associations: {},
   },
   security: {
@@ -54,7 +45,6 @@ class DataService {
       playlists: [],
       categories: [],
       videoCategories: {},
-      _migrated: false,
     };
     this._initialized = false;
   }
@@ -64,18 +54,6 @@ class DataService {
    * Must be called once before any reads.
    */
   async init() {
-    // Check for legacy localStorage data and migrate if needed
-    const legacyRaw = localStorage.getItem('funsync-settings');
-    if (legacyRaw) {
-      try {
-        const legacyData = JSON.parse(legacyRaw);
-        await window.funsync.migrateLocalStorage(legacyData);
-        localStorage.removeItem('funsync-settings');
-      } catch (err) {
-        console.warn('[DataService] Migration failed:', err.message);
-      }
-    }
-
     // Load all data from main process into cache (deep clone to avoid shared references)
     const data = await window.funsync.getAllData();
     if (data) {

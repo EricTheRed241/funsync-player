@@ -12,7 +12,67 @@
 // the focus of these tests. See SCOPE-orgasm-switch.md.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { OrgasmSwitch } from '../../renderer/js/orgasm-switch.js';
+import { OrgasmSwitch, interpolatePosition } from '../../renderer/js/orgasm-switch.js';
+
+describe('interpolatePosition — pure linear interpolation', () => {
+  it('returns null for empty / non-array input', () => {
+    expect(interpolatePosition(null, 100)).toBeNull();
+    expect(interpolatePosition([], 100)).toBeNull();
+    expect(interpolatePosition('abc', 100)).toBeNull();
+  });
+
+  it('clamps to first action when time is before any action', () => {
+    const actions = [{ at: 1000, pos: 30 }, { at: 2000, pos: 70 }];
+    expect(interpolatePosition(actions, 0)).toBe(30);
+    expect(interpolatePosition(actions, 999)).toBe(30);
+    expect(interpolatePosition(actions, 1000)).toBe(30);
+  });
+
+  it('clamps to last action when time is after any action', () => {
+    const actions = [{ at: 1000, pos: 30 }, { at: 2000, pos: 70 }];
+    expect(interpolatePosition(actions, 2000)).toBe(70);
+    expect(interpolatePosition(actions, 5000)).toBe(70);
+  });
+
+  it('linearly interpolates between adjacent actions', () => {
+    const actions = [{ at: 1000, pos: 0 }, { at: 2000, pos: 100 }];
+    expect(interpolatePosition(actions, 1500)).toBe(50);
+    expect(interpolatePosition(actions, 1250)).toBe(25);
+    expect(interpolatePosition(actions, 1750)).toBe(75);
+  });
+
+  it('handles non-monotonic positions (down then up)', () => {
+    const actions = [
+      { at: 0, pos: 80 },
+      { at: 1000, pos: 20 },
+      { at: 2000, pos: 90 },
+    ];
+    expect(interpolatePosition(actions, 500)).toBe(50);
+    expect(interpolatePosition(actions, 1500)).toBe(55);
+  });
+
+  it('binary-searches efficiently over many actions', () => {
+    // Construct an array of 1000 actions; assert correct lookup near the
+    // tail without scanning from the head.
+    const actions = [];
+    for (let i = 0; i < 1000; i++) actions.push({ at: i * 100, pos: i % 2 === 0 ? 0 : 100 });
+    // Between the 998th and 999th action — pos goes from 0 (998) to 100 (999).
+    expect(interpolatePosition(actions, 998 * 100 + 50)).toBe(50);
+  });
+
+  it('handles a single-action script gracefully', () => {
+    const actions = [{ at: 500, pos: 42 }];
+    expect(interpolatePosition(actions, 0)).toBe(42);
+    expect(interpolatePosition(actions, 500)).toBe(42);
+    expect(interpolatePosition(actions, 999999)).toBe(42);
+  });
+
+  it('handles zero-span bracket (two actions at same time)', () => {
+    const actions = [{ at: 1000, pos: 50 }, { at: 1000, pos: 80 }];
+    // Either pos is acceptable; the function returns the upper bracket.
+    expect(interpolatePosition(actions, 1000)).toBe(50); // first match
+  });
+});
 
 const SCRIPT = JSON.stringify({
   actions: [
@@ -32,7 +92,6 @@ function makeDeps(overrides = {}) {
       sendRotate: vi.fn(),
     },
     tcodeManager: { connected: true, sendAxes: vi.fn() },
-    handyManager: { connected: true, hdspMove: vi.fn() },
     onActivate: vi.fn(),
     onDeactivate: vi.fn(),
     now: () => 0,
@@ -160,35 +219,16 @@ describe('OrgasmSwitch — loop clock + device dispatch', () => {
     os.activate(); // immediate tick at elapsed 0 → pos 0
     expect(deps.buttplugManager.sendLinear).toHaveBeenCalledWith(0, 0, expect.any(Number));
     expect(deps.tcodeManager.sendAxes).toHaveBeenCalledWith({ L0: 0 });
-    expect(deps.handyManager.hdspMove).toHaveBeenCalledWith(0, expect.any(Number));
-  });
-
-  it('gates the Handy send on handyReady but still drives Buttplug/T-Code', () => {
-    // While the app is still awaiting the HSSP→HDSP handoff, handyReady is
-    // false: the Handy must NOT be driven (its commands would be ignored in
-    // HSSP mode), but the local devices drive immediately.
-    let ready = false;
-    const gated = new OrgasmSwitch(makeDeps({ now: () => 0, handyReady: () => ready }));
-    gated.setTimerImpl(() => 1, () => {});
-    gated.loadScript(SCRIPT);
-    gated.activate();
-    expect(gated.buttplugManager.sendLinear).toHaveBeenCalled();
-    expect(gated.handyManager.hdspMove).not.toHaveBeenCalled();
-    // Once the handoff completes, the next tick drives the Handy.
-    ready = true;
-    gated._lastSentPos = -1; // allow the same position to re-send
-    gated._tick();
-    expect(gated.handyManager.hdspMove).toHaveBeenCalled();
   });
 
   it('applies the per-device cutoff so the finisher respects output limits', () => {
-    const d = makeDeps({ now: () => 0, getCutoff: (key) => (key === 'handy' ? { min: 20, max: 80 } : null) });
+    const d = makeDeps({ now: () => 0, getCutoff: (key) => (key === 'tcode' ? { min: 20, max: 80 } : null) });
     const os2 = new OrgasmSwitch(d);
     os2.setTimerImpl(() => 1, () => {});
     os2.loadScript(SCRIPT); // at t=0 → pos 0
     os2.activate();
-    // Handy has a 20-80 cutoff → 0 clamps to 20; Buttplug has none → raw 0.
-    expect(d.handyManager.hdspMove).toHaveBeenCalledWith(20, expect.any(Number));
+    // T-Code has a 20-80 cutoff → 0 clamps to 20; Buttplug has none → raw 0.
+    expect(d.tcodeManager.sendAxes).toHaveBeenCalledWith({ L0: 20 });
     expect(d.buttplugManager.sendLinear).toHaveBeenCalledWith(0, 0, expect.any(Number));
   });
 
@@ -254,7 +294,6 @@ describe('OrgasmSwitch — loop clock + device dispatch', () => {
   it('skips disconnected managers without throwing', () => {
     deps.buttplugManager.connected = false;
     deps.tcodeManager.connected = false;
-    deps.handyManager.connected = false;
     os.activate();
     clock.t = 500;
     expect(() => os._tick()).not.toThrow();
@@ -367,14 +406,13 @@ describe('OrgasmSwitch — loadPlan (multi-axis)', () => {
     expect(vibeCalls.at(-1)[1]).toBeCloseTo(50, 0);
   });
 
-  it('axis-only plan (no main): aux channels drive, linear/handy stay silent', () => {
+  it('axis-only plan (no main): aux channels drive, linear stays silent', () => {
     os.loadPlan(multiPlan({ main: null, tcodeAxes: { R0: TWIST } }));
     expect(os.configured).toBe(true);
     os.activate();
     clock.t = 250; os._tick();
     expect(deps.tcodeManager.sendAxes).toHaveBeenCalled();
     expect(deps.buttplugManager.sendLinear).not.toHaveBeenCalled();
-    expect(deps.handyManager.hdspMove).not.toHaveBeenCalled();
   });
 });
 
@@ -498,19 +536,15 @@ describe('OrgasmSwitch — loadPlan (custom routing)', () => {
     expect(last[1]).toBeCloseTo(20, 0); // 1800 → 100 - (800/1000)*100 = 20
   });
 
-  // acuity7, thread #275: the Handy is smooth over WiFi and jerky over
+  // acuity7, thread #275: a stroker was smooth over WiFi and jerky over
   // Bluetooth-via-Intiface. They pinned it further by reproducing the same
   // split in MultiFunPlayer — "FixedUpdate" jerky, "PolledUpdate" smooth.
   //
-  // WiFi takes the Handy HDSP path, which already used a move window LONGER
-  // than the tick (HANDY_MOVE_MS) precisely so moves overlap into continuous
-  // motion. Bluetooth takes the Buttplug path, which passed the TICK LENGTH
-  // as the move duration — "reach X in 40ms", re-sent every 40ms. On BLE a
-  // round trip is often longer than the tick itself, so the device is
-  // retargeted before it completes anything and bumps in place.
-  //
-  // The same mistake was already found and fixed for the Handy in this very
-  // file; it was simply never applied to Buttplug.
+  // The Buttplug path passed the TICK LENGTH as the move duration — "reach X
+  // in 40ms", re-sent every 40ms. On BLE a round trip is often longer than
+  // the tick itself, so the device is retargeted before it completes
+  // anything and bumps in place. The move window must be LONGER than the
+  // tick so moves overlap into continuous motion.
   describe('Buttplug linear move window (thread #275)', () => {
     it('sends a move duration LONGER than the tick, not equal to it', () => {
       const deps = makeDeps();
@@ -528,20 +562,6 @@ describe('OrgasmSwitch — loadPlan (custom routing)', () => {
           + 'the device gets retargeted before it can finish and stutters on BLE',
         ).toBeGreaterThan(40);
       }
-    });
-
-    it('matches the Handy move window, which is the proven-smooth value', () => {
-      const deps = makeDeps();
-      const os = new OrgasmSwitch(deps, { tickIntervalMs: 40 });
-      os.setTimerImpl(() => 1, () => {});
-      os.loadScript(SCRIPT);
-      os.activate();
-
-      const bpDur = deps.buttplugManager.sendLinear.mock.calls.at(-1)[2];
-      const handyDur = deps.handyManager.hdspMove.mock.calls.length
-        ? deps.handyManager.hdspMove.mock.calls.at(-1)[1]
-        : bpDur;
-      expect(bpDur).toBe(handyDur);
     });
 
     // The move window and the velocity denominator are DIFFERENT quantities.

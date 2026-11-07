@@ -12,7 +12,6 @@ describe('DataService', () => {
         window.funsync[key].mockClear();
       }
     });
-    localStorage.clear();
     ds = new DataService();
   });
 
@@ -22,19 +21,6 @@ describe('DataService', () => {
       expect(window.funsync.getAllData).toHaveBeenCalledTimes(1);
       expect(ds.get('player.volume')).toBe(80);
     });
-
-    it('triggers migration when localStorage has legacy data', async () => {
-      localStorage.setItem('funsync-settings', JSON.stringify({ player: { volume: 42 } }));
-      await ds.init();
-      expect(window.funsync.migrateLocalStorage).toHaveBeenCalledTimes(1);
-      // localStorage should be cleared after migration
-      expect(localStorage.getItem('funsync-settings')).toBeNull();
-    });
-
-    it('skips migration when no legacy data', async () => {
-      await ds.init();
-      expect(window.funsync.migrateLocalStorage).not.toHaveBeenCalled();
-    });
   });
 
   describe('get() / set()', () => {
@@ -43,7 +29,7 @@ describe('DataService', () => {
     });
 
     it('reads default value from cache', () => {
-      expect(ds.get('handy.connectionKey')).toBe('');
+      expect(ds.get('player.volume')).toBe(80);
     });
 
     it('returns undefined for missing path', () => {

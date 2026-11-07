@@ -80,7 +80,7 @@ function mergeConfig(existing, imported, mode) {
 describe('data-export', () => {
   const baseConfig = {
     settings: {
-      handy: { connectionKey: 'abc', defaultOffset: 50 },
+      tcode: { port: 'COM3', baudRate: 115200 },
       player: { volume: 80 },
       buttplug: { port: 12345 },
     },
@@ -93,7 +93,6 @@ describe('data-export', () => {
     videoCategories: {
       '/v/a.mp4': ['c1'],
     },
-    _migrated: true,
   };
 
   describe('mergeConfig — overwrite mode', () => {
@@ -107,7 +106,7 @@ describe('data-export', () => {
       const result = mergeConfig(baseConfig, imported, 'overwrite');
       expect(result.settings.player.volume).toBe(50);
       expect(result.playlists).toEqual([]);
-      expect(result.settings.handy).toBeUndefined();
+      expect(result.settings.tcode).toBeUndefined();
     });
   });
 
@@ -122,7 +121,7 @@ describe('data-export', () => {
       const result = mergeConfig(baseConfig, imported, 'merge');
       expect(result.settings.player.volume).toBe(50);
       // Existing settings preserved
-      expect(result.settings.handy.connectionKey).toBe('abc');
+      expect(result.settings.tcode.port).toBe('COM3');
       expect(result.settings.buttplug.port).toBe(12345);
     });
 
@@ -249,7 +248,7 @@ describe('data-export', () => {
     function configWithCaches() {
       return {
         settings: {
-          handy: { connectionKey: 'eK6Qv3AH', defaultOffset: -50 },
+          tcode: { port: 'COM3', baudRate: 115200 },
           library: {
             sources: [{ id: 's1', path: '/media/lib' }],
             collections: [{ id: 'c1', name: 'Favourites' }],
@@ -264,7 +263,6 @@ describe('data-export', () => {
         playlists: [{ id: 'p1', name: 'Test', videoPaths: [] }],
         categories: [{ id: 'cat1', name: 'Action' }],
         videoCategories: { '/v/a.mp4': ['cat1'] },
-        _migrated: true,
       };
     }
 
@@ -288,11 +286,10 @@ describe('data-export', () => {
       expect(exported.settings.library.collections).toHaveLength(1);
       expect(exported.settings.library.associations).toEqual({ '/v/a.mp4': '/v/a.funscript' });
       expect(exported.settings.library.customRouting).toEqual({ dev0: 'L0' });
-      expect(exported.settings.handy.connectionKey).toBe('eK6Qv3AH');
+      expect(exported.settings.tcode.port).toBe('COM3');
       expect(exported.playlists).toHaveLength(1);
       expect(exported.categories).toHaveLength(1);
       expect(exported.videoCategories).toEqual({ '/v/a.mp4': ['cat1'] });
-      expect(exported._migrated).toBe(true);
     });
 
     it('exportData does not mutate the input config (cache fields stay on the live object)', async () => {
@@ -311,14 +308,14 @@ describe('data-export', () => {
       // Edge case: minimal install / first-launch config has no library
       // sub-tree at all. stripBlacklist must not throw on missing parents.
       const minimal = {
-        settings: { handy: { connectionKey: 'k' } },
+        settings: { tcode: { port: 'k' } },
         playlists: [],
         categories: [],
       };
       const result = await dataExport.exportData(minimal, path.join(tmpDir, 'backup.zip'));
       expect(result.success).toBe(true);
       const exported = await readZipConfig(path.join(tmpDir, 'backup.zip'));
-      expect(exported.settings.handy.connectionKey).toBe('k');
+      expect(exported.settings.tcode.port).toBe('k');
     });
   });
 

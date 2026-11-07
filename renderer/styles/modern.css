@@ -194,9 +194,8 @@
 
 /* ========================================================================
  * PHASE 2 — secondary desktop surfaces: playlists, categories, queue panel,
- * up-next card, eroscripts panel, session card, VR format panel, editor
- * chrome. Same Modern language (elevation + radius + lift + press + rings).
- * (Audience pop-out is handled with the other detached windows in Phase 4.)
+ * up-next card, eroscripts panel, session card, VR format panel. Same
+ * Modern language (elevation + radius + lift + press + rings).
  * ==================================================================== */
 
 /* --- Shared soft focus ring for Phase-2 interactive elements ------------- */
@@ -211,8 +210,7 @@
 :root[data-style="modern"] .eroscripts-panel__search-input:focus-visible,
 :root[data-style="modern"] .session-card__btn:focus-visible,
 :root[data-style="modern"] .vr-format-panel__seg-btn:focus-visible,
-:root[data-style="modern"] .vr-format-panel__select:focus-visible,
-:root[data-style="modern"] .editor__btn:focus-visible {
+:root[data-style="modern"] .vr-format-panel__select:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
 }
@@ -359,21 +357,6 @@
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
 }
 
-/* --- Editor chrome (canvas untouched): toolbar buttons + lane depth ------- */
-:root[data-style="modern"] .editor__btn {
-  border-radius: var(--radius-sm);
-  transition: background var(--dur-1) var(--ease-out), color var(--dur-1), transform var(--dur-1) var(--ease-out);
-}
-:root[data-style="modern"] .editor__btn:active {
-  transform: scale(0.95);
-}
-/* Lanes read as stacked layers via a hairline lit edge rather than a flat
-   border only. */
-:root[data-style="modern"] .editor__lane {
-  border-radius: var(--radius-sm);
-  box-shadow: var(--edge-highlight);
-}
-
 /* Reduced-motion — drop the Phase-2 transforms/transitions too. */
 @media (prefers-reduced-motion: reduce) {
   :root[data-style="modern"] .playlists__card,
@@ -393,8 +376,7 @@
   :root[data-style="modern"] .up-next__dismiss,
   :root[data-style="modern"] .eroscripts-panel__btn,
   :root[data-style="modern"] .session-card__btn,
-  :root[data-style="modern"] .vr-format-panel__seg-btn,
-  :root[data-style="modern"] .editor__btn {
+  :root[data-style="modern"] .vr-format-panel__seg-btn {
     transition: none;
   }
   :root[data-style="modern"] .playlists__card:hover,
@@ -414,76 +396,7 @@
   :root[data-style="modern"] .up-next__dismiss:active,
   :root[data-style="modern"] .eroscripts-panel__btn:active,
   :root[data-style="modern"] .session-card__btn:active,
-  :root[data-style="modern"] .vr-format-panel__seg-btn:active,
-  :root[data-style="modern"] .editor__btn:active {
-    transform: none;
-  }
-}
-
-/* ========================================================================
- * PHASE 4 — audience pop-out (renderer/audience-room.css, loaded in the
- * audience-room pop-out which now links modern.css + sets data-style).
- * ==================================================================== */
-:root[data-style="modern"] .audience-room__card {
-  border-radius: var(--radius-lg);
-  box-shadow: var(--elev-1), var(--edge-highlight);
-}
-:root[data-style="modern"] .audience-room__add-form {
-  border-radius: var(--radius-lg);
-}
-:root[data-style="modern"] .audience-room__add-key {
-  border-radius: var(--radius-md);
-  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
-}
-:root[data-style="modern"] .audience-room__add-key:focus {
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
-}
-:root[data-style="modern"] .audience-room__card-buzz-btn,
-:root[data-style="modern"] .audience-room__card-mute-btn,
-:root[data-style="modern"] .audience-room__card-remove-btn,
-:root[data-style="modern"] .audience-room__card-offset-reset,
-:root[data-style="modern"] .audience-room__hide-keys-btn,
-:root[data-style="modern"] .audience-room__buzz-all-btn,
-:root[data-style="modern"] .audience-room__add-submit {
-  border-radius: var(--radius-md);
-  transition: background var(--dur-1) var(--ease-out), color var(--dur-1),
-              border-color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
-}
-:root[data-style="modern"] .audience-room__card-buzz-btn:focus-visible,
-:root[data-style="modern"] .audience-room__card-mute-btn:focus-visible,
-:root[data-style="modern"] .audience-room__card-remove-btn:focus-visible,
-:root[data-style="modern"] .audience-room__hide-keys-btn:focus-visible,
-:root[data-style="modern"] .audience-room__buzz-all-btn:focus-visible,
-:root[data-style="modern"] .audience-room__add-submit:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
-}
-:root[data-style="modern"] .audience-room__card-buzz-btn:active,
-:root[data-style="modern"] .audience-room__card-mute-btn:active,
-:root[data-style="modern"] .audience-room__card-remove-btn:active,
-:root[data-style="modern"] .audience-room__card-offset-reset:active,
-:root[data-style="modern"] .audience-room__hide-keys-btn:active,
-:root[data-style="modern"] .audience-room__buzz-all-btn:active,
-:root[data-style="modern"] .audience-room__add-submit:active {
-  transform: scale(0.96);
-}
-@media (prefers-reduced-motion: reduce) {
-  :root[data-style="modern"] .audience-room__card-buzz-btn,
-  :root[data-style="modern"] .audience-room__card-mute-btn,
-  :root[data-style="modern"] .audience-room__card-remove-btn,
-  :root[data-style="modern"] .audience-room__card-offset-reset,
-  :root[data-style="modern"] .audience-room__hide-keys-btn,
-  :root[data-style="modern"] .audience-room__buzz-all-btn,
-  :root[data-style="modern"] .audience-room__add-submit {
-    transition: none;
-  }
-  :root[data-style="modern"] .audience-room__card-buzz-btn:active,
-  :root[data-style="modern"] .audience-room__card-mute-btn:active,
-  :root[data-style="modern"] .audience-room__card-remove-btn:active,
-  :root[data-style="modern"] .audience-room__card-offset-reset:active,
-  :root[data-style="modern"] .audience-room__hide-keys-btn:active,
-  :root[data-style="modern"] .audience-room__buzz-all-btn:active,
-  :root[data-style="modern"] .audience-room__add-submit:active {
+  :root[data-style="modern"] .vr-format-panel__seg-btn:active {
     transform: none;
   }
 }

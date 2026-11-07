@@ -113,7 +113,7 @@ export function thumbRequestOpts(custom) {
 /**
  * Resolve a user-uploaded custom thumbnail IMAGE from a video's override
  * entry. Returns the cached image path for `{ type: 'image', imagePath }`
- * entries, else null (frame pins and legacy `{ seekPct }` entries are
+ * entries, else null (frame pins, `{ seekPct }`, are
  * handled by `thumbRequestOpts`). Pure + exported so all thumb surfaces
  * (library, playlists, categories, Up Next) share one rule.
  *
@@ -253,10 +253,9 @@ export class Library {
 
     // Ctrl/Cmd+A — select everything in the current filter.
     //
-    // Bound once, on document, and gated three ways: the library must be the
-    // visible view, the event must not come from a text field (or we hijack
-    // "select all" while someone is editing the search box), and the script
-    // editor must not be open (it has its own Ctrl+A for actions).
+    // Bound once, on document, and gated two ways: the library must be the
+    // visible view, and the event must not come from a text field (or we
+    // hijack "select all" while someone is editing the search box).
     if (!this._selectAllListenerAttached) {
       this._onSelectAllKey = (e) => {
         if (e.key !== 'a' && e.key !== 'A') return;
@@ -265,7 +264,6 @@ export class Library {
         const el = document.activeElement;
         const tag = el?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
-        if (document.querySelector('.script-editor:not([hidden])')) return;
         e.preventDefault();
         const n = this.selectAllVisible();
         import('../js/toast.js').then(({ showToast }) => {
@@ -378,8 +376,6 @@ export class Library {
     }
 
     // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives).
-    // `library.directory` is a legacy singleton setting that app.js migrates into `library.sources` on
-    // startup, so there's no need to fall back to it here.
     const sources = this._settings.get('library.sources') || [];
     const unavailable = this._unavailablePaths || new Set();
     const activeSources = sources.filter(s => s.enabled !== false && !unavailable.has(s.path));
@@ -1027,16 +1023,7 @@ export class Library {
       const raw = associations[video.path];
       if (!raw) continue;
 
-      // Upgrade any legacy shape (string / bare multi / {mode:'custom'}) to
-      // the new parallel-slot shape on first read, so subsequent reads and
-      // writes all work with the same shape. Mark for persistence only if
-      // the serialized form actually changed.
       const entry = normalizeAssociation(raw);
-      const wasNew = raw && typeof raw === 'object' && 'active' in raw;
-      if (!wasNew) {
-        associations[video.path] = entry;
-        assocMigrated = true;
-      }
 
       const resolved = resolveActiveConfig(entry);
       if (!resolved) continue;
@@ -4018,15 +4005,9 @@ export class Library {
         return;
       }
 
-      // Normalize so we can walk slots uniformly. If the stored entry was
-      // legacy-shape we mutate in place on `all` below.
+      // Normalize so we can walk slots uniformly.
       const entry = normalizeAssociation(rawAssoc);
       let entryChanged = false;
-      const wasNew = rawAssoc && typeof rawAssoc === 'object' && 'active' in rawAssoc;
-      if (!wasNew) {
-        all[videoPath] = entry;
-        entryChanged = true;
-      }
 
       // --- single slot ---
       if (entry.single) {
@@ -5434,19 +5415,14 @@ export class Library {
               opt.textContent = kd.label;
               devSelect.appendChild(opt);
             }
-            // Preselect — buttplug knownDevices now use a composite id
+            // Preselect — buttplug knownDevices use a composite id
             // (`buttplug:Name#Index`) so two same-name devices show as
             // distinct options. Match the route to its knownDevice by
-            // deviceId + buttplugIndex; fall back to exact id for legacy
-            // routes and non-buttplug device types.
+            // deviceId + buttplugIndex; other device types by exact id.
             const matchedKd = (knownDevices || []).find((kd) => {
               if (kd.type === 'buttplug') {
-                const name = kd.name || kd.label;
-                if (`buttplug:${name}` !== route.deviceId) return false;
-                if (Number.isFinite(route.buttplugIndex)) {
-                  return kd.buttplugIndex === route.buttplugIndex;
-                }
-                return true;
+                return `buttplug:${kd.name}` === route.deviceId
+                  && kd.buttplugIndex === route.buttplugIndex;
               }
               return kd.id === route.deviceId;
             });
@@ -5458,8 +5434,7 @@ export class Library {
                 // `route.deviceId` stays name-only — the matcher compares
                 // against `buttplug:${dev.name}` and the extra disambiguation
                 // is carried by `buttplugIndex` below.
-                const name = known.name || known.label;
-                route.deviceId = `buttplug:${name}`;
+                route.deviceId = `buttplug:${known.name}`;
               } else {
                 route.deviceId = devSelect.value;
               }

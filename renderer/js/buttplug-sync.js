@@ -6,7 +6,7 @@
 //   - 'action-boundary' (default): one LinearCmd per funscript action transition,
 //     with duration = full stroke length. The device's firmware handles the
 //     in-stroke interpolation — no mid-stroke retargeting, much smoother on BLE
-//     (Handy / Kiiroo / Fredorch). This matches the semantics of the BLE
+//     (Kiiroo / Fredorch). This matches the semantics of the BLE
 //     protocol's "move to X over Y ms" command and avoids the ~10-commands-per-
 //     stroke flood the interpolated strategy produces.
 //   - 'interpolated' (legacy): re-samples between actions at ~20Hz and sends
@@ -197,79 +197,7 @@ export class ButtplugSync {
   }
 
   /**
-   * Whether a video is currently driving this engine.
-   *
-   * An off-clock driver (the filler test button) must not write to devices
-   * that playback already owns — two writers on one device leaves whichever
-   * loses holding a stale value.
-   */
-  isDriving() {
-    return !!this._active;
-  }
-
-  /**
-   * Push one position to the devices from OUTSIDE the video clock.
-   *
-   * Deliberately routed through the same `_sendToDevices` funnel playback
-   * uses, so routing, invert, range, cutoff and the safety cap all apply.
-   * A test that bypassed the transform stack would tell the user their
-   * pattern feels like something it will never feel like.
-   *
-   * Mirrors playback's two-path split, and the caller is expected to use both:
-   * non-linear actuators (vibrate, rotate, oscillate, e-stim) do NOT
-   * interpolate — they take an intensity and hold it — so they need the
-   * interpolated position resampled every tick. Linear actuators travel to a
-   * target over a duration and want one command per keyframe instead. Sending
-   * only the keyframes makes a vibrator jump between the extremes with no
-   * ramp at all, which is exactly how the first version of the filler test
-   * button felt on a Lovense Edge (Dave, 2026-08-21).
-   *
-   * @param {number} position 0-100
-   * @param {number} durationMs time to reach it
-   * @param {number} [prevPosition] 0-100, for derived-intensity modes
-   * @param {{emitLinear?: boolean}} [opts] emitLinear:false for the tick path
-   * @returns {boolean} false when refused (playback owns the devices)
-   */
-  sendPositionNow(position, durationMs, prevPosition = position, opts = {}) {
-    if (this._active) return false;
-    if (!this.buttplug?.connected) return false;
-    this._sendToDevices(position, durationMs, prevPosition, {
-      sinceLastMs: durationMs,
-      emitLinear: opts.emitLinear !== false,
-    });
-    return true;
-  }
-
-  /**
-   * Send one LINEAR target from outside the video clock — the keyframe half
-   * of the split described on `sendPositionNow`.
-   *
-   * @returns {boolean} false when refused
-   */
-  sendLinearNow(position, durationMs, prevPosition = position) {
-    if (this._active) return false;
-    if (!this.buttplug?.connected) return false;
-    this._sendLinearToDevices(position, durationMs, prevPosition);
-    return true;
-  }
-
-  /**
-   * Idle the devices after an off-clock run. Same reasoning as `stop()`:
-   * sustained outputs hold their last value until told otherwise.
-   */
-  stopTestOutput() {
-    if (this._active) return;
-    if (this.buttplug?.stopAll) {
-      Promise.resolve(this.buttplug.stopAll()).catch((err) => {
-        console.error(
-          `[ButtplugSync] STOP-ALL FAILED after test — devices may still be running: ${err?.message || err}`,
-        );
-      });
-    }
-  }
-
-  /**
-   * Reload cached actions (e.g. after editor changes).
+   * Reload cached actions (e.g. after filler settings change).
    */
   reloadActions() {
     this._cacheActions();
@@ -657,8 +585,8 @@ export class ButtplugSync {
   /**
    * Action-boundary linear scheduler. Fires ONE LinearCmd per action
    * transition with the full stroke duration, pre-scheduled by
-   * _linearLookaheadMs to compensate for BLE round-trip. The Handy and
-   * similar BLE strokers handle their own in-stroke interpolation, so
+   * _linearLookaheadMs to compensate for BLE round-trip. BLE strokers
+   * handle their own in-stroke interpolation, so
    * one command per stroke produces the smoothest motion.
    */
   _dispatchLinearAtBoundary(timeMs) {

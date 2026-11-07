@@ -1,8 +1,8 @@
 // Per-device position transformation pipeline.
 //
 // Single source of truth for the order in which raw script values get
-// transformed before being sent to a device. Every sync engine (Handy,
-// Buttplug, TCode, Autoblow) routes its per-tick position through
+// transformed before being sent to a device. Every sync engine (Buttplug,
+// TCode) routes its per-tick position through
 // `applyDeviceStack` so the composition order is identical everywhere.
 //
 // Order (matches SCOPE-device-settings-expansion.md §2):
@@ -88,7 +88,7 @@ export function applyInvert(rawPos, inverted) {
 
 /**
  * Linearly remap 0-100 into the user's configured min-max window.
- * Used by Handy stroke range, TCode per-axis range, Buttplug per-device
+ * Used by TCode per-axis range and Buttplug per-device
  * range. Defensive against degenerate ranges (min >= max → no-op);
  * never silently swaps min and max because that's a hidden behaviour
  * change the user wouldn't expect.
@@ -152,8 +152,8 @@ export function applySafetyCap(rawPos, maxIntensity) {
 
 /**
  * Canonical per-device transform pipeline. Every sync engine call site
- * uses this so the composition order can never drift between Handy,
- * Buttplug, TCode, or Autoblow.
+ * uses this so the composition order can never drift between Buttplug
+ * and TCode.
  *
  * @param {number} rawPos      — interpolator output, 0-100
  * @param {object} ctx
@@ -223,107 +223,4 @@ export function computeNaturalRange(actions) {
   // Degenerate: no valid actions at all → defaults
   if (min > max) return { min: 0, max: 100 };
   return { min, max };
-}
-
-/**
- * Pre-process raw funscript JSON content for cloud upload (Handy HSSP,
- * Autoblow). Returns the content with `actions[].pos` stretched if the
- * extender is enabled AND the script is narrow.
- *
- * Cloud devices upload the script once and play it server-side, so
- * per-tick `applyExtender` doesn't reach them. This helper applies the
- * same transformation at upload time so the user gets uniform behaviour
- * regardless of device class (Nielsen #4 consistency).
- *
- * Only the main `actions` array is transformed — Handy HSSP and
- * Autoblow are single-axis. Embedded multi-axis arrays (additional_axes,
- * raw.*, etc.) are left intact because their per-axis natural ranges
- * are tracked separately by the multi-axis sync engines for per-tick
- * extension.
- *
- * Returns the original content string unchanged if:
- *   - extender disabled
- *   - content is not valid JSON
- *   - content has no `actions` array
- *   - script's natural width >= threshold (no stretch needed)
- *
- * @param {string} rawContent — funscript JSON
- * @param {boolean} enabled
- * @returns {string} possibly-stretched JSON, or original string on no-op
- */
-export function extendRawScriptContent(rawContent, enabled) {
-  if (!enabled) return rawContent;
-  if (typeof rawContent !== 'string' || rawContent.length === 0) return rawContent;
-  let parsed;
-  try {
-    parsed = JSON.parse(rawContent);
-  } catch {
-    return rawContent;
-  }
-  if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
-    return rawContent;
-  }
-  const natural = computeNaturalRange(parsed.actions);
-  const width = natural.max - natural.min;
-  if (width <= 0 || width >= RANGE_EXTENDER_THRESHOLD_PCT) {
-    // Already wide enough OR degenerate — no transformation. Return
-    // the original string to preserve any whitespace / key ordering
-    // that mattered to the source author.
-    return rawContent;
-  }
-  const stretched = {
-    ...parsed,
-    actions: parsed.actions.map((a) => {
-      if (!a || typeof a.pos !== 'number') return a;
-      return { ...a, pos: applyExtender(a.pos, natural, true, RANGE_EXTENDER_THRESHOLD_PCT) };
-    }),
-  };
-  return JSON.stringify(stretched);
-}
-
-/**
- * Pre-clamp raw funscript JSON content with a floor/ceiling cutoff for
- * cloud upload (Handy HSSP, Autoblow). Cloud devices play the script
- * server-side, so the per-tick `applyCutoff` doesn't reach them — this
- * applies the SAME hard clamp to each action's `pos` at upload time so a
- * floor behaves identically on a Handy as it does on a local Buttplug
- * device (Nielsen #4 consistency).
- *
- * Deliberately NOT Handy's native `setStrokeZone`: that is a REMAP
- * (rescales the full range into the zone), which is different behaviour
- * from the clamp the user asked for. Pre-clamping the content gives true
- * clamp semantics on cloud devices.
- *
- * Returns the original content string unchanged if: cutoff is a no-op
- * (0/100 or degenerate), content isn't valid JSON, or there's no actions
- * array — preserving the source author's whitespace / key ordering.
- *
- * @param {string} rawContent — funscript JSON
- * @param {{min:number, max:number}|null} cutoff
- * @returns {string} possibly-clamped JSON, or original string on no-op
- */
-export function clampRawScriptContent(rawContent, cutoff) {
-  if (typeof rawContent !== 'string' || rawContent.length === 0) return rawContent;
-  if (!cutoff || !Number.isFinite(cutoff.min) || !Number.isFinite(cutoff.max)) return rawContent;
-  const floor = Math.max(0, Math.min(100, cutoff.min));
-  const ceil = Math.max(0, Math.min(100, cutoff.max));
-  if (floor === 0 && ceil === 100) return rawContent;  // no-op at defaults
-  if (floor >= ceil) return rawContent;                // degenerate, refuse
-  let parsed;
-  try {
-    parsed = JSON.parse(rawContent);
-  } catch {
-    return rawContent;
-  }
-  if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
-    return rawContent;
-  }
-  const clamped = {
-    ...parsed,
-    actions: parsed.actions.map((a) => {
-      if (!a || typeof a.pos !== 'number') return a;
-      return { ...a, pos: applyCutoff(a.pos, { min: floor, max: ceil }) };
-    }),
-  };
-  return JSON.stringify(clamped);
 }

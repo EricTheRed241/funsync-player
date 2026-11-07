@@ -4,7 +4,7 @@
 // file transport by default. Only explicit `window.funsync.logLine(...)`
 // calls did (e.g. the startup timer). That meant when a user hit a problem
 // and "sent their log file", the file contained main-process + Python lines
-// only — none of the renderer-side Handy / Audience / sync diagnostics that
+// only — none of the renderer-side device / sync diagnostics that
 // actually explain device issues.
 //
 // installConsoleForwarding() routes console.log/info/warn/error through the
@@ -15,7 +15,7 @@
 // forwards — so we don't add duplicate listeners here.
 //
 // console.debug is intentionally NOT forwarded: it's used for per-tick /
-// high-frequency traces (HDSP moves, drift checks) that would flood the
+// high-frequency traces (per-tick position moves, drift checks) that would flood the
 // 5 MB file. Developers still see those in DevTools.
 
 let _installed = false;

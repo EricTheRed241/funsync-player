@@ -5,8 +5,7 @@
  */
 // Tests for the association shape helpers. These guard the parallel-slot
 // data model against regression — the "single/multi/custom in parallel
-// with an active pointer" model is what makes mode switches lossless,
-// and any migration bug here would silently clobber user configs.
+// with an active pointer" model is what makes mode switches lossless.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -16,7 +15,7 @@ import {
   hasConfigForMode,
 } from '../../renderer/js/association-shape.js';
 
-describe('normalizeAssociation — legacy shape migration', () => {
+describe('normalizeAssociation', () => {
   it('treats null/undefined as an empty entry with null active', () => {
     expect(normalizeAssociation(null)).toEqual({
       active: null, single: null, multi: null, custom: null,
@@ -24,39 +23,6 @@ describe('normalizeAssociation — legacy shape migration', () => {
     expect(normalizeAssociation(undefined)).toEqual({
       active: null, single: null, multi: null, custom: null,
     });
-  });
-
-  it('maps a bare string to single-axis active', () => {
-    const out = normalizeAssociation('/path/to/script.funscript');
-    expect(out.active).toBe('single');
-    expect(out.single).toBe('/path/to/script.funscript');
-    expect(out.multi).toBeNull();
-    expect(out.custom).toBeNull();
-  });
-
-  it('maps legacy {mode:"custom", routes} to custom-active', () => {
-    const routes = [{ role: 'main', scriptPath: '/a.funscript' }];
-    const out = normalizeAssociation({ mode: 'custom', routes });
-    expect(out.active).toBe('custom');
-    expect(out.custom).toEqual({ routes });
-    expect(out.single).toBeNull();
-    expect(out.multi).toBeNull();
-  });
-
-  it('maps legacy multi-axis object to multi-active', () => {
-    const out = normalizeAssociation({
-      main: '/main.funscript',
-      axes: { vib: '/vib.funscript' },
-      buttplugVib: true,
-    });
-    expect(out.active).toBe('multi');
-    expect(out.multi).toEqual({
-      main: '/main.funscript',
-      axes: { vib: '/vib.funscript' },
-      buttplugVib: true,
-    });
-    expect(out.single).toBeNull();
-    expect(out.custom).toBeNull();
   });
 
   it('trusts the new shape and returns it unchanged structurally', () => {

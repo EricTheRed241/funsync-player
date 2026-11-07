@@ -116,8 +116,7 @@ export class SessionCard {
 
     const devices = session.devices || {};
     const deviceRow = [
-      ['Handy', devices.handy], ['Buttplug', devices.buttplug],
-      ['TCode', devices.tcode], ['Autoblow', devices.autoblow],
+      ['Buttplug', devices.buttplug], ['TCode', devices.tcode],
     ]
       .filter(([, on]) => on !== undefined)
       .map(([name, on]) =>

@@ -198,7 +198,7 @@ export class RemoteBridge {
         break;
       case 'switch-variant':
         // Phone tapped a variant row. Desktop performs the switch (load
-        // script, re-upload to Handy, reset editor, etc.) and broadcasts
+        // script, reload the sync engines, etc.) and broadcasts
         // `variant-changed` back so the phone can update its UI when the
         // switch actually completes.
         if (this.onPhoneSwitchVariant && typeof msg.label === 'string') {
@@ -242,8 +242,8 @@ export class RemoteBridge {
    * `phone-connected` AND the phone separately emits `hello` on the
    * same connection — both arrive within ~50ms of each other. Without
    * deduplication, `_onRemotePhoneConnected` would run end-to-end
-   * twice: two script uploads to Handy cloud, two `setScript` calls,
-   * two `syncEngine.start()` (the second is a no-op via `_active`
+   * twice: two script loads, two `setScript` calls,
+   * two sync-engine starts (the second is a no-op via `_active`
    * guard but still wasteful), and the phone briefly sees two
    * `script-loading` → `script-ready` pairs back-to-back.
    *

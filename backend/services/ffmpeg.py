@@ -13,16 +13,10 @@ from typing import Any
 
 
 def _find_binary(name: str) -> str:
-    """Find ffmpeg/ffprobe binary — bundled alongside the backend exe, or on PATH."""
-    # Check next to the running executable (PyInstaller bundle)
-    if getattr(sys, "frozen", False):
-        bundled = os.path.join(os.path.dirname(sys.executable), name)
-        if os.path.exists(bundled):
-            return bundled
+    """Find ffmpeg/ffprobe binary — in the project's ffmpeg dirs, or on PATH."""
     # Check sibling dev directories. Windows keeps ffmpeg in `ffmpeg/`;
-    # Linux keeps it in `ffmpeg-linux/` (the CI build downloads platform-
-    # specific static binaries into each). Probe both so dev runs work on
-    # either OS without a reshuffle.
+    # Linux keeps it in `ffmpeg-linux/`. Probe both so runs work on either
+    # OS without a reshuffle.
     project_root = os.path.join(os.path.dirname(__file__), "..", "..")
     exe_suffix = ".exe" if os.name == "nt" else ""
     dev_dirs = ("ffmpeg-linux", "ffmpeg") if os.name != "nt" else ("ffmpeg",)
@@ -39,12 +33,10 @@ FFMPEG = _find_binary("ffmpeg")
 
 
 # Suppress the cmd.exe window that Windows creates for every ffmpeg /
-# ffprobe subprocess when the parent is a GUI app. The PyInstaller spec
-# ships the backend as `console=False` (windowed exe), and under those
-# conditions Windows spawns a fresh console per child. Without this flag
-# the user sees hundreds of console windows flashing during library scan
-# (one per thumbnail / metadata probe / VR info probe). On non-Windows
-# platforms the flag evaluates to 0 and is a no-op.
+# ffprobe subprocess when the parent is a GUI app. Without this flag the
+# user sees console windows flashing during library scan (one per
+# thumbnail / metadata probe / VR info probe). On non-Windows platforms
+# the flag evaluates to 0 and is a no-op.
 NO_WINDOW_CREATIONFLAGS = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -52,7 +44,7 @@ def run_silent(*args, **kwargs):
     """`subprocess.run` wrapper that hides the Windows console popup for
     GUI-parent subprocess calls. Use for every ffmpeg / ffprobe call
     anywhere in the backend — the default `subprocess.run` flashes a
-    console per call in packaged Windows builds."""
+    console per call."""
     if sys.platform == "win32":
         kwargs.setdefault("creationflags", NO_WINDOW_CREATIONFLAGS)
     return subprocess.run(*args, **kwargs)

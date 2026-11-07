@@ -4,12 +4,10 @@ import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
-    this.scriptEditor = scriptEditor || null;
-    this.deviceSimulator = deviceSimulator || null;
     this.gapSkipEngine = gapSkipEngine || null;
     this.onNavigate = onNavigate || null;
     this.onToggleLoop = onToggleLoop || null;
@@ -28,7 +26,7 @@ export class KeyboardHandler {
 
   /**
    * Key-up handler — the two hold keys (Orgasm Switch X, Edge Hold Z).
-   * Deliberately does NOT gate on focus/editor: if a hold was started we
+   * Deliberately does NOT gate on focus: if a hold was started we
    * must always release it, even if focus moved to an input mid-hold
    * (otherwise the device would be stuck driving the orgasm loop, or — for
    * Edge — stuck silent). The holds themselves are gated in _onKeyDown.
@@ -50,11 +48,8 @@ export class KeyboardHandler {
 
     // Alt+1/2/3/4 — top-level nav between Library / Playlists / Categories / Overview.
     // Slack/Discord/Notion convention; Nielsen #7 (flexibility for experts).
-    // Skipped when the editor canvas owns input or a modal is on screen
-    // (modals trap focus on themselves so the typical guard is a no-op,
-    // but the editor handles its own keys without focusing — gate
-    // explicitly).
-    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && this.onNavigate && !this.scriptEditor?.isOpen) {
+    // Modals trap focus on themselves, so the input guard above covers them.
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && this.onNavigate) {
       const navMap = { '1': 'library', '2': 'playlists', '3': 'categories', '4': 'overview' };
       const target = navMap[e.key];
       if (target) {
@@ -69,12 +64,7 @@ export class KeyboardHandler {
     // switch because these keys otherwise mean nothing here, and because
     // preventDefault MUST run or Chromium's page zoom rescales the whole UI.
     // '+' is included since Shift+= is how many layouts produce it.
-    // Gated on the editor being closed, matching every other player-only
-    // key here. The editor binds BARE +/=/- to its own timeline zoom and
-    // calls stopPropagation, so a focused canvas already wins — but with
-    // the editor open and focus elsewhere this would otherwise zoom the
-    // video behind the editor, which is not what the user is looking at.
-    if (e.ctrlKey && !e.altKey && !this.scriptEditor?.isOpen) {
+    if (e.ctrlKey && !e.altKey) {
       if (e.key === '=' || e.key === '+') {
         e.preventDefault();
         if (this.onVRZoom) this.onVRZoom(1);
@@ -142,9 +132,7 @@ export class KeyboardHandler {
 
       case 'q':
       case 'Q':
-        // Shift+Q toggles the queue panel. Plain Q is taken by the
-        // editor's alternating-insert binding and is only meaningful
-        // when the editor canvas has focus.
+        // Shift+Q toggles the queue panel.
         if (e.shiftKey && this.onToggleQueue) {
           e.preventDefault();
           this.onToggleQueue();
@@ -173,17 +161,13 @@ export class KeyboardHandler {
       //
       // These were listed in the `?` help from the beginning but never
       // actually implemented in the player: pressing them did nothing.
-      // Found by the shortcut audit on 2026-08-15. The editor binds both
-      // to its own actions (repeat-last-stroke / move-to-playhead), so
-      // they are gated like every other player-only key.
+      // Found by the shortcut audit on 2026-08-15.
       case 'Home':
-        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
         this.player.seek(0);
         break;
 
       case 'End':
-        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
         // Land a hair before the end: seeking exactly to `duration` fires
         // `ended` on some builds, which would advance the playlist instead
@@ -238,14 +222,8 @@ export class KeyboardHandler {
 
       case 'b':
       case 'B':
-        // Shift+B / Ctrl+B → bookmark prev/next (player-side bindings,
-        // mirrors editor convention). Editor intercepts these when open,
-        // so the guard below keeps player nav out of the way during
-        // script authoring. Bare B is the A-B loop B-point.
-        if (this.scriptEditor?.isOpen) {
-          // Editor handles its own bookmark nav; let it through.
-          break;
-        }
+        // Shift+B / Ctrl+B → bookmark prev/next. Bare B is the A-B loop
+        // B-point.
         if (e.shiftKey && this.onJumpBookmark) {
           e.preventDefault();
           this.onJumpBookmark(-1);
@@ -286,13 +264,11 @@ export class KeyboardHandler {
         // Shift+, decrements playback speed (YouTube convention).
         // `,` arrives without Shift on US/UK layouts; `<` is what
         // some browsers report with Shift held. Accept both.
-        // Bare `,` (no modifier) jumps to the previous chapter — the
-        // editor's `,` is for selection and only fires when the editor
-        // canvas has focus, so the guard below stays out of the way.
+        // Bare `,` (no modifier) jumps to the previous chapter.
         if (e.shiftKey || e.key === '<') {
           e.preventDefault();
           this.player.cyclePlaybackRate(-1);
-        } else if (!e.ctrlKey && !e.altKey && !e.metaKey && !this.scriptEditor?.isOpen && this.onJumpChapter) {
+        } else if (!e.ctrlKey && !e.altKey && !e.metaKey && this.onJumpChapter) {
           e.preventDefault();
           this.onJumpChapter(-1);
         }
@@ -305,22 +281,10 @@ export class KeyboardHandler {
         if (e.shiftKey || e.key === '>') {
           e.preventDefault();
           this.player.cyclePlaybackRate(+1);
-        } else if (!e.ctrlKey && !e.altKey && !e.metaKey && !this.scriptEditor?.isOpen && this.onJumpChapter) {
+        } else if (!e.ctrlKey && !e.altKey && !e.metaKey && this.onJumpChapter) {
           e.preventDefault();
           this.onJumpChapter(+1);
         }
-        break;
-
-      case 'd':
-      case 'D':
-        e.preventDefault();
-        if (this.deviceSimulator) this.deviceSimulator.toggle();
-        break;
-
-      case 'e':
-      case 'E':
-        e.preventDefault();
-        if (this.scriptEditor) this.scriptEditor.toggle();
         break;
 
       case 'v':
@@ -347,18 +311,14 @@ export class KeyboardHandler {
       case 'N':
         // Next / previous video in the active queue. Same bindings the
         // detached pop-out window has always used, so the two windows
-        // behave identically. Gated against the editor: swapping the
-        // loaded video out from under an authoring session is worse
-        // than a dead keypress. No-op with no queue, matching the
+        // behave identically. No-op with no queue, matching the
         // prev/next buttons (which stay hidden below 2 items).
-        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
         if (this.onLoadNext) this.onLoadNext();
         break;
 
       case 'p':
       case 'P':
-        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
         if (this.onLoadPrev) this.onLoadPrev();
         break;
@@ -373,10 +333,8 @@ export class KeyboardHandler {
       case 'X':
         // Orgasm Switch — HOLD to swap the device(s) onto a short, looping
         // "orgasm" script; release to snap back to the main script (handled
-        // in _onKeyUp). Gated against the editor so it doesn't fire during
-        // authoring. keydown auto-repeats while held, so the _orgasmHoldActive
+        // in _onKeyUp). keydown auto-repeats while held, so the _orgasmHoldActive
         // flag makes activation fire exactly once per physical press.
-        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
         if (!this._orgasmHoldActive) {
           this._orgasmHoldActive = true;
@@ -389,9 +347,8 @@ export class KeyboardHandler {
         // Edge Hold — the Orgasm Switch's inverse, on the neighboring key:
         // HOLD to stop all device output while the video keeps playing;
         // release resumes the main script in sync at the current position
-        // (handled in _onKeyUp). Same auto-repeat guard and editor gate as X.
+        // (handled in _onKeyUp). Same auto-repeat guard as X.
         // (MattWritesNSFW, EroScripts #301.)
-        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
         if (!this._edgeHoldActive) {
           this._edgeHoldActive = true;
@@ -409,9 +366,6 @@ export class KeyboardHandler {
           break;
         }
         e.preventDefault();
-        if (this.scriptEditor?.isOpen) {
-          this.scriptEditor.hide();
-        }
         this.player.clearAbLoop();
         if (this.connectionPanel) {
           this.connectionPanel.hide();
@@ -420,14 +374,9 @@ export class KeyboardHandler {
 
       // ? opens the keyboard-shortcut help overlay (Nielsen #7 +
       // #10 — make every shortcut discoverable from one binding).
-      // Skipped when the editor is open — its own canvas-level
-      // handler picks `?` up there and renders the editor-specific
-      // group set.
       case '?':
-        if (!this.scriptEditor?.isOpen) {
-          e.preventDefault();
-          openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
-        }
+        e.preventDefault();
+        openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
         break;
 
       default:

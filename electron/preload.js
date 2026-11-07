@@ -8,7 +8,6 @@ contextBridge.exposeInMainWorld('funsync', {
   platform: process.platform,
   getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
-  getPortableInfo: () => ipcRenderer.invoke('get-portable-info'),
 
   // Backend health monitoring — used by the disconnected-banner.
   getBackendHealth: () => ipcRenderer.invoke('get-backend-health'),
@@ -90,9 +89,6 @@ contextBridge.exposeInMainWorld('funsync', {
   getVideoCategories: (videoPath) => ipcRenderer.invoke('get-video-categories', videoPath),
   getVideosByCategory: (catId) => ipcRenderer.invoke('get-videos-by-category', catId),
 
-  // Migration
-  migrateLocalStorage: (data) => ipcRenderer.invoke('migrate-local-storage', data),
-
   // Library
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   scanDirectory: (dirPath, sourceMap) => ipcRenderer.invoke('scan-directory', dirPath, sourceMap),
@@ -108,7 +104,7 @@ contextBridge.exposeInMainWorld('funsync', {
   readCustomThumbnail: (cachedPath) => ipcRenderer.invoke('read-custom-thumbnail', cachedPath),
   getCustomThumbsDir: () => ipcRenderer.invoke('get-custom-thumbs-dir'),
 
-  // Script editor
+  // Funscript files
   saveFunscript: (content, name) => ipcRenderer.invoke('save-funscript', content, name),
   writeFunscript: (content, filePath) => ipcRenderer.invoke('write-funscript', content, filePath),
 
@@ -137,7 +133,6 @@ contextBridge.exposeInMainWorld('funsync', {
   resolveRemoteVideo: (pageUrl) => ipcRenderer.invoke('resolve-remote-video', pageUrl),
   getSpeedStats: () => ipcRenderer.invoke('get-speed-stats'),
   getDurations: () => ipcRenderer.invoke('get-durations'),
-  convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
 
   // Shell
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
@@ -189,16 +184,6 @@ contextBridge.exposeInMainWorld('funsync', {
     return () => ipcRenderer.removeListener('vr-disconnected', callback);
   },
 
-  // Autoblow
-  autoblowConnect: (token) => ipcRenderer.invoke('autoblow-connect', token),
-  autoblowDisconnect: () => ipcRenderer.invoke('autoblow-disconnect'),
-  autoblowStatus: () => ipcRenderer.invoke('autoblow-status'),
-  autoblowUploadScript: (content) => ipcRenderer.invoke('autoblow-upload-script', content),
-  autoblowSyncStart: (startTimeMs) => ipcRenderer.invoke('autoblow-sync-start', startTimeMs),
-  autoblowSyncStop: () => ipcRenderer.invoke('autoblow-sync-stop'),
-  autoblowSyncOffset: (offsetMs) => ipcRenderer.invoke('autoblow-sync-offset', offsetMs),
-  autoblowLatency: () => ipcRenderer.invoke('autoblow-latency'),
-
   // EroScripts
   eroscriptsLoginWindow: () => ipcRenderer.invoke('eroscripts-login-window'),
   eroscriptsLogout: () => ipcRenderer.invoke('eroscripts-logout'),
@@ -216,28 +201,6 @@ contextBridge.exposeInMainWorld('funsync', {
   deleteEroScriptsThumbnail: (imagePath) => ipcRenderer.invoke('delete-eroscripts-thumbnail', imagePath),
   faptapImportThumbnail: (videoPath, url) => ipcRenderer.invoke('faptap-import-thumbnail', videoPath, url),
 
-  // Editor pop-out window
-  editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),
-  editorPopoutClose: () => ipcRenderer.invoke('editor-popout:close'),
-  editorPopoutStatus: () => ipcRenderer.invoke('editor-popout:status'),
-  editorPopoutRelay: (direction, payload) => ipcRenderer.invoke('editor-popout:relay', direction, payload),
-  onEditorPopoutEvent: (callback) => {
-    const handler = (_event, evt) => callback(evt);
-    ipcRenderer.on('editor-popout:event', handler);
-    return () => ipcRenderer.removeListener('editor-popout:event', handler);
-  },
-
-  // Audience pop-out window (SCOPE-audience-broadcast.md §3.3)
-  audiencePopoutOpen: () => ipcRenderer.invoke('audience-popout:open'),
-  audiencePopoutClose: () => ipcRenderer.invoke('audience-popout:close'),
-  audiencePopoutStatus: () => ipcRenderer.invoke('audience-popout:status'),
-  audiencePopoutRelay: (direction, payload) => ipcRenderer.invoke('audience-popout:relay', direction, payload),
-  onAudiencePopoutEvent: (callback) => {
-    const handler = (_event, evt) => callback(evt);
-    ipcRenderer.on('audience-popout:event', handler);
-    return () => ipcRenderer.removeListener('audience-popout:event', handler);
-  },
-
   // Player pop-out window (SCOPE-separate-player-window.md — detached player)
   playerPopoutOpen: () => ipcRenderer.invoke('player-popout:open'),
   playerPopoutClose: () => ipcRenderer.invoke('player-popout:close'),
@@ -247,31 +210,5 @@ contextBridge.exposeInMainWorld('funsync', {
     const handler = (_event, evt) => callback(evt);
     ipcRenderer.on('player-popout:event', handler);
     return () => ipcRenderer.removeListener('player-popout:event', handler);
-  },
-
-  // Auto-updater
-  updaterCheck: () => ipcRenderer.invoke('updater-check'),
-  updaterDownload: () => ipcRenderer.invoke('updater-download'),
-  updaterInstall: () => ipcRenderer.invoke('updater-install'),
-  onUpdateEvent: (callback) => {
-    const channels = [
-      'update:checking',
-      'update:available',
-      'update:not-available',
-      'update:download-progress',
-      'update:downloaded',
-      'update:error',
-    ];
-    const handlers = channels.map((ch) => {
-      const handler = (_event, data) => callback(ch, data);
-      ipcRenderer.on(ch, handler);
-      return { channel: ch, handler };
-    });
-    // Return cleanup function
-    return () => {
-      for (const { channel, handler } of handlers) {
-        ipcRenderer.removeListener(channel, handler);
-      }
-    };
   },
 });

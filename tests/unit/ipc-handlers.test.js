@@ -6,9 +6,9 @@
 // Unit tests for IPC handler logic from electron/main.js
 //
 // main.js registers handlers via ipcMain.handle() — we can't call them
-// directly without Electron. Instead we test local copies of the core logic
-// (same pattern as data-migration.test.js). Changes to main.js handler logic
-// must be mirrored here. Acceptable tradeoff for ~30 lines of glue.
+// directly without Electron. Instead we test local copies of the core logic.
+// Changes to main.js handler logic must be mirrored here. Acceptable
+// tradeoff for ~30 lines of glue.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---- scan-directory logic (local copy from main.js) ----

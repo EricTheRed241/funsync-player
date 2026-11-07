@@ -1,8 +1,7 @@
 """Remote-video resolver — turn a web *page* URL into a directly-playable
 stream URL (+ the HTTP headers it needs), the way yt-downloader sites do.
 
-Uses yt-dlp's Python API (NOT a subprocess) so it works the same in the dev
-venv and in the PyInstaller-frozen backend, and so we get the structured info
+Uses yt-dlp's Python API (NOT a subprocess) so we get the structured info
 dict (formats, per-format http_headers, title, duration, thumbnail) directly.
 
 This module only RESOLVES. The actual byte-streaming is done by the proxy in

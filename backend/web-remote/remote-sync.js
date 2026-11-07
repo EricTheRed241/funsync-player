@@ -147,7 +147,7 @@ export class RemoteSyncClient {
   /**
    * Tell the desktop to switch to a different funscript variant for the
    * currently-playing video. Fire-and-forget — the desktop performs the
-   * switch (loads the script, re-uploads to Handy, etc.) and broadcasts
+   * switch (loads the script, re-arms the devices) and broadcasts
    * a `variant-changed` reply that `onServerMessage` receives. The UI
    * should treat this as a request and only reflect the change after
    * the reply arrives.
@@ -169,8 +169,8 @@ export class RemoteSyncClient {
 
   /**
    * Per-device offset adjustment from the phone (F4). `device` is the
-   * kind key the desktop's device-status list uses (handy/buttplug/
-   * tcode/autoblow); ms is clamped desktop-side (untrusted LAN input).
+   * kind key the desktop's device-status list uses (buttplug/tcode);
+   * ms is clamped desktop-side (untrusted LAN input).
    */
   sendSetOffset(device, ms) {
     if (typeof device !== 'string' || !device) return;

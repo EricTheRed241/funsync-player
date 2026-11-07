@@ -179,7 +179,7 @@ function _scoreToken(name, token) {
  * Average excludes zero-movement pairs (same position consecutive actions)
  * to avoid skewing from pauses/holds.
  *
- * Reference values: Handy max ~432 units/s, Launch max ~377 units/s.
+ * Reference value: Launch max ~377 units/s.
  *
  * @param {Array<{at: number, pos: number}>} actions
  * @returns {{avgSpeed: number, maxSpeed: number}} speeds in units/sec

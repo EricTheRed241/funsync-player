@@ -231,34 +231,4 @@ describe('store', () => {
       expect(paths).toContain('/b.mp4');
     });
   });
-
-  describe('migration', () => {
-    it('isMigrated returns false initially', () => {
-      expect(store.isMigrated()).toBe(false);
-    });
-
-    it('migrateFromLegacy sets data and marks migrated', () => {
-      store.migrateFromLegacy({
-        handy: { connectionKey: 'test123' },
-        player: { volume: 42 },
-        playlists: [{ id: 'p1', name: 'My List', createdAt: 1000, videoPaths: ['/v.mp4'] }],
-        categories: [{ id: 'c1', name: 'Action', color: '#ff0000' }],
-        videoCategories: { '/v.mp4': ['c1'] },
-      });
-
-      expect(store.isMigrated()).toBe(true);
-      expect(store.getSetting('handy.connectionKey')).toBe('test123');
-      expect(store.getSetting('player.volume')).toBe(42);
-      expect(store.getPlaylists()).toHaveLength(1);
-      expect(store.getPlaylists()[0].name).toBe('My List');
-      expect(store.getCategories()).toHaveLength(1);
-      expect(store.getVideoCategories('/v.mp4')).toEqual(['c1']);
-    });
-
-    it('migrateFromLegacy handles null data', () => {
-      store.migrateFromLegacy(null);
-      // Should not throw, should not corrupt
-      expect(store.getPlaylists()).toEqual([]);
-    });
-  });
 });

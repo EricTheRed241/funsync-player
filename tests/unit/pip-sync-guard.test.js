@@ -48,14 +48,10 @@ function makeVideoElement() {
 function makeDeps({ syncActive = true } = {}) {
   return {
     videoPlayer: { video: makeVideoElement() },
-    syncEngine: { stop: vi.fn() },
     buttplugSync: { _active: syncActive, stop: vi.fn() },
     tcodeSync: { _active: syncActive, stop: vi.fn() },
-    autoblowSync: { _active: syncActive, stop: vi.fn() },
-    handyManager: { connected: true, hsspStop: vi.fn() },
     buttplugManager: { connected: true, stopAll: vi.fn() },
     tcodeManager: { connected: true, stop: vi.fn() },
-    autoblowManager: { connected: true, syncStop: vi.fn() },
   };
 }
 
@@ -125,22 +121,18 @@ describe('teardownPlayback — full sequence (no PiP)', () => {
     expect(deps.videoPlayer.video.pause).toHaveBeenCalledTimes(1);
   });
 
-  it('stops all four sync engines', () => {
+  it('stops both sync engines', () => {
     const deps = makeDeps();
     teardownPlayback(deps);
-    expect(deps.syncEngine.stop).toHaveBeenCalledTimes(1);
     expect(deps.buttplugSync.stop).toHaveBeenCalledTimes(1);
     expect(deps.tcodeSync.stop).toHaveBeenCalledTimes(1);
-    expect(deps.autoblowSync.stop).toHaveBeenCalledTimes(1);
   });
 
   it('issues stop commands to all connected devices', () => {
     const deps = makeDeps();
     teardownPlayback(deps);
-    expect(deps.handyManager.hsspStop).toHaveBeenCalledTimes(1);
     expect(deps.buttplugManager.stopAll).toHaveBeenCalledTimes(1);
     expect(deps.tcodeManager.stop).toHaveBeenCalledTimes(1);
-    expect(deps.autoblowManager.syncStop).toHaveBeenCalledTimes(1);
   });
 
   it('skips sync.stop on engines that are not active', () => {
@@ -148,20 +140,14 @@ describe('teardownPlayback — full sequence (no PiP)', () => {
     teardownPlayback(deps);
     expect(deps.buttplugSync.stop).not.toHaveBeenCalled();
     expect(deps.tcodeSync.stop).not.toHaveBeenCalled();
-    expect(deps.autoblowSync.stop).not.toHaveBeenCalled();
-    // syncEngine has no _active gate — always stopped.
-    expect(deps.syncEngine.stop).toHaveBeenCalled();
   });
 
   it('skips device stops when manager is disconnected', () => {
     const deps = makeDeps();
-    deps.handyManager.connected = false;
     deps.tcodeManager.connected = false;
     teardownPlayback(deps);
-    expect(deps.handyManager.hsspStop).not.toHaveBeenCalled();
     expect(deps.tcodeManager.stop).not.toHaveBeenCalled();
     expect(deps.buttplugManager.stopAll).toHaveBeenCalledTimes(1);
-    expect(deps.autoblowManager.syncStop).toHaveBeenCalledTimes(1);
   });
 
   it('is safe with no video element', () => {
@@ -169,7 +155,7 @@ describe('teardownPlayback — full sequence (no PiP)', () => {
     deps.videoPlayer = { video: null };
     expect(() => teardownPlayback(deps)).not.toThrow();
     // The other side-effects still run.
-    expect(deps.syncEngine.stop).toHaveBeenCalled();
+    expect(deps.buttplugSync.stop).toHaveBeenCalled();
   });
 
   it('is safe with no managers attached at all (defensive)', () => {
@@ -201,7 +187,7 @@ describe('beginDeferredPipTeardown — listener semantics', () => {
   it('does not stop anything inline when video is present', () => {
     const deps = makeDeps();
     beginDeferredPipTeardown({}, deps);
-    expect(deps.syncEngine.stop).not.toHaveBeenCalled();
+    expect(deps.buttplugSync.stop).not.toHaveBeenCalled();
     expect(deps.videoPlayer.video.pause).not.toHaveBeenCalled();
   });
 
@@ -210,7 +196,7 @@ describe('beginDeferredPipTeardown — listener semantics', () => {
     deps.videoPlayer = { video: null };
     const installed = beginDeferredPipTeardown({}, deps);
     expect(installed).toBe(false);
-    expect(deps.syncEngine.stop).toHaveBeenCalled();
+    expect(deps.buttplugSync.stop).toHaveBeenCalled();
   });
 });
 
@@ -221,8 +207,8 @@ describe('Deferred fire — leavepictureinpicture event', () => {
     beginDeferredPipTeardown(state, deps);
     deps.videoPlayer.video._fire('leavepictureinpicture');
     expect(deps.videoPlayer.video.pause).toHaveBeenCalledTimes(1);
-    expect(deps.syncEngine.stop).toHaveBeenCalledTimes(1);
-    expect(deps.handyManager.hsspStop).toHaveBeenCalledTimes(1);
+    expect(deps.buttplugSync.stop).toHaveBeenCalledTimes(1);
+    expect(deps.buttplugManager.stopAll).toHaveBeenCalledTimes(1);
     expect(state._pipTeardownPending).toBe(false);
   });
 
@@ -232,7 +218,7 @@ describe('Deferred fire — leavepictureinpicture event', () => {
     deps.videoPlayer.video._fire('leavepictureinpicture');
     deps.videoPlayer.video._fire('leavepictureinpicture');
     expect(deps.videoPlayer.video.pause).toHaveBeenCalledTimes(1);
-    expect(deps.syncEngine.stop).toHaveBeenCalledTimes(1);
+    expect(deps.buttplugSync.stop).toHaveBeenCalledTimes(1);
   });
 
   it('skips teardown when _pipTeardownCancelled flag is set', () => {
@@ -244,7 +230,7 @@ describe('Deferred fire — leavepictureinpicture event', () => {
     state._pipTeardownCancelled = true;
     deps.videoPlayer.video._fire('leavepictureinpicture');
     expect(deps.videoPlayer.video.pause).not.toHaveBeenCalled();
-    expect(deps.syncEngine.stop).not.toHaveBeenCalled();
+    expect(deps.buttplugSync.stop).not.toHaveBeenCalled();
     // Cancellation flag itself is consumed so a future PiP session starts clean.
     expect(state._pipTeardownCancelled).toBe(false);
     expect(state._pipTeardownPending).toBe(false);
@@ -286,17 +272,16 @@ describe('Full lifecycle — community bug repro end-to-end', () => {
     // 3. The video keeps playing in PiP, devices keep syncing — nothing
     //    has been torn down yet.
     expect(deps.videoPlayer.video.pause).not.toHaveBeenCalled();
-    expect(deps.syncEngine.stop).not.toHaveBeenCalled();
     expect(deps.buttplugSync.stop).not.toHaveBeenCalled();
-    expect(deps.handyManager.hsspStop).not.toHaveBeenCalled();
+    expect(deps.buttplugManager.stopAll).not.toHaveBeenCalled();
 
     // 4. User eventually closes PiP (or the video ends). The deferred
     //    teardown now runs in full.
     clearPipElement();
     deps.videoPlayer.video._fire('leavepictureinpicture');
     expect(deps.videoPlayer.video.pause).toHaveBeenCalledTimes(1);
-    expect(deps.syncEngine.stop).toHaveBeenCalledTimes(1);
-    expect(deps.handyManager.hsspStop).toHaveBeenCalledTimes(1);
+    expect(deps.buttplugSync.stop).toHaveBeenCalledTimes(1);
+    expect(deps.buttplugManager.stopAll).toHaveBeenCalledTimes(1);
   });
 
   it('user returns to the player view while PiP is still active — no teardown', () => {
@@ -316,6 +301,6 @@ describe('Full lifecycle — community bug repro end-to-end', () => {
     // handle teardown the immediate way.
     deps.videoPlayer.video._fire('leavepictureinpicture');
     expect(deps.videoPlayer.video.pause).not.toHaveBeenCalled();
-    expect(deps.syncEngine.stop).not.toHaveBeenCalled();
+    expect(deps.buttplugSync.stop).not.toHaveBeenCalled();
   });
 });

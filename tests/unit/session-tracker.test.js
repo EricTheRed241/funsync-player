@@ -137,22 +137,22 @@ describe('SessionTracker — device status', () => {
   });
 
   it('setDeviceStatus is remembered across session start', () => {
-    tracker.setDeviceStatus({ handy: true });
+    tracker.setDeviceStatus({ tcode: true });
     const s = tracker.startSession('web-remote', 'x');
-    expect(s.devices.handy).toBe(true);
+    expect(s.devices.tcode).toBe(true);
   });
 
   it('setDeviceStatus updates the current session', () => {
     tracker.startSession('web-remote', 'x');
-    tracker.setDeviceStatus({ handy: true, buttplug: true });
-    expect(tracker.getSession().devices).toMatchObject({ handy: true, buttplug: true });
+    tracker.setDeviceStatus({ tcode: true, buttplug: true });
+    expect(tracker.getSession().devices).toMatchObject({ tcode: true, buttplug: true });
   });
 
   it('partial updates merge with prior state', () => {
-    tracker.setDeviceStatus({ handy: true });
+    tracker.setDeviceStatus({ tcode: true });
     tracker.setDeviceStatus({ buttplug: true });
     tracker.startSession('web-remote', 'x');
-    expect(tracker.getSession().devices.handy).toBe(true);
+    expect(tracker.getSession().devices.tcode).toBe(true);
     expect(tracker.getSession().devices.buttplug).toBe(true);
   });
 });

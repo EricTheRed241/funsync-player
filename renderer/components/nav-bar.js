@@ -5,9 +5,9 @@ import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 
 export class NavBar {
-  constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLoadUrlClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
+  constructor({ onNavigate, onDevicesClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLoadUrlClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
     this._onNavigate = onNavigate;
-    this._onHandyClick = onHandyClick;
+    this._onDevicesClick = onDevicesClick;
     this._onSettingsClick = onSettingsClick;
     this._onRemoteClick = onRemoteClick;
     this._onVRClick = onVRClick;
@@ -20,9 +20,9 @@ export class NavBar {
     this._onAddSource = onAddSource;
     this._el = null;
     this._activeId = null;
-    this._handyBtn = null;
-    this._handyLed = null;
-    this._handyText = null;
+    this._deviceBtn = null;
+    this._deviceLed = null;
+    this._deviceText = null;
     this._libraryBtn = null;
     this._libraryDropdown = null;
     this._collections = [];
@@ -150,36 +150,36 @@ export class NavBar {
     // Device status widget — LED dot + "Devices" label + status text.
     // LED is aria-hidden; status text gets aria-live so screen readers
     // announce connect/disconnect transitions without re-focusing.
-    this._handyBtn = document.createElement('button');
-    this._handyBtn.className = 'nav-bar__action nav-bar__handy';
-    this._handyBtn.title = t('nav.deviceConnection');
-    this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: t('nav.notConnected') }));
+    this._deviceBtn = document.createElement('button');
+    this._deviceBtn.className = 'nav-bar__action nav-bar__devices';
+    this._deviceBtn.title = t('nav.deviceConnection');
+    this._deviceBtn.setAttribute('aria-label', t('nav.devicesAria', { status: t('nav.notConnected') }));
 
-    this._handyLed = document.createElement('span');
-    this._handyLed.className = 'nav-bar__handy-led';
-    this._handyLed.setAttribute('aria-hidden', 'true');
+    this._deviceLed = document.createElement('span');
+    this._deviceLed.className = 'nav-bar__device-led';
+    this._deviceLed.setAttribute('aria-hidden', 'true');
 
-    this._handyLabel = document.createElement('span');
-    this._handyLabel.className = 'nav-bar__handy-label nav-bar__action-label';
-    this._handyLabel.textContent = t('nav.devices');
+    this._deviceLabel = document.createElement('span');
+    this._deviceLabel.className = 'nav-bar__device-label nav-bar__action-label';
+    this._deviceLabel.textContent = t('nav.devices');
 
-    this._handyText = document.createElement('span');
-    this._handyText.className = 'nav-bar__handy-text';
+    this._deviceText = document.createElement('span');
+    this._deviceText.className = 'nav-bar__device-text';
     // Default state is "Not connected" (neutral) — was "Disconnected"
     // which read as a failure even on first launch. Reserve
-    // "Disconnected" for actual drop-out (see setHandyStatus).
-    this._handyText.textContent = t('nav.notConnected');
-    this._handyText.setAttribute('aria-live', 'polite');
+    // "Disconnected" for actual drop-out (see setDeviceStatus).
+    this._deviceText.textContent = t('nav.notConnected');
+    this._deviceText.setAttribute('aria-live', 'polite');
 
-    this._handyBtn.appendChild(this._handyLed);
-    this._handyBtn.appendChild(this._handyLabel);
-    this._handyBtn.appendChild(this._handyText);
+    this._deviceBtn.appendChild(this._deviceLed);
+    this._deviceBtn.appendChild(this._deviceLabel);
+    this._deviceBtn.appendChild(this._deviceText);
 
-    this._handyBtn.addEventListener('click', () => {
-      if (this._onHandyClick) this._onHandyClick();
+    this._deviceBtn.addEventListener('click', () => {
+      if (this._onDevicesClick) this._onDevicesClick();
     });
 
-    this._el.appendChild(this._handyBtn);
+    this._el.appendChild(this._deviceBtn);
 
     // Web Remote — opens the phone/tablet connection modal. Now
     // surfaces a connected-state tint when ≥1 phone is connected
@@ -272,7 +272,7 @@ export class NavBar {
   }
 
   /** Re-apply translations to existing label elements + dynamic tooltips
-   *  whose values were baked at the last setter call (handy status text,
+   *  whose values were baked at the last setter call (device status text,
    *  Web Remote tooltip, VR tooltip). Static data-i18n-key labels handled
    *  by walking the DOM; dynamic ones replayed from their cached args. */
   _retranslate() {
@@ -283,8 +283,8 @@ export class NavBar {
     }
     // Replay the last dynamic setter calls so their translated strings
     // refresh to the new locale.
-    if (this._lastHandyStatus) {
-      this.setHandyStatus(this._lastHandyStatus.status, this._lastHandyStatus.deviceCount);
+    if (this._lastDeviceStatus) {
+      this.setDeviceStatus(this._lastDeviceStatus.status, this._lastDeviceStatus.deviceCount);
     }
     if (this._lastRemoteState) {
       this.setRemoteState(this._lastRemoteState.connected, this._lastRemoteState.count);
@@ -295,8 +295,8 @@ export class NavBar {
     // Static button titles set once in init() — re-apply now too.
     if (this._libraryBtn) this._libraryBtn.title = t('nav.library');
     if (this._esBtn) this._esBtn.title = t('nav.eroscriptsTitle');
-    if (this._handyBtn && !this._lastHandyStatus) {
-      this._handyBtn.title = t('nav.deviceConnection');
+    if (this._deviceBtn && !this._lastDeviceStatus) {
+      this._deviceBtn.title = t('nav.deviceConnection');
     }
     if (this._settingsBtn) {
       this._settingsBtn.title = t('nav.settings');
@@ -397,13 +397,13 @@ export class NavBar {
     this._vrBtn.title = title;
   }
 
-  setHandyStatus(status, deviceCount = 0) {
-    if (!this._handyLed || !this._handyText) return;
-    this._lastHandyStatus = { status, deviceCount };
-    this._handyLed.className = 'nav-bar__handy-led';
+  setDeviceStatus(status, deviceCount = 0) {
+    if (!this._deviceLed || !this._deviceText) return;
+    this._lastDeviceStatus = { status, deviceCount };
+    this._deviceLed.className = 'nav-bar__device-led';
 
-    if (this._handyLabel) {
-      this._handyLabel.textContent = deviceCount === 1 ? t('nav.device') : t('nav.devices');
+    if (this._deviceLabel) {
+      this._deviceLabel.textContent = deviceCount === 1 ? t('nav.device') : t('nav.devices');
     }
 
     // "Not connected" is the neutral default — no failure framing
@@ -414,11 +414,11 @@ export class NavBar {
     let textValue = t('nav.notConnected');
     switch (status) {
       case 'connected':
-        this._handyLed.classList.add('nav-bar__handy-led--connected');
+        this._deviceLed.classList.add('nav-bar__device-led--connected');
         textValue = deviceCount > 0 ? t('nav.deviceCount', { count: deviceCount }) : t('nav.connected');
         break;
       case 'connecting':
-        this._handyLed.classList.add('nav-bar__handy-led--connecting');
+        this._deviceLed.classList.add('nav-bar__device-led--connecting');
         textValue = t('nav.connecting');
         break;
       case 'disconnected':
@@ -426,12 +426,12 @@ export class NavBar {
         textValue = t('nav.notConnected');
         break;
     }
-    this._handyText.textContent = textValue;
+    this._deviceText.textContent = textValue;
     // Refresh button-level aria-label so the announcement reads
     // "Devices: 2 Connected" or similar (Norman signifier — text is
     // canonical, colour is secondary).
-    if (this._handyBtn) {
-      this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: textValue }));
+    if (this._deviceBtn) {
+      this._deviceBtn.setAttribute('aria-label', t('nav.devicesAria', { status: textValue }));
     }
   }
 

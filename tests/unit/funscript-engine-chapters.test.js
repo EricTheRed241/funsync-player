@@ -1,19 +1,11 @@
 // Tests for chapter + bookmark parsing in FunscriptEngine.
 // SCOPE: notes/features/SCOPE-chapters-bookmarks.md §6 edge cases.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { FunscriptEngine } from '../../renderer/js/funscript-engine.js';
 
-// Stub the backend CSV conversion — these tests don't care about it.
-beforeEach(() => {
-  if (!window.funsync) window.funsync = {};
-  window.funsync.convertFunscript = vi.fn().mockResolvedValue({
-    local_url: 'file://stub.csv', hash: 'stub', size_bytes: 0,
-  });
-});
-
 function makeEngine() {
-  return new FunscriptEngine({ backendPort: 5123 });
+  return new FunscriptEngine();
 }
 
 async function loadJSON(engine, obj) {

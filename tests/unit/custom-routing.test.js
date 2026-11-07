@@ -674,7 +674,7 @@ describe('Custom axis (C prefix) sends by capability', () => {
 });
 
 // --- Persisted-settings vs custom-routing collision (regression for the
-//     "second Handy in a 2-device custom-routing setup is silent" bug) ---
+//     "second device in a 2-device custom-routing setup is silent" bug) ---
 //
 // On cold start of a custom-routed video, `_loadCustomRouting` correctly
 // assigns each device to its route's axis (e.g. device 0 → L0, device 1 →
@@ -684,7 +684,7 @@ describe('Custom axis (C prefix) sends by capability', () => {
 // CR-axis on device 1 and leaving it silent. The fix gates the re-apply
 // on `!_customRoutingActive`. These tests replicate the load-side logic
 // to pin the behaviour down.
-describe('persisted axis vs custom routing collision (two-Handy regression)', () => {
+describe('persisted axis vs custom routing collision (two-device regression)', () => {
   /**
    * Replicates the GUARDED load logic from
    * `connection-panel.js::_loadButtplugDeviceSettings` so any change there
@@ -705,8 +705,8 @@ describe('persisted axis vs custom routing collision (two-Handy regression)', ()
 
   it('does not let saved axisAssignment clobber a custom-routing CR-axis', () => {
     const bp = mockButtplug([
-      { index: 0, name: 'The Handy', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
-      { index: 1, name: 'The Handy', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+      { index: 0, name: 'Stroker', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+      { index: 1, name: 'Stroker', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
     ]);
     const sync = new ButtplugSync({
       videoPlayer: mockPlayer(),
@@ -722,8 +722,8 @@ describe('persisted axis vs custom routing collision (two-Handy regression)', ()
     // Step 2: stale persisted settings — user set device 1 to L1 in an
     // earlier multi-axis session before switching to custom routing.
     const persisted = {
-      '0:The Handy': { axisAssignment: 'L0' },
-      '1:The Handy': { axisAssignment: 'L1' },
+      '0:Stroker': { axisAssignment: 'L0' },
+      '1:Stroker': { axisAssignment: 'L1' },
     };
 
     // Step 3: _tryStartButtplugSync invokes _loadButtplugDeviceSettings.

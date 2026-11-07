@@ -15,7 +15,7 @@ const basename = (p) => (p ? String(p).split(/[\\/]/).pop() : null);
  * @returns {object} JSON-safe snapshot.
  */
 export function buildDesktopStatus({
-  handyManager, buttplugManager, tcodeManager, tcodeSync, autoblowManager,
+  buttplugManager, tcodeManager, tcodeSync,
   vrBridge, sessionTracker, videoPlayer, currentVideoPath, now = Date.now(),
 } = {}) {
   const video = videoPlayer?.video;
@@ -23,7 +23,6 @@ export function buildDesktopStatus({
   return {
     at: iso(now),
     devices: {
-      handy: handyManager ? { connected: !!handyManager.connected } : null,
       buttplug: buttplugManager ? {
         connected: !!buttplugManager.connected,
         devices: buttplugManager.connected ? (buttplugManager.devices || []).map((d) => d.name) : [],
@@ -33,10 +32,6 @@ export function buildDesktopStatus({
         waiting: !!tcodeManager.waiting,
         syncActive: !!tcodeSync?._active,
         link: tcodeManager.status || null,
-      } : null,
-      autoblow: autoblowManager ? {
-        connected: !!autoblowManager.connected,
-        model: autoblowManager.connected ? (autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2') : null,
       } : null,
     },
     vr: vrBridge ? {

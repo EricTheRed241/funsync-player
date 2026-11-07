@@ -1,16 +1,13 @@
 // Inline script visualization — TL (windowed timeline graph) + HM (full-
-// duration heatmap strip) shown during NORMAL playback, outside the editor.
+// duration heatmap strip) shown during normal playback.
 // zaikechi (EroScripts #209 + DM); reference design: ScriptPlayer+ v0.3.0's
 // independent TL/HM toggles. See SCOPE-inline-viz-and-script-mapping.md.
 //
-// Crucially NOT the editor: no pause, no Up Next suppression, no editing.
-// The whole overlay is pointer-events:none — pure display; interaction
-// stays on the seek bar. TL reuses the editor's ActionGraph in a read-only
-// mount (no pointer wiring — the editor attaches its handlers externally,
-// so a bare ActionGraph is already non-interactive), which guarantees
-// visual parity with the editor for free. HM uses the seek-bar heatmap's
-// exact per-action-pair algorithm (see _renderHeatmap) so both show
-// identical detail.
+// No pause, no Up Next suppression, no editing. The whole overlay is
+// pointer-events:none — pure display; interaction stays on the seek bar.
+// TL mounts the read-only ActionGraph renderer. HM uses the seek-bar
+// heatmap's exact per-action-pair algorithm (see _renderHeatmap) so both
+// show identical detail.
 
 import { ActionGraph } from '../js/action-graph.js';
 
@@ -46,9 +43,8 @@ export class InlineViz {
     this._root.append(this._hmCanvas, this._tlWrap);
     container.appendChild(this._root);
 
-    // Read-only shim satisfying ActionGraph's script interface
-    // (actions + selection + bookmarks — nothing is ever selected here).
-    this._shim = { actions: [], selectedIndices: new Set(), getBookmarks: () => [] };
+    // Action source the graph reads on every draw.
+    this._shim = { actions: [] };
     this._graph = new ActionGraph(this._tlCanvas, this._shim);
 
     // Drive the graph's cursor from the video clock with our own rAF loop
@@ -210,7 +206,7 @@ export class InlineViz {
    * binned speeds into 240 fixed buckets, which read as blocky flat colour
    * next to the seek bar's per-action detail (Dave, 2026-08-04).
    * Colors via ActionGraph.speedToColor — one palette across the strip,
-   * seek bar, and editor lines.
+   * seek bar, and timeline lines.
    */
   _renderHeatmap() {
     if (this._hmCanvas.hidden || !this._actions || !(this._durationMs > 0)) return;

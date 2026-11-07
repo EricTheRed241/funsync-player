@@ -60,7 +60,6 @@ export class VideoPlayer {
     this.onProgressHover = null; // callback: (timeSeconds) => {}
     // Fired only on an actual show/hide transition of the control chrome.
     this.onControlsVisibilityChanged = null; // callback: (visible: boolean) => {}
-    this.onSeekDrag = null; // callback: (timeSeconds) => {} — called during scrub
 
     this._cacheElements();
     this._bindEvents();
@@ -557,8 +556,7 @@ export class VideoPlayer {
 
     // Reset playback rate to 1× on every new video load. Matches YouTube
     // / VLC convention — avoids "why is this video at 2×?" surprise the
-    // next morning. Replaces the editor-close reset (removed from
-    // script-editor.js since rate is now player-owned).
+    // next morning.
     //
     // Guarded on OUR tracked rate, not `video.playbackRate`. Loading a new
     // resource already reset the element to `defaultPlaybackRate` (1), so
@@ -567,9 +565,6 @@ export class VideoPlayer {
     // emitted `playback:rate-changed`, so the speed chip kept showing the
     // previous video's rate — "appears to persist but doesn't really", and
     // reselecting the same value was the only way to make it take effect.
-    //
-    // It also left the Handy in HDSP mode after a non-1× video, since the
-    // HSSP↔HDSP switch lives in setPlaybackRate and was likewise skipped.
     //
     // With "remember playback speed" on we re-APPLY the tracked rate rather
     // than resetting — the element still needs writing to either way, since
@@ -631,11 +626,6 @@ export class VideoPlayer {
       this.video.currentTime = time;
       this.progressBar.style.width = `${pct * 100}%`;
       this.progressThumb.style.left = `${pct * 100}%`;
-
-      // Notify for HDSP scrub preview
-      if (this._isSeeking && this.onSeekDrag) {
-        this.onSeekDrag(time);
-      }
     }
   }
 
@@ -981,32 +971,14 @@ export class VideoPlayer {
 
   // --- Playback Speed ---
   //
-  // Single source of truth for playback rate. Editor dropdown, player
-  // controls button, keyboard shortcuts, and (Phase 2) web-remote all
-  // route through here so the Handy HSSP↔HDSP mode switch fires in
-  // exactly one place.
-  //
-  // HSSP can't follow rate changes (cloud schedules at 1.0× regardless),
-  // so at non-1× we switch to HDSP-polled mode — the polled engine reads
-  // `video.currentTime` per tick, which naturally scales with the rate.
-  // Buttplug / TCode / Autoblow already handle rate via per-tick reads.
+  // Single source of truth for playback rate. Player controls button,
+  // keyboard shortcuts, and the web remote all route through here.
+  // Buttplug / TCode handle the rate via per-tick `video.currentTime` reads.
 
   setPlaybackRate(rate) {
     if (!PLAYBACK_RATE_PRESETS.includes(rate)) return;
     this.video.playbackRate = rate;
     this._currentRate = rate;
-
-    if (this._handyManager?.connected) {
-      if (rate === 1) {
-        if (this._handyHdspSync?.active) this._handyHdspSync.stop();
-        if (this._handySyncEngine) this._handySyncEngine.start();
-      } else {
-        if (this._handySyncEngine) this._handySyncEngine.stop();
-        if (this._handyHdspSync && !this._handyHdspSync.active) {
-          this._handyHdspSync.start();
-        }
-      }
-    }
 
     eventBus.emit('playback:rate-changed', rate);
   }
@@ -1031,11 +1003,6 @@ export class VideoPlayer {
   }
 
   /**
-   * Wire the Handy sync references so setPlaybackRate can manage the
-   * HSSP↔HDSP mode switch. Called by app.js once the managers are
-   * constructed. Idempotent — passing nullish keeps existing refs.
-   */
-  /**
    * Supply a predicate for "carry the playback rate across videos"
    * (`player.rememberPlaybackSpeed`). Read at each video load, so a change
    * in Settings takes effect on the very next video with no propagation.
@@ -1044,12 +1011,6 @@ export class VideoPlayer {
    */
   setRememberRateProvider(fn) {
     this._rememberRateProvider = typeof fn === 'function' ? fn : null;
-  }
-
-  setHandySyncRefs({ handyManager, handySyncEngine, handyHdspSync }) {
-    if (handyManager !== undefined) this._handyManager = handyManager;
-    if (handySyncEngine !== undefined) this._handySyncEngine = handySyncEngine;
-    if (handyHdspSync !== undefined) this._handyHdspSync = handyHdspSync;
   }
 
   // --- Subtitles ---

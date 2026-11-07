@@ -62,14 +62,8 @@ export class SettingsPanel {
     getConnectionState,
     getUnreachableSources,
     onRecheckSources,
-    onTestFillerPattern,
-    onStopFillerTest,
   }) {
     this._settings = settings;
-    // Filler test button. The panel owns no devices — app.js holds the sync
-    // engines, so it hands back a start/stop pair and reports progress.
-    this.onTestFillerPattern = onTestFillerPattern || null;
-    this.onStopFillerTest = onStopFillerTest || null;
     this._onSourcesChanged = onSourcesChanged;
     // Reachability lives on the library/app side; the panel only reads it.
     // Supplied as a GETTER, not a value, so a re-probe is reflected without
@@ -213,7 +207,6 @@ export class SettingsPanel {
           ...(isLinux ? [{ id: 'sp-sec-video', label: t('settingsPanel.playback.videoHeader') }] : []),
         ],
       },
-      { id: 'editor', label: t('settingsPanel.tabEditor'), groups: [] },
       {
         id: 'appearance',
         label: t('settingsPanel.tabAppearance'),
@@ -402,13 +395,6 @@ export class SettingsPanel {
     // --- Playback Tab ---
     panels.playback = this._buildPlaybackTab();
     wirePanel('playback');
-
-    // --- Editor Tab — script-authoring settings (position keys; future
-    //     home for other editor-specific tunables). Sits between Playback
-    //     and Appearance because it's content-side work that belongs
-    //     next to playback in mental model, not next to theme settings. ---
-    panels.editor = this._buildEditorTab();
-    wirePanel('editor');
 
     // --- Appearance Tab (theme toggle) ---
     panels.appearance = this._buildAppearanceTab();
@@ -677,17 +663,6 @@ export class SettingsPanel {
               const srcs = this._settings.get('library.sources') || [];
               this._settings.set('library.sources', srcs.filter(s => s.id !== src.id));
 
-              // Clear the legacy `library.directory` singleton if it still
-              // points at this source. Otherwise the migrate-on-load path
-              // in `app.js::_refreshCollectionsUI` would re-add this source
-              // on the next library refresh — only ever the FIRST source
-              // ever added is affected (subsequent adds don't touch the
-              // legacy key), so this fix is narrow but real.
-              const legacyDir = this._settings.get('library.directory');
-              if (legacyDir && legacyDir === src.path) {
-                this._settings.set('library.directory', '');
-              }
-
               renderSources();
               if (this._onSourcesChanged) this._onSourcesChanged();
               showToast(t('settingsPanel.sources.removed', { name: src.name }), 'info');
@@ -867,10 +842,7 @@ export class SettingsPanel {
       </div>
       <div id="sp-filler-preview-row" hidden>
         <canvas id="sp-filler-preview" class="settings-panel__filler-preview" width="260" height="60" role="img" aria-label="${t('settingsPanel.playback.fillerPreviewAria')}"></canvas>
-        <div class="settings-panel__filler-test-row">
-          <button type="button" id="sp-filler-test" class="settings-panel__add-btn">${t('settingsPanel.playback.fillerTest')}</button>
-          <span class="settings-panel__hint" id="sp-filler-stats"></span>
-        </div>
+        <div class="settings-panel__hint" id="sp-filler-stats"></div>
       </div>
       <div class="settings-panel__hint" id="sp-filler-hint">${t('settingsPanel.playback.fillerHint')}</div>
     `;
@@ -1017,13 +989,6 @@ export class SettingsPanel {
         <button type="button" id="sp-inline-viz-opacity-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.inlineVizOpacityResetTitle')}" aria-label="${t('settingsPanel.playback.inlineVizOpacityResetTitle')}">↻</button>
       </div>
       <div class="settings-panel__hint" id="sp-inline-viz-opacity-hint">${t('settingsPanel.playback.inlineVizOpacityHint')}</div>
-      <div class="settings-panel__field">
-        <label class="settings-panel__field-label" for="sp-device-sim-opacity">${t('settingsPanel.playback.deviceSimOpacityLabel')}</label>
-        <input type="range" id="sp-device-sim-opacity" class="settings-panel__input settings-panel__input--range" min="20" max="100" step="5" value="80" aria-describedby="sp-device-sim-opacity-hint">
-        <span id="sp-device-sim-opacity-val" class="settings-panel__field-value">80%</span>
-        <button type="button" id="sp-device-sim-opacity-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.deviceSimOpacityResetTitle')}" aria-label="${t('settingsPanel.playback.deviceSimOpacityResetTitle')}">↻</button>
-      </div>
-      <div class="settings-panel__hint" id="sp-device-sim-opacity-hint">${t('settingsPanel.playback.deviceSimOpacityHint')}</div>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
         <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.miniPlayer') !== false ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
@@ -1267,11 +1232,10 @@ export class SettingsPanel {
           max: depth.max,
         });
         const css = getComputedStyle(document.documentElement);
-        this._fillerPreviewActions = actions;
         drawFillerWaveform(fillerCanvas, actions, {
           stroke: css.getPropertyValue('--accent')?.trim() || '#4aa3ff',
           grid: 'rgba(127,127,127,0.25)',
-        }, { playhead: this._fillerTestHead });
+        });
         if (fillerStats) {
           fillerStats.textContent = t('settingsPanel.playback.fillerStats', {
             avg: stats.avgSpeed,
@@ -1279,45 +1243,6 @@ export class SettingsPanel {
           });
         }
       };
-
-      // Test button — play the previewed pattern through the connected
-      // devices. The preview is drawn in SCRIPT space, so a per-device
-      // invert/range/cutoff can make the hardware do something quite
-      // different from the picture; this is the only way to find that out
-      // without playing a video with a gap in it (Dave, 2026-08-21).
-      const fillerTestBtn = panel.querySelector('#sp-filler-test');
-      if (fillerTestBtn) {
-        const endTest = () => {
-          this._fillerTestHead = null;
-          fillerTestBtn.textContent = t('settingsPanel.playback.fillerTest');
-          redrawFillerPreview();
-        };
-        fillerTestBtn.addEventListener('click', () => {
-          if (this._fillerTestHead !== null && this._fillerTestHead !== undefined) {
-            this.onStopFillerTest?.();
-            endTest();
-            return;
-          }
-          const actions = this._fillerPreviewActions;
-          if (!actions || actions.length < 2) return;
-          const result = this.onTestFillerPattern?.(actions, {
-            onProgress: (progress) => {
-              this._fillerTestHead = progress;
-              redrawFillerPreview();
-            },
-            onEnd: endTest,
-          });
-          if (result === 'started') {
-            this._fillerTestHead = 0;
-            fillerTestBtn.textContent = t('settingsPanel.playback.fillerTestStop');
-            redrawFillerPreview();
-          } else if (result === 'busy') {
-            showToast(t('toast.fillerTestBusy'), 'info', 3000);
-          } else {
-            showToast(t('toast.fillerTestNoDevices'), 'info', 3000);
-          }
-        });
-      }
 
       const persistFiller = () => {
         this._settings.set('player.gapFiller', {
@@ -1569,37 +1494,6 @@ export class SettingsPanel {
         });
       }
 
-      // Device simulator (D) opacity. Same 20-100 range and live-apply as the
-      // inline viz above — both are video overlays and are judged against the
-      // footage, not in the abstract.
-      const simOpacity = panel.querySelector('#sp-device-sim-opacity');
-      const simOpacityVal = panel.querySelector('#sp-device-sim-opacity-val');
-      const simOpacityReset = panel.querySelector('#sp-device-sim-opacity-reset');
-      if (simOpacity) {
-        const DEFAULT_SIM_OPACITY = 80;
-        const readSimOpacity = () => {
-          const v = Number(this._settings.get('player.deviceSimOpacity'));
-          return Number.isFinite(v) ? Math.min(100, Math.max(20, v)) : DEFAULT_SIM_OPACITY;
-        };
-        const paintSimOpacity = (v) => {
-          simOpacity.value = String(v);
-          if (simOpacityVal) simOpacityVal.textContent = `${v}%`;
-          if (simOpacityReset) simOpacityReset.hidden = v === DEFAULT_SIM_OPACITY;
-        };
-        paintSimOpacity(readSimOpacity());
-        simOpacity.addEventListener('input', () => {
-          const v = Number(simOpacity.value);
-          this._settings.set('player.deviceSimOpacity', v);
-          paintSimOpacity(v);
-          if (this.onDeviceSimOpacityChanged) this.onDeviceSimOpacityChanged(v);
-        });
-        simOpacityReset?.addEventListener('click', () => {
-          this._settings.set('player.deviceSimOpacity', DEFAULT_SIM_OPACITY);
-          paintSimOpacity(DEFAULT_SIM_OPACITY);
-          if (this.onDeviceSimOpacityChanged) this.onDeviceSimOpacityChanged(DEFAULT_SIM_OPACITY);
-        });
-      }
-
       // Orgasm Switch behaviour: hold-to-ride vs press-to-finish.
       const orgasmMode = panel.querySelector('#sp-orgasm-mode');
       if (orgasmMode) {
@@ -1682,44 +1576,6 @@ export class SettingsPanel {
       wireDefaultCheckbox(autoplayCheckbox, panel.querySelector('#sp-autoplay-on-advance-reset'), SETTINGS_DEFAULTS['player.autoplayOnAdvance']);
       wireDefaultCheckbox(queueAutoFill, panel.querySelector('#sp-queue-auto-fill-reset'), SETTINGS_DEFAULTS['player.queueAutoFill']);
       wireDefaultCheckbox(rangeExtender, panel.querySelector('#sp-range-extender-reset'), SETTINGS_DEFAULTS['player.rangeExtender.enabled']);
-    }, 0);
-
-    return panel;
-  }
-
-  /**
-   * Editor tab — script-authoring settings. Home for editor-specific
-   * tunables that don't belong in Playback (which is about how the
-   * video + script run together). Currently hosts the custom
-   * position-key bindings; future editor-only options land here too.
-   *
-   * SCOPE: notes/features/SCOPE-editor-custom-position-keys.md
-   */
-  _buildEditorTab() {
-    const panel = document.createElement('div');
-    panel.className = 'settings-panel__tab-content';
-
-    const customKeysSection = document.createElement('div');
-    customKeysSection.className = 'settings-panel__section';
-    customKeysSection.innerHTML = `
-      <h2 class="settings-panel__section-header">${t('editor.customKeysTitle')}</h2>
-      <div id="sp-custom-position-keys-mount"></div>
-    `;
-    panel.appendChild(customKeysSection);
-
-    // Defer + lazy-load: the settings modal doesn't pay the cost of
-    // pulling in custom-position-keys.js (and its KeyCapture dep) until
-    // the user actually opens the Editor tab.
-    setTimeout(async () => {
-      const mountSlot = panel.querySelector('#sp-custom-position-keys-mount');
-      if (!mountSlot) return;
-      try {
-        const { CustomPositionKeys } = await import('./custom-position-keys.js');
-        new CustomPositionKeys({ element: mountSlot, settings: this._settings });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[settings-panel] failed to mount custom-position-keys', err);
-      }
     }, 0);
 
     return panel;
@@ -2112,7 +1968,6 @@ export class SettingsPanel {
     aboutSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.help.aboutHeader')}</h2>
       <div id="sp-about-version" class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.aboutVersion', { version: '…' })}</div>
-      <div id="sp-about-portable" class="settings-panel__hint" style="margin-bottom:10px" hidden></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="sp-about-github" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.aboutGithub')}</button>
         <button id="sp-about-license" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.aboutLicense')}</button>
@@ -2125,16 +1980,6 @@ export class SettingsPanel {
       const el = panel.querySelector('#sp-about-version');
       if (el) el.textContent = t('settingsPanel.help.aboutVersion', { version: version || '?' });
     }).catch(() => { /* leave placeholder */ });
-    // Portable-mode indicator — only shown when running portably so normal
-    // installs see nothing (Nielsen #1 + #8 minimalist). Tells the user where
-    // their data lives, which matters most on a USB stick.
-    window.funsync.getPortableInfo?.().then((info) => {
-      const el = panel.querySelector('#sp-about-portable');
-      if (el && info?.portable) {
-        el.textContent = t('settingsPanel.help.portableMode', { dir: info.dataDir || '' });
-        el.hidden = false;
-      }
-    }).catch(() => { /* not portable / unavailable */ });
 
     setTimeout(() => this._wireHelpTab(panel), 0);
     return panel;

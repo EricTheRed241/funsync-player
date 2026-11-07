@@ -84,18 +84,16 @@ function parseBookmarks(data) {
 }
 
 export class FunscriptEngine {
-  constructor({ backendPort }) {
-    this.backendPort = backendPort;
+  constructor() {
     this._parsed = null;
-    this._csvInfo = null;
-    this._rawContent = null; // raw funscript JSON string for SDK upload
+    this._rawContent = null; // raw funscript JSON string (metadata, device uploads)
     this._fillerOptions = null;
     this._filledActions = null; // authored + gap filler, or null when off
   }
 
   /**
    * Parse a .funscript file from a File object.
-   * Validates structure, converts to CSV via backend, stores result.
+   * Validates structure and stores the parsed result.
    * @param {File} file
    * @returns {Object} Parsed funscript info
    */
@@ -108,7 +106,7 @@ export class FunscriptEngine {
    * Parse funscript from raw JSON string.
    * @param {string} content - Raw .funscript JSON
    * @param {string} filename - Original filename
-   * @returns {Object} Parsed info with actions, duration, CSV URL
+   * @returns {Object} Parsed info with actions and duration
    */
   async loadContent(content, filename = 'unknown.funscript') {
     // Client-side validation first. stripBOM() defends against
@@ -133,7 +131,7 @@ export class FunscriptEngine {
     // Sort actions by timestamp
     data.actions.sort((a, b) => a.at - b.at);
 
-    // Store raw content for SDK upload (SDK handles its own conversion)
+    // Store raw content (metadata, multi-axis extraction)
     this._rawContent = content;
 
     this._parsed = {
@@ -151,14 +149,6 @@ export class FunscriptEngine {
       chapters: parseChapters(data),
       bookmarks: parseBookmarks(data),
     };
-
-    // Convert to CSV via backend
-    try {
-      this._csvInfo = await window.funsync.convertFunscript(content);
-    } catch (err) {
-      console.warn('Backend CSV conversion failed, using client-side data:', err.message);
-      this._csvInfo = null;
-    }
 
     // A new script invalidates any filler built for the previous one.
     this._rebuildFiller();
@@ -180,9 +170,6 @@ export class FunscriptEngine {
       actionCount: this._parsed.actionCount,
       durationMs: this._parsed.durationMs,
       durationFormatted: this._formatDuration(this._parsed.durationMs),
-      localUrl: this._csvInfo?.local_url || null,
-      csvHash: this._csvInfo?.hash || null,
-      csvSizeBytes: this._csvInfo?.size_bytes || null,
     };
   }
 
@@ -302,24 +289,7 @@ export class FunscriptEngine {
   }
 
   /**
-   * Get the local URL for the Handy to download the CSV script.
-   * @returns {string|null}
-   */
-  getLocalUrl() {
-    return this._csvInfo?.local_url || null;
-  }
-
-  /**
-   * Get the raw CSV content for cloud upload.
-   * @returns {string|null}
-   */
-  getCsvContent() {
-    return this._csvInfo?.csv || null;
-  }
-
-  /**
-   * Get the raw funscript JSON string for SDK upload.
-   * The SDK's uploadDataToServer() handles conversion to its own CSV format.
+   * Get the raw funscript JSON string.
    * @returns {string|null}
    */
   getRawContent() {
@@ -350,7 +320,7 @@ export class FunscriptEngine {
 
   /**
    * Replace the parsed actions array (e.g. after editor changes).
-   * Also updates _rawContent so Handy SDK re-upload uses the new actions.
+   * Also updates _rawContent so it matches the new actions.
    * @param {Array<{at: number, pos: number}>} actions
    */
   reloadActions(actions) {
@@ -361,7 +331,7 @@ export class FunscriptEngine {
     if (this._parsed.actions.length > 0) {
       this._parsed.durationMs = this._parsed.actions[this._parsed.actions.length - 1].at;
     }
-    // Rebuild raw content for SDK upload
+    // Rebuild raw content
     const metadata = this.getMetadata() || {};
     metadata.actions = this._parsed.actions;
     this._rawContent = JSON.stringify(metadata);
@@ -372,7 +342,6 @@ export class FunscriptEngine {
    */
   clear() {
     this._parsed = null;
-    this._csvInfo = null;
     this._rawContent = null;
     this._filledActions = null;
   }

@@ -93,4 +93,4 @@ async function trashGeneratedCompanions(scriptPath, { trashItem }) {
   return { trashed, failed };
 }
 
-module.exports = { generatedStemOf, listGeneratedInFolder, trashGeneratedCompanions };
+module.exports = { generatedStemOf, trashGeneratedCompanions };

@@ -5,7 +5,6 @@
 //   npm run eroscripts:scout                 scan new posts (+ a little backfill) → <userData>/eroscripts-scout.json
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
-//   npm run eroscripts:scout -- --recheck    judge saved candidates' sex by their first post (one-off)
 //   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (sex required for
@@ -82,10 +81,6 @@ By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
 Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
                          and the paths config.json keeps for them (app must be closed)
-Recheck (one-off):
-  --recheck              for saved candidates that fail only the sex rule and were saved without its
-                         evidence, read the first post: sex there keeps them (sexual: text; monster / feet
-                         there rank lower), excluded words there drop them for good; the rest stay skipped
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
@@ -101,7 +96,6 @@ function parseArgs(argv) {
     switch (a) {
       case '--fetch': opts.fetch = true; break;
       case '--retitle': opts.retitle = true; break;
-      case '--recheck': opts.recheck = true; break;
       case '--dry-run': opts.dryRun = true; break;
       case '--manual-list': opts.manualList = true; break;
       case '--manual-dir': opts.manualDir = path.resolve(value(i, a)); i++; break;
@@ -392,63 +386,6 @@ async function addPicked(opts, { api, userData, config, incoming }) {
   const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
   fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
   console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run eroscripts:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
-  return 0;
-}
-
-// ── Recheck ─────────────────────────────────────────────────────────────
-
-/**
- * `--recheck`: saved candidates that fail only the sex rule and carry no
- * evidence (saved before it was kept) are judged again with their first
- * post (lib.recheckWithText). The list is re-read before writing, so only
- * the judged candidates change.
- */
-async function recheck({ api, userData }) {
-  const file = path.join(userData, 'eroscripts-scout.json');
-  if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
-  const todo = (JSON.parse(fs.readFileSync(file, 'utf8')).candidates || []).filter(lib.needsSexRecheck);
-  console.log(`Recheck: ${todo.length} waiting posts fail only the sex rule by tags and title`);
-  if (!todo.length) return 0;
-  if (!(await api.validateSession()).valid) throw new SessionExpiredError();
-  const pacer = createPacer();
-  const changed = new Map();
-  const counts = { text: 0, 'not-sexual': 0, excluded: 0, unreadable: 0 };
-  const examples = { text: [], 'not-sexual': [], excluded: [] };
-  try {
-    for (const c of todo) {
-      await pacer.wait();
-      const data = await api.getTopicData(c.id);
-      if (data?.error_type === 'rate_limit') throw new RateLimitedError();
-      const op = data?.post_stream?.posts?.[0];
-      if (!op) {
-        if (!(await api.validateSession()).valid) throw new SessionExpiredError();
-        counts.unreadable++;
-        process.stderr.write(`! ${c.id} unreadable\n`);
-        continue;
-      }
-      const r = lib.recheckWithText(c, (op.cooked || '').replace(/<[^>]+>/g, ' '));
-      counts[r.outcome]++;
-      examples[r.outcome].push(`${c.title}${r.candidate.contentBreak ? ` (${r.candidate.contentBreak})` : ''}`);
-      if (r.candidate !== c) changed.set(c.id, r.candidate);
-    }
-  } finally {
-    // Progress survives a rate limit or an expired session.
-    if (changed.size) {
-      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-      saved.candidates = (saved.candidates || []).map((c) => {
-        const r = changed.get(c.id);
-        if (!r) return c;
-        const { contentBreak, ...rest } = c;
-        const judged = Object.fromEntries(['sexual', 'contentBreak', 'monster', 'feet', 'ffm'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
-        return { ...rest, ...judged };
-      });
-      writeAtomic(file, JSON.stringify(saved, null, 1));
-    }
-    console.log(`\nKept by first-post text ${counts.text} · still not sexual ${counts['not-sexual']} · newly excluded ${counts.excluded}${counts.unreadable ? ` · unreadable ${counts.unreadable}` : ''}`);
-    for (const [k, label] of [['text', 'Kept'], ['excluded', 'Excluded'], ['not-sexual', 'Still not sexual']]) {
-      if (examples[k].length) console.log(`${label}: ${examples[k].slice(0, 8).join(' · ')}${examples[k].length > 8 ? ' …' : ''}`);
-    }
-  }
   return 0;
 }
 
@@ -832,7 +769,6 @@ async function main() {
 
   try {
     if (opts.add) return await addPicked(opts, { api, userData, config, incoming });
-    if (opts.recheck) return await recheck({ api, userData });
     return opts.fetch ? await fetchAll(opts, { api, userData, config, incoming }) : await scan(opts, { api, userData, config, incoming });
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }

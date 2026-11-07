@@ -116,7 +116,7 @@ export function createEmojiImage(emoji, opts = {}) {
   img.style.flexShrink = '0';
   img.style.verticalAlign = 'middle';
 
-  // The artwork is gitignored and fetched at build time, so a source clone
+  // The artwork is gitignored and fetched separately, so a source clone
   // that has not run scripts/fetch-twemoji.mjs has the manifest but not the
   // files. Rather than show a broken-image icon, fall back to rendering the
   // character itself — which is exactly what an emoji with no bundled art

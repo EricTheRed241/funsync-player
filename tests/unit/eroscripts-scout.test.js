@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, needsSexRecheck, recheckWithText, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
+  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
@@ -128,7 +128,6 @@ describe('lessPreferred and the monster / feet / FFM penalty', () => {
     expect(candidateScore({ ...base, tags: [...base.tags, 'werewolf', 'feet', 'ffm'] })).toBe(plain + D.werewolf + D.feet + D.ffm);
     expect(candidateScore({ ...base, title: 'Werewolf footjob', tags: [...base.tags, 'werewolf', 'feet'] })).toBe(plain + D.werewolf + D.feet);
     expect(candidateScore({ ...base, monster: true })).toBe(plain + D.monster);
-    expect(candidateScore({ ...base, contentBreak: 'feet' })).toBe(plain + D.footjob);
   });
 });
 
@@ -182,12 +181,9 @@ describe('contentRuleBreak', () => {
     expect(contentRuleBreak({ tags: ['animation', 'blowjob', 'riding'], title: 'X' })).toBeNull();
   });
 
-  it('lets sex shown by the first post pass; an old monster / feet mark no longer breaks anything', () => {
+  it('lets sex shown by the first post pass', () => {
     expect(contentRuleBreak({ tags: ['animation', 'straight'], title: 'X', sexual: 'text' })).toBeNull();
     expect(contentRuleBreak({ tags: ['animation', 'sfw'], title: 'X', sexual: 'text' })).toBe('not-sexual');
-    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'feet' })).toBeNull();
-    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'monster' })).toBeNull();
-    expect(contentRuleBreak({ tags: ['animation', 'vaginal'], title: 'X', contentBreak: 'excluded' })).toBe('excluded');
   });
 
   it('drops a saved flat live music compilation that is not POV from the queue, unless a favourite, VR or picked', () => {
@@ -225,27 +221,6 @@ describe('sexEvidence and judgeFirstPost', () => {
     expect(judgeFirstPost({ tags: ['animation', 'titjob'], title: 'Rio Paizuri' }, 'paizuri only')).toEqual({ ok: false, reason: 'not-sexual' });
     expect(judgeFirstPost({ tags: ['animation', 'blowjob'], title: 'Seraphine BJ' }, 'then she rides you')).toEqual({ ok: true, sexual: 'text', monster: false, feet: false, ffm: false });
     expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, 'an FFM threesome')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: false, ffm: true });
-  });
-});
-
-describe('recheck', () => {
-  const c = (title, tags, extra = {}) => ({ id: 1, title, tags, score: 1, ...extra });
-
-  it('reads the first post only of candidates failing just the sex rule without evidence, old monster / feet marks included', () => {
-    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight']))).toBe(true);
-    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { sexual: 'text' }))).toBe(false);
-    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { contentBreak: 'monster' }))).toBe(true);
-    expect(needsSexRecheck(c('Silver Streaks', ['animation', 'straight'], { contentBreak: 'excluded' }))).toBe(false);
-    expect(needsSexRecheck(c('Tracer rides', ['animation']))).toBe(false);
-  });
-
-  it('keeps sex shown by the text (flagging monster / feet), marks excluded text for good, and leaves the rest skipped', () => {
-    const post = c('Silver Streaks', ['animation', 'straight']);
-    expect(recheckWithText(post, 'She ends up riding him')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: false, feet: false, ffm: false } });
-    expect(recheckWithText(post, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false, ffm: false } });
-    expect(recheckWithText({ ...post, contentBreak: 'monster' }, 'riding a werewolf')).toEqual({ outcome: 'text', candidate: { ...post, sexual: 'text', monster: true, feet: false, ffm: false } });
-    expect(recheckWithText(post, 'a loli edit')).toEqual({ outcome: 'excluded', candidate: { ...post, contentBreak: 'excluded' } });
-    expect(recheckWithText(post, 'a slow blowjob')).toEqual({ outcome: 'not-sexual', candidate: post });
   });
 });
 
@@ -588,10 +563,10 @@ describe('downloadQueue', () => {
     expect(q.map((x) => x.id)).toEqual([4, 1, 2, 5]);
   });
 
-  it('takes a saved post whose first post shows the sex, and brings back one an older --recheck marked monster / feet', () => {
+  it('takes a saved post whose first post shows the sex', () => {
     const c = (id, extra) => ({ id, title: 'Silver Streaks', tags: ['animation', 'straight'], axisType: 'multi', score: 1, vr: false, scenes: [{ axes: ['twist'] }], ...extra });
-    const q = downloadQueue([c(1, { sexual: 'text' }), c(2, { sexual: 'text', contentBreak: 'monster' }), c(3, {}), c(4, { sexual: 'text', contentBreak: 'excluded' })]);
-    expect(q.map((x) => x.id)).toEqual([1, 2]);
+    const q = downloadQueue([c(1, { sexual: 'text' }), c(2, {})]);
+    expect(q.map((x) => x.id)).toEqual([1]);
   });
 
   it('orders by the user\'s tag scores too, within multi-axis and single-axis', () => {

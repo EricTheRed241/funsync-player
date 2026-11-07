@@ -20,62 +20,77 @@
 //     (main script's duration). Shorter channel scripts clamp-and-hold —
 //     interpolatePosition does that natively. Never per-channel modulo:
 //     independent wrapping de-phases choreographed axis bundles.
-//   - Buttplug + T-Code are the validated paths (local, instant). Handy is
-//     best-effort via HDSP direct-drive when a manager is injected; the app
-//     instead engages the HSSP tiled loop (orgasm-handy-engage.js).
+//   - Drives Buttplug + T-Code (local, instant).
 //
 // Pure + dependency-injected so it unit-tests without real devices or timers.
 
 import { stripBOM } from './funscript-engine.js';
-import { interpolatePosition } from './handy-hdsp-sync.js';
 import { applyCutoff } from './device-transform-stack.js';
 
 const DEFAULT_TICK_MS = 40;   // ~25 Hz, same cadence as the Buttplug engine
 const MIN_POS_DELTA = 1;      // skip sends that wouldn't move the device
-// The Handy's HDSP move duration. It must be LONGER than the tick so moves
-// overlap into smooth continuous motion — matches the working HandyHdspSync
-// engine (100ms). At the tick length (40ms) with stopOnTarget the device
-// start-stops and just bumps instead of stroking. See handy-hdsp-sync.js.
-const HANDY_MOVE_MS = 100;
-// Buttplug LinearCmd move window. Same reasoning as HANDY_MOVE_MS above, and
-// for a long time the same bug: this loop passed the TICK LENGTH (40ms) as
-// the move duration, so a device was told "reach X in 40ms" every 40ms and
-// was retargeted before it could complete anything. On BLE, where a round
-// trip is often longer than the tick itself, that is a stutter.
+// Buttplug LinearCmd move window. It must be LONGER than the tick so moves
+// overlap into smooth continuous motion. For a long time this loop passed
+// the TICK LENGTH (40ms) as the move duration, so a device was told "reach X
+// in 40ms" every 40ms and was retargeted before it could complete anything.
+// On BLE, where a round trip is often longer than the tick itself, that is a
+// stutter.
 //
 // Reported by acuity7 (thread #275) with an unusually precise diagnosis: the
-// Handy is smooth over WiFi and jerky over Bluetooth-via-Intiface, and they
+// stroker was smooth over WiFi and jerky over Bluetooth-via-Intiface, and they
 // reproduced the same split in MultiFunPlayer — "FixedUpdate" jerky,
-// "PolledUpdate" smooth. WiFi takes the HDSP path above and already got the
-// longer window; Bluetooth takes the Buttplug path and did not.
+// "PolledUpdate" smooth.
 //
 // NOT the same value as the speed denominator. `dur` stays the tick because
 // `p - pPrev` is one tick of movement; conflating the two is its own bug.
 const BP_LINEAR_MOVE_MS = 100;
+
+/**
+ * Pure linear interpolation against a sorted-by-`.at` actions array.
+ * Returns position 0–100, or `null` for an empty/invalid array. Times
+ * outside the script's range clamp to the first/last position.
+ *
+ * @param {Array<{at: number, pos: number}>} actions
+ * @param {number} timeMs
+ * @returns {number | null}
+ */
+export function interpolatePosition(actions, timeMs) {
+  if (!Array.isArray(actions) || actions.length === 0) return null;
+  if (timeMs <= actions[0].at) return actions[0].pos;
+  if (timeMs >= actions[actions.length - 1].at) return actions[actions.length - 1].pos;
+
+  // Binary search the upper bracket. Action `at` values are sorted.
+  let lo = 0;
+  let hi = actions.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >>> 1;
+    if (actions[mid].at <= timeMs) lo = mid;
+    else hi = mid;
+  }
+  const a = actions[lo];
+  const b = actions[hi];
+  const span = b.at - a.at;
+  if (span <= 0) return b.pos;
+  const t = (timeMs - a.at) / span;
+  return a.pos + (b.pos - a.pos) * t;
+}
 
 export class OrgasmSwitch {
   /**
    * @param {object} deps
    * @param {object} [deps.buttplugManager] — needs { connected, devices[], sendLinear(i,pos,ms) }
    * @param {object} [deps.tcodeManager]    — needs { connected, sendAxes({L0}) }
-   * @param {object} [deps.handyManager]    — needs { connected, hdspMove(pos,ms) }
    * @param {() => void} [deps.onActivate]   — app stops the normal sync engines here
    * @param {() => void} [deps.onDeactivate] — app restarts them here (re-anchor at video time)
-   * @param {() => boolean} [deps.handyReady] — gate for the Handy send; false while
-   *   the app is still awaiting the HSSP→HDSP handoff. Buttplug/T-Code are driven
-   *   immediately (local, no mode handshake); the Handy waits so its commands
-   *   aren't sent before the device is actually in HDSP mode. Default: always ready.
    * @param {() => number} [deps.now]        — monotonic clock (injected for tests)
    * @param {object} [opts]
    * @param {number} [opts.tickIntervalMs=40]
    */
-  constructor({ buttplugManager, tcodeManager, handyManager, onActivate, onDeactivate, handyReady, getCutoff, now } = {}, opts = {}) {
+  constructor({ buttplugManager, tcodeManager, onActivate, onDeactivate, getCutoff, now } = {}, opts = {}) {
     this.buttplugManager = buttplugManager || null;
     this.tcodeManager = tcodeManager || null;
-    this.handyManager = handyManager || null;
     this.onActivate = onActivate || null;
     this.onDeactivate = onDeactivate || null;
-    this._handyReady = typeof handyReady === 'function' ? handyReady : (() => true);
     // Per-device output cutoff {min,max}|null resolver — so the orgasm loop
     // respects the same floor/ceiling limits the normal sync engines apply
     // (it drives the managers directly, bypassing the engines otherwise, which
@@ -294,17 +309,6 @@ export class OrgasmSwitch {
         try { tc.sendAxes(axes); } catch { /* */ }
       }
     }
-
-    // --- Handy (HDSP direct-drive when a manager is injected; the app
-    //     passes null and engages the HSSP tiled loop instead) ---
-    const hy = this.handyManager;
-    if (hy?.connected && this._handyReady() && typeof hy.hdspMove === 'function'
-        && pos !== null && mainMoved) {
-      // Longer move window than the tick → overlapping smooth strokes (matches
-      // HandyHdspSync). Passing the tick length made the device bump in place.
-      try { hy.hdspMove(applyCutoff(pos, this._getCutoff('handy')), HANDY_MOVE_MS); } catch { /* */ }
-    }
-
     // Throttled diagnostic — shows whether the loop is producing a varying
     // stroke (script playing) or a stuck value. ~2 lines/sec, safe for the log.
     if (mainMoved && pos !== null && (!this._lastLogMs || this._now() - this._lastLogMs > 500)) {

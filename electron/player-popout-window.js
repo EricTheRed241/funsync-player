@@ -9,10 +9,9 @@
 // the detached clock land in 2b/2c. See
 // notes/features/SCOPE-separate-player-window.md §9.
 //
-// Mirrors electron/audience-popout-window.js exactly — same lifecycle,
-// same single-channel `{type:'message', payload}` envelope, same
-// size-only bounds persistence (position doesn't travel across monitor
-// setups). Channel: `player-popout:event`.
+// Single-channel `{type:'message', payload}` envelope and size-only
+// bounds persistence (position doesn't travel across monitor setups).
+// Channel: `player-popout:event`.
 
 const path = require('path');
 const { BrowserWindow } = require('electron');
@@ -52,8 +51,7 @@ function persistBounds() {
     storeRef.setSetting(POPOUT_BOUNDS_KEY, {
       width: bounds.width,
       height: bounds.height,
-      // Size only — position doesn't travel well across monitor changes
-      // (matches editor / audience pop-outs).
+      // Size only — position doesn't travel well across monitor changes.
     });
   } catch { /* window torn down mid-call — fine */ }
 }

@@ -2,67 +2,17 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// --- Portable mode (run from a USB / external disk) -------------------------
-// When launched from electron-builder's `portable` target, PORTABLE_EXECUTABLE_DIR
-// points at the folder holding the user-visible .exe (the app itself runs from a
-// temp extraction). We also honour a `data/` folder or a `FunSync-portable.txt`
-// marker next to the exe so an unpacked/zip build can opt in (VS Code convention).
-//
-// In portable mode ALL durable data — config, logs, backups, the (plaintext)
-// Handy key — lives in a `data/` folder next to the exe instead of %LOCALAPPDATA%,
-// so the whole thing travels on the stick. Regenerable caches (thumbnails, remux)
-// deliberately stay in the OS temp dir — they're fast-local and not worth carrying.
-//
-// MUST run before require('./logger') and require('./store') below: electron-log
-// resolves its file path lazily and electron-conf reads userData when initStore()
-// constructs it, so the override has to land first. See SCOPE-portable-install.md.
-const PORTABLE_DIR = (() => {
-  if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
-  try {
-    const exeDir = path.dirname(app.getPath('exe'));
-    if (fs.existsSync(path.join(exeDir, 'FunSync-portable.txt'))
-        || fs.existsSync(path.join(exeDir, 'data'))) {
-      return exeDir;
-    }
-  } catch { /* getPath('exe') can throw very early on some platforms — ignore */ }
-  return null;
-})();
-let IS_PORTABLE = false;
-if (PORTABLE_DIR) {
-  const dataDir = path.join(PORTABLE_DIR, 'data');
-  try {
-    fs.mkdirSync(dataDir, { recursive: true });
-    // Probe writability up front — read-only / locked media must degrade
-    // gracefully (Nielsen #9), not crash on the first config write.
-    fs.accessSync(dataDir, fs.constants.W_OK);
-    app.setPath('userData', dataDir);
-    app.setAppLogsPath(path.join(dataDir, 'logs'));
-    IS_PORTABLE = true;
-    // Surfaced to safe-key.js + auto-updater gating without a circular require.
-    process.env.FUNSYNC_PORTABLE = '1';
-  } catch (err) {
-    // Unwritable portable media → fall back to the default userData so the app
-    // still runs (data just won't be portable). Logged once logger is up.
-    // eslint-disable-next-line no-console
-    console.error('[Portable] Cannot use portable data dir, falling back to default userData:', err.message);
-  }
-}
-
 const log = require('./logger');
 const { setRedactionEnabled } = require('./log-redact');
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState, getHealthDetail } = require('./python-bridge');
 const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
 const dataBackup = require('./data-backup');
-const dataMigration = require('./data-migration');
-const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
 const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames, closeDecoder } = require('./custom-thumbs');
 const { createPreviewValidator } = require('./preview-validator');
 const { MATCH_THRESHOLD } = require('./preview-match');
 const { matchFaptapThumbnail } = require('./faptap-thumbnail');
-const editorPopout = require('./editor-popout-window');
-const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
 const { scanLibrary, isAppleDoubleSidecar } = require('./library-scan');
 const { readLinksFile } = require('./eroscripts-links');
@@ -74,14 +24,9 @@ const eroScripts = new EroScriptsAPI();
 
 // Warm the electron-conf ESM import NOW (module load, before whenReady) —
 // it was ~1s of the serial initStore cost on the startup trace and doesn't
-// touch userData (only `new Conf` inside initStore does, safely after the
-// portable redirect above). Resolves in parallel with Chromium init + the
-// recovery sweep.
+// touch userData (only `new Conf` inside initStore does). Resolves in
+// parallel with Chromium init + the recovery sweep.
 store.preloadModule();
-
-if (IS_PORTABLE) {
-  log.info(`[Portable] Running in portable mode — data dir: ${app.getPath('userData')}`);
-}
 
 // Enable Chromium's VA-API hardware video decoder on Linux. Chromium
 // ships with this off by default on Linux because of historical
@@ -164,7 +109,7 @@ let _backendReadyPromise = null;
 let _finalSnapshotDone = false;
 
 // Single instance lock — prevent multiple copies running at once.
-// Also handles the installer/updater trying to relaunch the app.
+// A second launch focuses the existing window instead.
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -240,12 +185,6 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     splash.destroy();
     mainWindow.show();
-    // electron-builder's auto-updater doesn't support the portable target
-    // (no latest.yml is published for it), so skip it entirely in portable
-    // mode — the user updates by replacing the exe. See SCOPE-portable-install.
-    if (app.isPackaged && !IS_PORTABLE) {
-      initAutoUpdater(mainWindow);
-    }
   });
 
   const _mainWinId = mainWindow.id;
@@ -535,12 +474,6 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
-// Portable-mode status for the About section (Nielsen #1 — let the user see
-// where their data lives). dataDir is the portable `data/` folder when active.
-ipcMain.handle('get-portable-info', () => {
-  return { portable: IS_PORTABLE, dataDir: app.getPath('userData') };
-});
-
 // Collect a privacy-scrubbed diagnostics bundle for the in-app
 // "Report a problem" dialog. Connection flags are passed in by the
 // renderer (where the device-manager state actually lives). Log path
@@ -587,7 +520,6 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
       port: 5123,
     },
     devices: {
-      handy: !!rendererState?.handyConnected,
       buttplug: !!rendererState?.buttplugConnected,
       vr: !!rendererState?.vrConnected,
       deviceCount: Number(rendererState?.deviceCount || 0),
@@ -908,11 +840,6 @@ ipcMain.handle('get-video-categories', (_event, videoPath) => {
 
 ipcMain.handle('get-videos-by-category', (_event, catId) => {
   return store.getVideosByCategory(catId);
-});
-
-// Migration
-ipcMain.handle('migrate-local-storage', (_event, legacyData) => {
-  return dataMigration.migrate(legacyData);
 });
 
 // --- IPC Handlers: File Operations ---
@@ -1394,7 +1321,7 @@ ipcMain.handle('read-funscript', async (_event, filePath) => {
     // Strip UTF-8 BOM (EF BB BF, U+FEFF) at the I/O boundary. Some
     // scripting tools (Windows editors, older OFS, hand-saved files)
     // write a leading BOM that JSON.parse rejects. Community report
-    // 2026-06-01: RyzaMerged.funscript loaded fine in Handyverse but
+    // 2026-06-01: RyzaMerged.funscript loaded fine in other players but
     // errored here because of the BOM. Strip once, every consumer
     // gets clean content automatically.
     return raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
@@ -1477,25 +1404,6 @@ ipcMain.handle('get-durations', async () => {
   }
 });
 
-ipcMain.handle('convert-funscript', async (_event, funscriptContent) => {
-  const { getBackendPort } = require('./python-bridge');
-  const port = getBackendPort();
-  const url = `http://localhost:${port}/scripts/convert`;
-  try {
-    // 15s: conversion is pure CPU / JSON; anything over this is a hang.
-    const resp = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: funscriptContent,
-    }, 15000);
-    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
-    return await resp.json();
-  } catch (err) {
-    log.error('Funscript conversion failed:', err.message);
-    return null;
-  }
-});
-
 // --- Data Export/Import ---
 
 ipcMain.handle('export-data', async () => {
@@ -1528,8 +1436,8 @@ ipcMain.handle('import-data', async () => {
   if (!importResult.success) return importResult;
 
   // Snapshot the pre-import state — merging an arbitrary backup file
-  // can mutate sources, collections, playlists, categories, and even
-  // the encrypted Handy key. If the user picks the wrong file, this
+  // can mutate sources, collections, playlists, categories, and
+  // settings. If the user picks the wrong file, this
   // is the snapshot they'll roll back to.
   await _preActionSnapshot('pre-import');
 
@@ -1702,66 +1610,8 @@ ipcMain.handle('backup:pre-action', async (_event, label) => {
   }
 });
 
-// === Editor pop-out window ===========================================
-// Per SCOPE-editor-v2.md §5: pop-out takes full ownership (main shows
-// only video while pop-out is open), state-sync is IPC-through-main, no
-// auto-reopen on app restart. The window module owns the BrowserWindow
-// lifecycle; these handlers expose it to the renderer.
-ipcMain.handle('editor-popout:open', () => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return { success: false, error: 'Main window unavailable' };
-  }
-  editorPopout.open(mainWindow, store);
-  return { success: true };
-});
-
-ipcMain.handle('editor-popout:close', () => {
-  editorPopout.close();
-  return { success: true };
-});
-
-ipcMain.handle('editor-popout:status', () => {
-  return { open: editorPopout.isOpen() };
-});
-
-// State-sync relay. The sender side passes a `direction` so we know
-// whether to forward to the parent or to the pop-out — the main process
-// is the broker. Single channel keeps the protocol observable in one
-// place rather than forking into N typed channels.
-ipcMain.handle('editor-popout:relay', (_event, direction, payload) => {
-  editorPopout.relay(direction, payload);
-  return { success: true };
-});
-
-// --- Audience pop-out (SCOPE-audience-broadcast.md §3.3) ---
-// Same lifecycle shape as editor-popout. Channel: `audience-popout:event`.
-// Bounds key: `audience.popoutBounds`. Room state lives in the main
-// renderer's AudienceBridge — closing this window doesn't end the room.
-ipcMain.handle('audience-popout:open', () => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return { success: false, error: 'Main window unavailable' };
-  }
-  audiencePopout.open(mainWindow, store);
-  return { success: true };
-});
-
-ipcMain.handle('audience-popout:close', () => {
-  audiencePopout.close();
-  return { success: true };
-});
-
-ipcMain.handle('audience-popout:status', () => {
-  return { open: audiencePopout.isOpen() };
-});
-
-ipcMain.handle('audience-popout:relay', (_event, direction, payload) => {
-  audiencePopout.relay(direction, payload);
-  return { success: true };
-});
-
 // --- Player pop-out (SCOPE-separate-player-window.md — detached player) ---
-// Same lifecycle shape as audience/editor pop-outs. Channel:
-// `player-popout:event`. Bounds key: `player.popoutBounds`.
+// Channel: `player-popout:event`. Bounds key: `player.popoutBounds`.
 ipcMain.handle('player-popout:open', () => {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return { success: false, error: 'Main window unavailable' };
@@ -2124,89 +1974,6 @@ ipcMain.handle('vr-send', (_event, jsonStr) => {
     vrSocket.write(Buffer.concat([header, payload]));
     return true;
   } catch { return false; }
-});
-
-// --- IPC Handlers: Autoblow ---
-
-const autoblowApi = require('./autoblow-api.js');
-
-ipcMain.handle('autoblow-connect', async (_event, token) => {
-  try {
-    const result = await autoblowApi.connect(token);
-    return { success: true, ...result };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('autoblow-disconnect', () => {
-  autoblowApi.disconnect();
-  return { success: true };
-});
-
-ipcMain.handle('autoblow-status', () => ({
-  connected: autoblowApi.isConnected(),
-  deviceType: autoblowApi.getDeviceType(),
-}));
-
-ipcMain.handle('autoblow-upload-script', async (_event, funscriptContent) => {
-  try {
-    await autoblowApi.syncScriptUploadFunscript(funscriptContent);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('autoblow-sync-start', async (_event, startTimeMs) => {
-  try {
-    await autoblowApi.syncScriptStart(startTimeMs);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('autoblow-sync-stop', async () => {
-  try {
-    await autoblowApi.syncScriptStop();
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('autoblow-sync-offset', async (_event, offsetMs) => {
-  try {
-    await autoblowApi.syncScriptOffset(offsetMs);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('autoblow-latency', async () => {
-  try {
-    const latency = await autoblowApi.estimateLatency();
-    return { success: true, latency };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-// --- IPC Handlers: Auto-Updater ---
-
-ipcMain.handle('updater-check', () => {
-  if (IS_PORTABLE) return; // no auto-update for portable builds
-  checkForUpdates();
-});
-
-ipcMain.handle('updater-download', () => {
-  downloadUpdate();
-});
-
-ipcMain.handle('updater-install', () => {
-  quitAndInstall();
 });
 
 // --- IPC Handlers: EroScripts ---

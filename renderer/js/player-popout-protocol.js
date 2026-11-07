@@ -6,7 +6,7 @@
 // detached <video> + local controls). Both import this module so the
 // message-type constants live in exactly one place.
 //
-// Wire shape (mirrors editor/audience pop-out protocols):
+// Wire shape:
 //   `{ type: 'message', payload: { type: '<msg-type>', ... } }`
 //
 // Architecture (SCOPE-separate-player-window.md §9): the player window is

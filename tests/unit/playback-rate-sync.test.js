@@ -24,32 +24,22 @@
 //      doesn't "play faster"; the script LOOKUP key (currentTime) moves
 //      faster. Verified directly.
 //
-//   3. Per-tick sync engines (Buttplug, Handy-HDSP) read
-//      `player.currentTime` every tick and feed that to the interpolator.
-//      Because the video advances `currentTime` at the rate-adjusted
-//      pace, the engines naturally follow without rate-aware code of
-//      their own. Verified by spying on the lookup time the engine
-//      computes from a stubbed video element.
-//
-// Handy-HSSP is the exception — the cloud schedules the uploaded CSV
-// at 1.0× regardless of `video.playbackRate`. That's why
-// `videoPlayer.setPlaybackRate` flips to HDSP mode at non-1×. The mode
-// switch is unit-tested in video-player-rate.test.js; here we assert
-// the architectural contract (engine reads currentTime per tick) that
-// makes HDSP rate-correct.
+//   3. Per-tick sync engines (Buttplug, TCode) read `player.currentTime`
+//      every tick and feed that to the interpolator. Because the video
+//      advances `currentTime` at the rate-adjusted pace, the engines
+//      naturally follow without rate-aware code of their own.
 
 import { describe, it, expect, vi } from 'vitest';
 import { FunscriptEngine } from '../../renderer/js/funscript-engine.js';
 import { VideoPlayer, PLAYBACK_RATE_PRESETS } from '../../renderer/js/video-player.js';
-import { HandyHdspSync } from '../../renderer/js/handy-hdsp-sync.js';
 import { eventBus } from '../../renderer/js/event-bus.js';
 
 /**
  * Build a FunscriptEngine seeded with a known action list, bypassing
- * file IO and backend CSV conversion (both irrelevant to time matching).
+ * file IO (irrelevant to time matching).
  */
 function makeEngineWith(actions) {
-  const engine = new FunscriptEngine({ backendPort: 0 });
+  const engine = new FunscriptEngine();
   engine._parsed = {
     filename: 'test.funscript',
     version: '1.0',
@@ -110,101 +100,6 @@ describe('Funscript engine is rate-independent', () => {
   });
 });
 
-describe('Per-tick sync engine reads currentTime (rate-correct by construction)', () => {
-  // HandyHdspSync._tick reads `player.currentTime` every poll and feeds
-  // it to `interpolatePosition(actions, timeMs)`. Because HTML5 already
-  // advances currentTime at `playbackRate`, the engine naturally tracks
-  // the user's rate without rate-aware code of its own.
-
-  function buildHdsp(currentTime, actions) {
-    const handyManager = { connected: true, hdspMove: vi.fn() };
-    // Player stub — only `currentTime` is read in _tick.
-    const player = { currentTime };
-    const sync = new HandyHdspSync({ handyManager, player });
-    sync._actions = actions;
-    sync._active = true;
-    return { sync, handyManager };
-  }
-
-  const actions = [
-    { at: 0,    pos: 0 },
-    { at: 1000, pos: 100 },
-    { at: 2000, pos: 0 },
-  ];
-
-  it('at currentTime=0.5s sends position interpolated for 500ms', () => {
-    const { sync, handyManager } = buildHdsp(0.5, actions);
-    sync._tick();
-    expect(handyManager.hdspMove).toHaveBeenCalledOnce();
-    const sentPos = handyManager.hdspMove.mock.calls[0][0];
-    expect(sentPos).toBeCloseTo(50, 1); // 50% between (0,0) and (1000,100)
-  });
-
-  it('same currentTime → same target position, regardless of how fast we got there', () => {
-    // Scenario: imagine playing at 2× speed reached currentTime=0.5s
-    // in 250 wall-clock ms; at 0.5× speed we reached the same
-    // currentTime in 1000 wall-clock ms. The engine cannot distinguish
-    // those — it sees only the timestamp. Both produce the same target.
-    const slow = buildHdsp(0.5, actions);
-    const fast = buildHdsp(0.5, actions);
-    slow.sync._tick();
-    fast.sync._tick();
-    expect(slow.handyManager.hdspMove.mock.calls[0][0])
-      .toBe(fast.handyManager.hdspMove.mock.calls[0][0]);
-  });
-
-  it('after the user changes rate to 1.5×, ticks continue to be driven by currentTime', () => {
-    // Simulate: rate change happened upstream, video advanced 200ms
-    // since the last tick. The engine reads the new currentTime and
-    // produces the correct interpolated value for it.
-    const t1 = buildHdsp(0.700, actions); // 700ms into video
-    t1.sync._tick();
-    const posAt700 = t1.handyManager.hdspMove.mock.calls[0][0];
-    expect(posAt700).toBeCloseTo(70, 1); // 70% between (0,0) and (1000,100)
-
-    const t2 = buildHdsp(0.900, actions); // 200ms later, rate=1.5× would do this in ~133ms wall
-    t2.sync._tick();
-    const posAt900 = t2.handyManager.hdspMove.mock.calls[0][0];
-    expect(posAt900).toBeCloseTo(90, 1);
-  });
-});
-
-describe('Handy HSSP is disengaged at non-1× (architectural contract)', () => {
-  // HSSP uploads the script and the cloud schedules it at 1.0× pace.
-  // At any other rate the device drifts. Video-player.setPlaybackRate
-  // must stop the HSSP engine and start the polled HDSP engine.
-  // (Detailed mode-switch tests live in video-player-rate.test.js —
-  // this is a smoke test that the contract holds end-to-end.)
-
-  it('rate=1.5× stops HSSP and starts HDSP', () => {
-    const player = makePlayer();
-    const syncEngine = { start: vi.fn(), stop: vi.fn() };
-    const handyHdsp = { active: false, start: vi.fn(), stop: vi.fn() };
-    player.setHandySyncRefs({
-      handyManager: { connected: true },
-      handySyncEngine: syncEngine,
-      handyHdspSync: handyHdsp,
-    });
-    player.setPlaybackRate(1.5);
-    expect(syncEngine.stop).toHaveBeenCalledTimes(1);
-    expect(handyHdsp.start).toHaveBeenCalledTimes(1);
-  });
-
-  it('rate=1× restores HSSP', () => {
-    const player = makePlayer();
-    const syncEngine = { start: vi.fn(), stop: vi.fn() };
-    const handyHdsp = { active: true, start: vi.fn(), stop: vi.fn() };
-    player.setHandySyncRefs({
-      handyManager: { connected: true },
-      handySyncEngine: syncEngine,
-      handyHdspSync: handyHdsp,
-    });
-    player.setPlaybackRate(1);
-    expect(handyHdsp.stop).toHaveBeenCalledTimes(1);
-    expect(syncEngine.start).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('HTML5 audio / video / subtitle timing (documentation tests)', () => {
   // These are documentation tests — they assert the architectural fact
   // that we do NOT interpose on the browser's native clock. If a future
@@ -216,8 +111,8 @@ describe('HTML5 audio / video / subtitle timing (documentation tests)', () => {
     // The only assignment to playbackRate in the player surface is
     // inside setPlaybackRate (verified by greppable contract). The
     // _onMetadataLoaded reset path also calls setPlaybackRate(1)
-    // rather than assigning directly, so the event emission and mode
-    // switch fire consistently.
+    // rather than assigning directly, so the event emission fires
+    // consistently.
     const player = makePlayer();
     const setSpy = vi.spyOn(player, 'setPlaybackRate');
     player.timeDuration = { textContent: '' };
@@ -226,20 +121,19 @@ describe('HTML5 audio / video / subtitle timing (documentation tests)', () => {
     player.video.playbackRate = 1.5;
     player._formatTime = () => '';
     player._onMetadataLoaded();
-    // Routed through the public API — guarantees the event fires and
-    // mode switch (if needed) runs.
+    // Routed through the public API — guarantees the event fires.
     expect(setSpy).toHaveBeenCalledWith(1);
   });
 
   it('all engine surfaces use a single clock (video.currentTime)', () => {
-    // Smoke check: the engines under test (FunscriptEngine.getPositionAt,
-    // HandyHdspSync._tick, buttplug-sync._currentTimeMs) all read
+    // Smoke check: the engines (FunscriptEngine.getPositionAt,
+    // buttplug-sync._currentTimeMs, tcode-sync) all read
     // `player.currentTime` or accept `timeMs`. None read
     // `Date.now()` / `performance.now()` for the script lookup. This
     // is what makes audio/video/funscript time match: they share one
     // clock that the browser already rate-adjusts.
     //
-    // Asserted by construction in the previous describe blocks; this
+    // Asserted by construction in the previous describe block; this
     // documents the contract for future readers.
     expect(PLAYBACK_RATE_PRESETS.includes(1)).toBe(true);
   });

@@ -100,7 +100,7 @@ describe('redactFileNames', () => {
   // problems get solved and contain nothing personal.
   it('leaves non-media lines completely alone', () => {
     for (const line of [
-      '[Handy] connect(••••BqeK) — requesting…',
+      '[TCode/ws] connected to ws://mirabot.local:8888',
       '[Buttplug] Device added: "Hismith" (index 3) outputs=[Oscillate]',
       'INFO: Uvicorn running on http://0.0.0.0:5123',
       '[Timing main] startBackend (parallel with window): 2784ms',

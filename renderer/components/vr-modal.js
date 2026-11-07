@@ -1,8 +1,8 @@
 // VRModal — dedicated modal for VR setup (library streaming + device sync).
 //
 // Was previously a tab inside the connection panel. Split out so the
-// panel stays focused on physical devices (Handy / Buttplug / TCode /
-// Autoblow) while "network surfaces" (web remote, VR) live behind their
+// panel stays focused on physical devices (Buttplug / TCode) while
+// "network surfaces" (web remote, VR) live behind their
 // own toolbar buttons. Same pattern as web-remote-modal.js.
 //
 // The VRBridge state is the source of truth — this modal just renders
@@ -80,11 +80,6 @@ function _template() {
   //    the toggle reads correctly as a disclosure widget.
   //  - vr-now-playing is a sub-cluster, not a section (no nested border).
   return `
-    <div class="vr-modal__experimental" role="note" aria-label="${t('vrModal.experimentalAria')}">
-      <span class="vr-modal__experimental-label">${t('vrModal.experimentalLabel')}</span>
-      <span class="vr-modal__experimental-text">${t('vrModal.experimentalText')}</span>
-    </div>
-
     <section class="vr-modal__section" aria-labelledby="vr-modal-streaming-h">
       <h2 class="vr-modal__section-header" id="vr-modal-streaming-h">
         <span class="vr-modal__section-num" aria-hidden="true">1</span>
@@ -443,15 +438,4 @@ function _checkSubnet(root, pcIp, host) {
     warnEl.hidden = true;
     warnEl.textContent = '';
   }
-}
-
-
-/**
- * Expose a module-level helper that app.js can call to get the bridge's
- * current "display name" for the currently-playing VR video even when
- * the modal isn't open — used to keep the toolbar tooltip informative.
- */
-export function setVRModalVideoName(vrBridge, name) {
-  if (!vrBridge) return;
-  vrBridge.__vrModalLastVideo = name || '';
 }

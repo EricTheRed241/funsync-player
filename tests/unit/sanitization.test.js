@@ -103,17 +103,10 @@ describe('sanitization', () => {
     expect(usesTextContent || usesEsc).toBe(true);
   });
 
-  it('script editor metadata modal escapes user input', () => {
-    const seFile = path.join(RENDERER_DIR, 'components', 'script-editor.js');
-    const content = fs.readFileSync(seFile, 'utf-8');
-
-    // Verify _esc is used in metadata modal innerHTML
-    expect(content).toContain('_esc(');
-  });
 
   it('_esc function escapes HTML special characters', () => {
-    // Test the _esc function pattern used in script-editor.js and connection-panel.js
-    // Both files define the same helper locally
+    // Test the _esc function pattern used in connection-panel.js and other
+    // components. They define the same helper locally.
     const _esc = (str) =>
       String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 

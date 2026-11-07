@@ -25,8 +25,7 @@
 //     dance or its title is about a non-sex act. Never a post tagged sfw /
 //     non-porn. Candidates keep where the sex showed (`sexual: tags | title
 //     | text`). `--fetch` and every scan drop saved candidates that now
-//     break these content rules (contentRuleBreak); `--recheck` reads the
-//     first post of those saved before the evidence was kept.
+//     break these content rules (contentRuleBreak).
 //   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
 //     downloaded; shorter scenes fetched under older rules stay.
 //   • Scenes with hand-made axes only (a partial set counts); single-axis
@@ -140,9 +139,6 @@ export function hasExcludedText(text) {
   return EXCLUDED_TEXT.test(String(text || ''));
 }
 
-// `contentBreak` values an older `--recheck` saved for monster / feet text, which no longer keep a post out.
-const RETIRED_BREAKS = new Set(['monster', 'feet']);
-
 /**
  * True when a post or video is by a BLOCKED_CREATORS name: in its title, as
  * its poster / uploader (`author`), its artist, or one of its performers.
@@ -185,18 +181,17 @@ export function liveNotPov({ tags = [], title = '', live, vr, picked, favourite 
  * Why a post or video breaks the content rules every scout list obeys
  * (favourites and picks included, except where noted), judged by its tags
  * and title, so a saved candidate can be checked again: `blocked`
- * (isBlockedCreator, hasBlockedTag), a `contentBreak` `--recheck` saved,
- * `not-sexual` (see isSexual), `live-not-pov` (liveNotPov; favourites and
- * picks skip this one), or null when it doesn't. A candidate
- * whose first post showed the sex (`sexual: 'text'`) passes the sex rule.
- * Monsters and feet only rank lower (lessPreferred).
+ * (isBlockedCreator, hasBlockedTag), `not-sexual` (see isSexual),
+ * `live-not-pov` (liveNotPov; favourites and picks skip this one), or null
+ * when it doesn't. A candidate whose first post showed the sex
+ * (`sexual: 'text'`) passes the sex rule. Monsters and feet only rank lower
+ * (lessPreferred).
  *
- * @param {{tags?: string[], title?: string, author?: string, artist?: string, sexual?: string, contentBreak?: string,
+ * @param {{tags?: string[], title?: string, author?: string, artist?: string, sexual?: string,
  *   live?: boolean, vr?: boolean, picked?: boolean, favourite?: string|null}} post
  */
-export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', sexual, contentBreak, live, vr, picked, favourite }) {
+export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', sexual, live, vr, picked, favourite }) {
   if (isBlockedCreator({ title, author, artist }) || hasBlockedTag({ tags, title })) return 'blocked';
-  if (contentBreak && !RETIRED_BREAKS.has(contentBreak)) return contentBreak;
   if (!isSexual({ tags, title }) && !(sexual === 'text' && !tags.some((t) => SFW_TAGS.has(t)))) return 'not-sexual';
   if (liveNotPov({ tags, title, live, vr, picked, favourite })) return 'live-not-pov';
   return null;
@@ -252,30 +247,6 @@ export function judgeFirstPost({ tags = [], title = '' }, text) {
   if (hasExcludedText(text)) return { ok: false, reason: 'excluded' };
   const sexual = sexEvidence({ tags, title, text });
   return sexual ? { ok: true, sexual, ...lessPreferred({ tags, title, text }) } : { ok: false, reason: 'not-sexual' };
-}
-
-/** True for a waiting candidate `--recheck` reads the first post of: it breaks only the sex rule and has no evidence saved. */
-export function needsSexRecheck(c) {
-  return !c.sexual && contentRuleBreak(c) === 'not-sexual';
-}
-
-/**
- * A waiting candidate judged again with its first post's text (`--recheck`):
- * excluded words in the text mark it `contentBreak: 'excluded'` for good,
- * sex in the text saves `sexual: 'text'` (and `monster` / `feet`, which rank
- * lower), anything else leaves it as it was (skipped). A retired monster /
- * feet `contentBreak` goes.
- *
- * @returns {{outcome: 'excluded' | 'text' | 'not-sexual', candidate: object}}
- */
-export function recheckWithText(c, text) {
-  const { contentBreak, ...rest } = c;
-  const base = contentBreak && !RETIRED_BREAKS.has(contentBreak) ? c : rest;
-  if (hasExcludedText(text)) return { outcome: 'excluded', candidate: { ...base, contentBreak: 'excluded' } };
-  if (sexEvidence({ tags: c.tags, title: c.title, text })) {
-    return { outcome: 'text', candidate: { ...base, sexual: 'text', ...lessPreferred({ tags: c.tags, title: c.title, text }) } };
-  }
-  return { outcome: 'not-sexual', candidate: base };
 }
 
 /** Discourse category of Free Scripts (Paid Scripts posts link to a store instead of files). */

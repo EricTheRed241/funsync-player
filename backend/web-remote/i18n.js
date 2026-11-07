@@ -12,8 +12,7 @@
 //     notes/features/SCOPE-web-remote-i18n.md.
 //   - Fallback chain: missing key → English bundle → raw key string.
 //   - Locale bundles are served by the backend at `/locales/<lang>.json`
-//     (mounted from the same renderer/locales/ source the desktop uses,
-//     bundled into the PyInstaller exe in packaged builds).
+//     (mounted from the same renderer/locales/ source the desktop uses).
 //   - ICU MessageFormat plurals via the vendored
 //     intl-messageformat.iife.js — same library the renderer uses.
 //

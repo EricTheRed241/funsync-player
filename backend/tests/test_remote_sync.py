@@ -193,12 +193,12 @@ def test_observer_forwards_to_phone(client):
             _ = obs.receive_json()
             obs.send_json({
                 "type": "device-status",
-                "handy": "connected",
-                "buttplug": "disconnected",
+                "buttplug": "connected",
+                "tcode": "disconnected",
             })
             msg = phone.receive_json()
             assert msg["type"] == "device-status"
-            assert msg["handy"] == "connected"
+            assert msg["buttplug"] == "connected"
 
 
 def test_observer_malformed_json_does_not_crash(client):
@@ -207,7 +207,7 @@ def test_observer_malformed_json_does_not_crash(client):
         obs.send_text("42")
         obs.send_json({"no_type_key": True})
         # Still alive — send a real payload to confirm
-        obs.send_json({"type": "device-status", "handy": "connected"})
+        obs.send_json({"type": "device-status", "buttplug": "connected"})
 
 
 def test_second_observer_replaces_first(client):

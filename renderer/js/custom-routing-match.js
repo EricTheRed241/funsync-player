@@ -16,7 +16,7 @@
  * @param {{deviceId: string, buttplugIndex?: number}} route
  * @param {Array<{index: number, name: string}>} bpDevices
  * @param {{ excludeIndices?: Set<number> }} [options]  Indices to skip during
- *   NAME-fallback only (not the index-hit path). Used by the two-Handy case
+ *   NAME-fallback only (not the index-hit path). Used by the two-same-name-device case
  *   where two routes with the same stored name need to claim two distinct
  *   devices — the second route's fallback must not steal the first's device.
  *   Index-hit ignores the set because a direct index match is authoritative.

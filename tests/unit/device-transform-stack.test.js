@@ -21,8 +21,6 @@ import {
   applyDeviceStack,
   clamp01,
   computeNaturalRange,
-  extendRawScriptContent,
-  clampRawScriptContent,
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from '../../renderer/js/device-transform-stack.js';
 
@@ -463,174 +461,17 @@ describe('computeNaturalRange', () => {
   });
 });
 
-describe('extendRawScriptContent', () => {
-  const NARROW_SCRIPT = JSON.stringify({
-    version: '1.0',
-    actions: [
-      { at: 0, pos: 30 }, { at: 100, pos: 50 }, { at: 200, pos: 70 },
-    ],
-  });
-  const WIDE_SCRIPT = JSON.stringify({
-    version: '1.0',
-    actions: [
-      { at: 0, pos: 0 }, { at: 100, pos: 50 }, { at: 200, pos: 100 },
-    ],
-  });
-
-  it('disabled → returns original string unchanged', () => {
-    expect(extendRawScriptContent(NARROW_SCRIPT, false)).toBe(NARROW_SCRIPT);
-  });
-
-  it('wide script → returns original (no transformation needed)', () => {
-    expect(extendRawScriptContent(WIDE_SCRIPT, true)).toBe(WIDE_SCRIPT);
-  });
-
-  it('narrow script + enabled → returns stretched JSON', () => {
-    const out = extendRawScriptContent(NARROW_SCRIPT, true);
-    expect(out).not.toBe(NARROW_SCRIPT);
-    const parsed = JSON.parse(out);
-    expect(parsed.actions[0].pos).toBe(0);    // 30 → 0 (min of natural)
-    expect(parsed.actions[1].pos).toBe(50);   // 50 → 50 (midpoint)
-    expect(parsed.actions[2].pos).toBe(100);  // 70 → 100 (max of natural)
-  });
-
-  it('preserves action timestamps + other fields', () => {
-    const content = JSON.stringify({
-      version: '1.2',
-      metadata: { creator: 'test' },
-      actions: [
-        { at: 0,   pos: 30, custom: 'x' },
-        { at: 500, pos: 70, custom: 'y' },
-      ],
-    });
-    const out = extendRawScriptContent(content, true);
-    const parsed = JSON.parse(out);
-    expect(parsed.version).toBe('1.2');
-    expect(parsed.metadata).toEqual({ creator: 'test' });
-    expect(parsed.actions[0]).toEqual({ at: 0, pos: 0, custom: 'x' });
-    expect(parsed.actions[1]).toEqual({ at: 500, pos: 100, custom: 'y' });
-  });
-
-  it('invalid JSON → returns original string (defensive, never throws)', () => {
-    const bad = 'not valid json {';
-    expect(extendRawScriptContent(bad, true)).toBe(bad);
-  });
-
-  it('non-string input → returned unchanged', () => {
-    expect(extendRawScriptContent(null, true)).toBe(null);
-    expect(extendRawScriptContent(undefined, true)).toBe(undefined);
-    // For numeric input, returned unchanged (typeof check is the guard)
-    expect(extendRawScriptContent(42, true)).toBe(42);
-  });
-
-  it('content without actions array → returned unchanged', () => {
-    const noActions = JSON.stringify({ version: '1.0' });
-    expect(extendRawScriptContent(noActions, true)).toBe(noActions);
-  });
-
-  it('content with empty actions array → returned unchanged', () => {
-    const empty = JSON.stringify({ version: '1.0', actions: [] });
-    expect(extendRawScriptContent(empty, true)).toBe(empty);
-  });
-
-  it('degenerate width (all-same pos) → returned unchanged (no div-by-zero)', () => {
-    const flat = JSON.stringify({
-      actions: [{ at: 0, pos: 50 }, { at: 100, pos: 50 }],
-    });
-    expect(extendRawScriptContent(flat, true)).toBe(flat);
-  });
-
-  it('threshold boundary — width exactly at threshold → no stretch', () => {
-    const exactlyThreshold = JSON.stringify({
-      actions: [
-        { at: 0, pos: 10 },                                // min
-        { at: 100, pos: 10 + RANGE_EXTENDER_THRESHOLD_PCT }, // max → width = threshold
-      ],
-    });
-    expect(extendRawScriptContent(exactlyThreshold, true)).toBe(exactlyThreshold);
-  });
-
-  it('multi-axis embedded fields left intact (Handy/Autoblow are single-axis)', () => {
-    // additional_axes is for multi-axis devices; cloud upload paths
-    // (HSSP / Autoblow) ignore them anyway. Preserve so re-export
-    // round-trips don't lose data.
-    const content = JSON.stringify({
-      actions: [{ at: 0, pos: 30 }, { at: 100, pos: 70 }],
-      additional_axes: [
-        { axis: 'twist', actions: [{ at: 0, pos: 50 }, { at: 100, pos: 50 }] },
-      ],
-    });
-    const out = extendRawScriptContent(content, true);
-    const parsed = JSON.parse(out);
-    expect(parsed.additional_axes).toBeDefined();
-    expect(parsed.additional_axes[0].actions).toEqual([{ at: 0, pos: 50 }, { at: 100, pos: 50 }]);
-    // Main actions were stretched
-    expect(parsed.actions[0].pos).toBe(0);
-    expect(parsed.actions[1].pos).toBe(100);
-  });
-
-  it('RANGE_EXTENDER_THRESHOLD_PCT is the documented value', () => {
+describe('RANGE_EXTENDER_THRESHOLD_PCT', () => {
+  it('is the documented value', () => {
     // Decision: fixed at 80%. Pinning the constant so a future change
     // to it is visible in PR review.
     expect(RANGE_EXTENDER_THRESHOLD_PCT).toBe(80);
   });
 });
 
-describe('clampRawScriptContent', () => {
-  const SCRIPT = JSON.stringify({
-    version: '1.0',
-    actions: [
-      { at: 0, pos: 5 }, { at: 100, pos: 50 }, { at: 200, pos: 95 },
-    ],
-  });
-
-  it('no-op cutoff (0/100) → returns original string unchanged', () => {
-    expect(clampRawScriptContent(SCRIPT, { min: 0, max: 100 })).toBe(SCRIPT);
-  });
-
-  it('null / non-finite cutoff → returns original unchanged', () => {
-    expect(clampRawScriptContent(SCRIPT, null)).toBe(SCRIPT);
-    expect(clampRawScriptContent(SCRIPT, { min: NaN, max: 80 })).toBe(SCRIPT);
-  });
-
-  it('floor/ceiling → pins out-of-band action positions', () => {
-    const out = clampRawScriptContent(SCRIPT, { min: 20, max: 80 });
-    expect(out).not.toBe(SCRIPT);
-    const parsed = JSON.parse(out);
-    expect(parsed.actions[0].pos).toBe(20);  // 5  → floor
-    expect(parsed.actions[1].pos).toBe(50);  // 50 → untouched
-    expect(parsed.actions[2].pos).toBe(80);  // 95 → ceiling
-  });
-
-  it('preserves timestamps + other fields', () => {
-    const content = JSON.stringify({
-      version: '1.2',
-      metadata: { creator: 'test' },
-      actions: [{ at: 0, pos: 5, custom: 'x' }, { at: 500, pos: 95, custom: 'y' }],
-    });
-    const parsed = JSON.parse(clampRawScriptContent(content, { min: 20, max: 80 }));
-    expect(parsed.version).toBe('1.2');
-    expect(parsed.metadata).toEqual({ creator: 'test' });
-    expect(parsed.actions[0]).toEqual({ at: 0, pos: 20, custom: 'x' });
-    expect(parsed.actions[1]).toEqual({ at: 500, pos: 80, custom: 'y' });
-  });
-
-  it('degenerate min >= max → returns original unchanged', () => {
-    expect(clampRawScriptContent(SCRIPT, { min: 80, max: 20 })).toBe(SCRIPT);
-  });
-
-  it('invalid JSON / non-string / no-actions → returned unchanged', () => {
-    const bad = 'not json {';
-    expect(clampRawScriptContent(bad, { min: 20, max: 80 })).toBe(bad);
-    expect(clampRawScriptContent(null, { min: 20, max: 80 })).toBe(null);
-    const noActions = JSON.stringify({ version: '1.0' });
-    expect(clampRawScriptContent(noActions, { min: 20, max: 80 })).toBe(noActions);
-  });
-});
-
 describe('applyDeviceStack — non-regression for existing transforms', () => {
   // Pins that the existing per-device behavior (Buttplug invert + e-stim
-  // max-intensity, TCode range, Handy stroke range) reproduces correctly
+  // max-intensity, TCode range) reproduces correctly
   // when expressed through the new stack. Failure here = behavior drift
   // against the audit findings in SCOPE §1 contracts R1-R5.
 
@@ -656,16 +497,6 @@ describe('applyDeviceStack — non-regression for existing transforms', () => {
     const inline = (v, r) => r.min + (v / 100) * (r.max - r.min);
     const range = { min: 25, max: 85 };
     for (const v of [0, 17, 50, 73, 100]) {
-      expect(applyDeviceStack(v, { range })).toBeCloseTo(inline(v, range), 9);
-    }
-  });
-
-  it('Handy stroke range (existing R1) matches the inline formula', () => {
-    // Same arithmetic as TCode — Handy applies it via SDK's setStrokeZone
-    // but the conceptual remap is identical at the per-tick level.
-    const inline = (v, r) => r.min + (v / 100) * (r.max - r.min);
-    const range = { min: 10, max: 60 };
-    for (const v of [0, 25, 50, 75, 100]) {
       expect(applyDeviceStack(v, { range })).toBeCloseTo(inline(v, range), 9);
     }
   });

@@ -1,8 +1,6 @@
 # FunSync Player
 
-A local desktop video player with device synchronization for funscript playback. Built with Electron. Windows and Linux.
-
-**[Download Latest Release](https://github.com/DaveMakesWaves/funsync-player/releases/latest)**
+A local desktop video player with device synchronization for funscript playback. Built with Electron. Runs from a source checkout (see Install).
 
 ---
 
@@ -125,10 +123,9 @@ A local desktop video player with device synchronization for funscript playback.
 - **Discovery scout: `npm run eroscripts:scout`** — finds free EroScripts posts worth adding to the library and downloads them for review, without the app running (it reuses the app's EroScripts login):
   - Lists the newest Free Scripts posts tagged multi-axis, animation, 3d, vam or sfm (`--pages N` for the multi-axis feed, default 6; `--anim-pages N` for each animation feed, default 3). There's no hentai feed: hentai posts still come in through the others, and 2D hentai ranks lower (below); there's no mmd feed either, since MMD is blocked (below). Never takes loli, shota, furry / anthro / yiff or futa / futanari posts (tags, title or first post, as whole words: `futa-on-female` counts, `Futaba` doesn't); scenes already in the library are left alone. Takes animated posts (no `real` tag; AI-generated video counts), music posts (PMV / HMV / Cock Hero) by a creator already in the library, and live action as below. Skips posts the library already links, posts turned down in the app (2 stars or lower), and scenes whose video it already has.
   - **Live action (both scouts).** Animated is the default. **Flat live action is turned down only when something shows it isn't POV**: a `non-pov` / `no-pov` / `not-pov` tag, or a music compilation (a `pmv` / `hmv` / `cock-hero` / `fap-hero` / `music-video` / `compilation` tag, or PMV, HMV, Cock Hero, Fap Hero or compilation as a title word), turned down as `live-not-pov` (scans, and saved lists before `--fetch`). A `pov` / `male-pov` tag or POV as a title word always passes, and so do VR, favourites and posts picked with `--add`; a flat live post with no indication either way passes too. Live action by a **favourite** creator or actress (named in the title, tags, poster / uploader or FapTap performers) is always taken; the favourites start as `FAVOURITES` in `renderer/js/content-preferences.js` (ScyllaHMV, Agapilord, Eternal Enigma, Cuddle Mocap, Noodledude, NoFaceGirl, Candy Love, JJULEZ) and you change them in the web remote's Artists view (`library.favouriteArtists`; the old `scout-favourites.json` isn't read any more). Saved lists are judged with the current favourites, so unstarring an artist removes the exemption from their waiting posts. Other live action is listed as "live (quota)" and downloaded only **one in every 20 Discovery downloads**, counted across both scouts in `scout-live-quota.json`, so new live creators still turn up; quota scenes go last in a `--fetch` so the run's other downloads can earn the slot, and the rest wait for later runs. Favourites rank like creators already in the library, plus the favourite artist bonus.
-  - **Monsters, feet and FFM rank lower (both scouts, favourites and picks included); they aren't kept out.** Each is a tag-score group starting at −0.5 (see Tag scores under Library). **Monster**: a tag that names one (monster, monstergirls, tentacle, werewolf, horse / horse-cock, bestiality, zoophilia, orc, goblin, minotaur, ogre, troll, alien, beast, slime-girl, knot …) or the title, as whole words in any case (monster girl, tentacles, 触手, werewolf, horse guy, horse cock, orcs, goblins, minotaur, ogre, troll, aliens, beast, bestiality, and `WW` on its own, as in Solace2K's and Rekin3D's "Mercy X WW"). Succubi, demon girls and elves aren't monsters. **Feet**: footjob, feet, foot, foot-fetish, foot-worship, footsie, soles or toes as a tag, or feet / foot / footjob / toes / soles / footsie / 足コキ in the title. **FFM** (two women, one man): the `ffm` / `f-f-m` / `ffm-threesome` tag or FFM as a word in the title (a plain `threesome` tag doesn't count). Each group counts once; the three add up (all three: −1.5). On EroScripts the same words in the first post count too (saved on the candidate as `monster` / `feet` / `ffm`). Posts an older `--recheck` marked `contentBreak: monster / feet` are back on the list, ranked lower.
+  - **Monsters, feet and FFM rank lower (both scouts, favourites and picks included); they aren't kept out.** Each is a tag-score group starting at −0.5 (see Tag scores under Library). **Monster**: a tag that names one (monster, monstergirls, tentacle, werewolf, horse / horse-cock, bestiality, zoophilia, orc, goblin, minotaur, ogre, troll, alien, beast, slime-girl, knot …) or the title, as whole words in any case (monster girl, tentacles, 触手, werewolf, horse guy, horse cock, orcs, goblins, minotaur, ogre, troll, aliens, beast, bestiality, and `WW` on its own, as in Solace2K's and Rekin3D's "Mercy X WW"). Succubi, demon girls and elves aren't monsters. **Feet**: footjob, feet, foot, foot-fetish, foot-worship, footsie, soles or toes as a tag, or feet / foot / footjob / toes / soles / footsie / 足コキ in the title. **FFM** (two women, one man): the `ffm` / `f-f-m` / `ffm-threesome` tag or FFM as a word in the title (a plain `threesome` tag doesn't count). Each group counts once; the three add up (all three: −1.5). On EroScripts the same words in the first post count too (saved on the candidate as `monster` / `feet` / `ffm`).
   - **Blocked creators and tags (both scouts, favourites and picks included).** `BLOCKED_CREATORS` in `renderer/js/content-preferences.js` (now AidenHet) are never taken: a post or video whose title names one, posted / uploaded by one, or with one as artist or FapTap performer, is turned down as `blocked`. Names compare without case, spaces or punctuation (`[Aiden Het]`, `aidenhet`). `BLOCKED_TAGS` / `BLOCKED_TITLE` are turned down the same way: now **MMD** (the `mmd` tag, or MMD as a word in the title) and **dildo riding** (the `dildo-riding` / `riding-dildo` / `dildo-ride` tags, or dildo / dildos as a word in the title). `--fetch` drops waiting candidates of either saved list that match. Library scenes aren't touched; delete them with 2 stars or lower.
   - **Sex required (both scouts, picks included).** A post needs penetrative sex, by tag (vaginal, anal, sex, riding, cowgirl, reverse-cowgirl, doggy, missionary, mating-press, pronebone, spooning, creampie, anal-creampie, double-penetration, threesome, foursome, gangbang, orgy, cum-in-pussy …) or by a word in its title (sex, fuck / fucked / fucking, riding, rides, cowgirl, doggy, missionary, creampie, anal, mating press, 中出し, セックス, 騎乗位, 做爱, 骑乘, 내사 …), or on EroScripts by such a word in the first post. Each EroScripts candidate keeps where the sex showed (`sexual`: `tags`, `title` or `text`), so a saved one is judged again without reading the post. A blowjob, handjob, titjob or paizuri alone doesn't count; with sex it's fine. Music videos (PMV, HMV, Cock Hero, Fap Hero, music-video) count unless they're a dance (`dance` tag, or "dance" / ダンス / 舞蹈 in the title) or their title is about a non-sex act without a sex word (`Blowjob PMV`, `Titjob HMV`, `JOI`). Posts tagged `sfw` or `non-porn` never qualify. `--fetch` and every scan drop waiting candidates of either saved list (picks too) that now break these rules, and `--fetch` prints how many.
-  - **`--recheck` (one-off):** candidates saved before the evidence was kept that fail only the sex rule (and those an older `--recheck` turned down for monster / feet words) get their first post read (paced, read-only): sex there keeps them (`sexual: 'text'`, plus `monster` / `feet` when the post names one), excluded words there drop them for good (`contentBreak: 'excluded'`), the rest stay skipped. It prints the counts with examples and writes the list atomically; exit 2 when rate limited (progress kept), 3 when the session expired.
   - **Hand-made axes only.** A scene is taken only with at least one hand-made axis file (a partial set counts and is left as made); single-axis scenes come in only as picks (`--add`). A post left without scenes is turned down; `--fetch` applies the same rule to a saved list. FapTap, whose scripts are all single-axis, is paused while the library works towards about half hand-made scenes.
   - **Library cap.** A `--fetch` (either scout) downloads nothing more once the library holds `LIBRARY_MAX_VIDEOS` videos (500), counted over the enabled library sources when each pass starts; a pass that reaches it stops there (exit 2). Delete scenes (2 stars or lower) or raise the cap to go on.
   - Each post's scripts are paired with its videos on the forum, MEGA or pixeldrain. Every script set gets its own video: names match without encode words (`1080p`, `8K60FPS`, `VR`…), numbers must agree (Part 1 isn't Part 2), and handy-only scripts are ignored. VR picks ≤ 8K, ≤ 60 fps and the low bitrate when offered; flat picks ≤ 4K. TCode suffixes (`.R0`, `.L1`…) are renamed to the names the library pairs.
@@ -183,39 +180,22 @@ A local desktop video player with device synchronization for funscript playback.
 - Per-setting persistence — configure once, applies to all playback
 
 ### Device Integration
-- **The Handy** — HSSP cloud sync with automatic script upload, drift detection, 10-second cloud health check (catches BT-mode switches)
 - **Buttplug.io** — Connect to 700+ devices via Intiface Central (strokers, vibrators, rotators, e-stim)
-- **TCode (OSR2 / SR6 / MiraBot)** — USB serial, UDP (Wi-Fi) or WebSocket, with per-axis enable + min/max controls for all 10 axes (experimental). MiraBot's Wi-Fi firmware speaks UDP; its Bluetooth LE firmware is not supported
+- **TCode (OSR2 / SR6 / MiraBot)** — USB serial, UDP (Wi-Fi) or WebSocket, with per-axis enable + min/max controls for all 10 axes. MiraBot's Wi-Fi firmware speaks UDP; its Bluetooth LE firmware is not supported
   - **WebSocket reconnect.** A WebSocket device is tried until it answers or you press Disconnect: every 5 seconds for the first 30 minutes it's unreachable, then every minute. That covers a first connect to a device that's switched off (the panel shows *Connecting…* and the button turns into *Disconnect*) and a connection that drops. It connects by itself as soon as the device is up, and sync starts if a script is loaded.
   - **WebSocket log** (`main.log`, `[TCode/ws]`): each connect, drop and reconnect with the URL, the device's IP (and the previous one when DHCP moved it), close code, time up or down, commands and bytes sent, and the attempt count. A failed attempt says why: the host doesn't resolve, the IP refuses or doesn't answer on the port, or TCP is open but the WebSocket handshake failed. The same failure repeated is logged once a minute (every 10 minutes after the first 30) with a count of the attempts in between.
-- **Autoblow Ultra / VacuGlide 2** — Cloud API (experimental)
-- **Auto-connect on startup** — Handy and Buttplug.io connect automatically if previously configured; a WebSocket TCode device (MiraBot) is reconnected to its saved URL and tried until it answers, unless you pressed Disconnect last time
+- **Auto-connect on startup** — Buttplug.io connects automatically if previously configured; a WebSocket TCode device (MiraBot) is reconnected to its saved URL and tried until it answers, unless you pressed Disconnect last time
 - Per-device offset controls + unified Sync tab showing total effective offset (VR + device stacking)
-- Device simulator overlay showing real-time stroke position
 - Works without any device connected — pure video playback is fully functional
 - **Status API: `GET /api/status`** on the backend port (`http://<mac>:5123/api/status`, reachable from the LAN unless `--local-only`). One JSON answer for diagnosing a session without reading the log:
   - `issues`: what looks wrong, in plain words (desktop app not connected or its status stale, a TCode device waiting or reconnecting with the last failure reason and attempt count, no device connected, the headset asked for a scene in the last 15 minutes but the VR companion bridge isn't connected, or the bridge has had no packets for 5 seconds).
-  - `devices`: Handy, Buttplug (paired device names), TCode (`link`: state `connecting` / `connected` / `waiting` / `reconnecting` / `stopped`, URL, IP, connected or down since, attempts, retry interval and next retry, last error, last disconnect with close code, commands and bytes sent), Autoblow.
+  - `devices`: Buttplug (paired device names), TCode (`link`: state `connecting` / `connected` / `waiting` / `reconnecting` / `stopped`, URL, IP, connected or down since, attempts, retry interval and next retry, last error, last disconnect with close code, commands and bytes sent).
   - `vrBridge` (connected, link state, player, host, jitter), `session` (web remote or VR: state, video, position), `player` (desktop video, playing, position), `headset` (last scene HereSphere / DeoVR asked for: when, which video, from which IP), `phone` (active web-remote phone), `backend` (pid, uptime, videos registered) and `desktop` (connected since, age of its last status).
   - The desktop app sends its part over the web-remote observer socket on every device change and every 15 seconds; the backend keeps the latest one.
 - **Log file:** `main.log` (macOS `~/Library/Logs/funsync-player/`) holds the app, renderer and backend lines, and rotates to `main.old.log` at **1 GB**, so up to 2 GB of history is kept on disk.
 - **Quiet polling:** successful `GET /health`, `/api/media/vr-activity` and `/api/media/rescan-request` requests from the desktop app itself (loopback) are not written to the log; the same requests from a phone/headset, and any failures, still are.
 
-### Script Editor (Experimental)
-- OFS-style action graph with centered playhead and speed-colored lines
-- Numpad placement (0-9 maps to position 0-100), frame-by-frame stepping, snap-to-frame toggle
-- Selection, copy/paste, undo/redo (per-script history persistence)
-- Multi-script selector for multi-axis / custom-routing editing
-- Modifier tools: half/double speed, remap range, offset time, remove pauses, reverse
-- Pattern generator: sine, sawtooth, square, triangle, escalating, random
-- Gap detection and fill with configurable patterns
-- Audio waveform display and beat detection for music-synced scripting
-- Metadata editor (title, creator, tags, performers)
-- Bookmarks with named markers on the graph
-- Live device preview on numpad placement (when sync engine is idle)
-- Autosave toggle (off by default, shows save timestamp when enabled)
-
-### Multi-Axis Support (Experimental)
+### Multi-Axis Support
 - **Target setup: 4 axes on a MiraBot Lite** — stroke (L0), twist (R0), roll (R1), pitch (R2). Every script in the library should drive all four.
 - TCode convention detection (10 standard axes)
 - Companion file detection by filename suffix, including generated `<name>.generated.<axis>.funscript` files
@@ -238,22 +218,23 @@ A local desktop video player with device synchronization for funscript playback.
 ### Data
 - Settings, playlists, and categories stored locally (no cloud, no account)
 - Export/import backups as .funsync-backup zip files
-- Automatic updates — notified when a new version is available; **you control download AND install** (no silent install on app quit)
-- All user data preserved across updates
 
 ---
 
 ## Install
 
-1. Download the latest installer from the [Releases page](https://github.com/DaveMakesWaves/funsync-player/releases/latest)
-   - **Windows**: `FunSync Player Setup X.Y.Z.exe`
-   - **Linux**: `FunSync-Player-X.Y.Z.AppImage`
-2. Run the installer / AppImage
-   - Windows: no admin required, installs per-user
-   - Linux: `chmod +x` the AppImage, then run
-3. The app launches automatically
+The app runs from a source checkout:
 
-Updates are checked on startup. When a new version is available, a toast appears — click Download, then Restart Now when ready.
+```bash
+npm install
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
+node scripts/fetch-twemoji.mjs   # category-icon artwork (optional; without it emoji render as text)
+npm start
+```
+
+`npm start` launches Electron, which starts the backend from `backend/.venv` (or the system `python3` when there is no venv). On Windows the venv's pip is `.venv\Scripts\pip`.
+
+Requires Node.js 18+, Python 3.11+, and `ffmpeg` / `ffprobe`: on the `PATH`, or in `ffmpeg/` (Windows) / `ffmpeg-linux/` (Linux) at the repo root. The `video:tags` and `age:screen` commands are Rust (a Cargo workspace at the repo root, `crates/*`) and need `cargo` ([rustup](https://rustup.rs)); `cargo test` runs their tests (`age:screen`'s end-to-end test needs `ffmpeg`/`ffprobe` on the `PATH` and is skipped without them).
 
 ---
 
@@ -274,56 +255,15 @@ Updates are checked on startup. When a new version is available, a toast appears
 | A / B | Loop points |
 | Escape | Clear loop / close panels |
 | R | Cycle aspect ratio |
-| E | Toggle script editor |
-| D | Toggle device simulator |
 | V / Shift+V | Cycle script variants |
 | G / Shift+G | Skip to next/previous action |
-
-### Script Editor (when canvas focused)
-
-| Key / Mouse | Action |
-|-------------|--------|
-| 0-9 / Numpad 0-9 | Place action at current playhead (positions 0, 11, 22, ..., 100) |
-| Alt+Click on empty canvas | Insert action at click position |
-| Left / Right | Step one video frame |
-| Ctrl+Left / Right | Fast frame step (default 6 — `editor.fastStepFrames`) |
-| Shift+Left / Right | Move selected action(s) ±1 frame in time |
-| Ctrl+Shift+Left / Right | Move selected action(s) ±N frames in time |
-| Up / Down | Select previous / next action (with seek) |
-| Ctrl+Up / Down | Select previous / next action across all loaded scripts |
-| Shift+Up / Down | Nudge selected position ±5 (coarse) |
-| Ctrl+Shift+Up / Down | Nudge selected position ±1 (fine) |
-| Delete / Backspace | Delete selected actions |
-| Ctrl+Z / Ctrl+Y | Undo / Redo |
-| Ctrl+C / V / X | Copy / Paste / Cut |
-| Ctrl+A | Select all |
-| Ctrl+I | Invert positions |
-| Ctrl+S | Save |
-| W | Toggle audio waveform overlay |
-| B | Add bookmark at current time |
-| +/- | Zoom in / out |
-| Escape | Clear selection / close editor |
-
-When placing actions: press numpad without moving the playhead to refine the just-placed action's height; seek the playhead before pressing numpad to place a new action at the new time.
 
 ---
 
 ## Requirements
 
-- Windows 10/11 (x64) or Linux (AppImage — Ubuntu 22+, Fedora 38+, SteamOS)
+- macOS, Windows 10/11 or Linux
 - [Intiface Central](https://intiface.com/central/) for Buttplug.io device support (optional)
-
----
-
-## Building from Source
-
-```bash
-npm install
-cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt && cd ..
-npm run build
-```
-
-Requires Node.js 18+, Python 3.11+, and ffmpeg/ffprobe binaries in the `ffmpeg/` directory (or `ffmpeg-linux/` for Linux). The `video:tags` and `age:screen` commands are Rust (a Cargo workspace at the repo root, `crates/*`) and need `cargo` ([rustup](https://rustup.rs)); `cargo test` runs their tests (`age:screen`'s end-to-end test needs `ffmpeg`/`ffprobe` on the `PATH` and is skipped without them).
 
 ---
 
