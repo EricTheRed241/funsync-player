@@ -128,6 +128,12 @@ export class VRBridge {
   get playerType() { return this._playerType; }
   get currentVideoPath() { return this._currentVideoPath; }
   get host() { return this._host; }
+  /** Milliseconds since the last timestamp packet, null while disconnected. */
+  get lastPacketAgeMs() {
+    return this._connected && this._lastArrivalMs ? Date.now() - this._lastArrivalMs : null;
+  }
+  /** The last connect / socket error, '' when there was none. */
+  get lastError() { return this._lastError || ''; }
 
   /**
    * Three-state derivation for the UI: connected & receiving / connected &

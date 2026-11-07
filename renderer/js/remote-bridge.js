@@ -41,6 +41,7 @@ export class RemoteBridge {
     this.onPhoneOrgasmHold = null;     // (active, ip) => {} — phone orgasm button press/release (F2)
     this.onPhoneSetOffset = null;      // (device, ms, ip) => {} — phone offset slider (F4)
     this.onLibraryEdit = null;         // (edit) => {} — rating / playlist edit from phone or headset
+    this.onTelemetryLease = null;      // (ms) => {} — the device dashboard wants samples for `ms`
     this.onBridgeOpen = null;          // (reconnected: boolean) => {} — false for the first open only
     this.onBridgeClose = null;         // () => {}
   }
@@ -90,6 +91,14 @@ export class RemoteBridge {
    */
   sendDesktopStatus(status) {
     this.sendToPhone({ type: 'desktop-status', status });
+  }
+
+  /**
+   * Live device sample (device-telemetry.js) for the local device dashboard.
+   * Consumed by the backend, not forwarded to the phone.
+   */
+  sendTelemetry(sample) {
+    this.sendToPhone({ type: 'device-telemetry', sample });
   }
 
   /** True when the observer socket is open. */
@@ -230,6 +239,11 @@ export class RemoteBridge {
         if (this.onLibraryEdit && msg.edit && typeof msg.edit === 'object') {
           this.onLibraryEdit(msg.edit);
         }
+        break;
+      case 'telemetry-lease':
+        // The device dashboard (backend GET /device) is open: stream
+        // device-telemetry samples for `ms`.
+        if (this.onTelemetryLease) this.onTelemetryLease(Number(msg.ms) || 0);
         break;
       default:
         // Unknown types are silently ignored — forward-compat.

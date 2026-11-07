@@ -36,6 +36,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from routes.media import apply_acked_edit, get_video_registry
 from services import library_edits
+from services.device_telemetry import telemetry
 
 router = APIRouter()
 log = logging.getLogger("funsync.remote")
@@ -90,14 +91,17 @@ async def _safe_close(ws: WebSocket | None, code: int = 1000, reason: str = "") 
         pass
 
 
-async def _notify_observer(payload: dict) -> None:
-    """Forward a payload to the observer if one is connected."""
+async def notify_desktop(payload: dict) -> bool:
+    """Send a payload to the desktop's observer socket. False when no
+    desktop is connected or the send failed."""
     global _observer
     if _observer is None:
-        return
-    if not await _safe_send(_observer, payload):
-        # Observer socket is dead — clear the slot so a future reconnect works.
-        _observer = None
+        return False
+    if await _safe_send(_observer, payload):
+        return True
+    # Observer socket is dead — clear the slot so a future reconnect works.
+    _observer = None
+    return False
 
 
 # --- Library edits (phone / headset → desktop) -----------------------------
@@ -124,7 +128,7 @@ async def submit_library_edit(edit: dict) -> tuple[dict, bool]:
     stamped = library_edits.queue.enqueue(edit)
     delivered = False
     if _observer is not None:
-        await _notify_observer(_edit_message(stamped))
+        await notify_desktop(_edit_message(stamped))
         delivered = _observer is not None
     log.info(
         "[edits] #%s %s from %s %s",
@@ -178,7 +182,7 @@ async def phone_sync(ws: WebSocket) -> None:
                                # handler doesn't double-clear
         await _safe_send(old, {"type": "kicked", "reason": KICK_REPLACED})
         await _safe_close(old, code=4000, reason=KICK_REPLACED)
-        await _notify_observer({
+        await notify_desktop({
             "type": "phone-replaced",
             "oldIp": old_ip,
             "newIp": client_ip,
@@ -190,7 +194,7 @@ async def phone_sync(ws: WebSocket) -> None:
     _active_phone_video_id = query_video_id
     _last_state = None
 
-    await _notify_observer({
+    await notify_desktop({
         "type": "phone-connected",
         "ip": client_ip,
         "videoId": query_video_id,
@@ -226,7 +230,7 @@ async def phone_sync(ws: WebSocket) -> None:
                     client_ip, msg["videoId"], enriched["videoPath"],
                     "connected" if _observer else "NONE",
                 )
-            await _notify_observer(enriched)
+            await notify_desktop(enriched)
 
             if msg_type == "bye":
                 break
@@ -243,7 +247,7 @@ async def phone_sync(ws: WebSocket) -> None:
             _active_phone_ip = None
             _active_phone_video_id = None
             _last_state = None
-            await _notify_observer({"type": "phone-disconnected", "ip": departing_ip})
+            await notify_desktop({"type": "phone-disconnected", "ip": departing_ip})
             log.info("[remote] Phone disconnected: %s", departing_ip)
         await _safe_close(ws)
 
@@ -271,6 +275,7 @@ async def observer_sync(ws: WebSocket) -> None:
 
     _observer = ws
     _observer_since = time.time()
+    telemetry.observer_changed(True, _observer_since)
     log.info("[remote] Observer connected")
 
     # Catch-up snapshot so the renderer knows the current state even if it
@@ -308,6 +313,10 @@ async def observer_sync(ws: WebSocket) -> None:
                 if isinstance(msg.get("status"), dict):
                     _desktop_status = msg["status"]
                     _desktop_status_at = time.time()
+                    telemetry.record_status(_desktop_status, _desktop_status_at)
+                continue
+            if msg.get("type") == "device-telemetry":
+                telemetry.record_sample(msg.get("sample"), time.time())
                 continue
 
             # Forward to phone if one is connected
@@ -321,6 +330,7 @@ async def observer_sync(ws: WebSocket) -> None:
         if _observer is ws:
             _observer = None
             _observer_since = None
+            telemetry.observer_changed(False, time.time())
             log.info("[remote] Observer disconnected")
         await _safe_close(ws)
 
@@ -361,6 +371,7 @@ def _reset_state_for_tests() -> None:
     _desktop_status = None
     _desktop_status_at = None
     library_edits.queue.clear()
+    telemetry.reset()
 
 
 def _get_state_for_tests() -> dict:

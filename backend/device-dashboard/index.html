@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FunSync device dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header>
+    <h1>Device dashboard</h1>
+    <span id="stream" class="pill">connecting…</span>
+    <span id="verdict" class="verdict"></span>
+  </header>
+
+  <main>
+    <section class="card wide">
+      <h2>Why isn't it moving?</h2>
+      <ol id="checks" class="checks"></ol>
+    </section>
+
+    <section class="card">
+      <h2>TCode link</h2>
+      <dl id="link" class="kv"></dl>
+    </section>
+
+    <section class="card">
+      <h2>Sync engine</h2>
+      <dl id="sync" class="kv"></dl>
+      <table id="axes" class="axes"></table>
+    </section>
+
+    <section class="card">
+      <h2>Playback source</h2>
+      <dl id="source" class="kv"></dl>
+    </section>
+
+    <section class="card wide">
+      <h2>Commands per second <small>last 15 min · red = link down</small></h2>
+      <canvas id="rate-chart" height="140"></canvas>
+    </section>
+
+    <section class="card wide">
+      <h2>Axis positions sent <small>last 30 s</small></h2>
+      <div id="axis-legend" class="legend"></div>
+      <canvas id="axis-chart" height="180"></canvas>
+    </section>
+
+    <section class="card wide">
+      <h2>Headset packet age <small>ms since the last HereSphere/DeoVR timestamp, last 15 min</small></h2>
+      <canvas id="vr-chart" height="110"></canvas>
+    </section>
+
+    <section class="card">
+      <h2>Last commands</h2>
+      <ol id="commands" class="commands"></ol>
+    </section>
+
+    <section class="card">
+      <h2>Issues <small>from /api/status</small></h2>
+      <ul id="issues" class="issues"></ul>
+    </section>
+
+    <section class="card wide">
+      <h2>Timeline <small>this app run, newest first</small></h2>
+      <ol id="events" class="events"></ol>
+    </section>
+  </main>
+
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

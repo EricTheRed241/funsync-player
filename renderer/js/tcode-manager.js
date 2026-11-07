@@ -9,6 +9,9 @@
 // some MFP-compatible consumers infer the version from digit count.
 
 const PRECISION_LIMITS = { 3: 999, 4: 9999 };
+// Recent commands kept for the device dashboard: 10 s at a 60 Hz update rate,
+// well over the dashboard's 1 s collection interval.
+const RECENT_COMMANDS_KEEP = 600;
 
 export class TCodeManager {
   constructor() {
@@ -25,6 +28,10 @@ export class TCodeManager {
     this._statusCleanup = null;
     this._precision = 3;       // digits per axis value
     this._valueMax = 999;      // derived from precision
+    // Every command sent this app run, for the device dashboard
+    // (device-telemetry.js): counters plus the most recent commands.
+    this._output = { commands: 0, failed: 0, lastCommand: null, lastAt: null };
+    this._recent = [];         // [{ t: epoch ms, cmd }], oldest first
 
     // Callbacks
     this.onConnect = null;
@@ -198,11 +205,28 @@ export class TCodeManager {
    */
   async send(command) {
     if (!this._connected) return false;
+    const out = this._output;
+    out.commands++;
+    out.lastCommand = command.trimEnd();
+    out.lastAt = Date.now();
+    this._recent.push({ t: out.lastAt, cmd: out.lastCommand });
+    if (this._recent.length > RECENT_COMMANDS_KEEP) this._recent.shift();
+    let ok = false;
     try {
-      return await window.funsync.tcodeSend(command);
+      ok = await window.funsync.tcodeSend(command);
     } catch {
-      return false;
+      ok = false;
     }
+    if (!ok) out.failed++;
+    return ok;
+  }
+
+  /** Counters for every command handed to main this app run. */
+  get output() { return { ...this._output }; }
+
+  /** Commands sent in (sinceMs, untilMs] (epoch ms), oldest first. */
+  recentCommands(sinceMs = 0, untilMs = Infinity) {
+    return this._recent.filter((c) => c.t > sinceMs && c.t <= untilMs);
   }
 
   /**

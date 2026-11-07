@@ -17,6 +17,7 @@ from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
 from routes.locale import router as locale_router, set_user_data_dir
 from routes.status import router as status_router
+from routes.device import router as device_router
 from services import library_edits, stereo_detect, video_info
 import access_log
 
@@ -52,6 +53,8 @@ app.include_router(remote_router, prefix="/api/remote", tags=["remote"])
 app.include_router(remote_sync_router, prefix="/api/remote", tags=["remote-sync"])
 app.include_router(locale_router, prefix="/api/remote", tags=["locale"])
 app.include_router(status_router, prefix="/api", tags=["status"])
+# Local-only device dashboard at /device/ (routes/device.py).
+app.include_router(device_router, tags=["device"])
 
 # Web remote SPA served at /remote/ — static files live in backend/web-remote/.
 _remote_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web-remote")

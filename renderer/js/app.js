@@ -34,6 +34,7 @@ import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
 import { buildDesktopStatus } from './desktop-status.js';
+import { buildDeviceTelemetry, TelemetryStream } from './device-telemetry.js';
 import { SessionCard } from '../components/session-card.js';
 import { openSessionHistory } from '../components/session-history-modal.js';
 import { SettingsPanel } from '../components/settings-panel.js';
@@ -2025,6 +2026,14 @@ class App {
     // shares (see init and library-edits.js).
     this.remoteBridge.onLibraryEdit = (edit) => { this._libraryEdits.apply(edit); };
 
+    // The local device dashboard (backend GET /device) asks for live samples
+    // with a lease; the stream stops by itself when the dashboard closes.
+    this._telemetryStream = new TelemetryStream({
+      collect: (since, now) => this._collectDeviceTelemetry(since, now),
+      send: (sample) => this.remoteBridge?.sendTelemetry(sample),
+    });
+    this.remoteBridge.onTelemetryLease = (ms) => this._telemetryStream.extend(ms);
+
     // Desktop-side changes reach the headset sections and the phone too.
     let timer = null;
     const schedule = () => {
@@ -3391,6 +3400,38 @@ class App {
       videoPlayer: this.videoPlayer,
       currentVideoPath: this._currentVideoPath,
     }));
+  }
+
+  /** One device-dashboard sample: commands sent in (since, now]. */
+  async _collectDeviceTelemetry(since, now) {
+    let tcodeLink = null;
+    if (this.tcodeManager) {
+      // Main's snapshot carries live send counters; the pushed one only
+      // changes with the link state.
+      try { tcodeLink = await window.funsync.tcodeStatus(); } catch { tcodeLink = null; }
+    }
+    return buildDeviceTelemetry({
+      tcodeManager: this.tcodeManager,
+      tcodeLink,
+      tcodeSync: this.tcodeSync,
+      funscriptEngine: this.funscriptEngine,
+      buttplugManager: this.buttplugManager,
+      vrBridge: this.vrBridge,
+      source: this._syncSource(),
+      commandsSince: since,
+      now,
+    });
+  }
+
+  /** What the device sync engines follow right now, for the device dashboard. */
+  _syncSource() {
+    const player = this.tcodeSync?.player ?? this.buttplugSync?.player;
+    if (!player) return null;
+    if (this._vrPlayerRef && player === this._vrPlayerRef) return this.vrBridge?.playerType || 'vr';
+    if (this._remoteActive) return 'phone';
+    if (this._playerWindowActive) return 'player-window';
+    if (player === this.videoPlayer) return 'desktop';
+    return null;
   }
 
   /**

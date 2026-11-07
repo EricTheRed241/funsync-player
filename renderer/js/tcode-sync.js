@@ -144,6 +144,45 @@ export class TCodeSync {
     this._resetIndices();
   }
 
+  /**
+   * What the engine is doing right now, for the device dashboard
+   * (device-telemetry.js). `nextKeyframeInMs` is the wait until the next
+   * main-script keyframe: null past the script's end, and over MAX_GAP_MS
+   * means the engine is holding still through a gap.
+   */
+  snapshot() {
+    const timeMs = this.player ? this._currentTimeMs() : NaN;
+    const known = Number.isFinite(timeMs);
+    const value = (v) => (v >= 0 ? Math.round(v * 10) / 10 : null);
+    const axes = [];
+    if (this._actions) {
+      axes.push({ axis: 'L0', kind: 'script', actions: this._actions.length, enabled: this.isAxisEnabled('L0'), last: value(this._lastSentPos) });
+    }
+    for (const [axis, s] of this._axisActions) {
+      axes.push({ axis, kind: 'script', actions: s.actions.length, enabled: this.isAxisEnabled(axis), last: value(s.lastSentValue) });
+    }
+    for (const [axis, cfg] of this._axisMotion) {
+      if (this._axisActions.has(axis)) continue;
+      axes.push({ axis, kind: cfg.mode, actions: null, enabled: this.isAxisEnabled(axis), last: value(this._genState.get(axis)?.lastSentValue ?? -1) });
+    }
+    let nextKeyframeInMs = null;
+    if (known && this._actions?.length) {
+      const next = this._actions[this._binarySearch(this._actions, timeMs) + 1];
+      if (next) nextKeyframeInMs = Math.round(next.at - timeMs);
+    }
+    return {
+      active: this._active,
+      running: this._intervalId !== null,
+      tickHz: Math.round(1000 / this._tickIntervalMs),
+      offsetMs: this._offsetMs,
+      mediaTimeMs: known ? Math.round(timeMs + this._offsetMs) : null,
+      paused: !!this.player?.paused,
+      nextKeyframeInMs,
+      maxGapMs: MAX_GAP_MS,
+      axes,
+    };
+  }
+
   /** Set actions for a companion axis. */
   setAxisActions(tcode, actions) {
     if (!actions || actions.length < 2) {
