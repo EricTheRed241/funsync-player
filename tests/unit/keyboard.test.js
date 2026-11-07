@@ -24,18 +24,16 @@ function fireKey(key) {
 }
 
 describe('KeyboardHandler', () => {
-  let player, handler, connectionPanel, onOpenFile, scriptEditor;
+  let player, handler, connectionPanel, onOpenFile;
 
   beforeEach(() => {
     player = createMockPlayer();
     connectionPanel = { toggle: vi.fn(), hide: vi.fn() };
     onOpenFile = vi.fn();
-    scriptEditor = { toggle: vi.fn(), hide: vi.fn(), isOpen: false };
     handler = new KeyboardHandler({
       videoPlayer: player,
       connectionPanel,
       onOpenFile,
-      scriptEditor,
     });
   });
 
@@ -143,12 +141,6 @@ describe('KeyboardHandler', () => {
     expect(player.cycleAspectRatio).toHaveBeenCalled();
   });
 
-  // --- Editor ---
-
-  it('e toggles script editor', () => {
-    fireKey('e');
-    expect(scriptEditor.toggle).toHaveBeenCalled();
-  });
 
   // --- File open ---
 
@@ -165,11 +157,6 @@ describe('KeyboardHandler', () => {
     expect(connectionPanel.hide).toHaveBeenCalled();
   });
 
-  it('Escape hides editor when open', () => {
-    scriptEditor.isOpen = true;
-    fireKey('Escape');
-    expect(scriptEditor.hide).toHaveBeenCalled();
-  });
 
   // --- INPUT guard ---
 
@@ -211,13 +198,6 @@ describe('KeyboardHandler', () => {
     expect(onOrgasmHold).toHaveBeenLastCalledWith(true);
   });
 
-  it('does not activate the hold while the editor is open', () => {
-    const onOrgasmHold = vi.fn();
-    handler.onOrgasmHold = onOrgasmHold;
-    scriptEditor.isOpen = true;
-    fireKey('x');
-    expect(onOrgasmHold).not.toHaveBeenCalled();
-  });
 
   it('keyup always releases even if a hold was never registered (no throw)', () => {
     const onOrgasmHold = vi.fn();
@@ -254,17 +234,6 @@ describe('KeyboardHandler', () => {
     expect(onLoadPrev).toHaveBeenCalledTimes(1);
   });
 
-  it('does not change video while the editor is open', () => {
-    const onLoadNext = vi.fn();
-    const onLoadPrev = vi.fn();
-    handler.onLoadNext = onLoadNext;
-    handler.onLoadPrev = onLoadPrev;
-    scriptEditor.isOpen = true;
-    fireKey('n');
-    fireKey('p');
-    expect(onLoadNext).not.toHaveBeenCalled();
-    expect(onLoadPrev).not.toHaveBeenCalled();
-  });
 
   it('n / p are inert when no callback is wired (no queue)', () => {
     handler.onLoadNext = null;

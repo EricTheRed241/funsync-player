@@ -71,12 +71,6 @@ describe('lookupVrPreset', () => {
 });
 
 describe('computeSuggestedOffset', () => {
-  it('uses Handy RTD/2 for handy device on desktop', () => {
-    const r = computeSuggestedOffset({ device: 'handy', context: 'desktop', handyRtdMs: 120 });
-    // 120/2 = 60, rounded to 10ms → -60
-    expect(r).toBe(-60);
-  });
-
   it('uses Buttplug ping/2 for buttplug device on desktop', () => {
     const r = computeSuggestedOffset({ device: 'buttplug', context: 'desktop', buttplugPingMs: 80 });
     expect(r).toBe(-40);
@@ -84,8 +78,8 @@ describe('computeSuggestedOffset', () => {
 
   it('adds VR jitter for vr context', () => {
     const r = computeSuggestedOffset({
-      device: 'handy', context: 'vr',
-      handyRtdMs: 100, vrJitterMs: 12, vrPlayerType: 'heresphere',
+      device: 'buttplug', context: 'vr',
+      buttplugPingMs: 100, vrJitterMs: 12, vrPlayerType: 'heresphere',
     });
     // 100/2 + 12 + |-200| (heresphere:wifi-fast) = 50+12+200 = 262 → -260
     expect(r).toBe(-260);
@@ -93,20 +87,20 @@ describe('computeSuggestedOffset', () => {
 
   it('adds WS RTT/2 for remote context', () => {
     const r = computeSuggestedOffset({
-      device: 'handy', context: 'remote',
-      handyRtdMs: 100, wsRttMs: 30,
+      device: 'buttplug', context: 'remote',
+      buttplugPingMs: 100, wsRttMs: 30,
     });
     // 50 + 15 = 65 → -70 (rounded to nearest 10)
     expect(r).toBe(-70);
   });
 
   it('rounds to nearest 10ms', () => {
-    expect(computeSuggestedOffset({ device: 'handy', context: 'desktop', handyRtdMs: 47 })).toBe(-20);
-    expect(computeSuggestedOffset({ device: 'handy', context: 'desktop', handyRtdMs: 53 })).toBe(-30);
+    expect(computeSuggestedOffset({ device: 'buttplug', context: 'desktop', buttplugPingMs: 47 })).toBe(-20);
+    expect(computeSuggestedOffset({ device: 'buttplug', context: 'desktop', buttplugPingMs: 53 })).toBe(-30);
   });
 
   it('returns 0 when nothing is measurable', () => {
-    expect(computeSuggestedOffset({ device: 'handy', context: 'desktop' })).toBe(0);
+    expect(computeSuggestedOffset({ device: 'buttplug', context: 'desktop' })).toBe(0);
   });
 
   it('omits device latency when not provided', () => {

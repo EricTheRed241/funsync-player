@@ -21,7 +21,7 @@
 // value that would be SENT TO THE DEVICE, not the script-space value —
 // asserting in script space would prove nothing about the thing that breaks.
 import { describe, it, expect } from 'vitest';
-import { applyFiller, fillRawScriptContent, DEFAULT_MAX_JOIN_SPEED } from '../../renderer/js/filler-engine.js';
+import { applyFiller, DEFAULT_MAX_JOIN_SPEED } from '../../renderer/js/filler-engine.js';
 import { applyDeviceStack, computeNaturalRange } from '../../renderer/js/device-transform-stack.js';
 
 const TOLERANCE = 1.05;
@@ -186,57 +186,5 @@ describe('every combination, swept', () => {
         }
       }
     }
-  });
-});
-
-describe('cloud-upload devices get filler too', () => {
-  // Handy HSSP and Autoblow play an uploaded script from their own clock.
-  // Without this path they would silently get no filler at all.
-  it('bakes filler into the uploaded JSON', () => {
-    const raw = JSON.stringify({ version: '1.0', actions: scriptWithMidGap(0, 100) });
-    const out = fillRawScriptContent(raw, FILLER_OPTS);
-    const parsed = JSON.parse(out);
-    expect(parsed.actions.length).toBeGreaterThan(scriptWithMidGap(0, 100).length);
-    expect(parsed.version).toBe('1.0');   // other fields preserved
-  });
-
-  it('strips the internal marker before sending', () => {
-    const raw = JSON.stringify({ actions: scriptWithMidGap(0, 100) });
-    const parsed = JSON.parse(fillRawScriptContent(raw, FILLER_OPTS));
-    for (const a of parsed.actions) {
-      expect(Object.keys(a).sort()).toEqual(['at', 'pos']);
-    }
-  });
-
-  it('keeps the uploaded script within the speed cap', () => {
-    const raw = JSON.stringify({ actions: scriptWithMidGap(0, 1) });
-    const parsed = JSON.parse(fillRawScriptContent(raw, FILLER_OPTS));
-    for (let i = 1; i < parsed.actions.length; i++) {
-      const dt = parsed.actions[i].at - parsed.actions[i - 1].at;
-      const dp = Math.abs(parsed.actions[i].pos - parsed.actions[i - 1].pos);
-      if (dp === 0 || dt <= 0) continue;
-      // Authored segments can legitimately be fast; only check the gap.
-      if (parsed.actions[i].at > 2000 && parsed.actions[i].at < 22000) {
-        expect((dp / dt) * 1000).toBeLessThanOrEqual(DEFAULT_MAX_JOIN_SPEED * TOLERANCE);
-      }
-    }
-  });
-
-  // Same contract as extendRawScriptContent: never corrupt, never throw.
-  it('returns the input untouched on a no-op', () => {
-    const raw = JSON.stringify({ actions: scriptWithMidGap(0, 100) });
-    expect(fillRawScriptContent(raw, { ...FILLER_OPTS, enabled: false })).toBe(raw);
-    expect(fillRawScriptContent(raw, null)).toBe(raw);
-    expect(fillRawScriptContent('not json', FILLER_OPTS)).toBe('not json');
-    expect(fillRawScriptContent(JSON.stringify({ actions: [] }), FILLER_OPTS))
-      .toBe(JSON.stringify({ actions: [] }));
-    expect(fillRawScriptContent('', FILLER_OPTS)).toBe('');
-    expect(fillRawScriptContent(null, FILLER_OPTS)).toBe(null);
-  });
-
-  it('returns the input untouched when no gap qualifies', () => {
-    const dense = Array.from({ length: 40 }, (_, i) => ({ at: i * 500, pos: i % 2 ? 100 : 0 }));
-    const raw = JSON.stringify({ actions: dense });
-    expect(fillRawScriptContent(raw, FILLER_OPTS)).toBe(raw);
   });
 });

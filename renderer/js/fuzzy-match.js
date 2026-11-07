@@ -56,7 +56,7 @@ const NOISE_TOKENS = new Set([
 ]);
 
 /** True when a token carries no scene information. */
-export function isNoiseToken(t) {
+function isNoiseToken(t) {
   if (!t) return true;
   if (NOISE_TOKENS.has(t)) return true;
   if (/^\d{3,4}p$/.test(t)) return true;        // 720p 1080p 1920p 2160p
@@ -71,7 +71,7 @@ export function isNoiseToken(t) {
  * Drop noise tokens, but NEVER strip a name to nothing — a file called
  * "1080p.mp4" must still be comparable to itself.
  */
-export function stripNoise(normalized) {
+function stripNoise(normalized) {
   const kept = tokenize(normalized).filter((t) => !isNoiseToken(t));
   return kept.length ? kept.join(' ') : normalized;
 }
@@ -86,7 +86,7 @@ export function stripNoise(normalized) {
  * "Amazing" is fully contained in "Amazing Long Descriptive Title…" too, so
  * the length ratio keeps a single generic word from beating the real title.
  */
-export function tokenContainmentScore(tokensA, tokensB, idf = null) {
+function tokenContainmentScore(tokensA, tokensB, idf = null) {
   if (!tokensA.length || !tokensB.length) return 0;
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
@@ -153,7 +153,7 @@ export function tokenOverlapScore(tokensA, tokensB, idf = null) {
  * @param {Array<string>} names — candidate filenames
  * @returns {Map<string, number>} token → weight
  */
-export function buildIdf(names) {
+function buildIdf(names) {
   const df = new Map();
   for (const name of names) {
     for (const t of new Set(tokenize(stripNoise(normalize(name))))) {

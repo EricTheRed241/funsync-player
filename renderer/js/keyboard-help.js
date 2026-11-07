@@ -1,13 +1,8 @@
-// keyboard-help — Shared "press ? to see all shortcuts" overlay.
-//
-// Used by:
-//   - renderer/components/script-editor.js (editor view, `?` opens
-//     editor-specific shortcut groups).
-//   - renderer/js/app.js (player view, `?` opens player shortcut groups).
+// keyboard-help — "press ? to see all shortcuts" overlay for the player
+// view (renderer/js/keyboard.js).
 //
 // The overlay itself is a `Modal.open` — same dialog primitives as the
-// rest of the app. Each caller passes its own group-of-rows data shape
-// so the same module renders different content per surface. Nielsen #7
+// rest of the app. The caller passes group-of-rows data. Nielsen #7
 // (flexibility for experts — surface every binding without making
 // novices learn them) + #10 (help in context).
 //
@@ -20,7 +15,6 @@
 
 import { Modal } from '../components/modal.js';
 import { t } from './i18n.js';
-import { formatBindingLabel } from '../components/key-capture.js';
 import { dataService } from './data-service.js';
 
 /**
@@ -33,19 +27,19 @@ export function openKeyboardHelp(title, groups) {
     title,
     onRender(body, close) {
       const wrap = document.createElement('div');
-      wrap.className = 'editor-help'; // reuses the editor's two-column dl styling
+      wrap.className = 'kbd-help';
       for (const g of groups) {
         const sec = document.createElement('section');
-        sec.className = 'editor-help__section';
+        sec.className = 'kbd-help__section';
         const h = document.createElement('h3');
-        h.className = 'editor-help__title';
+        h.className = 'kbd-help__title';
         h.textContent = g.title;
         sec.appendChild(h);
         const tbl = document.createElement('dl');
-        tbl.className = 'editor-help__list';
+        tbl.className = 'kbd-help__list';
         for (const [keys, desc] of g.rows) {
           const dt = document.createElement('dt');
-          dt.className = 'editor-help__keys';
+          dt.className = 'kbd-help__keys';
           // Render each key part as <kbd> so screen readers + copy/paste
           // both render keyboard input semantically. Splits on " / "
           // (alternative bindings) but preserves "+" combos as one chip.
@@ -56,7 +50,7 @@ export function openKeyboardHelp(title, groups) {
             dt.appendChild(kbd);
           }
           const dd = document.createElement('dd');
-          dd.className = 'editor-help__desc';
+          dd.className = 'kbd-help__desc';
           dd.textContent = desc;
           tbl.appendChild(dt);
           tbl.appendChild(dd);
@@ -148,7 +142,6 @@ export function getPlayerShortcutGroups() {
       title: t('kbd.devicesSync'),
       rows: [
         ['H',             t('kbd.devicesPanel')],
-        ['D',             t('kbd.deviceSimulator')],
         // X was never listed here — a user with a configured finisher had no
         // way to discover the hotkey (lettuce, EroScripts #302).
         // Both keys can run as hold or press-to-toggle, so the row has to
@@ -163,7 +156,6 @@ export function getPlayerShortcutGroups() {
     {
       title: t('kbd.script'),
       rows: [
-        ['E',             t('kbd.scriptEditor')],
         ['V',             t('kbd.nextVariant')],
         ['Shift+V',       t('kbd.prevVariant')],
       ],
@@ -191,94 +183,4 @@ export function getPlayerShortcutGroups() {
       ],
     },
   ];
-}
-
-export function getEditorShortcutGroups() {
-  return [
-    {
-      title: t('kbd.editorSelection'),
-      rows: [
-        ['Up / Down',           t('kbd.editorPrevNextAction')],
-        ['Ctrl+Up / Ctrl+Down', t('kbd.editorPrevNextAcrossScripts')],
-        ['Left / Right',        t('kbd.editorStepFrame')],
-        ['Ctrl+Left / Right',   t('kbd.editorFastFrame')],
-        ['Ctrl+A',              t('kbd.editorSelectAll')],
-        ['Ctrl+1 / 2 / 3',      t('kbd.editorSelectThird')],
-        ['Esc',                 t('kbd.editorClearSelection')],
-      ],
-    },
-    {
-      title: t('kbd.editorEdit'),
-      rows: [
-        ['Shift+Up / Down',     t('kbd.editorNudgeCoarse')],
-        ['Ctrl+Shift+Up / Down',t('kbd.editorNudgeFine')],
-        ['Shift+Left / Right',  t('kbd.editorMoveFrame')],
-        ['Ctrl+Shift+Left / Right', t('kbd.editorMoveFrames')],
-        ['Ctrl+Alt+Left / Right', t('kbd.editorSelectLeftRightOfCursor')],
-        ['E',                   t('kbd.editorEqualize')],
-        ['End',                 t('kbd.editorMoveToPlayhead')],
-        ['Del / Backspace',     t('kbd.editorDelete')],
-        ['Ctrl+I',              t('kbd.editorInvert')],
-      ],
-    },
-    {
-      title: t('kbd.editorPlace'),
-      rows: [
-        ['0 – 9 (or Numpad)',   t('kbd.editorPlaceNumpad')],
-        ['Shift+0 / - / Numpad-', t('kbd.editorPlaceTop')],
-        ['Alt+Click',           t('kbd.editorInsertAtClick')],
-        ['Shift+Drag dot',      t('kbd.editorMoveSelected')],
-        ['Q',                   t('kbd.editorAlternatingInsert')],
-        ['Home',                t('kbd.editorRepeatLastStroke')],
-        ['B',                   t('kbd.editorBookmark')],
-        ['Shift+B / Ctrl+B',    t('kbd.editorBookmarkNav')],
-        ['R',                   t('kbd.editorRecording')],
-        ['W',                   t('kbd.editorWaveform')],
-        ['Shift+W',             t('kbd.editorMultiBand')],
-        ['V',                   t('kbd.editorVAD')],
-        ['[ / ]',                t('kbd.editorSpeedStep')],
-      ],
-    },
-    {
-      title: t('kbd.editorHistory'),
-      rows: [
-        ['Ctrl+Z',                t('kbd.editorUndo')],
-        ['Ctrl+Y / Ctrl+Shift+Z', t('kbd.editorRedo')],
-        ['Ctrl+C / Ctrl+X',       t('kbd.editorCopyCut')],
-        ['Ctrl+V',                t('kbd.editorPaste')],
-        ['Ctrl+Shift+V',          t('kbd.editorPasteOriginal')],
-        ['Ctrl+S',                t('kbd.editorSave')],
-      ],
-    },
-    {
-      title: t('kbd.view'),
-      rows: [
-        ['+ / -',               t('kbd.editorZoom')],
-        ['?',                   t('kbd.showHelp')],
-      ],
-    },
-    ...buildCustomPositionKeysGroup(),
-  ];
-}
-
-/**
- * Build the dynamic "Custom position keys" group from the user's saved
- * bindings. Returns an empty array when the user has no custom bindings
- * — so the empty group is never rendered (no visual noise). Per
- * Nielsen #6 (recognition > recall), users should be able to find their
- * own bindings via `?` without rummaging through Settings.
- */
-function buildCustomPositionKeysGroup() {
-  let bindings = [];
-  try {
-    const raw = dataService?.get?.('editor.customPositionKeys');
-    if (Array.isArray(raw)) bindings = raw;
-  } catch { /* not initialised — fall through to empty group */ }
-  if (bindings.length === 0) return [];
-  return [{
-    title: t('editor.customKeysHelpGroup'),
-    rows: bindings
-      .filter((b) => b && typeof b.code === 'string')
-      .map((b) => [formatBindingLabel(b), `→ ${b.position}`]),
-  }];
 }

@@ -1,6 +1,6 @@
 // Lucide Icons — centralized icon helper for FunSync Player
 //
-// Uses the same relative-path import pattern as handy-sdk
+// Uses relative-path imports into node_modules
 // (bare specifiers fail in Electron renderer with contextIsolation: true).
 
 import createElement from '../../node_modules/lucide/dist/esm/createElement.js';
@@ -23,7 +23,6 @@ export { default as Maximize2 } from '../../node_modules/lucide/dist/esm/icons/m
 export { default as Minimize } from '../../node_modules/lucide/dist/esm/icons/minimize.js';
 export { default as ArrowLeft } from '../../node_modules/lucide/dist/esm/icons/arrow-left.js';
 export { default as Plus } from '../../node_modules/lucide/dist/esm/icons/plus.js';
-export { default as Home } from '../../node_modules/lucide/dist/esm/icons/house.js';
 export { default as Library } from '../../node_modules/lucide/dist/esm/icons/library.js';
 export { default as ListVideo } from '../../node_modules/lucide/dist/esm/icons/list-video.js';
 export { default as Tag } from '../../node_modules/lucide/dist/esm/icons/tag.js';
@@ -51,7 +50,6 @@ export { default as WandSparkles } from '../../node_modules/lucide/dist/esm/icon
 export { default as BookmarkPlus } from '../../node_modules/lucide/dist/esm/icons/bookmark-plus.js';
 export { default as FileText } from '../../node_modules/lucide/dist/esm/icons/file-text.js';
 export { default as Rows3 } from '../../node_modules/lucide/dist/esm/icons/rows-3.js';
-export { default as AudioWaveform } from '../../node_modules/lucide/dist/esm/icons/audio-waveform.js';
 export { default as Activity } from '../../node_modules/lucide/dist/esm/icons/activity.js';
 export { default as Thermometer } from '../../node_modules/lucide/dist/esm/icons/thermometer.js';
 export { default as Info } from '../../node_modules/lucide/dist/esm/icons/info.js';
@@ -76,7 +74,6 @@ export { default as ChevronDown } from '../../node_modules/lucide/dist/esm/icons
 // ChevronUp + Shuffle — playlist reorder (Move up) + shuffle toggle.
 export { default as ChevronUp } from '../../node_modules/lucide/dist/esm/icons/chevron-up.js';
 export { default as Shuffle } from '../../node_modules/lucide/dist/esm/icons/shuffle.js';
-export { default as Scale } from '../../node_modules/lucide/dist/esm/icons/scale.js';
 // History — playlist "Continue from last watched". (RotateCcw, used for
 // the matching Reset, is already exported above.)
 export { default as History } from '../../node_modules/lucide/dist/esm/icons/history.js';
@@ -88,8 +85,8 @@ export { default as Check } from '../../node_modules/lucide/dist/esm/icons/check
 // icon, complements the placeholder which disappears on focus).
 export { default as Search } from '../../node_modules/lucide/dist/esm/icons/search.js';
 // Cable — replaces Bluetooth on the player Devices button (2026-04-27
-// player-bottom-bar polish). Bluetooth was misleading: Handy is WiFi,
-// TCode is serial, Buttplug uses Intiface (which can be any transport).
+// player-bottom-bar polish). Bluetooth was misleading: TCode is serial
+// or network, Buttplug uses Intiface (which can be any transport).
 export { default as Cable } from '../../node_modules/lucide/dist/esm/icons/cable.js';
 // Volume1 — middle state for the 3-state mute icon set.
 //   Volume2 = audible (volume > 0, not muted)
@@ -110,13 +107,6 @@ export { default as Languages } from '../../node_modules/lucide/dist/esm/icons/l
 export { default as ExternalLink } from '../../node_modules/lucide/dist/esm/icons/external-link.js';
 // Link — "Load from URL" (remote video) nav-bar action.
 export { default as Link } from '../../node_modules/lucide/dist/esm/icons/link.js';
-
-// Audience-broadcast feature (SCOPE-audience-broadcast.md)
-export { default as Eye } from '../../node_modules/lucide/dist/esm/icons/eye.js';
-export { default as EyeOff } from '../../node_modules/lucide/dist/esm/icons/eye-off.js';
-export { default as Bell } from '../../node_modules/lucide/dist/esm/icons/bell.js';
-export { default as Users } from '../../node_modules/lucide/dist/esm/icons/users.js';
-export { default as TriangleAlert } from '../../node_modules/lucide/dist/esm/icons/triangle-alert.js';
 
 // Ratings + favourites (rating-stars.js).
 export { default as Star } from '../../node_modules/lucide/dist/esm/icons/star.js';

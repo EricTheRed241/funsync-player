@@ -6,14 +6,6 @@ let conf = null;
 
 const DEFAULTS = {
   settings: {
-    handy: {
-      connectionKey: '',
-      defaultOffset: 0,
-      slideMin: 0,
-      slideMax: 100,
-      scriptHostMode: 'local',
-      syncRounds: 30,
-    },
     player: {
       volume: 80,
       theme: 'dark',
@@ -78,7 +70,6 @@ const DEFAULTS = {
       localIp: 'auto',
     },
     library: {
-      directory: '',
       sources: [],
       associations: {},
       manualVariants: {},
@@ -87,24 +78,16 @@ const DEFAULTS = {
       // Tri-state covers both flipping a missed VR file → VR and
       // clearing a false-positive on a flat file with a VR-like token.
       manualVRType: {},
-      // Per-path VR-as-flat playback override. Legacy two-string shape
-      // — value was `'left'` or `'right'`. Kept indefinitely as a read
-      // fallback for downgrade safety (a user reverting to <0.7.x still
-      // sees their saved eye preference). New writes go to vrFormat
-      // below; this key is not updated post-migration.
-      vrFlatten: {},
-      // Phase 1 of VR-flatten expansion (2026-05-21). Per-path richer
-      // schema:
+      // Per-path VR-as-flat playback format. Schema:
       //   { projection: 'sbs-half'|'sbs-full'|'tb-half'|'tb-full'|'flat',
       //     eye: 'left'|'right'|null,
       //     zoom: 1.0,
       //     source: 'auto'|'manual' }
-      // Old vrFlatten entries lazy-migrate on read; no batch migration.
       // Non-planar projections (fisheye/equirect/MKX/RF52/EAC) reserved
       // for Phase 2a/2b — they appear disabled in the panel dropdown.
       vrFormat: {},
       // Per-path custom thumbnail override. Two shapes:
-      //   `{ seekPct: 0..1 }` — pinned frame (legacy shape, no `type` key)
+      //   `{ seekPct: 0..1 }` — pinned frame (no `type` key)
       //   `{ type: 'image', imagePath }` — user-uploaded poster, imported
       //     into userData/custom-thumbs by main.js (community #217)
       // EroScripts previews and FapTap thumbnails add `source`
@@ -184,14 +167,6 @@ const DEFAULTS = {
       // Off by default. See electron/log-redact.js for the reasoning.
       hideLogFileNames: false,
     },
-    editor: {
-      defaultCreator: '',
-      patternPresets: [],
-      // Pop-out window — size only, not position. Multi-monitor users
-      // move setups around; restoring at last-saved coords on a setup
-      // that no longer has that monitor lands the window off-screen.
-      popoutBounds: null,
-    },
     knownDevices: [],
     buttplug: {
       port: 12345,
@@ -208,15 +183,10 @@ const DEFAULTS = {
       axisRanges: {},
       axisEnabled: {},
     },
-    autoblow: {
-      token: '',
-      offset: 0,
-    },
   },
   playlists: [],
   categories: [],
   videoCategories: {},
-  _migrated: false,
 };
 
 // electron-conf is ESM-only → dynamic import. The import itself is the
@@ -244,7 +214,7 @@ async function initStore() {
  * unsubscribe function from electron-conf.
  *
  * Called by main.js right after initStore() so the very first write
- * (which is often the migration) is observed too.
+ * is observed too.
  */
 function subscribe(callback) {
   if (!conf || typeof conf.onDidAnyChange !== 'function') {
@@ -259,7 +229,6 @@ function getAll() {
     playlists: conf.get('playlists'),
     categories: conf.get('categories'),
     videoCategories: conf.get('videoCategories'),
-    _migrated: conf.get('_migrated'),
   }));
 }
 
@@ -545,64 +514,6 @@ function getVideosByCategory(catId) {
   return paths;
 }
 
-// --- Migration helper (direct conf access for root-level keys) ---
-
-function isMigrated() {
-  return conf.get('_migrated') === true;
-}
-
-function migrateFromLegacy(legacyData) {
-  if (!legacyData || typeof legacyData !== 'object') return;
-
-  // Settings
-  const settingKeys = ['handy', 'player', 'backend', 'library'];
-  for (const key of settingKeys) {
-    if (legacyData[key] && typeof legacyData[key] === 'object') {
-      for (const [subKey, value] of Object.entries(legacyData[key])) {
-        conf.set(`settings.${key}.${subKey}`, value);
-      }
-    }
-  }
-
-  // Playlists
-  if (Array.isArray(legacyData.playlists)) {
-    const valid = legacyData.playlists
-      .filter((p) => p && p.id && p.name)
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        createdAt: p.createdAt || Date.now(),
-        videoPaths: Array.isArray(p.videoPaths) ? p.videoPaths : [],
-      }));
-    conf.set('playlists', valid);
-  }
-
-  // Categories
-  if (Array.isArray(legacyData.categories)) {
-    const valid = legacyData.categories
-      .filter((c) => c && c.id && c.name)
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        color: c.color || '#3498db',
-      }));
-    conf.set('categories', valid);
-  }
-
-  // Video category mappings
-  if (legacyData.videoCategories && typeof legacyData.videoCategories === 'object') {
-    const clean = {};
-    for (const [path, catIds] of Object.entries(legacyData.videoCategories)) {
-      if (Array.isArray(catIds) && catIds.length > 0) {
-        clean[path] = catIds;
-      }
-    }
-    conf.set('videoCategories', clean);
-  }
-
-  conf.set('_migrated', true);
-}
-
 module.exports = {
   DEFAULTS,
   initStore,
@@ -636,6 +547,4 @@ module.exports = {
   unassignCategory,
   getVideoCategories,
   getVideosByCategory,
-  isMigrated,
-  migrateFromLegacy,
 };

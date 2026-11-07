@@ -44,7 +44,7 @@ function buildLargeConfig() {
   const customRouting = {};
   for (let i = 0; i < 50; i++) {
     customRouting[`/media/library-${i % 8}/video-${i}.mp4`] = [
-      { role: 'main', deviceId: 'handy-0', axis: 'L0' },
+      { role: 'main', deviceId: 'tcode-0', axis: 'L0' },
       { role: 'aux',  deviceId: 'vorze-0', axis: 'V0' },
     ];
   }
@@ -54,7 +54,7 @@ function buildLargeConfig() {
   }
   return {
     settings: {
-      handy: { connectionKey: 'eK6Qv3AH', defaultOffset: -50 },
+      tcode: { port: 'COM3', baudRate: 115200 },
       library: { sources, collections, customRouting, associations,
         manualVariants: { '/media/library-0/v.mp4': ['Soft', 'Hard'] },
         // High-churn caches included intentionally — recovery must
@@ -111,7 +111,7 @@ describe('Scenario: the reporter\'s incident — power loss wipes config', () =>
     expect(Object.keys(restored.settings.library.associations)).toHaveLength(100);
     expect(restored.playlists).toHaveLength(6);
     expect(restored.categories).toHaveLength(4);
-    expect(restored.settings.handy.connectionKey).toBe('eK6Qv3AH');
+    expect(restored.settings.tcode.port).toBe('COM3');
 
     // Step 6: blacklisted caches are correctly stripped from the
     // recovered file (they get rebuilt for free on next scan).

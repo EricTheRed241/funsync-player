@@ -1,18 +1,11 @@
 // Regression test: UTF-8 BOM on funscript files must not break parsing.
 // Community report 2026-06-01 — RyzaMerged.funscript loaded fine in
-// Handyverse but errored here at JSON.parse because the file carried
+// another player but errored here at JSON.parse because the file carried
 // a leading EF BB BF BOM (U+FEFF). Fixed at the IPC boundary AND in
 // FunscriptEngine.loadContent for drag-drop coverage.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { FunscriptEngine, stripBOM } from '../../renderer/js/funscript-engine.js';
-
-beforeEach(() => {
-  if (!window.funsync) window.funsync = {};
-  window.funsync.convertFunscript = vi.fn().mockResolvedValue({
-    local_url: 'file://stub.csv', hash: 'stub', size_bytes: 0,
-  });
-});
 
 const SAMPLE = JSON.stringify({
   actions: [
@@ -50,7 +43,7 @@ describe('stripBOM', () => {
 
 describe('FunscriptEngine.loadContent — BOM tolerance', () => {
   it('parses content with a leading UTF-8 BOM', async () => {
-    const engine = new FunscriptEngine({ backendPort: 5123 });
+    const engine = new FunscriptEngine();
     const withBom = '﻿' + SAMPLE;
     await expect(engine.loadContent(withBom, 'bommed.funscript')).resolves.toBeTruthy();
     const actions = engine.getActions();
@@ -59,13 +52,13 @@ describe('FunscriptEngine.loadContent — BOM tolerance', () => {
   });
 
   it('still parses content without a BOM', async () => {
-    const engine = new FunscriptEngine({ backendPort: 5123 });
+    const engine = new FunscriptEngine();
     await expect(engine.loadContent(SAMPLE, 'clean.funscript')).resolves.toBeTruthy();
     expect(engine.getActions().length).toBe(3);
   });
 
   it('preserves chapters / bookmarks through BOM-prefixed parse', async () => {
-    const engine = new FunscriptEngine({ backendPort: 5123 });
+    const engine = new FunscriptEngine();
     const withMetadata = JSON.stringify({
       actions: [{ at: 0, pos: 0 }, { at: 100, pos: 50 }],
       metadata: {

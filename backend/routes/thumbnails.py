@@ -1,9 +1,7 @@
-"""Thumbnail generation routes — generate and serve video thumbnails."""
+"""Thumbnail generation routes — generate video thumbnails and frame samples."""
 
 import base64
-import os
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
 
 from services.ffmpeg import generate_thumbnails, generate_single_thumbnail, sample_gray_frames
 
@@ -83,11 +81,3 @@ def samples(
             for f in result["frames"]
         ],
     }
-
-
-@router.get("/image")
-async def get_thumbnail(path: str = Query(..., description="Absolute path to thumbnail file")):
-    """Serve a single thumbnail image file."""
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Thumbnail not found")
-    return FileResponse(path, media_type="image/jpeg")

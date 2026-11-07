@@ -10,9 +10,6 @@ import { preferHandmadeAxes, filesBeside } from './handmade-axes.js';
 import { sourcesToProbe } from './source-state.js';
 import { BackendBannerState } from './backend-banner-state.js';
 
-/** Mirrors BACKEND_MISSING in electron/python-bridge.js. */
-const BACKEND_MISSING = 'backend-executable-missing';
-
 /**
  * Budget for a single source reachability probe, in ms. Matches the main
  * process default. A dead mapped network drive is the case this exists for:
@@ -21,17 +18,11 @@ const BACKEND_MISSING = 'backend-executable-missing';
  * wrongly marked unreachable.
  */
 const SOURCE_PROBE_TIMEOUT_MS = 800;
-import { HandyManager } from './handy-manager.js';
-import { AudienceBridge } from './audience-bridge.js';
-import * as AUDIENCE from './audience-popout-protocol.js';
 import * as PLAYERWIN from './player-popout-protocol.js';
-import { SyncEngine } from './sync-engine.js';
 import { ButtplugManager } from './buttplug-manager.js';
 import { ButtplugSync } from './buttplug-sync.js';
 import { TCodeManager } from './tcode-manager.js';
 import { TCodeSync } from './tcode-sync.js';
-import { AutoblowManager } from './autoblow-manager.js';
-import { AutoblowSync } from './autoblow-sync.js';
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
@@ -54,11 +45,8 @@ import { showToast } from './toast.js';
 import { maybeShowHevcGuidance } from './hevc-detect.js';
 import { initTheme } from './theme-manager.js';
 import { matchButtplugRoute } from './custom-routing-match.js';
-import { extendRawScriptContent, clampRawScriptContent } from './device-transform-stack.js';
-import { fillRawScriptContent } from './filler-engine.js';
 import { createCategoryMark } from './category-icon.js';
 import { resolveFillerOptions } from './filler-presets.js';
-import { FillerTestPlayer } from './filler-test-player.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library, thumbRequestOpts, customThumbImagePath } from '../components/library.js';
@@ -69,8 +57,6 @@ import { rankFunscriptMatches } from './fuzzy-match.js';
 import { Playlists } from '../components/playlists.js';
 import { Categories } from '../components/categories.js';
 import { LibraryOverview } from '../components/library-overview.js';
-import { ScriptEditor } from '../components/script-editor.js';
-import { DeviceSimulator } from '../components/device-simulator.js';
 import { GapSkipEngine } from './gap-skip.js';
 import { UpNextEngine } from './up-next.js';
 import { UpNextCard } from '../components/up-next-card.js';
@@ -79,7 +65,7 @@ import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
   EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles, Repeat1,
   Maximize, Maximize2, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-  Pencil, FileCheck, Captions, RotateCcw, Columns2, X, Activity, Thermometer,
+  FileCheck, Captions, RotateCcw, Columns2, X, Activity, Thermometer,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { installConsoleForwarding } from './logger.js';
@@ -90,9 +76,7 @@ import { classifyStereoFormat, isFlattenableStereo, isVRVideo } from './vr-detec
 import {
   applyZoomStep, resetZoomFields, applyPanDelta, wheelDirection, isSpherical,
 } from './vr-zoom.js';
-import { HandyHdspSync } from './handy-hdsp-sync.js';
 import { OrgasmSwitch } from './orgasm-switch.js';
-import { engageHandyFinisher, releaseHandyFinisher } from './orgasm-handy-engage.js';
 import { resolveOrgasmPlan, parseFinisherActions, collectOrgasmScriptPaths, describeOrgasmEntry } from './orgasm-plan.js';
 import { openOrgasmConfigModal } from '../components/orgasm-config-modal.js';
 import { pickVariantIndexOnLoad } from './variant-select.js';
@@ -114,7 +98,6 @@ import {
 
 /** Default opacity (percent) for the inline TL/HM overlays. */
 const INLINE_VIZ_OPACITY_DEFAULT = 80;
-const DEVICE_SIM_OPACITY_DEFAULT = 80;
 /** Settle time before the auto-filled queue is computed again and published. */
 const QUEUE_REFRESH_MS = 250;
 /** Settings the auto-filled queue depends on (besides the library scan, ratings and playlists events). */
@@ -125,15 +108,10 @@ class App {
     this.videoPlayer = null;
     this.progressBar = null;
     this.funscriptEngine = null;
-    this.handyManager = null;
-    this.audienceBridge = null;
-    this.syncEngine = null;
     this.buttplugManager = null;
     this.buttplugSync = null;
     this.tcodeManager = null;
     this.tcodeSync = null;
-    this.autoblowManager = null;
-    this.autoblowSync = null;
     this.vrBridge = null;
     this.remoteBridge = null;
     this._remoteProxy = null;
@@ -141,8 +119,6 @@ class App {
     this._remotePausedDesktop = false;
     this.connectionPanel = null;
     this.settings = dataService;
-    this.scriptEditor = null;
-    this.deviceSimulator = null;
     this.library = null;
     this.navBar = null;
     this.playlists = null;
@@ -177,17 +153,6 @@ class App {
 
     this._navStack = ['library']; // navigation history stack — current view is last element
     this._miniActive = false; // mini-player docked (video plays in a corner overlay while browsing)
-    this._scriptCloudUrl = null; // cloud URL of the last uploaded script (for re-setup after HDSP)
-    // Cloud-upload gate. `_pendingUploads` is the set of devices whose
-    // funscript upload is currently in flight; `_waitingForScript` is
-    // its derived "any of them" flag, kept as a separate variable for
-    // back-compat with all the existing readers (loadVideo's loadeddata
-    // handler, the variant-switch loading overlay path, the timeout
-    // fallback). When the last upload resolves, `_resolveCloudUpload`
-    // flips the flag and triggers the deferred `play()`.
-    this._pendingUploads = new Set();
-    this._waitingForScript = false;
-    this._scriptLoadingTimeout = null; // fallback timeout for script upload
   }
 
   async init() {
@@ -234,7 +199,7 @@ class App {
       icons: {
         Play, Pause, Volume2, Volume1, VolumeX, FolderOpen, Bluetooth, Cable,
         Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-        Pencil, RotateCcw, EllipsisVertical,
+        RotateCcw, EllipsisVertical,
         // 'keyboard' icon for the overflow menu's help item; lucide
         // ships it as `keyboard.js`. Resolved by createIcons via
         // data-lucide attribute lookup at the placeholder site.
@@ -299,8 +264,7 @@ class App {
 
     // "Remember playback speed" — read live at each video load rather than
     // cached, so toggling it in Settings applies to the very next video with
-    // nothing to propagate. Wired here, not in the Handy block below, so a
-    // failed Handy init can't leave it unset.
+    // nothing to propagate.
     this.videoPlayer.setRememberRateProvider(
       () => this.settings?.get?.('player.rememberPlaybackSpeed') === true,
     );
@@ -313,9 +277,7 @@ class App {
     });
 
     // Initialize funscript engine
-    this.funscriptEngine = new FunscriptEngine({
-      backendPort: this.backendPort,
-    });
+    this.funscriptEngine = new FunscriptEngine();
 
     // Windows Controls Overlay detection: when the native title bar is
     // replaced by the tinted overlay (titleBarStyle hidden, main.js), the
@@ -356,12 +318,6 @@ class App {
       // the panel. Empty set = everything reachable (fail open).
       getUnreachableSources: () => this._sourceProbeCache || new Set(),
       onRecheckSources: () => this._recheckSources(),
-      // Filler test button. The panel has no devices of its own, so it hands
-      // the previewed actions back here and app.js drives them through the
-      // engines' off-clock send path — the same funnel playback uses, so the
-      // user feels what they will actually get, per-device transforms and all.
-      onTestFillerPattern: (actions, hooks) => this._startFillerTest(actions, hooks),
-      onStopFillerTest: () => this._fillerTest?.stop(),
       onSourcesChanged: () => {
         this._refreshCollectionsUI();
         if (this.library) this.library._lastScanKey = null;
@@ -416,17 +372,11 @@ class App {
       },
       onRangeExtenderChanged: (enabled) => {
         // Per-tick sync engines cache the flag for performance.
-        // Cloud-upload paths (Handy HSSP, Autoblow) read it from
-        // settings directly on each upload, so they pick up the new
-        // state on the next video load / variant switch without
-        // needing the callback. See SCOPE-device-settings-expansion.md
-        // §4 for the cloud-upload tradeoff.
         if (this.buttplugSync) this.buttplugSync.setRangeExtenderEnabled(enabled);
         if (this.tcodeSync) this.tcodeSync.setRangeExtenderEnabled(enabled);
       },
       // Inline TL/HM overlay opacity — live-applied while the slider moves.
       onInlineVizOpacityChanged: (v) => this._applyInlineVizOpacity(v),
-      onDeviceSimOpacityChanged: (v) => this._applyDeviceSimOpacity(v),
       // Per-card heatmap strip: cards are built once, so the row can only
       // appear/disappear via a re-render of the library view.
       // Any library-display setting that changes WHAT is listed or how a
@@ -445,9 +395,8 @@ class App {
       getOrgasmScriptName: () => this._orgasmSummaryText(),
       // Snapshot device-connection flags for the "Report a problem"
       // diagnostics bundle. Read defensively — managers may be null
-      // (Handy SDK can fail to import; Buttplug isn't always inited).
+      // (Buttplug isn't always inited).
       getConnectionState: () => ({
-        handyConnected: !!this.handyManager?._connected,
         buttplugConnected: !!this.buttplugManager?._connected,
         vrConnected: !!this.vrBridge?.connected,
         deviceCount: this.buttplugManager?._devices?.length || 0,
@@ -456,7 +405,7 @@ class App {
 
     this.navBar = new NavBar({
       onNavigate: (viewId) => this._navigateTo(viewId),
-      onHandyClick: () => { if (this.connectionPanel) this.connectionPanel.toggle(); },
+      onDevicesClick: () => { if (this.connectionPanel) this.connectionPanel.toggle(); },
       onSettingsClick: () => { this.settingsPanel.show(); },
       onRemoteClick: () => {
         import('../components/web-remote-modal.js').then(mod => {
@@ -742,22 +691,14 @@ class App {
     this.videoPlayer.video.addEventListener('play', () => {
       if (this.library) this.library._isVideoPlaying = true;
       this._updatePlayerSyncChip();
-      // Fan out to audience viewers (SCOPE-audience-broadcast.md). No-op
-      // if no room is open.
-      this._audienceFanOut('play', Math.round(this.videoPlayer.video.currentTime * 1000));
     });
     this.videoPlayer.video.addEventListener('pause', () => {
       if (this.library) this.library._isVideoPlaying = false;
       this._updatePlayerSyncChip();
-      this._audienceFanOut('stop');
     });
     this.videoPlayer.video.addEventListener('ended', () => {
       if (this.library) this.library._isVideoPlaying = false;
       this._updatePlayerSyncChip();
-      this._audienceFanOut('stop');
-    });
-    this.videoPlayer.video.addEventListener('seeked', () => {
-      this._audienceFanOut('seek', Math.round(this.videoPlayer.video.currentTime * 1000));
     });
 
     // Render heatmap once video duration is known
@@ -793,39 +734,7 @@ class App {
       this.settings.set('player.volume', Math.round(this.videoPlayer.video.volume * 100));
     });
 
-    // Initialize Handy integration (non-critical — app works without it)
-    try {
-      this.handyManager = new HandyManager();
-      await span('handyManager.init (SDK import)', () => this.handyManager.init());
-
-      this.syncEngine = new SyncEngine({
-        videoPlayer: this.videoPlayer,
-        handyManager: this.handyManager,
-        funscriptEngine: this.funscriptEngine,
-      });
-      // Parallel HDSP-polled engine for non-1.0× playback rates. HSSP
-      // (used by syncEngine) can't follow rate changes — the cloud
-      // schedules the script at 1.0× regardless. HDSP is per-tick and
-      // reads video.currentTime so it scales naturally. See
-      // notes/UPDATES.md and `renderer/js/handy-hdsp-sync.js`.
-      this.handyHdspSync = new HandyHdspSync({
-        handyManager: this.handyManager,
-        player: this.videoPlayer.video,
-      });
-
-      // Give the player the refs it needs to manage HSSP↔HDSP on rate
-      // changes triggered from any surface (player button, keyboard,
-      // editor, web-remote). Single source of truth.
-      this.videoPlayer.setHandySyncRefs({
-        handyManager: this.handyManager,
-        handySyncEngine: this.syncEngine,
-        handyHdspSync: this.handyHdspSync,
-      });
-    } catch (err) {
-      console.warn('Handy integration unavailable:', err.message);
-    }
-
-    // Initialize Buttplug.io integration (non-critical — works alongside Handy)
+    // Initialize Buttplug.io integration (non-critical)
     try {
         this.buttplugManager = new ButtplugManager();
         await span('buttplugManager.init (SDK import)', () => this.buttplugManager.init());
@@ -850,17 +759,6 @@ class App {
         });
       } catch (err) {
         console.warn('TCode integration unavailable:', err.message);
-      }
-
-      // Initialize Autoblow integration (non-critical)
-      try {
-        this.autoblowManager = new AutoblowManager();
-        this.autoblowSync = new AutoblowSync({
-          videoPlayer: this.videoPlayer,
-          autoblowManager: this.autoblowManager,
-        });
-      } catch (err) {
-        console.warn('Autoblow integration unavailable:', err.message);
       }
 
       // Initialize VR bridge (non-critical)
@@ -915,60 +813,20 @@ class App {
       // Ratings of 2 stars or lower delete from disk (reject-rule.js).
       this._wireRejectRule();
 
-      // AudienceBridge — fans out HSSP commands to N viewer Handys for
-      // the broadcast feature (SCOPE-audience-broadcast.md). Constructed
-      // here so it can use the same HandyManager class for each viewer
-      // (cloud-fire-and-forget by key; no shared instance contention).
-      this.audienceBridge = new AudienceBridge({
-        settings: this.settings,
-        eventBus,
-        HandyManagerCtor: HandyManager,
-        getCurrentVideoTimeMs: () => Math.round((this.videoPlayer?.video?.currentTime || 0) * 1000),
-        isVideoPlaying: () => !!(this.videoPlayer?.video && !this.videoPlayer.video.paused),
-        getCurrentScriptUrl: () => this._scriptCloudUrl || this.funscriptEngine?.getCsvUrl?.() || null,
-        // Self-key collision guard — the streamer's own key is held by
-        // handyManager. If they paste it as a viewer, refuse.
-        getStreamerOwnKey: () => this.settings?.get?.('handy.connectionKey') || null,
-      });
-      this._wireAudiencePopoutRelay();
-
       this.connectionPanel = new ConnectionPanel({
-        handyManager: this.handyManager,
         buttplugManager: this.buttplugManager,
         buttplugSync: this.buttplugSync,
         tcodeManager: this.tcodeManager,
         tcodeSync: this.tcodeSync,
-        autoblowManager: this.autoblowManager,
-        autoblowSync: this.autoblowSync,
         vrBridge: this.vrBridge,
         settings: this.settings,
-        audienceBridge: this.audienceBridge,
-        onResyncComplete: () => this._restoreHssspAfterResync(),
         // Buttplug "Reload script" — manual re-arm for the reported
         // post-dropout state where the device stays connected but the
         // sync engine sits idle ("ready" but nothing moves) until the
         // user swaps videos. Returns true if a device was available to
         // re-arm so the panel can show success/failure feedback.
         onButtplugResync: () => this._resyncButtplug(),
-        // Push a live Handy output-limits (cutoff) change into the per-tick
-        // HDSP engine. HSSP bakes the clamp into the next uploaded script,
-        // so it applies on the next load / variant switch (Range Extender
-        // model) — no disruptive mid-playback re-upload.
-        onHandyCutoffChanged: () => {
-          this.handyHdspSync?.setCutoff(this._cutoffFromSettings('handy'));
-        },
       });
-
-      // Keep the Audience tab's LED in lockstep with the bridge's
-      // aggregate state.
-      const refreshAudienceLed = () => {
-        this.connectionPanel?.setAudienceTabLed?.(this.audienceBridge.aggregateStatus);
-      };
-      for (const evt of ['audience:room-opened', 'audience:room-ended',
-                          'audience:viewer-added', 'audience:viewer-removed',
-                          'audience:viewer-status']) {
-        eventBus.on(evt, refreshAudienceLed);
-      }
 
       // Load saved smoothing settings into buttplug sync
       if (this.buttplugSync) {
@@ -990,7 +848,7 @@ class App {
 
         // Linear strategy: action-boundary (default) sends one LinearCmd per
         // stroke with the full duration, letting the device's firmware handle
-        // in-stroke interpolation — much smoother on BLE (Handy / Kiiroo).
+        // in-stroke interpolation — much smoother on BLE.
         // interpolated (legacy) re-sends every tick with remaining duration.
         const savedLinearStrategy = this.settings.get('player.linearStrategy') || 'action-boundary';
         const savedLookahead = this.settings.get('player.linearLookaheadMs');
@@ -1019,44 +877,18 @@ class App {
       if (this.buttplugSync) {
         let activityTimeout = null;
         this.buttplugSync.onCommandSent = () => {
-          if (this.navBar?._handyLed) {
-            this.navBar._handyLed.classList.add('nav-bar__handy-led--active');
+          if (this.navBar?._deviceLed) {
+            this.navBar._deviceLed.classList.add('nav-bar__device-led--active');
             if (activityTimeout) clearTimeout(activityTimeout);
             activityTimeout = setTimeout(() => {
-              this.navBar._handyLed.classList.remove('nav-bar__handy-led--active');
+              this.navBar._deviceLed.classList.remove('nav-bar__device-led--active');
             }, 200);
           }
         };
       }
 
-      // ConnectionPanel sets handyManager.onConnect/onDisconnect for its own UI updates.
-      // Wrap them so we also get notified (to upload pending scripts + update indicators).
-      if (this.handyManager) {
-        const panelOnConnect = this.handyManager.onConnect;
-        this.handyManager.onConnect = () => {
-          if (panelOnConnect) panelOnConnect();
-          const fw = this.handyManager.fwVersion || this.handyManager._fwVersion || 'unknown';
-          const keySuffix = this.handyManager.connectionKey
-            ? this.handyManager.connectionKey.slice(-4)
-            : '?';
-          console.log(`[Handy] Connected (native WiFi) — key ...${keySuffix}, firmware ${fw}`);
-          this._registerKnownDevice('handy', 'The Handy', 'handy');
-          this._onHandyConnected();
-          this._refreshOrgasmPlan();
-        };
-
-        const panelOnDisconnect = this.handyManager.onDisconnect;
-        this.handyManager.onDisconnect = () => {
-          if (panelOnDisconnect) panelOnDisconnect();
-          console.log('[Handy] Disconnected — stopping sync engine');
-          if (this.syncEngine) this.syncEngine.stop();
-          this._updateHandyIndicators('disconnected');
-          this._updateDeviceIndicators();
-          this._refreshOrgasmPlan();
-        };
-      }
-
-      // Buttplug.io callback wiring (same pattern as Handy — wrap panel callbacks)
+      // Buttplug.io callback wiring (ConnectionPanel sets onConnect/onDisconnect
+      // for its own UI updates; wrap them so we also get notified)
       if (this.buttplugManager) {
         const panelBpConnect = this.buttplugManager.onConnect;
         this.buttplugManager.onConnect = () => {
@@ -1172,27 +1004,6 @@ class App {
         };
       }
 
-      // Wire Autoblow connect/disconnect callbacks
-      if (this.autoblowManager) {
-        const panelAbConnect = this.autoblowManager.onConnect;
-        this.autoblowManager.onConnect = () => {
-          if (panelAbConnect) panelAbConnect();
-          const abLabel = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
-          console.log(`[Autoblow] Connected — ${abLabel}`);
-          this._registerKnownDevice('autoblow', abLabel, 'autoblow');
-          this._updateDeviceIndicators();
-          this._tryStartAutoblowSync();
-        };
-
-        const panelAbDisconnect = this.autoblowManager.onDisconnect;
-        this.autoblowManager.onDisconnect = () => {
-          if (panelAbDisconnect) panelAbDisconnect();
-          console.log('[Autoblow] Disconnected — stopping sync engine');
-          if (this.autoblowSync) this.autoblowSync.stop();
-          this._updateDeviceIndicators();
-        };
-      }
-
       // Wire VR bridge callbacks
       if (this.vrBridge) {
         const prevVrConnect = this.vrBridge.onConnect;
@@ -1239,22 +1050,10 @@ class App {
         };
       }
 
-      // Wire HDSP scrub preview — send position to Handy while seeking.
-      // IMPORTANT: HDSP switches the SDK to mode 2, which clears the internal
-      // scriptSet flag. We must NOT use HDSP while HSSP sync is active, or
-      // HSSP will break and the script won't play. Only use HDSP when no
-      // HSSP script is set up (i.e. device connected but no funscript loaded).
-      this.videoPlayer.onSeekDrag = (timeSeconds) => {
-        if (this.handyManager?.connected && this.funscriptEngine.isLoaded) {
-          // HSSP is active — DON'T use HDSP (it breaks HSSP scriptSet).
-          // The sync engine will handle seeking via hsspStop + hsspPlay.
-        }
-      };
-
-      // Wire Handy button
-      const btnHandy = document.getElementById('btn-handy');
-      if (btnHandy) {
-        btnHandy.addEventListener('click', () => this.connectionPanel.toggle());
+      // Wire the player-bar Devices button
+      const btnDevices = document.getElementById('btn-devices');
+      if (btnDevices) {
+        btnDevices.addEventListener('click', () => this.connectionPanel.toggle());
       }
 
       // Initialize keyboard shortcuts (with connection panel for H key)
@@ -1262,7 +1061,6 @@ class App {
         videoPlayer: this.videoPlayer,
         connectionPanel: this.connectionPanel,
         onOpenFile: () => this.dragDrop._openNativeDialog(),
-        scriptEditor: null, // Set after ScriptEditor creation below
         onNavigate: (viewId) => this._navigateTo(viewId),
         onToggleLoop: () => { this._toggleVideoLoop?.(); },
         onToggleQueue: () => { this._toggleQueuePanel(); },
@@ -1271,12 +1069,6 @@ class App {
         onLoadNext: () => this._playNext(),
         onLoadPrev: () => this._playPrev(),
       });
-
-      // Auto-connect if a key is saved
-      const savedKey = this.settings.get('handy.connectionKey');
-      if (savedKey) {
-        this._autoConnectHandy(savedKey);
-      }
 
       // Auto-connect to Buttplug/Intiface if previously used
       if (this.buttplugManager) {
@@ -1333,41 +1125,6 @@ class App {
       });
     };
 
-    // Initialize script editor (after all dependencies are set up)
-    this.scriptEditor = new ScriptEditor({
-      videoPlayer: this.videoPlayer,
-      funscriptEngine: this.funscriptEngine,
-      progressBar: this.progressBar,
-      syncEngine: this.syncEngine,
-      handyHdspSync: this.handyHdspSync,
-      handyManager: this.handyManager,
-      settings: this.settings,
-    });
-
-    // Auto-minimise the session card when the editor opens (space is scarce;
-    // the user can still click the edge tab to re-expand). Wrap show/hide
-    // on the editor so this stays in sync regardless of which path triggers.
-    if (this.scriptEditor) {
-      const origShow = this.scriptEditor.show.bind(this.scriptEditor);
-      const origHide = this.scriptEditor.hide.bind(this.scriptEditor);
-      this.scriptEditor.show = (...args) => {
-        const r = origShow(...args);
-        this.sessionCard?.forceMinimised(true);
-        return r;
-      };
-      this.scriptEditor.hide = (...args) => {
-        const r = origHide(...args);
-        this.sessionCard?.forceMinimised(false);
-        return r;
-      };
-    }
-
-    // Initialize device simulator
-    this.deviceSimulator = new DeviceSimulator({
-      videoPlayer: this.videoPlayer,
-      funscriptEngine: this.funscriptEngine,
-    });
-
     // Initialize gap skip engine
     this.gapSkipEngine = new GapSkipEngine({
       videoPlayer: this.videoPlayer,
@@ -1382,10 +1139,8 @@ class App {
     });
     this._wireUpNextUI();
 
-    // Wire script editor + device simulator + gap skip + variants into keyboard handler
+    // Wire gap skip + up next + variants into keyboard handler
     if (this._keyboard) {
-      this._keyboard.scriptEditor = this.scriptEditor;
-      this._keyboard.deviceSimulator = this.deviceSimulator;
       this._keyboard.gapSkipEngine = this.gapSkipEngine;
       this._keyboard.upNextEngine = this.upNextEngine;
       this._keyboard.onCycleVariant = (dir) => this._cycleVariant(dir);
@@ -1411,20 +1166,9 @@ class App {
     // pausing the video; release → snap back. The controller drives devices
     // directly while held; onActivate/onDeactivate stop and restart the
     // normal sync engines so the two never both drive a device.
-    //
-    // Handy: driven via HDSP per-tick (mode 2) while held — same model
-    // MultiFunPlayer uses for the Handy, and inherently swap/seek-robust
-    // (no cloud re-upload during the loop). HDSP clears HSSP's scriptSet,
-    // so on release we re-establish HSSP from scratch (_restoreHandyAfterOrgasm).
     this.orgasmSwitch = new OrgasmSwitch({
       buttplugManager: this.buttplugManager,
       tcodeManager: this.tcodeManager,
-      // NOTE: the Handy is deliberately NOT driven by the per-tick loop. It's
-      // cloud-connected, and streaming ~25 HDSP commands/sec over the cloud API
-      // can't keep up — the device just bumps. Instead the Handy plays the
-      // finisher via HSSP LOOP mode (uploaded once, looped device-side), set up
-      // in onActivate below. The loop here only drives local Buttplug/T-Code.
-      handyManager: null,
       // Respect the per-device output limits the normal engines apply, so the
       // finisher doesn't push the toy past the user's configured floor/ceiling.
       getCutoff: (key) => this._cutoffFromSettings(key),
@@ -1445,83 +1189,21 @@ class App {
         if ((!plan || plan.stopsTcode !== false) && this.tcodeSync?._active) {
           this.tcodeSync.stop(); this._orgasmStoppedEngines.push('tcode');
         }
-        // Handy: stop the main HSSP + rate-change HDSP engines, then upload the
-        // finisher (cached after first time) and LOOP it via HSSP — the same
-        // cloud-friendly path the main script uses. Which script the Handy
-        // plays comes from the plan (custom routing can give it its own);
-        // the target is LOCKED for this activation — a mid-hold plan swap
-        // never re-uploads (cloud round-trips would stall the finisher).
-        const handyPath = plan?.handyPath || null;
-        const handyContent = handyPath ? (this._orgasmContentCache?.get(handyPath) || null) : null;
-        if (this.handyManager?.connected && handyPath && handyContent) {
-          this._orgasmHandyEngaged = true;
-          const activation = (this._orgasmActivationId = (this._orgasmActivationId || 0) + 1);
-          // Stop UNCONDITIONALLY — do not gate on `_active`. That flag can
-          // drift out of step with the engine's bound video handlers: the
-          // web-remote path swaps `syncEngine.player` to the proxy and calls
-          // start() again, which early-returns when _active is already true.
-          // The logs showed `[Sync] correction hsspPlay` and `[Sync] seeked`
-          // firing DURING a finisher hold with no "Sync engine stopped" line,
-          // i.e. the guard skipped the stop while the handlers stayed live —
-          // so the main script kept yanking the device to video time while it
-          // was meant to be looping the finisher (Dave 2026-08-05).
-          // stop() is safe to call when already stopped.
-          this.syncEngine?.stop();
-          if (this.handyHdspSync?.active) this.handyHdspSync.stop();
-          // Fire-and-forget; the sequence + stale-activation aborts live in
-          // orgasm-handy-engage.js where the order is unit-tested.
-          // The output cutoff is baked into the upload (HSSP plays server-
-          // side), so a cached URL is only valid for the cutoff it was
-          // uploaded with — drop it if the sliders changed since.
-          const cutoff = this._cutoffFromSettings('handy');
-          // 'tiled-v2' — upload format version + the SCRIPT PATH: with
-          // multi/custom configs the Handy's script can differ per plan, so
-          // a cached URL is only valid for the exact script it uploaded.
-          const cutoffKey = `tiled-v2|${handyPath}|${JSON.stringify(cutoff ?? null)}`;
-          if (this._orgasmCloudUrl && this._orgasmCloudUrlCutoffKey !== cutoffKey) {
-            this._orgasmCloudUrl = null;
-          }
-          // Keep the promise: a quick release awaits it so the restore's
-          // setScript can never interleave with an in-flight engage.
-          this._orgasmEngagePromise = engageHandyFinisher({
-            handyManager: this.handyManager,
-            content: handyContent,
-            cachedUrl: this._orgasmCloudUrl,
-            cutoff,
-            onUrlCached: (url) => {
-              this._orgasmCloudUrl = url;
-              this._orgasmCloudUrlCutoffKey = cutoffKey;
-            },
-            isCurrent: () => activation === this._orgasmActivationId,
-          });
-        }
       },
       onDeactivate: () => {
         this._pushRemoteOrgasmState?.(); // phone button parity (F2)
-        this._orgasmActivationId = (this._orgasmActivationId || 0) + 1; // cancel any in-flight engage
         // Finish mode (toggle): the user is "done" — leave the main engines
         // stopped and halt the devices where they are, rather than snapping
         // back to the main funscript.
         if (this._orgasmFinishStop) {
           this._orgasmFinishStop = false;
           this._orgasmStoppedEngines = [];
-          this._orgasmHandyEngaged = false;
           // "Finished" means EVERYTHING stops — including engines a custom
           // plan left running on the main script (stops*=false kinds).
           // Idempotent when already stopped by onActivate.
           try { this.buttplugSync?.stop(); } catch { /* best-effort */ }
           try { this.tcodeSync?.stop(); } catch { /* best-effort */ }
-          if (this.syncEngine?._active) this.syncEngine.stop();
           this._stopAllDevicesIdle();
-          if (this.handyManager?.connected) {
-            // Stop the finisher; leave the device idle. Awaits any in-flight
-            // engage first so a stop can't land before a late hsspPlay.
-            Promise.resolve(this._orgasmEngagePromise)
-              .then(() => releaseHandyFinisher({ handyManager: this.handyManager }))
-              // Unhandled otherwise: a cloud error here surfaced as
-              // "[Rejection] Illegal state…" with no owner (Dave, 2026-08-21).
-              .catch((err) => console.warn('[OrgasmSwitch] finisher release failed:', err?.message || err));
-          }
           return;
         }
         // Hold mode: restart whichever local engines we stopped — they re-anchor
@@ -1544,35 +1226,10 @@ class App {
         if (this._orgasmStoppedEngines?.includes('buttplug')) this.buttplugSync.start();
         if (this._orgasmStoppedEngines?.includes('tcode')) this.tcodeSync.start();
         this._orgasmStoppedEngines = [];
-        if (this._orgasmHandyEngaged) {
-          this._orgasmHandyEngaged = false;
-          // Await any in-flight engage first (a quick tap can release while
-          // the engage's setScript is mid-flight — the engage aborts stale,
-          // and only then do we stop + restore so the calls never interleave).
-          Promise.resolve(this._orgasmEngagePromise)
-            .then(() => releaseHandyFinisher({ handyManager: this.handyManager }))
-            .then(() => this._restoreHandyAfterOrgasm());
-        }
       },
     });
-    // The simulator is built before the switch, so wire it up here. Without
-    // this the indicator keeps tracking video time during an orgasm loop,
-    // which the loop deliberately ignores.
-    if (this.deviceSimulator) this.deviceSimulator.orgasmSwitch = this.orgasmSwitch;
-
     // Load the saved global orgasm config (if any) into the controller.
     this._reloadOrgasmScripts();
-
-    // Editor toggle button
-    const btnEditor = document.getElementById('btn-editor');
-    if (btnEditor) {
-      btnEditor.addEventListener('click', () => {
-        this.scriptEditor.toggle();
-        // Editor visibility flips Up Next suppression — sync after the
-        // toggle so an open editor never has a stray Up Next card on top.
-        this._syncUpNextSuppression();
-      });
-    }
 
     // Initialize subtitle badge icon — and wire its click to toggle
     // subtitle visibility. Was a hover-styled but non-interactive badge
@@ -1615,25 +1272,6 @@ class App {
       });
     }
 
-    // Funscript badge — clicking opens the script editor (same as E
-    // key). Previously a hover-styled span that did nothing; now a
-    // real interactive control matching its affordance (Norman).
-    const fsBadgeInit = document.getElementById('funscript-badge');
-    if (fsBadgeInit) {
-      fsBadgeInit.setAttribute('role', 'button');
-      fsBadgeInit.setAttribute('tabindex', '0');
-      fsBadgeInit.setAttribute('aria-label', t('app.openScriptEditor'));
-      fsBadgeInit.style.cursor = 'pointer';
-      const openEditor = () => this.scriptEditor?.toggle?.();
-      fsBadgeInit.addEventListener('click', openEditor);
-      fsBadgeInit.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openEditor();
-        }
-      });
-    }
-
     // Variant selector button
     const variantBtn = document.getElementById('variant-btn');
     if (variantBtn) {
@@ -1654,21 +1292,15 @@ class App {
       });
     }
 
-    // Stop Handy device when app closes
+    // Stop devices when app closes
     window.addEventListener('beforeunload', () => {
       try {
         if (this._sourcePollingInterval) clearInterval(this._sourcePollingInterval);
         if (this._vrActivityInterval) clearInterval(this._vrActivityInterval);
         clearInterval(this._desktopStatusInterval);
         if (this._rescanPollInterval) clearInterval(this._rescanPollInterval);
-        if (this.syncEngine) this.syncEngine.stop();
         if (this.buttplugSync) this.buttplugSync.stop();
         if (this.tcodeSync) this.tcodeSync.stop();
-        if (this.autoblowSync) this.autoblowSync.stop();
-        if (this.handyManager?.connected) {
-          this.handyManager.hsspStop();
-          this.handyManager.disconnect();
-        }
         if (this.buttplugManager?.connected) {
           this.buttplugManager.stopAll();
           this.buttplugManager.disconnect();
@@ -1677,16 +1309,10 @@ class App {
           this.tcodeManager.stop();
           this.tcodeManager.disconnect();
         }
-        if (this.autoblowManager?.connected) {
-          this.autoblowManager.disconnect();
-        }
       } catch (e) {
         // Fire-and-forget — app is closing
       }
     });
-
-    // Listen for auto-update events from main process
-    this._initAutoUpdater();
 
     // Show library as default landing page
     mark('library.show() invoked');
@@ -1787,12 +1413,6 @@ class App {
     // pass that touches this video.
     await this._pruneStaleManualVariant(scriptPath);
     return null;
-  }
-
-  /** @deprecated thin shim around _readScriptResilient — kept for
-   *  custom-routing call-site readability. */
-  _readRouteScript(route, videoPath) {
-    return this._readScriptResilient(route?.scriptPath, videoPath);
   }
 
   /**
@@ -1898,17 +1518,6 @@ class App {
     // Track whether any route's scriptPath was rewritten by the
     // stale-path fallback so we can persist the corrections at the end.
     let scriptPathsHealed = false;
-
-    // Collision guard (community report, TODO.md backlog): if main is
-    // routed to native Handy AND any CR route ALSO points at Handy,
-    // the CR upload races and overwrites the main upload (last call
-    // wins, no determinism). Detect once up-front; CR Handy-uploads
-    // are skipped when this fires. Main owns the Handy in collision —
-    // it was the user's primary choice via the dropdown that maps the
-    // main script to native Handy.
-    const mainOnHandy = routes.some(r => r.role === 'main' && r.deviceId === 'handy');
-    let suppressedHandyUploads = 0;
-
     let axisCounter = 1;
     for (const route of routes) {
       if (route.role === 'main') {
@@ -1921,7 +1530,7 @@ class App {
       if (!route.scriptPath) continue;
 
       try {
-        const read = await this._readRouteScript(route, videoPath);
+        const read = await this._readScriptResilient(route?.scriptPath, videoPath);
         if (!read) continue;
         const content = read.content;
         // Self-heal: if the recovery path differs, persist it back so
@@ -1944,24 +1553,6 @@ class App {
         if (this.tcodeSync) {
           this.tcodeSync.setAxisActions(syntheticAxis, actions);
         }
-
-        // For Handy on a non-main route: upload and start its own sync.
-        // Skipped when main is already on Handy (collision guard above).
-        if (route.deviceId === 'handy' && this.handyManager?.connected) {
-          if (mainOnHandy) {
-            suppressedHandyUploads++;
-            console.log('[CustomRouting] Skipping Handy upload for CR route — main already targets Handy (last-write-wins collision avoided).');
-          } else {
-            await this.handyManager.uploadAndSetScript(content);
-            this.syncEngine?._scriptReady && this.syncEngine.start();
-          }
-        }
-
-        // For Autoblow on a non-main route: upload script
-        if (route.deviceId === 'autoblow' && this.autoblowManager?.connected) {
-          await this.autoblowSync?.uploadScript(content);
-        }
-
         console.log(`[CustomRouting] Loaded ${route.scriptPath.split(/[\\/]/).pop()} → ${syntheticAxis} → ${route.deviceId}`);
       } catch (err) {
         console.warn(`[CustomRouting] Failed to load route:`, err.message);
@@ -1981,38 +1572,6 @@ class App {
     // also persists when buttplug indices self-heal, but its check only
     // covers index changes — explicit call here for the path case.
     if (scriptPathsHealed) this._persistCustomRoutes();
-
-    // One-time toast if the collision guard suppressed any uploads —
-    // tell the user the device is bound to main, not to the CR route
-    // they configured. Otherwise the CR script appears to be ignored
-    // with no visible explanation.
-    if (suppressedHandyUploads > 0) {
-      showToast(
-        `Native Handy is on main (${suppressedHandyUploads} custom-routing upload${suppressedHandyUploads > 1 ? 's' : ''} skipped to avoid collision)`,
-        'warn',
-        4500,
-      );
-    }
-
-    // Update editor script list for custom routing
-    if (this.scriptEditor) {
-      const scripts = [];
-      for (const route of routes) {
-        if (!route.scriptPath) continue;
-        const device = this._findKnownDeviceForRoute(route);
-        const deviceLabel = device ? device.label : (route.deviceId || '');
-        const prefix = route.role === 'main' ? '★ ' : '';
-        const scriptName = route.scriptName || route.scriptPath.split(/[\\/]/).pop();
-        scripts.push({ label: `${prefix}${deviceLabel}: ${scriptName}`, path: route.scriptPath });
-      }
-      if (scripts.length > 1) this.scriptEditor.setAvailableScripts(scripts);
-    }
-  }
-
-  _isDeviceOnMainRoute(deviceId) {
-    if (!this._currentCustomRoutes) return false;
-    const mainRoute = this._currentCustomRoutes.find(r => r.role === 'main');
-    return mainRoute && mainRoute.deviceId === deviceId;
   }
 
   /**
@@ -2293,9 +1852,8 @@ class App {
     // Load the funscript. Gen-check after EVERY await — rapid video
     // browsing in HereSphere can fire multiple video-changed events
     // before any one finishes loading. Without these checks, an older
-    // video's script upload could land on the Handy AFTER a newer
-    // video has started its own load, and the two would stomp each
-    // other's Handy state mid-async.
+    // video's script could be bound AFTER a newer video has started its
+    // own load, and the two would stomp each other's engine state.
     try {
       const content = await window.funsync.readFunscript(matched.funscriptPath);
       if (gen !== this._vrMatchGeneration) return;
@@ -2325,25 +1883,6 @@ class App {
         this.tcodeSync.player = vrPlayer;
         this.tcodeSync.reloadActions();
         this.tcodeSync.start();
-      }
-
-      // Handy: upload and sync to VR proxy timeline
-      if (this.handyManager?.connected) {
-        await this.handyManager.uploadAndSetScript(content);
-        if (gen !== this._vrMatchGeneration) return;
-        if (this.syncEngine) {
-          this.syncEngine.player = vrPlayer;
-          this.syncEngine._scriptReady = true;
-          this.syncEngine.start();
-        }
-      }
-
-      // Autoblow
-      if (this.autoblowManager?.connected && this.autoblowSync) {
-        await this.autoblowSync.uploadScript(content);
-        if (gen !== this._vrMatchGeneration) return;
-        this.autoblowSync.player = vrPlayer;
-        this.autoblowSync.start();
       }
 
       // Load custom routing if active for this video
@@ -2722,13 +2261,6 @@ class App {
   _applyRemoteOffset(device, msRaw) {
     const ms = Math.max(-1000, Math.min(1000, Math.round(Number(msRaw) || 0)));
     switch (device) {
-      case 'handy':
-        this.settings.set('handy.defaultOffset', ms);
-        this.settings.set('handy.defaultOffsetSource', 'user');
-        if (this.handyManager?.connected) {
-          Promise.resolve(this.handyManager.setOffset(ms)).catch(() => {});
-        }
-        break;
       case 'buttplug':
         this.settings.set('buttplug.defaultOffset', ms);
         this.settings.set('buttplug.defaultOffsetSource', 'user');
@@ -2737,10 +2269,6 @@ class App {
       case 'tcode':
         this.settings.set('tcode.defaultOffset', ms);
         this.tcodeSync?.setOffsetMs(ms);
-        break;
-      case 'autoblow':
-        this.settings.set('autoblow.offset', ms);
-        this.autoblowSync?.setOffsetMs?.(ms);
         break;
       default:
         return; // unknown device key — ignore
@@ -2767,7 +2295,7 @@ class App {
   /**
    * Phone tapped a variant in the player view. Translate the label into
    * the existing index-based `_switchVariant` flow — that path already
-   * loads the script, reloads sync engines, re-uploads to Handy, and
+   * loads the script, reloads sync engines, and
    * (with the additions below) broadcasts `variant-changed` back to the
    * phone so the phone's chip / heatmap update only when the switch
    * actually completes.
@@ -2879,10 +2407,8 @@ class App {
       const proxyPlayer = this._remoteProxy.asVideoPlayerWrapper();
 
       // Stop any current sync, rebind to the proxy, restart.
-      if (this.syncEngine?._active) this.syncEngine.stop();
       if (this.buttplugSync?._active) this.buttplugSync.stop();
       if (this.tcodeSync?._active) this.tcodeSync.stop();
-      if (this.autoblowSync?._active) this.autoblowSync.stop();
 
       if (this.buttplugSync && this.buttplugManager?.connected) {
         this.buttplugSync.player = proxyPlayer;
@@ -2893,19 +2419,6 @@ class App {
         this.tcodeSync.player = proxyPlayer;
         this.tcodeSync.reloadActions();
         this.tcodeSync.start();
-      }
-      if (this.handyManager?.connected) {
-        await this.handyManager.uploadAndSetScript(content);
-        if (this.syncEngine) {
-          this.syncEngine.player = proxyPlayer;
-          this.syncEngine._scriptReady = true;
-          this.syncEngine.start();
-        }
-      }
-      if (this.autoblowManager?.connected && this.autoblowSync) {
-        await this.autoblowSync.uploadScript(content);
-        this.autoblowSync.player = proxyPlayer;
-        this.autoblowSync.start();
       }
 
       this._remoteActive = true;
@@ -2940,18 +2453,13 @@ class App {
     }
 
     // Stop all device sync engines and rebind to the local player.
-    if (this.syncEngine?._active) this.syncEngine.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
-    if (this.autoblowSync?._active) this.autoblowSync.stop();
-    if (this.handyManager?.connected) this.handyManager.hsspStop();
     if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
 
     const localPlayer = this.videoPlayer;
     if (this.buttplugSync) this.buttplugSync.player = localPlayer;
     if (this.tcodeSync) this.tcodeSync.player = localPlayer;
-    if (this.syncEngine) this.syncEngine.player = localPlayer;
-    if (this.autoblowSync) this.autoblowSync.player = localPlayer;
 
     this._remoteProxy?.reset();
     this._remotePausedDesktop = false;
@@ -2967,7 +2475,7 @@ class App {
   }
 
   _pushRemoteDeviceStatus() {
-    // Build an actual device list, not just four transport booleans —
+    // Build an actual device list, not just transport booleans —
     // Buttplug's `connected` flag means "connected to Intiface", which
     // stays true even when zero devices are paired; the phone was
     // rendering "Connected: Buttplug" with no actual hardware present.
@@ -2976,13 +2484,10 @@ class App {
     // Per-kind offsets included so the phone's sync-pill sliders (F4)
     // seed from the live values and reflect desktop-side changes.
     const offsetFor = (kind) => {
-      const key = kind === 'autoblow' ? 'autoblow.offset' : `${kind}.defaultOffset`;
+      const key = `${kind}.defaultOffset`;
       const v = Number(this.settings?.get?.(key));
       return Number.isFinite(v) ? v : 0;
     };
-    if (this.handyManager?.connected) {
-      devices.push({ kind: 'handy', label: 'The Handy', offsetMs: offsetFor('handy') });
-    }
     if (this.buttplugManager?.connected) {
       for (const d of this.buttplugManager.devices || []) {
         devices.push({ kind: 'buttplug', label: d.name, offsetMs: offsetFor('buttplug') });
@@ -2992,32 +2497,16 @@ class App {
       const port = this.tcodeManager.portPath || 'serial';
       devices.push({ kind: 'tcode', label: `TCode (${port})`, offsetMs: offsetFor('tcode') });
     }
-    if (this.autoblowManager?.connected) {
-      const ab = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
-      devices.push({ kind: 'autoblow', label: ab, offsetMs: offsetFor('autoblow') });
-    }
 
-    // Tracker still expects the four-boolean summary. Derive it from the
+    // Tracker still expects the per-kind boolean summary. Derive it from the
     // device list so "Buttplug" only reads true when there's at least one
     // actual paired device under it — matches the phone pill semantics.
-    const handy    = devices.some(d => d.kind === 'handy');
     const buttplug = devices.some(d => d.kind === 'buttplug');
     const tcode    = devices.some(d => d.kind === 'tcode');
-    const autoblow = devices.some(d => d.kind === 'autoblow');
-    this.sessionTracker?.setDeviceStatus({ handy, buttplug, tcode, autoblow });
+    this.sessionTracker?.setDeviceStatus({ buttplug, tcode });
 
     if (!this.remoteBridge?.connected) return;
-    this.remoteBridge.sendToPhone({
-      type: 'device-status',
-      // Detailed list for the phone's "Connected devices" dropdown.
-      devices,
-      // Legacy boolean fields kept for backward compat with any cached
-      // older phone client that reconnects before refreshing.
-      handy: handy ? 'connected' : 'disconnected',
-      buttplug: buttplug ? 'connected' : 'disconnected',
-      tcode: tcode ? 'connected' : 'disconnected',
-      autoblow: autoblow ? 'connected' : 'disconnected',
-    });
+    this.remoteBridge.sendToPhone({ type: 'device-status', devices });
     // Piggyback the Orgasm Switch state (F2) — sent whenever device
     // status refreshes so a newly-connected phone learns availability.
     this._pushRemoteOrgasmState();
@@ -3039,11 +2528,8 @@ class App {
       return;
     }
 
-    if (this.syncEngine?._active) this.syncEngine.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
-    if (this.autoblowSync?._active) this.autoblowSync.stop();
-    if (this.handyManager?.connected) this.handyManager.hsspStop();
     if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
 
     // Tear down custom routing so the next VR video — routed or not —
@@ -3068,8 +2554,6 @@ class App {
       const localPlayer = this.videoPlayer;
       if (this.buttplugSync) this.buttplugSync.player = localPlayer;
       if (this.tcodeSync) this.tcodeSync.player = localPlayer;
-      if (this.syncEngine) this.syncEngine.player = localPlayer;
-      if (this.autoblowSync) this.autoblowSync.player = localPlayer;
       this._vrPlayerRef = null;
     }
 
@@ -3465,7 +2949,7 @@ class App {
    *
    * @returns {object|null} null when filler should not run
    */
-  _fillerOptionsForUpload() {
+  _fillerOptions() {
     const filler = this.settings?.get?.('player.gapFiller') || {};
     if (!filler.enabled) return null;
 
@@ -3485,39 +2969,13 @@ class App {
   }
 
   /**
-   * Play a previewed filler pattern through the connected devices.
-   *
-   * Returns a status rather than a boolean so the panel can say WHY nothing
-   * happened — "a video is driving the devices" and "nothing is connected"
-   * are different problems with different fixes (Nielsen #9).
-   *
-   * @returns {'started'|'busy'|'no-devices'}
-   */
-  _startFillerTest(actions, { onProgress, onEnd } = {}) {
-    if (!this._fillerTest) {
-      this._fillerTest = new FillerTestPlayer({
-        buttplugSync: this.buttplugSync,
-        tcodeSync: this.tcodeSync,
-      });
-    }
-    const player = this._fillerTest;
-    player.onProgress = onProgress || null;
-    player.onEnd = onEnd || null;
-
-    if (player.blockedByPlayback) return 'busy';
-    const connected = !!(this.buttplugManager?.connected || this.tcodeManager?.connected);
-    if (!connected) return 'no-devices';
-    return player.play(actions) ? 'started' : 'no-devices';
-  }
-
-  /**
    * Push the current filler settings into the funscript engine so the
-   * tick-driven devices (T-Code, Buttplug, Handy HDSP) pick filler up via
+   * tick-driven devices (T-Code, Buttplug) pick filler up via
    * their existing `reloadActions()` path.
    */
   _applyFillerSettings() {
     if (!this.funscriptEngine?.setFillerOptions) return;
-    this.funscriptEngine.setFillerOptions(this._fillerOptionsForUpload());
+    this.funscriptEngine.setFillerOptions(this._fillerOptions());
     // Tick-driven engines cache the action list; make them re-read it.
     this.buttplugSync?.reloadActions?.();
     this.tcodeSync?.reloadActions?.();
@@ -3610,23 +3068,11 @@ class App {
         restartBtn.disabled = true;
       } else if (state === 'down') {
         banner.classList.remove('backend-banner--restarting');
-        if (detail === BACKEND_MISSING) {
-          // A packaged install whose backend executable has gone. Almost
-          // always antivirus quarantine. Restarting cannot help — it would
-          // look for the same missing file — so the button is hidden rather
-          // than left there to be pressed forever, which is exactly what
-          // 4wen did (thread #262).
-          titleEl.textContent = t('backend.missingTitle');
-          detailEl.textContent = t('backend.missingDetail');
-          restartBtn.hidden = true;
-        } else {
-          titleEl.textContent = t('backend.title');
-          detailEl.textContent = detail
-            ? t('backend.detailWithError', { error: detail })
-            : t('backend.detail');
-          restartBtn.hidden = false;
-          restartBtn.disabled = false;
-        }
+        titleEl.textContent = t('backend.title');
+        detailEl.textContent = detail
+          ? t('backend.detailWithError', { error: detail })
+          : t('backend.detail');
+        restartBtn.disabled = false;
       } else {
         banner.classList.remove('backend-banner--restarting');
       }
@@ -3682,7 +3128,7 @@ class App {
    * right hardware before saving. Each device type gets an appropriate
    * nudge (linear devices stroke, vibrate/scalar devices buzz briefly).
    *
-   * @param {string} deviceId — 'handy' | 'tcode' | 'autoblow' | 'buttplug:<name>'
+   * @param {string} deviceId — 'tcode' | 'buttplug:<name>'
    * @param {number} [buttplugIndex] — when deviceId is a buttplug route,
    *   the stored Intiface index (we match by it first for stability).
    * @returns {Promise<{ok: boolean, reason?: string}>}
@@ -3690,20 +3136,6 @@ class App {
   async _testDevice(deviceId, buttplugIndex) {
     console.log(`[TestDevice] Pulse request for ${deviceId}` +
       (Number.isFinite(buttplugIndex) ? ` (index ${buttplugIndex})` : ''));
-
-    if (deviceId === 'handy') {
-      if (!this.handyManager?.connected) return { ok: false, reason: t('deviceTest.handyNotConnected') };
-      try {
-        // HandyManager wraps the raw SDK hdsp() — use the wrapper, not the
-        // private SDK object. Arguments are (position%, durationMs).
-        await this.handyManager.hdspMove(70, 500);
-        await new Promise(r => setTimeout(r, 550));
-        await this.handyManager.hdspMove(20, 500);
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, reason: err.message || t('deviceTest.handyFailed') };
-      }
-    }
 
     if (deviceId === 'tcode') {
       if (!this.tcodeManager?.connected) return { ok: false, reason: t('deviceTest.tcodeNotConnected') };
@@ -3717,14 +3149,6 @@ class App {
         return { ok: false, reason: err.message || t('deviceTest.tcodeFailed') };
       }
     }
-
-    if (deviceId === 'autoblow') {
-      if (!this.autoblowManager?.connected) return { ok: false, reason: t('deviceTest.autoblowNotConnected') };
-      // No standalone pulse command on the Autoblow cloud API — best we can
-      // do is tell the user we know about it but can't test without a script.
-      return { ok: false, reason: t('deviceTest.autoblowNoPulse') };
-    }
-
     if (deviceId?.startsWith('buttplug:')) {
       if (!this.buttplugManager?.connected) return { ok: false, reason: t('deviceTest.intifaceNotConnected') };
       // Match by index first (stable), then name — same priority as routing.
@@ -3791,8 +3215,8 @@ class App {
 
     // For Buttplug devices, persist each physical device as a distinct entry
     // by appending the Intiface deviceIndex to the id. Without this, two
-    // same-name devices (e.g. two OG Handys, both reported as "The Handy"
-    // over BT) collapsed into a single knownDevices entry — the routing
+    // same-name devices (e.g. two identical strokers reporting the same
+    // name over BT) collapsed into a single knownDevices entry — the routing
     // modal showed only one option and two-device custom routing couldn't
     // be saved. `route.deviceId` stays name-only (`buttplug:Name`); the
     // `buttplugIndex` field on both the route and the knownDevice carries
@@ -3800,11 +3224,6 @@ class App {
     if (type === 'buttplug' && typeof extras.buttplugIndex === 'number') {
       id = `buttplug:${label}#${extras.buttplugIndex}`;
       extras.name = label;
-      // Legacy cleanup: old builds stored a single `buttplug:${name}` entry
-      // without an index suffix. Drop it on first composite registration
-      // so the routing dropdown doesn't list a ghost option.
-      const legacyIdx = devices.findIndex(d => d.id === `buttplug:${label}`);
-      if (legacyIdx >= 0) devices.splice(legacyIdx, 1);
     }
 
     const existing = devices.find(d => d.id === id);
@@ -3850,31 +3269,20 @@ class App {
 
   /**
    * Find the knownDevice entry that corresponds to a given route.
-   * Handles both new composite-id format and legacy name-only ids:
-   *   - Buttplug + buttplugIndex present → match by name + index.
-   *   - Exact id match (handy, tcode, autoblow, legacy buttplug).
-   *   - Buttplug fallback by name-only when nothing else matches.
+   * Buttplug routes match by name + buttplugIndex (the knownDevice id is
+   * composite); every other device type matches by exact id.
    */
   _findKnownDeviceForRoute(route) {
     const devices = this.settings.get('knownDevices') || [];
     if (!route?.deviceId) return null;
 
-    if (route.deviceId.startsWith('buttplug:') && Number.isFinite(route.buttplugIndex)) {
-      const name = route.deviceId.slice('buttplug:'.length);
-      const byComposite = devices.find(d =>
-        d.type === 'buttplug' && d.name === name && d.buttplugIndex === route.buttplugIndex
-      );
-      if (byComposite) return byComposite;
-    }
-
-    const byExact = devices.find(d => d.id === route.deviceId);
-    if (byExact) return byExact;
-
     if (route.deviceId.startsWith('buttplug:')) {
       const name = route.deviceId.slice('buttplug:'.length);
-      return devices.find(d => d.type === 'buttplug' && (d.name === name || d.label === name)) || null;
+      return devices.find(d =>
+        d.type === 'buttplug' && d.name === name && d.buttplugIndex === route.buttplugIndex
+      ) || null;
     }
-    return null;
+    return devices.find(d => d.id === route.deviceId) || null;
   }
 
   /**
@@ -3942,92 +3350,25 @@ class App {
   }
 
   /**
-   * Called when the Handy device connects (after ConnectionPanel's handler).
-   * If a funscript is already loaded, upload it to the cloud and start sync.
-   */
-  async _onHandyConnected() {
-    console.log('[Handy] Device connected — checking for pending funscript...');
-    this._updateHandyIndicators('connected');
-    this._updateDeviceIndicators();
-
-    // Apply saved stroke zone and offset immediately after connection
-    try {
-      const slideMin = this.settings.get('handy.slideMin') ?? 0;
-      const slideMax = this.settings.get('handy.slideMax') ?? 100;
-      const offset = this.settings.get('handy.defaultOffset') || 0;
-      await this.handyManager.setStrokeZone(slideMin, slideMax);
-      await this.handyManager.setOffset(offset);
-      console.log(`[Handy] Applied stroke zone ${slideMin}-${slideMax}, offset ${offset}ms`);
-    } catch (err) {
-      console.warn('[Handy] Failed to apply saved settings:', err.message);
-    }
-
-    if (!this.funscriptEngine.isLoaded || !this.syncEngine) {
-      console.log('[Handy] No funscript loaded yet, will upload when funscript loads');
-      return;
-    }
-
-    await this._uploadAndStartSync();
-  }
-
-  /**
-   * Update Handy status indicators in both nav bar and player controls.
-   */
-  _updateHandyIndicators(status) {
-    const deviceCount = this._getConnectedDeviceCount();
-
-    // Check if any actual device is connected (not just Intiface server)
-    const buttplugDevices = this.buttplugManager?.connected ? this.buttplugManager.devices.length : 0;
-    const anyConnected = status === 'connected' || status === 'connecting' || buttplugDevices > 0;
-    const effectiveStatus = anyConnected
-      ? (status === 'connecting' ? 'connecting' : 'connected')
-      : 'disconnected';
-
-    // Nav bar LED + text
-    if (this.navBar) {
-      this.navBar.setHandyStatus(effectiveStatus, deviceCount);
-    }
-
-    // Player control button LED
-    const led = document.getElementById('handy-led');
-    if (led) {
-      led.className = 'handy-led';
-      if (effectiveStatus === 'connected') {
-        led.classList.add('handy-led--connected');
-      } else if (effectiveStatus === 'connecting') {
-        led.classList.add('handy-led--connecting');
-      }
-    }
-
-    // Player control button tooltip
-    const btn = document.getElementById('btn-handy');
-    if (btn) {
-      btn.title = deviceCount === 1 ? t('player.deviceConnectionShortcut') : t('player.devicesConnectionShortcut');
-    }
-  }
-
-  /**
-   * Update device connection indicators for both Handy and Buttplug.
-   * Shows green if either is connected.
+   * Update the device connection indicators (nav bar + player bar).
+   * Shows green if any device is connected.
    */
   _updateDeviceIndicators() {
-    const handyConnected = this.handyManager?.connected;
-    const buttplugDevices = this.buttplugManager?.connected ? this.buttplugManager.devices.length : 0;
     const deviceCount = this._getConnectedDeviceCount();
     const anyConnected = deviceCount > 0;
 
-    const led = document.getElementById('handy-led');
+    const led = document.getElementById('device-led');
     if (led) {
-      led.className = 'handy-led';
-      if (anyConnected) led.classList.add('handy-led--connected');
+      led.className = 'device-led';
+      if (anyConnected) led.classList.add('device-led--connected');
     }
 
     if (this.navBar) {
-      this.navBar.setHandyStatus(anyConnected ? 'connected' : 'disconnected', deviceCount);
+      this.navBar.setDeviceStatus(anyConnected ? 'connected' : 'disconnected', deviceCount);
     }
 
     // Player control button tooltip
-    const btn = document.getElementById('btn-handy');
+    const btn = document.getElementById('btn-devices');
     if (btn) {
       btn.title = deviceCount === 1 ? t('player.deviceConnectionShortcut') : t('player.devicesConnectionShortcut');
     }
@@ -4042,11 +3383,9 @@ class App {
   _pushDesktopStatus() {
     if (!this.remoteBridge?.connected) return;
     this.remoteBridge.sendDesktopStatus(buildDesktopStatus({
-      handyManager: this.handyManager,
       buttplugManager: this.buttplugManager,
       tcodeManager: this.tcodeManager,
       tcodeSync: this.tcodeSync,
-      autoblowManager: this.autoblowManager,
       vrBridge: this.vrBridge,
       sessionTracker: this.sessionTracker,
       videoPlayer: this.videoPlayer,
@@ -4056,9 +3395,9 @@ class App {
 
   /**
    * Compute the canonical sync state for the player top-bar chip.
-   * Single source of truth for "what's syncing" across Handy +
-   * Buttplug + TCode + Autoblow + the various sync engines. Called
-   * from `_updateDeviceIndicators` and from play/pause / sync-state
+   * Single source of truth for "what's syncing" across Buttplug +
+   * TCode. Called from `_updateDeviceIndicators` and from play/pause /
+   * sync-state
    * transitions so the chip always tells the user what's happening.
    *
    * Returns null when the chip should be hidden (e.g. before a video
@@ -4073,15 +3412,7 @@ class App {
     const deviceCount = this._getConnectedDeviceCount();
     const hasScript = !!this.funscriptEngine?.isLoaded;
 
-    // Aggregate "any sync engine actively driving" — covers Handy
-    // (HSSP, played server-side, no client-side _active flag), Buttplug,
-    // TCode, Autoblow.
-    const isPlaying = this.videoPlayer?.video && !this.videoPlayer.video.paused
-                      && !this.videoPlayer.video.ended;
-    const syncActive = !!(this.buttplugSync?._active
-                          || this.tcodeSync?._active
-                          || this.autoblowSync?._active
-                          || (this.handyManager?.connected && hasScript && isPlaying));
+    const syncActive = !!(this.buttplugSync?._active || this.tcodeSync?._active);
 
     if (deviceCount === 0) {
       return { state: 'idle', label: t('syncChip.noDevices') };
@@ -4113,14 +3444,12 @@ class App {
   }
 
   /**
-   * Count total connected devices across Handy and Buttplug.
+   * Count total connected devices across Buttplug and TCode.
    */
   _getConnectedDeviceCount() {
     let count = 0;
-    if (this.handyManager?.connected) count += 1;
     if (this.buttplugManager?.connected) count += this.buttplugManager.devices.length;
     if (this.tcodeManager?.connected) count += 1;
-    if (this.autoblowManager?.connected) count += 1;
     return count;
   }
 
@@ -4189,77 +3518,6 @@ class App {
     this.tcodeSync.start();
   }
 
-  async _tryStartAutoblowSync() {
-    // Every exit path resolves the gate so a caller that marked
-    // 'autoblow' pending (e.g. _playFromLibrary with autoplay-on-advance)
-    // isn't stuck behind the loading overlay if the upload short-
-    // circuits, disconnects, or fails. Resolve is idempotent; calls
-    // when nothing was marked are no-ops.
-    if (!this.autoblowSync || !this.autoblowManager?.connected) {
-      this._resolveCloudUpload('autoblow');
-      return;
-    }
-    if (!this.funscriptEngine.isLoaded) {
-      this._resolveCloudUpload('autoblow');
-      return;
-    }
-
-    // Upload the funscript if not already uploaded
-    if (!this.autoblowSync.scriptReady) {
-      const rawContent = this.funscriptEngine.getRawContent();
-      if (!rawContent) {
-        this._resolveCloudUpload('autoblow');
-        return;
-      }
-      // Apply Range Extender + output cutoff at upload time for Autoblow.
-      // Same reason as Handy HSSP: cloud-script-upload model, no per-tick
-      // hook. Extender stretches first, then the cutoff clamps.
-      const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
-      // extend → fill → clamp, same as the Handy HSSP path above.
-      const uploadContent = clampRawScriptContent(
-        fillRawScriptContent(
-          extendRawScriptContent(rawContent, extenderEnabled),
-          this._fillerOptionsForUpload(),
-        ),
-        this._cutoffFromSettings('autoblow'),
-      );
-      const ok = await this.autoblowSync.uploadScript(uploadContent);
-      if (!ok) {
-        this._resolveCloudUpload('autoblow');
-        return;
-      }
-    }
-
-    if (!this.autoblowSync._active) {
-      console.log('[Autoblow] Starting sync');
-      this.autoblowSync.start();
-    }
-    this._resolveCloudUpload('autoblow');
-  }
-
-  /**
-   * Auto-connect to Handy using a saved connection key.
-   */
-  async _autoConnectHandy(key) {
-    console.log('[Handy] Auto-connecting with saved key...');
-    this._updateHandyIndicators('connecting');
-
-    try {
-      const success = await this.handyManager.connect(key);
-      if (success) {
-        console.log('[Handy] Auto-connect successful');
-        // The onConnect callback will handle the rest (indicators + sync)
-      } else {
-        console.warn('[Handy] Auto-connect failed');
-        showToast(t('toast.handyAutoFailed'), 'warn');
-        this._updateHandyIndicators('disconnected');
-      }
-    } catch (err) {
-      console.warn('[Handy] Auto-connect error:', err.message);
-      this._updateHandyIndicators('disconnected');
-    }
-  }
-
   /**
    * Auto-connect to Buttplug/Intiface Central on startup.
    * Silently tries to connect — no error toast if Intiface isn't running.
@@ -4303,13 +3561,9 @@ class App {
   }
 
   /**
-   * Upload the current funscript to the Handy cloud and start HSSP sync.
-   */
-  /**
    * Read a single-device output cutoff {min,max} from settings, or null if
-   * unset / a no-op (0-100). Used for cloud devices (Handy, Autoblow) that
-   * clamp script content pre-upload, and to feed the Handy HDSP per-tick
-   * engine. `key` is the settings namespace, e.g. 'handy' or 'autoblow'.
+   * unset / a no-op (0-100). Feeds the Orgasm Switch loop, which drives the
+   * managers directly. `key` is the settings namespace, e.g. 'tcode'.
    */
   _cutoffFromSettings(key) {
     const c = this.settings?.get?.(`${key}.cutoff`);
@@ -4332,11 +3586,9 @@ class App {
     // An Edge hold (Z) must yield before the finisher arms: X's activation
     // records which engines IT stopped so its release can restart exactly
     // those — arming it while Edge already stopped them would record none
-    // and strand the engines on release. Restart them here (skipping the
-    // Handy resume — the finisher takes the Handy over immediately, and an
-    // in-flight resync() racing the engage's script swap could yank the
-    // device mid-finisher), then let X's activation stop them properly.
-    if (active && this._edgeActive) this._onEdgeHold(false, { skipHandyResume: true, force: true });
+    // and strand the engines on release. Restart them here, then let X's
+    // activation stop them properly.
+    if (active && this._edgeActive) this._onEdgeHold(false, { force: true });
     const mode = this.settings?.get?.('player.orgasmSwitchMode') || 'hold';
 
     if (mode === 'toggle') {
@@ -4397,9 +3649,7 @@ class App {
   /**
    * Stop all connected devices and leave them idle — used when finishing (the
    * orgasm loop drove Buttplug/T-Code directly, so their last command would
-   * otherwise hold at full intensity/position). The Handy is playing the
-   * tiled finisher via HSSP and is stopped separately by the sequenced
-   * releaseHandyFinisher (hsspStop) in onDeactivate's finish branch.
+   * otherwise hold at full intensity/position).
    */
   _stopAllDevicesIdle() {
     try { if (this.buttplugManager?.connected) this.buttplugManager.stopAll(); } catch { /* best-effort */ }
@@ -4408,18 +3658,13 @@ class App {
 
   /**
    * The orgasm config as a normalized association entry (same parallel-slot
-   * shape videos use). Falls back to the legacy `player.orgasmScript` string
-   * (read-through — normalizeAssociation turns a bare string into a single
-   * entry), so pre-0.8.1 configs keep working untouched.
+   * shape videos use), or null when none is configured.
    */
   _getOrgasmEntry() {
     const cfg = this.settings?.get?.('player.orgasmConfig');
-    if (cfg) {
-      const entry = normalizeAssociation(cfg);
-      if (entry.active) return entry;
-    }
-    const legacy = this.settings?.get?.('player.orgasmScript');
-    return legacy ? normalizeAssociation(legacy) : null;
+    if (!cfg) return null;
+    const entry = normalizeAssociation(cfg);
+    return entry.active ? entry : null;
   }
 
   /**
@@ -4464,7 +3709,6 @@ class App {
     } else {
       this._orgasmMissingPaths = new Set();
     }
-    this._orgasmCloudUrl = null; // scripts may have changed → stale upload
     this._refreshOrgasmPlan();
   }
 
@@ -4516,23 +3760,12 @@ class App {
         }
         : entry.custom,
     );
-    this._saveOrgasmConfigQuiet(next);
+    this.settings.set('player.orgasmConfig', next);
     for (const [from, to] of remap) {
       console.log(`[OrgasmSwitch] Re-pointed moved finisher script: ${from} → ${to}`);
     }
     showToast(t('toast.orgasmScriptRecovered', { count: remap.size }), 'info', 4000);
     return true;
-  }
-
-  /** Persist an orgasm config entry without the "script set" toast or a
-   *  reload (the caller re-reads). Used by the moved-file recovery. */
-  _saveOrgasmConfigQuiet(entry) {
-    this.settings.set('player.orgasmConfig', entry);
-    const mainRoute = entry.custom?.routes?.find?.((r) => r?.role === 'main' && r.scriptPath);
-    const legacyPath = entry.active === 'single' ? entry.single
-      : entry.active === 'multi' ? (entry.multi?.main || null)
-        : (entry.single || mainRoute?.scriptPath || null);
-    this.settings.set('player.orgasmScript', legacyPath);
   }
 
   /**
@@ -4541,16 +3774,12 @@ class App {
    * device connect/disconnect — that's what makes custom routing demote to
    * single-axis while its devices are missing and promote straight back
    * the moment they're all connected again.
-   *
-   * Mid-hold: local channels swap live on the running clock
-   * (preserveClock); the Handy engage target stays locked until release.
    */
   _refreshOrgasmPlan() {
     if (!this.orgasmSwitch) return;
     const snapshot = {
       buttplugDevices: (this.buttplugManager?.connected && this.buttplugManager.devices) || [],
       tcodeConnected: !!this.tcodeManager?.connected,
-      handyConnected: !!this.handyManager?.connected,
     };
     const { plan, demotedFrom, missing } = resolveOrgasmPlan(
       this._orgasmEntry || null,
@@ -4593,14 +3822,6 @@ class App {
   async _saveOrgasmConfig(entry) {
     if (!entry || !entry.active) { this._clearOrgasmScript(); return; }
     this.settings.set('player.orgasmConfig', entry);
-    // Downgrade mirror: older builds only read `player.orgasmScript`
-    // (string) — keep it pointing at the closest single-axis equivalent,
-    // same philosophy as the association-shape mirror fields.
-    const mainRoute = entry.custom?.routes?.find?.((r) => r?.role === 'main' && r.scriptPath);
-    const legacyPath = entry.active === 'single' ? entry.single
-      : entry.active === 'multi' ? (entry.multi?.main || null)
-        : (entry.single || mainRoute?.scriptPath || null);
-    this.settings.set('player.orgasmScript', legacyPath);
     await this._reloadOrgasmScripts();
     const d = describeOrgasmEntry(entry);
     if (d) showToast(t('toast.orgasmScriptSet', { name: d.name || '' }), 'info', 2500);
@@ -4673,12 +3894,10 @@ class App {
   /** Clear the configured orgasm script/config entirely. */
   _clearOrgasmScript() {
     this.settings.set('player.orgasmConfig', null);
-    this.settings.set('player.orgasmScript', null);
     this._orgasmEntry = null;
     this._orgasmContentCache = new Map();
     this._orgasmActionsCache = new Map();
     this._orgasmPlan = null;
-    this._orgasmCloudUrl = null;
     this._orgasmDemotionKey = null;
     this._orgasmDemotionToastShownKey = null;
     if (this.orgasmSwitch) this.orgasmSwitch.loadPlan(null);
@@ -4722,16 +3941,6 @@ class App {
       }
     }
   }
-
-  /**
-   * Restore the Handy after an orgasm-switch hold ends. The orgasm loop drove
-   * HDSP (mode 2), which clears HSSP's scriptSet, so we can't just hsspPlay.
-   *   - At non-1× playback the normal Handy mode IS HDSP, so just restart the
-   *     polled engine — it re-drives hdspMove at video time (no scriptSet needed).
-   *   - At 1× we re-establish HSSP: re-set the cached cloud script (fast,
-   *     USING_CACHED) then resume at the current video time. Falls back to a
-   *     full re-upload if no cached URL exists.
-   */
   /**
    * Edge Hold (Z) — the Orgasm Switch's inverse (MattWritesNSFW, EroScripts
    * #301): hold to stop ALL device output while the video keeps playing;
@@ -4739,18 +3948,11 @@ class App {
    * the finisher there is no takeover script, so activation is just "stop
    * engines + idle devices" and release is "restart what we stopped".
    *
-   * The Handy needs both halves done explicitly: syncEngine.stop() only
-   * kills the renderer's correction loop — HSSP playback lives ON the
-   * device, so without hsspStop() it strokes on to the end of the script.
-   * Release re-anchors via resync() (start() only anchors when the player
-   * reads unpaused at that instant — same unreliability the orgasm restore
-   * hit). The main script never left the device, so no re-upload is needed.
-   *
    * Refuses to arm while the Orgasm Switch is active: X owns the devices
    * during a finisher, and layering "stop everything" over its restore
    * bookkeeping would corrupt whose job it is to restart what.
    */
-  _onEdgeHold(active, { skipHandyResume = false, force = false } = {}) {
+  _onEdgeHold(active, { force = false } = {}) {
     // Press-to-toggle (lr_x3, EroScripts #307). Keyboard still reports Z as
     // a hold — press then release — so in toggle mode the release arrives as
     // active=false and must be ignored, or the edge would end the instant
@@ -4776,17 +3978,6 @@ class App {
       if (this.tcodeSync?._active) {
         this.tcodeSync.stop(); this._edgeStoppedEngines.push('tcode');
       }
-      if (this.autoblowSync?._active) {
-        this.autoblowSync.stop(); this._edgeStoppedEngines.push('autoblow');
-      }
-      if (this.syncEngine?._active || this.handyHdspSync?.active) {
-        this.syncEngine?.stop();
-        if (this.handyHdspSync?.active) this.handyHdspSync.stop();
-        this._edgeStoppedEngines.push('handy');
-        if (this.handyManager?.connected) {
-          this.handyManager.hsspStop().catch(() => { /* best-effort */ });
-        }
-      }
       // Devices to idle NOW — engine stop() alone leaves sustained outputs
       // (vibrate/rotate) holding their last value, the exact failure the
       // orgasm-switch release fixed on 2026-08-14.
@@ -4795,122 +3986,11 @@ class App {
     } else {
       if (this._edgeStoppedEngines?.includes('buttplug')) this.buttplugSync.start();
       if (this._edgeStoppedEngines?.includes('tcode')) this.tcodeSync.start();
-      if (this._edgeStoppedEngines?.includes('autoblow')) this.autoblowSync.start();
-      if (this._edgeStoppedEngines?.includes('handy') && !skipHandyResume) {
-        this._resumeHandyAfterEdge();
-      }
       this._edgeStoppedEngines = [];
     }
   }
 
-  /**
-   * Mirror of _restoreHandyAfterOrgasm minus the script restore — Edge never
-   * replaced the script on the device, so resume is: HDSP engine at non-1x
-   * rates, otherwise HSSP start + a forced resync() anchor at current time.
-   */
-  async _resumeHandyAfterEdge() {
-    if (!this.handyManager?.connected) return;
-    const rate = this.videoPlayer?.playbackRate || 1;
-    if (rate !== 1) {
-      if (this.handyHdspSync && !this.handyHdspSync.active) this.handyHdspSync.start();
-      return;
-    }
-    if (!this.funscriptEngine?.isLoaded) return;  // no script → leave device idle
-    try {
-      if (this.syncEngine) {
-        this.syncEngine.start();
-        await this.syncEngine.resync();
-      }
-    } catch (err) {
-      console.warn('[EdgeHold] Handy resume failed:', err?.message || err);
-    }
-  }
 
-  async _restoreHandyAfterOrgasm() {
-    if (!this.handyManager?.connected) return;
-    const rate = this.videoPlayer?.playbackRate || 1;
-    if (rate !== 1) {
-      if (this.handyHdspSync && !this.handyHdspSync.active) this.handyHdspSync.start();
-      return;
-    }
-    if (!this.funscriptEngine?.isLoaded) return;  // no script → leave device idle
-    try {
-      let ok = false;
-      if (this._scriptCloudUrl) {
-        ok = await this.handyManager.setupScript(this._scriptCloudUrl);
-      }
-      if (ok) {
-        this.syncEngine._scriptReady = true;
-        this.syncEngine.start();
-        // start() only anchors when `player.paused` reads false at that
-        // instant, which is unreliable here (remote proxy mid-buffer), so
-        // force the anchor at the CURRENT time. Without it the Handy stayed
-        // where the finisher left it and drifted from the video until the
-        // next seek — the "not synced after release" report. See resync().
-        await this.syncEngine.resync();
-      } else {
-        // No cached URL (script never uploaded this session) → full path.
-        await this._uploadAndStartSync();
-      }
-    } catch (err) {
-      console.warn('[OrgasmSwitch] Handy HSSP restore failed:', err?.message || err);
-    }
-  }
-
-  async _uploadAndStartSync() {
-    if (!this.handyManager?.connected) {
-      console.log('[Handy] Not connected, skipping script upload');
-      this._resolveCloudUpload('handy');
-      return;
-    }
-
-    const rawContent = this.funscriptEngine.getRawContent();
-    if (!rawContent) {
-      console.log('[Handy] No raw funscript content available');
-      this._resolveCloudUpload('handy');
-      return;
-    }
-
-    // Apply Range Extender at upload time for Handy HSSP. HSSP plays
-    // back from a cloud-hosted script — there's no per-tick hook to
-    // apply the stretch, so it must happen pre-upload. Returns the
-    // original content if extender is off or the script is already
-    // wide (no-op short-circuit inside the helper).
-    const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
-    // Extender stretches first, then the hard floor/ceiling cutoff clamps —
-    // same order as the per-tick stack (extender → … → cutoff). HSSP plays
-    // server-side, so both must be baked into the uploaded content.
-    const cutoff = this._cutoffFromSettings('handy');
-    // extend → fill → clamp. Gap filler is baked in here because HSSP plays
-    // the uploaded script from the device's own clock — there is no per-tick
-    // hook, so without this the Handy at 1x would be the one device that
-    // silently got no filler.
-    const uploadContent = clampRawScriptContent(
-      fillRawScriptContent(
-        extendRawScriptContent(rawContent, extenderEnabled),
-        this._fillerOptionsForUpload(),
-      ),
-      cutoff,
-    );
-
-    console.log('[Handy] Uploading funscript to cloud...');
-    const setupOk = await this.handyManager.uploadAndSetScript(uploadContent);
-
-    if (setupOk) {
-      // Store cloud URL for potential re-setup
-      this._scriptCloudUrl = this.handyManager._lastCloudUrl || null;
-      this.syncEngine._scriptReady = true;
-      this._resolveCloudUpload('handy');
-      this.syncEngine.start();
-      console.log('[Handy] Sync engine started — HSSP active');
-    } else {
-      // Upload failed — resolve the gate so the user isn't stuck behind
-      // the loading overlay; show a toast so they know why the device
-      // is silent.
-      this._resolveCloudUpload('handy');
-      showToast(t('toast.handyUploadFailed'), 'error');
-    }
-  }
 
   loadVideo(file, { skipViewSwitch = false, autoPlay = true } = {}) {
     console.log('Loading video:', file.name);
@@ -4930,11 +4010,8 @@ class App {
       URL.revokeObjectURL(this._currentVideoUrl);
       this._currentVideoUrl = null;
     }
-    this.syncEngine?.stop();
-    if (this.handyHdspSync?.active) this.handyHdspSync.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
-    if (this.autoblowSync?._active) this.autoblowSync.stop();
     this._stopGapSkip();
     if (this._queueEndedListener) {
       this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
@@ -4953,17 +4030,6 @@ class App {
     this._customRoutingActive = false;
     if (this.buttplugSync) this.buttplugSync._customRoutingActive = false;
     this.funscriptEngine.clear();
-    this._scriptCloudUrl = null;
-    // Fresh video — drop any gating from the previous video's load.
-    // Per-device resolves only fire as uploads complete; without this
-    // force-clear, a video that never finished its prior gate would
-    // leak the pending state into this load.
-    this._clearCloudUploadGate();
-    if (this._scriptLoadingTimeout) {
-      clearTimeout(this._scriptLoadingTimeout);
-      this._scriptLoadingTimeout = null;
-    }
-    this._hideScriptLoadingOverlay();
     this.progressBar.clearHeatmap();
     this._feedInlineViz(); // no script yet → clears viz + hides TL/HM buttons
     this.progressBar.setGaps(null);
@@ -4984,15 +4050,6 @@ class App {
     this._allVariantsWithManual = [];
     this._activeVariantIndex = 0;
     this._activeVariantPath = null;
-
-    // Hide editor, clear funscript path and script list, show editor toggle button
-    if (this.scriptEditor) {
-      if (this.scriptEditor.isOpen) this.scriptEditor.hide();
-      this.scriptEditor.setFunscriptPath(null);
-      this.scriptEditor.setAvailableScripts([]);
-      this.scriptEditor.clearUndoCache();
-    }
-    document.getElementById('btn-editor').hidden = false;
 
     // Switch to player view (unless caller already handled it)
     if (!skipViewSwitch) {
@@ -5041,8 +4098,7 @@ class App {
     this._scheduleQueueRefresh();
 
     // Apply any saved VR-as-flat preference for this video. Two inputs:
-    //   - per-video saved eye ('left' / 'right' / null) in
-    //     `library.vrFlatten[path]`
+    //   - per-video saved format/eye in `library.vrFormat[path]`
     //   - per-video format auto-detected by `classifyStereoFormat`
     // No saved preference + a detectable format = leave Off (the user
     // opts in explicitly via Shift+R or the library kebab). This avoids
@@ -5056,19 +4112,10 @@ class App {
     // the full rationale.
     maybeShowHevcGuidance(this.settings);
 
-    // Store video path on player container for editor access
-    const pc = document.getElementById('player-container');
-    if (pc) pc.dataset.videoPath = file.path || '';
-
-    // Auto-play once video is ready (gated by script upload if applicable)
+    // Auto-play once video is ready
     if (autoPlay) {
       this.videoPlayer.video.addEventListener('loadeddata', () => {
-        if (this._waitingForScript) {
-          this._showScriptLoadingOverlay();
-          // Don't play yet — _uploadAndStartSync will trigger play when ready
-        } else {
-          this.videoPlayer.video.play().catch(() => {});
-        }
+        this.videoPlayer.video.play().catch(() => {});
       }, { once: true });
     }
 
@@ -5092,14 +4139,10 @@ class App {
       }
 
       // Stop all sync engines and devices immediately
-      if (this.syncEngine) this.syncEngine.stop();
       if (this.buttplugSync?._active) this.buttplugSync.stop();
       if (this.tcodeSync?._active) this.tcodeSync.stop();
-      if (this.autoblowSync?._active) this.autoblowSync.stop();
-      if (this.handyManager?.connected) this.handyManager.hsspStop();
       if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
       if (this.tcodeManager?.connected) this.tcodeManager.stop();
-      if (this.autoblowManager?.connected) this.autoblowManager.syncStop();
 
       // Show appropriate error message
       if (isFileUrl && code === 2) {
@@ -5311,17 +4354,6 @@ class App {
 
       this._showFunscriptBadge(info);
 
-      // Feed actions to the parallel HDSP-polled engine — used at
-      // non-1.0× playback rates where HSSP can't follow. The engine
-      // doesn't start until rate diverges from 1.0× (see _setSpeed in
-      // script-editor.js), so this is a cheap cache.
-      if (this.handyHdspSync) {
-        this.handyHdspSync.setActions(this.funscriptEngine.getActions());
-        // HDSP is per-tick, so the cutoff clamps live (HSSP bakes it into
-        // the uploaded content instead). Same 'handy' setting drives both.
-        this.handyHdspSync.setCutoff(this._cutoffFromSettings('handy'));
-      }
-
       // Render heatmap if video duration is known
       if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
         this.progressBar.renderHeatmap(
@@ -5338,36 +4370,11 @@ class App {
         }
       }
 
-      // Load into script editor if open + set funscript path for autosave
-      if (this.scriptEditor) {
-        // Derive funscript path from the file info
-        if (file.path) {
-          this.scriptEditor.setFunscriptPath(file.path);
-        } else if (this._currentVideoPath) {
-          // Funscript from library/IPC — derive path from video path
-          const fsPath = this._currentVideoPath.replace(/\.[^/.]+$/, '') + '.funscript';
-          this.scriptEditor.setFunscriptPath(fsPath);
-        }
-        this.scriptEditor.loadScript();
-      }
-
-      // If Handy is connected, upload script to cloud and start sync
-      // (skip if custom routing is active — routing handles Handy assignment)
-      if (!this._customRoutingActive || this._isDeviceOnMainRoute('handy')) {
-        await this._uploadAndStartSync();
-      }
-
       // If Buttplug is connected, start sync
       this._tryStartButtplugSync();
 
       // If TCode is connected, start sync
       this._tryStartTCodeSync();
-
-      // If Autoblow is connected, upload script and start sync
-      // (skip if custom routing is active — routing handles Autoblow assignment)
-      if (!this._customRoutingActive || this._isDeviceOnMainRoute('autoblow')) {
-        await this._tryStartAutoblowSync();
-      }
 
       // Start gap skip monitoring (only for single-script playback — multi-device routing
       // has different scripts per device, skipping would desync them)
@@ -5737,7 +4744,7 @@ class App {
     }
     if (type === PLAYERWIN.SWITCH_VARIANT) {
       // Variant clicked in the pop-out → do the real switch in main (loads
-      // script + re-uploads to cloud devices), then re-stream fresh data.
+      // script), then re-stream fresh data.
       this._handlePhoneSwitchVariant(payload.label)
         .then(() => this._streamPlayerWindowData())
         .catch((err) => console.warn('[PlayerWindow] variant switch failed:', err));
@@ -5769,11 +4776,9 @@ class App {
       });
       // Drive the Up Next engine off the pop-out's clock (its inline event
       // hooks are dead while detached). Looping in the pop-out suppresses
-      // it — a looped video should never auto-advance. Editor-open in main
-      // still suppresses too.
+      // it — a looped video should never auto-advance.
       if (this.upNextEngine) {
-        const editorOpen = !!this.scriptEditor?.isOpen;
-        this.upNextEngine.setSuppressed(editorOpen || !!payload.loop);
+        this.upNextEngine.setSuppressed(!!payload.loop);
         this.upNextEngine.check();
       }
     } else if (type === PLAYERWIN.VIDEO_EVENT) {
@@ -5889,7 +4894,7 @@ class App {
 
   /**
    * Route a freshly-loaded video into the open pop-out. The load path set
-   * up the inline <video> (hidden) + funscript + cloud uploads with engines
+   * up the inline <video> (hidden) + funscript with engines
    * on the local player; re-activating rebinds them onto the proxy and
    * hands the video to the pop-out. Unsupported srcs (blob/HLS) fold the
    * pop-out back and play inline so we never strand it. Shared by the
@@ -5973,8 +4978,6 @@ class App {
    * rebind the sync engines to a RemotePlaybackProxy. The proxy is seeded
    * PAUSED so devices idle until the pop-out's <video> actually starts
    * playing (its VIDEO_EVENT 'play' drives the proxy from there).
-   *
-   * ⚠ HARDWARE-TEST REQUIRED (Handy HSSP re-anchor). SCOPE §9.5.
    */
   _activatePlayerWindow() {
     // Idempotent: safe to call again to re-bind onto a newly-loaded video
@@ -5998,24 +5001,14 @@ class App {
     const proxyPlayer = this._playerWinProxy.asVideoPlayerWrapper();
 
     // Stop engines, repoint to the proxy, restart (idle until proxy plays).
-    // Same script already set on cloud devices — no re-upload needed.
-    if (this.syncEngine?._active) this.syncEngine.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
-    if (this.autoblowSync?._active) this.autoblowSync.stop();
-    if (this.handyHdspSync?.active) this.handyHdspSync.stop();
 
     if (this.buttplugSync && this.buttplugManager?.connected) {
       this.buttplugSync.player = proxyPlayer; this.buttplugSync.reloadActions(); this.buttplugSync.start();
     }
     if (this.tcodeSync && this.tcodeManager?.connected) {
       this.tcodeSync.player = proxyPlayer; this.tcodeSync.reloadActions(); this.tcodeSync.start();
-    }
-    if (this.syncEngine && this.handyManager?.connected) {
-      this.syncEngine.player = proxyPlayer; this.syncEngine.start();
-    }
-    if (this.autoblowSync && this.autoblowManager?.connected) {
-      this.autoblowSync.player = proxyPlayer; this.autoblowSync.start();
     }
 
     // Repoint Up Next onto the proxy so its countdown + auto-advance track
@@ -6039,17 +5032,12 @@ class App {
     const proxyMs = Math.round((this._playerWinProxy?.currentTime || 0) * 1000);
     const wasPlaying = !!(this._playerWinProxy && !this._playerWinProxy.paused);
 
-    if (this.syncEngine?._active) this.syncEngine.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
-    if (this.autoblowSync?._active) this.autoblowSync.stop();
-    if (this.handyManager?.connected) this.handyManager.hsspStop();
 
     const localPlayer = this.videoPlayer;
     if (this.buttplugSync) this.buttplugSync.player = localPlayer;
     if (this.tcodeSync) this.tcodeSync.player = localPlayer;
-    if (this.syncEngine) this.syncEngine.player = localPlayer;
-    if (this.autoblowSync) this.autoblowSync.player = localPlayer;
     // Rebind Up Next to the inline player and drop any card that was
     // streamed to the (now closed) pop-out; check() re-shows it inline if
     // the inline playhead is still in the trailing zone.
@@ -6060,11 +5048,8 @@ class App {
 
     // Restart every CONNECTED engine against the local <video>, mirroring the
     // take-over in _activatePlayerWindow. This MUST run before vid.play() so
-    // the Handy's 'playing'-driven re-anchor (hsspPlay) fires and the per-tick
-    // engines pick up the resumed clock. The previous code restarted ONLY
-    // Buttplug + T-Code, and only in vid.play()'s .then() — so the Handy
-    // (syncEngine) and Autoblow were never restarted and their devices went
-    // silent as soon as the pop-out closed.
+    // the engines' 'playing'-driven re-anchor fires and they pick up the
+    // resumed clock.
     if (this.buttplugSync && this.buttplugManager?.connected) {
       this.buttplugSync.reloadActions();
       this.buttplugSync.start();
@@ -6073,12 +5058,10 @@ class App {
       this.tcodeSync.reloadActions();
       this.tcodeSync.start();
     }
-    if (this.syncEngine && this.handyManager?.connected) this.syncEngine.start();
-    if (this.autoblowSync && this.autoblowManager?.connected) this.autoblowSync.start();
 
     // Resume inline playback where the pop-out left off. The engines are now
     // active + bound to the local player, so the resulting 'playing' event
-    // re-anchors the Handy and the per-tick engines follow immediately.
+    // re-anchors them immediately.
     const vid = this.videoPlayer?.video;
     if (vid && (vid.currentSrc || vid.src)) {
       try { vid.currentTime = proxyMs / 1000; } catch { /* ignore */ }
@@ -6151,7 +5134,7 @@ class App {
   //
   // Two responsibilities:
   //   1. On video load, look up the per-video flatten preference from
-  //      `library.vrFlatten[path]` (value: 'left' | 'right' | null) AND
+  //      `library.vrFormat[path]` AND
   //      the auto-detected stereo format from filename. If both are
   //      present, apply the corresponding CSS transform.
   //   2. Expose a cycle callback for the Shift+R keyboard shortcut and
@@ -6167,11 +5150,6 @@ class App {
     const path = this._currentVideoPath;
     const name = this._currentVideoName;
     const detected = classifyStereoFormat(path || name || '');
-
-    // Lazy migration: legacy `library.vrFlatten[path] = 'left'|'right'`
-    // upgrades to the richer `library.vrFormat` shape on first read. We
-    // keep the old key untouched indefinitely for downgrade safety.
-    this._maybeMigrateVRFlattenEntry(path, detected);
 
     const entry = path
       ? (this.settings?.get?.('library.vrFormat') || {})[path] || null
@@ -6464,27 +5442,6 @@ class App {
   }
 
   /**
-   * Lazily upgrade legacy `library.vrFlatten[path] = 'left'|'right'`
-   * entries into the richer `library.vrFormat` schema. Old key is left
-   * in place so a user reverting to <0.7.x still sees their preference.
-   */
-  _maybeMigrateVRFlattenEntry(path, detected) {
-    if (!path || !this.settings) return;
-    const formatMap = this.settings.get('library.vrFormat') || {};
-    if (formatMap[path]) return;
-    const old = (this.settings.get('library.vrFlatten') || {})[path];
-    if (old !== 'left' && old !== 'right') return;
-    const projection = isFlattenableStereo(detected) ? detected : 'sbs-half';
-    const next = { ...formatMap, [path]: {
-      projection,
-      eye: old,
-      zoom: 1,
-      source: 'auto',
-    } };
-    this.settings.set('library.vrFormat', next);
-  }
-
-  /**
    * Schedule the first-time hint toast. Fires once per session per path,
    * only when no override exists, detection failed, and the video
    * aspect-ratio suggests VR (≥1.9:1 mono or ≥3.5:1 SBS).
@@ -6517,212 +5474,10 @@ class App {
   }
 
   /**
-   * Cycle the VR-flatten state for the current video and persist the new
-   * setting. Called by the keyboard (Shift+R). Writes to the new
-   * `library.vrFormat` schema; the old `library.vrFlatten` key is no
-   * longer touched (kept indefinitely as a downgrade fallback).
-   */
-  /**
-   * After the manual "Re-sync time" button completes its SDK sync,
-   * re-engage HSSP playback at the current video position. Without
-   * this, the SDK's `.sync()` routine can leave the device in a state
-   * where subsequent hsspStop / setScript calls silently fail — the
-   * app then thinks it's controlling playback but pause / next-video
-   * never reach the device.
-   *
-   * Mirrors the auto-drift recovery in sync-engine.js: if video is
-   * playing, stop + replay HSSP at current time. If paused, leave
-   * device alone (HSSP is already stopped via the pause handler).
-   *
-   * Community-reported 2026-06-01.
-   */
-  async _restoreHssspAfterResync() {
-    if (!this.handyManager?.connected) return;
-    if (!this.videoPlayer?.video) return;
-    if (this.videoPlayer.video.paused) return;  // already stopped, nothing to restore
-    const timeMs = Math.round(this.videoPlayer.video.currentTime * 1000);
-    try {
-      await this.handyManager.hsspStop();
-      await this.handyManager.hsspPlay(timeMs);
-    } catch (err) {
-      console.warn('[Resync] HSSP restore failed:', err?.message || err);
-    }
-  }
-
-  // ============ Audience broadcast (SCOPE-audience-broadcast.md) ============
-
-  /**
-   * Wire the audience pop-out IPC relay. Pop-out renderer sends ops via
-   * `audiencePopoutRelay('to-parent', ...)`; we receive them here and
-   * dispatch to AudienceBridge. AudienceBridge events fan back out via
-   * `audiencePopoutRelay('to-popout', ...)` so the pop-out re-renders.
-   */
-  _wireAudiencePopoutRelay() {
-    if (!window.funsync?.onAudiencePopoutEvent) return;
-
-    // Pop-out → main
-    window.funsync.onAudiencePopoutEvent(async (evt) => {
-      if (!evt) return;
-      // Closing the pop-out window ends the room automatically. The
-      // SCOPE originally kept room state alive across pop-out close
-      // (Shneiderman #6 reversibility), but Dave reversed that 2026-06-02
-      // — explicit "End Room" + confirm was high-friction; closing the
-      // window IS the end-room intent. The Audience tab's End Room
-      // button now just calls audiencePopoutClose() so both paths
-      // funnel through here.
-      if (evt.type === 'closed') {
-        console.log('[Audience] pop-out window closed');
-        if (this.audienceBridge?.roomActive) {
-          await this.audienceBridge.endRoom();
-        }
-        return;
-      }
-      if (evt.type !== 'message') return;
-      const payload = evt.payload;
-      // Log the op TYPE only — payloads carry viewer keys (passwords) and
-      // must never hit the log file.
-      if (payload?.type) console.debug(`[Audience] pop-out → ${payload.type}`);
-      switch (payload?.type) {
-        case AUDIENCE.READY: {
-          // Pop-out is up; push initial state.
-          this._pushAudienceInitialState();
-          break;
-        }
-        case AUDIENCE.ADD_VIEWER: {
-          try {
-            await this.audienceBridge.addViewer({
-              key: payload.key,
-              label: payload.label,
-              offsetMs: payload.offsetMs,
-            });
-          } catch (err) {
-            // SELF_KEY collision or generic add failure — surface to the
-            // pop-out as a toast-style status; the bridge already
-            // refused the add, so no state change is needed.
-            const msg = err?.code === 'SELF_KEY' ? t('audience.toast.selfKey')
-                      : err?.message || String(err);
-            showToast(msg, 'warn', 3500);
-          }
-          break;
-        }
-        case AUDIENCE.REMOVE_VIEWER:
-          await this.audienceBridge.removeViewer(payload.key, { forget: !!payload.forget });
-          break;
-        case AUDIENCE.SET_OFFSET:
-          this.audienceBridge.setOffsetForViewer(payload.key, payload.offsetMs);
-          break;
-        case AUDIENCE.SET_MUTED:
-          await this.audienceBridge.setMuted(payload.key, payload.muted);
-          break;
-        case AUDIENCE.TEST_BUZZ:
-          this._flashScreenForBuzzCalibration();
-          await this.audienceBridge.testBuzz(payload.key);
-          break;
-        case AUDIENCE.TEST_BUZZ_ALL:
-          this._flashScreenForBuzzCalibration();
-          await this.audienceBridge.testBuzzAll();
-          break;
-        case AUDIENCE.SET_HIDE_KEYS:
-          this.settings?.set?.('audience.hideKeys', !!payload.hideKeys);
-          this._pushAudienceMessage(AUDIENCE.HIDE_KEYS_CHANGED, { hideKeys: !!payload.hideKeys });
-          break;
-        case AUDIENCE.END_ROOM:
-          // Single funnel: closing the pop-out triggers the 'closed'
-          // event above which calls endRoom. The End Room button in
-          // the pop-out or the tab just closes the window.
-          await window.funsync.audiencePopoutClose?.();
-          break;
-      }
-    });
-
-    // Bridge → pop-out fan-out
-    eventBus.on('audience:viewer-added', ({ key }) => {
-      const viewer = this.audienceBridge.viewers.find((v) => v.key === key);
-      if (viewer) this._pushAudienceMessage(AUDIENCE.VIEWER_ADDED, { viewer });
-    });
-    eventBus.on('audience:viewer-removed', ({ key }) => {
-      this._pushAudienceMessage(AUDIENCE.VIEWER_REMOVED, { key });
-    });
-    eventBus.on('audience:viewer-status', (payload) => {
-      this._pushAudienceMessage(AUDIENCE.VIEWER_STATUS, payload);
-    });
-    eventBus.on('audience:viewer-offset', (payload) => {
-      this._pushAudienceMessage(AUDIENCE.VIEWER_OFFSET, payload);
-    });
-  }
-
-  _pushAudienceMessage(type, fields = {}) {
-    window.funsync?.audiencePopoutRelay?.('to-popout', { type, ...fields });
-  }
-
-  _pushAudienceInitialState() {
-    this._pushAudienceMessage(AUDIENCE.INITIAL_STATE, {
-      roomActive: this.audienceBridge.roomActive,
-      viewers: this.audienceBridge.viewers,
-      hideKeys: !!this.settings?.get?.('audience.hideKeys'),
-      theme: document.documentElement.dataset.theme || 'dark',
-      uiStyle: document.documentElement.dataset.style || 'classic',
-      // Pop-out renderer has its own module-level i18n state. Pass the
-      // streamer's chosen locale so the pop-out shows translated UI
-      // instead of raw key constants like "audience.room.empty".
-      locale: this.settings?.get?.('player.language') || 'en',
-    });
-  }
-
-  /**
-   * Flash the screen white for ~80ms for the buzz-calibration ping
-   * (SCOPE §3.4). Viewer sees the flash via Discord screen-share + feels
-   * the device pulse a tick later — reports felt-vs-saw delta back in
-   * Discord chat so the streamer can dial the per-viewer offset.
-   */
-  _flashScreenForBuzzCalibration() {
-    let overlay = document.getElementById('audience-buzz-flash');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'audience-buzz-flash';
-      overlay.className = 'audience-buzz-flash';
-      document.body.appendChild(overlay);
-    }
-    overlay.classList.add('audience-buzz-flash--active');
-    setTimeout(() => overlay.classList.remove('audience-buzz-flash--active'), 80);
-  }
-
-  /**
-   * Fan-out hook: called from the existing single-Handy play / pause /
-   * seek / load-video pipeline to push the same op out to every viewer.
-   * Idempotent + safe to call when no room is open (no-op).
-   *
-   * `op` is one of: 'play', 'stop', 'seek', 'script'.
-   */
-  async _audienceFanOut(op, ...args) {
-    if (!this.audienceBridge?.roomActive) return;
-    try {
-      switch (op) {
-        case 'play':
-          await this.audienceBridge.hsspPlayAll(args[0] || 0);
-          break;
-        case 'stop':
-          await this.audienceBridge.hsspStopAll();
-          break;
-        case 'seek':
-          // Stop + replay at new time. Same as auto-drift recovery.
-          await this.audienceBridge.hsspStopAll();
-          await this.audienceBridge.hsspPlayAll(args[0] || 0);
-          break;
-        case 'script':
-          await this.audienceBridge.uploadScriptToAll(args[0]);
-          break;
-      }
-    } catch (err) {
-      console.warn('[Audience] fan-out failed:', err?.message || err);
-    }
-  }
-
-  /**
    * Seek to the previous / next chapter relative to the current time.
    * No wrap-around per SCOPE-chapters-bookmarks.md C-E23 — at the last
-   * chapter, "next" is a no-op (stays put). Editor-focus guard happens
-   * upstream in keyboard.js; this method just does the math + seek.
+   * chapter, "next" is a no-op (stays put). This method just does the
+   * math + seek.
    *
    * @param {number} direction — -1 (prev) or +1 (next)
    */
@@ -6765,9 +5520,7 @@ class App {
 
   /**
    * Seek to the previous / next bookmark relative to the current time.
-   * Same semantics as _jumpChapter (no wrap). Editor's Shift+B / Ctrl+B
-   * continues to use its own EditableScript bookmark list when the
-   * editor is open; this method only fires from the player surface.
+   * Same semantics as _jumpChapter (no wrap).
    *
    * @param {number} direction — -1 (prev) or +1 (next)
    */
@@ -6798,6 +5551,10 @@ class App {
     this.videoPlayer.video.currentTime = target.at / 1000;
   }
 
+  /**
+   * Cycle the VR-flatten state for the current video and persist the new
+   * setting to `library.vrFormat`. Called by the keyboard (Shift+R).
+   */
   _cycleVRFlatten() {
     if (!this.videoPlayer) return null;
     if (!this._currentStereoFormat) {
@@ -6911,17 +5668,6 @@ class App {
     // clicks never set the flag — they always load paused so a click
     // doesn't immediately commit to playback.
     const autoPlayOnLoad = !!videoData?._autoPlayOnLoad;
-    // If we're auto-playing AND there's a funscript to upload, gate
-    // playback on every connected cloud-sync device (Handy / Autoblow).
-    // Without this, `loadeddata` would fire `.play()` immediately and
-    // the video would race ahead while the cloud upload(s) are still
-    // in flight (1–3s of device silence). `_resolveCloudUpload` from
-    // each device's upload completion path lifts the gate when the
-    // last one finishes.
-    if (autoPlayOnLoad && funscriptData?.textContent) {
-      this._markCloudUploadsPending();
-    }
-
     // Resume. Two arrival kinds, deliberately different:
     //
     //  - DELIBERATE (clicked this specific video) → ask. The user picked
@@ -6989,13 +5735,13 @@ class App {
         // The library passes textContent=null in that case, which would
         // skip loadFunscript and lose badge/heatmap/sync-engine wiring.
         // If the main route in routing config points at a readable file
-        // (or one we can recover via _readRouteScript's stale-path
+        // (or one we can recover via _readScriptResilient's stale-path
         // fallback), promote it to textContent so loadFunscript runs as
         // if a matching .funscript had been auto-paired.
         if (!funscriptData.textContent) {
           const mainRoute = funscriptData._customRouting.find(r => r.role === 'main');
           if (mainRoute?.scriptPath) {
-            const read = await this._readRouteScript(mainRoute, videoData?.path || null);
+            const read = await this._readScriptResilient(mainRoute.scriptPath, videoData?.path || null);
             if (read) {
               funscriptData.textContent = read.content;
               funscriptData.name = (read.recoveredPath || mainRoute.scriptPath).split(/[\\/]/).pop();
@@ -7181,17 +5927,6 @@ class App {
         if (this.connectionPanel) this.connectionPanel._loadButtplugDeviceSettings();
         this.buttplugSync.start();
       }
-    }
-
-    // Update editor script list for multi-axis
-    if (this.scriptEditor) {
-      const scripts = [{ label: t('editor.mainAxisLabel'), path: this.scriptEditor?._funscriptPath || '' }];
-      for (const [suffix, axisPath] of axisEntries) {
-        if (!axisPath) continue;
-        const SUFFIX_LABELS = { surge: 'Surge', sway: 'Sway', twist: 'Twist', roll: 'Roll', pitch: 'Pitch', vib: 'Vibe', lube: 'Lube', pump: 'Pump', suction: 'Suction', valve: 'Valve' };
-        scripts.push({ label: SUFFIX_LABELS[suffix] || suffix, path: axisPath });
-      }
-      if (scripts.length > 1) this.scriptEditor.setAvailableScripts(scripts);
     }
   }
 
@@ -7523,7 +6258,7 @@ class App {
     }, true);
 
     // Keep chip + overflow-menu label in sync with rate changes from
-    // any surface (keyboard, editor, web-remote later).
+    // any surface (keyboard, web-remote).
     const updateLabels = (rate) => {
       const text = `${rate}×`;
       chipLabel.textContent = text;
@@ -7832,16 +6567,15 @@ class App {
   }
 
   /**
-   * Sync editor / loop suppression state into the engine. Call after any
-   * change to A-B loop, video.loop, or scriptEditor.isOpen.
+   * Sync loop suppression state into the engine. Call after any
+   * change to A-B loop or video.loop.
    */
   _syncUpNextSuppression() {
     if (!this.upNextEngine) return;
-    const editorOpen = !!this.scriptEditor?.isOpen;
     const ab = this.videoPlayer?._abLoop;
     const abLoopActive = (ab && ab.a !== null && ab.b !== null)
       || this.videoPlayer?.video?.loop === true;
-    this.upNextEngine.setSuppressed(editorOpen || abLoopActive);
+    this.upNextEngine.setSuppressed(abLoopActive);
   }
 
   _setUpNextContext(playContext) {
@@ -8385,15 +7119,7 @@ class App {
   async _refreshCollectionsUI() {
     const collections = this.settings.get('library.collections') || [];
     let activeCollectionId = this.settings.get('library.activeCollectionId') || null;
-    let sources = this.settings.get('library.sources') || [];
-
-    // Auto-migrate: if legacy directory exists but not in sources, add it
-    const legacyDir = this.settings.get('library.directory');
-    if (legacyDir && !sources.some(s => s.path === legacyDir)) {
-      const dirName = legacyDir.split(/[\\/]/).pop() || t('nav.library');
-      sources.push({ id: crypto.randomUUID(), name: dirName, path: legacyDir, enabled: true });
-      this.settings.set('library.sources', sources);
-    }
+    const sources = this.settings.get('library.sources') || [];
 
     // Which source paths are reachable right now.
     //
@@ -8456,11 +7182,6 @@ class App {
     });
     this.settings.set('library.sources', sources);
 
-    // Also set as legacy directory if it's the first source
-    if (!this.settings.get('library.directory')) {
-      this.settings.set('library.directory', dirPath);
-    }
-
     await this._refreshCollectionsUI();
     if (this._currentView() === 'library') {
       this.library.show(this._getViewEl('library'));
@@ -8485,15 +7206,13 @@ class App {
     // syncSource + excludedPaths when present. New-collection mode passes
     // null/undefined and the modal starts with sync off.
     const sources = this.settings.get('library.sources') || [];
-    const legacyDir = this.settings.get('library.directory');
     const unavailable = this.library?._unavailablePaths || new Set();
     const initialSyncSource = existingCol?.syncSource || null;
     const initialExcluded = new Set(existingCol?.excludedPaths || []);
 
-    // Get initial videos from all available sources (or legacy dir)
-    let allScanPaths = sources.length > 0
-      ? sources.filter(s => s.enabled !== false && !unavailable.has(s.path)).map(s => s.path)
-      : (legacyDir && !unavailable.has(legacyDir) ? [legacyDir] : []);
+    // Get initial videos from all available sources
+    let allScanPaths = sources
+      .filter(s => s.enabled !== false && !unavailable.has(s.path)).map(s => s.path);
 
     // Scan to get initial video list
     let videos = [];
@@ -8975,7 +7694,7 @@ class App {
     // If a funscript is currently loaded but not in the variants list, add it as "Default"
     if (this.funscriptEngine.isLoaded && baseVariants.length === 0) {
       const rawContent = this.funscriptEngine.getRawContent();
-      const currentPath = this.scriptEditor?._funscriptPath || null;
+      const currentPath = this._activeVariantPath || null;
       const currentName = this._currentVideoName
         ? this._currentVideoName.replace(/\.[^/.]+$/, '') + '.funscript'
         : 'current.funscript';
@@ -9359,10 +8078,8 @@ class App {
   async _showAddVariantModal() {
     // Get all funscripts from library sources
     const sources = this.settings.get('library.sources') || [];
-    const dirPath = sources.length > 0
-      ? sources.filter(s => s.enabled !== false).map(s => s.path)
-      : this.settings.get('library.directory');
-    if (!dirPath || (Array.isArray(dirPath) && dirPath.length === 0)) {
+    const dirPaths = sources.filter(s => s.enabled !== false).map(s => s.path);
+    if (dirPaths.length === 0) {
       // No library — fall back to file dialog
       const result = await window.funsync.selectFunscript();
       if (result) await this._addManualVariant(result.path, result.name);
@@ -9563,48 +8280,6 @@ class App {
     this._activeVariantIndex = index;
     this._activeVariantPath = variant.path || null;
 
-    // Cloud-sync re-uploads (Handy, Autoblow) have a network leg
-    // (1-3s typically) that the local sync engines (Buttplug, T-Code)
-    // don't pay. Without a pause the video keeps playing while the
-    // device goes silent — Hick's law: unexplained absence of feedback
-    // feels like a bug. Pause + overlay gives the user a clear
-    // "loading" signal.
-    //
-    // Two distinct playing surfaces exist in this app:
-    //   - Desktop video element (`videoPlayer.video`) — when nothing
-    //     else is driving playback.
-    //   - Remote proxy (`_remoteProxy`) — when a phone is the controller;
-    //     the desktop video is paused intentionally and the phone's
-    //     `<video>` is what's actually playing. The proxy mirrors its
-    //     state via WebSocket.
-    // The pause+overlay logic has to handle both. The desktop overlay
-    // covers desktop-driven playback; the phone-side overlay (already
-    // wired to `script-loading`/`script-ready` messages in the web
-    // remote) covers phone-driven playback. Earlier this branch only
-    // checked `videoPlayer.video.paused` so phone-controlled switches
-    // ran without any pause/overlay/broadcast — the user saw the phone
-    // keep playing through a 1-3s device-silent window with no signal.
-    const cloudWillReupload = !!this.handyManager?.connected
-      || !!this.autoblowManager?.connected;
-    const desktopPlaying = !this.videoPlayer.video.paused;
-    const remotePlaying = !!this._remoteActive
-      && !!this._remoteProxy
-      && !this._remoteProxy.paused;
-    const shouldPauseDesktop = cloudWillReupload && desktopPlaying;
-    const shouldPauseRemote = cloudWillReupload && remotePlaying;
-    const willPauseAny = shouldPauseDesktop || shouldPauseRemote;
-    if (shouldPauseDesktop) {
-      this.videoPlayer.video.pause();
-      this._markCloudUploadsPending();
-      this._showScriptLoadingOverlay();
-    }
-    if (willPauseAny && this.remoteBridge?.connected) {
-      // Phone listens for this and pauses its own <video> + shows its
-      // overlay. Sent for both desktop-driven (so a connected remote
-      // mirrors the desktop's loading state) and phone-driven cases.
-      this.remoteBridge.sendToPhone({ type: 'script-loading' });
-    }
-
     try {
       // Resilient read — recovers from a moved file by trying the same
       // basename in the current video's folder, and prunes the entry
@@ -9667,37 +8342,6 @@ class App {
         await this._loadMultiAxisScripts({ ...baseMulti, axes: { ...axes } });
       }
 
-      // Re-upload to Handy (stop first so start() doesn't early-return).
-       // _uploadAndStartSync hides the overlay + resumes playback when
-       // _waitingForScript is set, so no toast needed during the wait.
-       //
-       // hsspStop() is explicit because syncEngine.stop() only unbinds
-       // listeners — it does NOT command the device. On the desktop /
-       // pause-then-reupload path the video's `pause` event is what
-       // triggers the engine's `_handlePause` to call hsspStop; but on
-       // the phone-controlled path the desktop video is already paused
-       // (so no pause event fires) and the engine is stopped before any
-       // playing/paused state change reaches it. Without this explicit
-       // stop, `setScript` runs while the device is mid-playback, and
-       // the next hsspPlay can no-op (device thinks it's already
-       // playing) — so the device keeps streaming the old script even
-       // though we uploaded the new one. Same shape as `_handleSeeked`,
-       // which has always done stop-then-setScript-then-play for seeks.
-      if (this.handyManager?.connected) {
-        if (this.syncEngine) this.syncEngine.stop();
-        try { await this.handyManager.hsspStop(); } catch { /* ignore */ }
-        await this._uploadAndStartSync();
-      }
-
-      // Re-upload to Autoblow
-      await this._tryStartAutoblowSync();
-
-      // Reload editor if open
-      if (this.scriptEditor?.isOpen) {
-        this.scriptEditor.setFunscriptPath(variant.path);
-        this.scriptEditor.loadScript();
-      }
-
       // Restart gap skip
       this._startGapSkip();
 
@@ -9708,32 +8352,9 @@ class App {
       // mirror the desktop's state. Covers both phone-initiated switches
       // (desktop is responding to the request) and desktop-initiated ones
       // (so the phone reflects the change without the user re-syncing).
-      if (this.remoteBridge?.connected) {
-        this.remoteBridge.sendToPhone({ type: 'variant-changed', label: variant.label });
-        if (willPauseAny) {
-          // Hides the phone-side loading overlay + resumes the phone's
-          // <video>. Sent in both surface cases so the phone always
-          // gets the bookend it expects after a `script-loading`.
-          this.remoteBridge.sendToPhone({ type: 'script-ready' });
-        }
-      }
 
       showToast(t('toast.nowPlayingVariant', { label: variant.label }), 'info', 2000);
     } catch (err) {
-      console.warn('[Variants] Switch failed:', err.message);
-      // Clear the loading state so the user isn't stranded on a paused
-      // video with a stuck overlay if the read/load step threw. Force-
-      // clear the gate (vs. per-device resolve) because we don't know
-      // how far through the upload pipeline each cloud device got
-      // before the throw.
-      if (shouldPauseDesktop) {
-        this._clearCloudUploadGate();
-        this._hideScriptLoadingOverlay();
-        if (desktopPlaying) this.videoPlayer.video.play().catch(() => {});
-      }
-      if (willPauseAny && this.remoteBridge?.connected) {
-        this.remoteBridge.sendToPhone({ type: 'script-ready' });
-      }
       showToast(t('toast.variantSwitchFailed'), 'error');
     }
   }
@@ -9770,7 +8391,6 @@ class App {
     wire('btn-inline-tl', 'player.inlineTimeline', (on) => this.inlineViz.setTimelineVisible(on));
     wire('btn-inline-hm', 'player.inlineHeatmap', (on) => this.inlineViz.setHeatmapVisible(on));
     this._applyInlineVizOpacity();
-    this._applyDeviceSimOpacity();
   }
 
   /**
@@ -9848,19 +8468,6 @@ class App {
     const pct = Number.isFinite(Number(raw)) ? Number(raw) : INLINE_VIZ_OPACITY_DEFAULT;
     const clamped = Math.min(100, Math.max(20, pct));
     document.documentElement.style.setProperty('--inline-viz-opacity', String(clamped / 100));
-  }
-
-  /**
-   * Push the configured device-simulator opacity onto the widget. Stored
-   * 20-100 (percent) under `player.deviceSimOpacity`, defaulting to 80 to
-   * match the inline-viz overlay. Clamped rather than trusted: a hand-edited
-   * config should not be able to make the indicator invisible.
-   */
-  _applyDeviceSimOpacity(value = null) {
-    const raw = value !== null ? value : this.settings?.get?.('player.deviceSimOpacity');
-    const pct = Number.isFinite(Number(raw)) ? Number(raw) : DEVICE_SIM_OPACITY_DEFAULT;
-    const clamped = Math.min(100, Math.max(20, pct));
-    document.documentElement.style.setProperty('--device-sim-opacity', String(clamped / 100));
   }
 
   /**
@@ -9976,13 +8583,6 @@ class App {
       loop: !!this._playQueueLoop,
     };
     this._setUpNextContext(this._currentPlayContext);
-
-    // Play All always auto-plays each queue item — gate playback on
-    // every connected cloud-sync device's upload so the next video
-    // doesn't race ahead of Handy / Autoblow re-upload.
-    if (item.funscriptPath) {
-      this._markCloudUploadsPending();
-    }
 
     // Resume. A queue advance is always a flow-through arrival — nobody
     // clicked this specific video — so it resumes silently with a toast
@@ -10420,7 +9020,7 @@ class App {
    * start from the beginning). Called before the video loads so the seek
    * can be applied on `loadedmetadata`, i.e. BEFORE playback starts — that
    * way the sync engine's normal play-anchor does the work instead of the
-   * seek-correction path, which is the fragile one for cloud HSSP devices.
+   * seek-correction path.
    */
   async _maybeOfferResume(videoPath, knownDuration) {
     if (!videoPath) return null;
@@ -10561,85 +9161,6 @@ class App {
     }
   }
 
-  _showScriptLoadingOverlay() {
-    const overlay = document.getElementById('script-loading-overlay');
-    if (overlay) overlay.hidden = false;
-
-    // Fallback timeout — if any cloud upload takes too long, force-
-    // clear the gate and play anyway. We list the stuck devices in the
-    // toast so the user knows which device will be silent, not just
-    // "Handy" (Autoblow can be the slow one too).
-    this._scriptLoadingTimeout = setTimeout(() => {
-      if (this._waitingForScript) {
-        const stuck = Array.from(this._pendingUploads).join(', ');
-        console.warn(`[Cloud] Script upload timeout (${stuck}) — playing without sync`);
-        this._clearCloudUploadGate();
-        this._hideScriptLoadingOverlay();
-        this.videoPlayer.video.play().catch(() => {});
-        // Surface the failure — without this, the user sees the video play
-        // but the device stays silent and they have no idea why.
-        showToast(t('toast.handyUploadTimeout'), 'warn', 8000);
-      }
-    }, 8000);
-  }
-
-  _hideScriptLoadingOverlay() {
-    const overlay = document.getElementById('script-loading-overlay');
-    if (overlay) overlay.hidden = true;
-  }
-
-  /**
-   * Mark every currently-connected cloud-sync device as having an
-   * upload in flight. Callers use this to defer autoplay until all
-   * uploads complete — without this, the video would race ahead while
-   * Handy / Autoblow are still uploading (1–3s of silent device).
-   *
-   * Cloud devices today: Handy (HSSP cloud upload), Autoblow
-   * Ultra / VacuGlide 2 (cloud sync API). Local devices (Buttplug,
-   * TCode serial) don't need gating — their sync engines spin up the
-   * instant the funscript parses, well before video's first frame
-   * decodes.
-   *
-   * If a new cloud device class is added later, extend this method
-   * AND its upload completion path must call `_resolveCloudUpload`
-   * with the same key on every success / failure / early-exit branch.
-   */
-  _markCloudUploadsPending() {
-    if (this.handyManager?.connected) this._pendingUploads.add('handy');
-    if (this.autoblowManager?.connected) this._pendingUploads.add('autoblow');
-    this._waitingForScript = this._pendingUploads.size > 0;
-  }
-
-  /**
-   * Resolve one device's pending upload. If the set is now empty AND
-   * the video was waiting, clear the gate + hide the overlay + resume
-   * playback. Idempotent — calling with a key that isn't pending is a
-   * no-op, so upload functions can call this defensively from every
-   * exit path without checking whether the caller actually gated.
-   */
-  _resolveCloudUpload(deviceKey) {
-    if (!this._pendingUploads.has(deviceKey)) return;
-    this._pendingUploads.delete(deviceKey);
-    if (this._pendingUploads.size === 0 && this._waitingForScript) {
-      this._waitingForScript = false;
-      if (this._scriptLoadingTimeout) {
-        clearTimeout(this._scriptLoadingTimeout);
-        this._scriptLoadingTimeout = null;
-      }
-      this._hideScriptLoadingOverlay();
-      this.videoPlayer.video.play().catch(() => {});
-    }
-  }
-
-  /**
-   * Hard-reset the gate. Used by the 8s timeout (force play through a
-   * stuck upload) and by loadVideo (fresh video discards prior gating).
-   */
-  _clearCloudUploadGate() {
-    this._pendingUploads.clear();
-    this._waitingForScript = false;
-  }
-
   _updateCategoryDots() {
     const container = document.getElementById('video-category-dots');
     if (!container) return;
@@ -10656,74 +9177,6 @@ class App {
         container.appendChild(dot);
       }
     }
-  }
-
-  // --- Auto-Updater ---
-
-  _initAutoUpdater() {
-    if (!window.funsync.onUpdateEvent) return;
-
-    this._updateCleanup = window.funsync.onUpdateEvent((channel, data) => {
-      switch (channel) {
-        case 'update:available':
-          this._showUpdateToast(data);
-          break;
-        case 'update:download-progress':
-          this._updateDownloadProgress(data);
-          break;
-        case 'update:downloaded':
-          this._showUpdateReadyToast(data);
-          break;
-        case 'update:error':
-          console.warn('[AutoUpdater]', data?.message);
-          break;
-      }
-    });
-  }
-
-  _showUpdateToast(data) {
-    const container = document.createElement('div');
-    container.className = 'update-toast';
-
-    const text = document.createElement('span');
-    text.textContent = t('updater.available', { version: data.version });
-    container.appendChild(text);
-
-    const btn = document.createElement('button');
-    btn.className = 'update-toast__btn';
-    btn.textContent = t('updater.download');
-    btn.addEventListener('click', () => {
-      window.funsync.updaterDownload();
-      btn.disabled = true;
-      btn.textContent = t('updater.downloading');
-    });
-    container.appendChild(btn);
-
-    showToast(container, 'info', 15000);
-  }
-
-  _updateDownloadProgress(data) {
-    // Progress is logged; could add a progress bar in future
-    console.log(`[AutoUpdater] Download: ${data.percent}%`);
-  }
-
-  _showUpdateReadyToast(data) {
-    const container = document.createElement('div');
-    container.className = 'update-toast';
-
-    const text = document.createElement('span');
-    text.textContent = t('updater.ready', { version: data.version });
-    container.appendChild(text);
-
-    const btn = document.createElement('button');
-    btn.className = 'update-toast__btn';
-    btn.textContent = t('updater.restartNow');
-    btn.addEventListener('click', () => {
-      window.funsync.updaterInstall();
-    });
-    container.appendChild(btn);
-
-    showToast(container, 'info', 0); // Persistent until dismissed
   }
 }
 

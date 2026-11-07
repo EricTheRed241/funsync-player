@@ -1,9 +1,7 @@
-// Inline script visualization (zaikechi #209 — TL/HM toggles outside the
-// editor). The component is a read-only display overlay: these tests pin
-// the visibility state machine (script × toggle gating), the read-only
-// ActionGraph shim contract, and that clear() empties everything — the
-// editor-side behaviors (pause, Up Next suppression) must never appear
-// here by construction.
+// Inline script visualization (zaikechi #209 — TL/HM toggles). The
+// component is a read-only display overlay: these tests pin the visibility
+// state machine (script × toggle gating), the ActionGraph source contract,
+// and that clear() empties everything.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InlineViz } from '../../renderer/components/inline-viz.js';
@@ -67,12 +65,10 @@ describe('InlineViz', () => {
     expect(root.hidden).toBe(true);
   });
 
-  it('feeds the read-only ActionGraph shim (actions in, nothing selectable)', () => {
+  it('feeds the read-only ActionGraph source', () => {
     const { viz } = makeViz();
     viz.setScript(ACTIONS, 60);
     expect(viz._shim.actions).toHaveLength(3);
-    expect(viz._shim.selectedIndices.size).toBe(0);
-    expect(viz._shim.getBookmarks()).toEqual([]);
   });
 
   it('rejects unusable scripts (fewer than 2 actions) like no script at all', () => {

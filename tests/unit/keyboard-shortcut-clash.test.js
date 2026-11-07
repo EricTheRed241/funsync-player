@@ -6,8 +6,7 @@
 //
 // Dave, 2026-08-15: "we should need a list of the current keyboard shortcuts
 // in the knowledge base for easy reference and no overlap in future as well
-// as when they are available so that shortcuts for the editor and player
-// cant cause errors if they share one".
+// as when they are available".
 //
 // The reference lives in the vault (Player Systems/Keyboard Shortcuts.md).
 // This file is the half a document cannot do: it fails the build when a new
@@ -19,20 +18,12 @@
 // If you add a binding, add it to keyboard-help.js, and this will tell you
 // whether it is free.
 //
-// Two contexts, deliberately separate:
-//   PLAYER — document-level handler in keyboard.js, active when the script
-//            editor is closed (most cases check `scriptEditor?.isOpen`).
-//   EDITOR — canvas-level handler in script-editor.js, which calls
-//            stopPropagation so a focused canvas wins over the player.
-//
-// Sharing a chord ACROSS the two contexts is legal and often deliberate
-// (Esc, ?, B). Sharing one WITHIN a context is a bug: one of the two
+// Sharing one chord within the player context is a bug: one of the two
 // actions can never fire.
 //
 // Reads keyboard-help.js as TEXT rather than importing it. Importing pulls
-// in Modal, key-capture and dataService, which touch IPC at module load and
-// hang the worker — and executing app code to lint a table is the wrong
-// trade anyway.
+// in Modal and dataService, which touch IPC at module load and hang the
+// worker — and executing app code to lint a table is the wrong trade anyway.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -47,14 +38,11 @@ const HELP_SRC = readFileSync(
 const ROW_RE = /\['([^']+)',\s*t\('kbd\.([A-Za-z]+)'\)\]/g;
 const TITLE_RE = /title:\s*t\('kbd\.([A-Za-z]+)'\)/;
 
-/** Slice the source into the player builder and the editor builder. */
+/** Slice the source down to the player shortcut builder. */
 function sectionsOf(src) {
   const pi = src.indexOf('export function getPlayerShortcutGroups');
-  const ei = src.indexOf('export function getEditorShortcutGroups');
-  if (pi < 0 || ei < 0) throw new Error('keyboard-help.js builders not found');
-  return pi < ei
-    ? { player: src.slice(pi, ei), editor: src.slice(ei) }
-    : { editor: src.slice(ei, pi), player: src.slice(pi) };
+  if (pi < 0) throw new Error('keyboard-help.js builder not found');
+  return { player: src.slice(pi) };
 }
 
 function rowsOf(section) {
@@ -122,7 +110,6 @@ const ALLOWED_DUPLICATES = {
     // leaves the player. Both are documented so the user can find either.
     Esc: 2,
   },
-  editor: {},
 };
 
 describe('expandBinding', () => {
@@ -142,7 +129,7 @@ describe('expandBinding', () => {
 });
 
 describe('no chord is bound twice in the same context', () => {
-  for (const name of ['player', 'editor']) {
+  for (const name of ['player']) {
     it(`${name}`, () => {
       const map = bindingMap(SECTIONS[name]);
       const allowed = ALLOWED_DUPLICATES[name] || {};
@@ -155,31 +142,4 @@ describe('no chord is bound twice in the same context', () => {
       expect(clashes, `\n${clashes.join('\n')}\n`).toEqual([]);
     });
   }
-});
-
-// Not a failure — a record. When a chord means different things in the two
-// contexts, the ONLY thing stopping the wrong one firing is the guard
-// (`scriptEditor?.isOpen` in keyboard.js, or stopPropagation from the
-// canvas). This pins the list so adding a new shared chord is a conscious
-// act rather than something noticed later on hardware.
-describe('chords shared between player and editor', () => {
-  it('matches the documented set', () => {
-    const p = bindingMap(SECTIONS.player);
-    const e = bindingMap(SECTIONS.editor);
-    const shared = [...p.keys()].filter((k) => e.has(k)).sort();
-    expect(shared).toEqual([
-      '?',            // help in both — different content, same idea
-      'B',            // loop point B  /  add bookmark
-      'Ctrl+B',       // next bookmark in both
-      'E',            // toggle editor  /  equalize selection
-      'End',          // jump to end  /  move action to playhead
-      'Esc',          // clear loop or leave  /  clear selection or close
-      'Home',         // jump to start  /  repeat last stroke
-      'R',            // cycle aspect  /  toggle recording
-      'Shift+B',      // previous bookmark in both
-      'Shift+Left',   // seek one frame  /  move selection one frame
-      'Shift+Right',
-      'V',            // next variant  /  toggle VAD
-    ]);
-  });
 });

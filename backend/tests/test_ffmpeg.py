@@ -54,9 +54,9 @@ class TestFindBinary:
             assert os.path.isabs(result)
 
     def test_linux_dev_probes_ffmpeg_linux_directory(self, monkeypatch, tmp_path):
-        """On Linux dev (no frozen bundle), `_find_binary` must check
-        `ffmpeg-linux/` since the CI build puts static Linux binaries there.
-        The Windows-only `ffmpeg/` directory would miss it."""
+        """On Linux, `_find_binary` must check `ffmpeg-linux/`, where the
+        static Linux binaries live. The Windows-only `ffmpeg/` directory
+        would miss it."""
         # Pretend we're on Linux
         monkeypatch.setattr(os, "name", "posix")
 

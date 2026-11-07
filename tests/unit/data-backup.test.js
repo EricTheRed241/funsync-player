@@ -39,7 +39,7 @@ function fakeConfig() {
         durationCache: { '/x/v.mp4': 1234 },           // BLACKLISTED
         thumbnailCache: { '/x/v.mp4': 'data:...' },    // BLACKLISTED
       },
-      handy: { connectionKey: 'eK6Qv3AH' },
+      tcode: { port: 'COM3' },
     },
     playlists: [{ id: 'p1' }, { id: 'p2' }],
     categories: [{ id: 'cat1' }],

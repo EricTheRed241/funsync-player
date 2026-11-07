@@ -31,10 +31,6 @@ export async function openOrgasmConfigModal({ entry, knownDevices = [] } = {}) {
   const isMulti = existing.active === 'multi';
   const isCustom = existing.active === 'custom';
 
-  // The finisher loop has no Autoblow drive path (upload+sync only, no
-  // direct move API) — offering it would create a silently dead route.
-  const routableDevices = knownDevices.filter((kd) => kd.type !== 'autoblow');
-
   const result = await Modal.open({
     title: t('orgasmConfig.title'),
     onRender: (body, close) => {
@@ -262,29 +258,26 @@ export async function openOrgasmConfigModal({ entry, knownDevices = [] } = {}) {
           devSelect.className = 'connection-panel__device-select';
           const defaultOpt = document.createElement('option');
           defaultOpt.value = '';
-          defaultOpt.textContent = routableDevices.length > 0
+          defaultOpt.textContent = knownDevices.length > 0
             ? t('library.assoc.selectDevice') : t('library.assoc.connectDeviceFirst');
           devSelect.appendChild(defaultOpt);
-          for (const kd of routableDevices) {
+          for (const kd of knownDevices) {
             const opt = document.createElement('option');
             opt.value = kd.id;
             opt.textContent = kd.label;
             devSelect.appendChild(opt);
           }
-          const matchedKd = routableDevices.find((kd) => {
+          const matchedKd = knownDevices.find((kd) => {
             if (kd.type === 'buttplug') {
-              const name = kd.name || kd.label;
-              if (`buttplug:${name}` !== route.deviceId) return false;
-              if (Number.isFinite(route.buttplugIndex)) return kd.buttplugIndex === route.buttplugIndex;
-              return true;
+              return `buttplug:${kd.name}` === route.deviceId && kd.buttplugIndex === route.buttplugIndex;
             }
             return kd.id === route.deviceId;
           });
           devSelect.value = matchedKd?.id || '';
           devSelect.addEventListener('change', () => {
-            const known = routableDevices.find((kd) => kd.id === devSelect.value);
+            const known = knownDevices.find((kd) => kd.id === devSelect.value);
             if (known && known.type === 'buttplug') {
-              route.deviceId = `buttplug:${known.name || known.label}`;
+              route.deviceId = `buttplug:${known.name}`;
             } else {
               route.deviceId = devSelect.value;
             }

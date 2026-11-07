@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routes.scripts import router as scripts_router
 from routes.thumbnails import router as thumbnails_router
 from routes.metadata import router as metadata_router
 from routes.media import router as media_router, set_thumb_cache_dir
@@ -45,7 +44,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(scripts_router, prefix="/scripts", tags=["scripts"])
 app.include_router(thumbnails_router, prefix="/thumbnails", tags=["thumbnails"])
 app.include_router(metadata_router, prefix="/metadata", tags=["metadata"])
 app.include_router(media_router, prefix="/api/media", tags=["media"])
@@ -56,10 +54,7 @@ app.include_router(locale_router, prefix="/api/remote", tags=["locale"])
 app.include_router(status_router, prefix="/api", tags=["status"])
 
 # Web remote SPA served at /remote/ — static files live in backend/web-remote/.
-# Resolve relative to this file so it works both in dev (python main.py) and
-# packaged (PyInstaller rewrites __file__ to the temp bundle root).
-_remote_base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-_remote_dir = os.path.join(_remote_base, "web-remote")
+_remote_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web-remote")
 if os.path.isdir(_remote_dir):
     app.mount("/remote", StaticFiles(directory=_remote_dir, html=True), name="web-remote")
 
@@ -79,20 +74,13 @@ async def _remote_no_stale_cache(request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
-# Locale bundles for the web-remote i18n module. In packaged builds
-# PyInstaller's spec ships renderer/locales/ as <_MEIPASS>/locales/.
-# In dev they live at <project>/renderer/locales/ (two dirs up from
-# backend/main.py). Web-remote fetches `/locales/<lang>.json` at boot.
+# Locale bundles for the web-remote i18n module, at <project>/renderer/locales/
+# (two dirs up from backend/main.py). Web-remote fetches `/locales/<lang>.json`
+# at boot.
 def _resolve_locales_dir() -> str | None:
-    candidates = []
-    if hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, "locales"))
     here = os.path.dirname(os.path.abspath(__file__))
-    candidates.append(os.path.abspath(os.path.join(here, "..", "renderer", "locales")))
-    for c in candidates:
-        if os.path.isdir(c):
-            return c
-    return None
+    locales = os.path.abspath(os.path.join(here, "..", "renderer", "locales"))
+    return locales if os.path.isdir(locales) else None
 
 _locales_dir = _resolve_locales_dir()
 if _locales_dir:

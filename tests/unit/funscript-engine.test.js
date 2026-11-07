@@ -1,5 +1,5 @@
 // Unit tests for FunscriptEngine — imports from real source
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { FunscriptEngine, isAutoMatch } from '../../renderer/js/funscript-engine.js';
 
 // --- isAutoMatch (standalone export) ---
@@ -51,16 +51,7 @@ describe('FunscriptEngine', () => {
   });
 
   beforeEach(() => {
-    engine = new FunscriptEngine({ backendPort: 5123 });
-    vi.clearAllMocks();
-    window.funsync.convertFunscript.mockResolvedValue({
-      csv: '0,0\n500,100\n1000,50',
-      hash: 'abc123',
-      local_url: 'http://localhost:5123/scripts/abc123.csv',
-      size_bytes: 24,
-      action_count: 3,
-      duration_ms: 1000,
-    });
+    engine = new FunscriptEngine();
   });
 
   describe('loadContent', () => {
@@ -98,18 +89,6 @@ describe('FunscriptEngine', () => {
     it('throws on empty actions', async () => {
       await expect(engine.loadContent('{"actions": []}')).rejects.toThrow('no actions');
     });
-
-    it('calls convertFunscript via IPC', async () => {
-      await engine.loadContent(validFunscript);
-      expect(window.funsync.convertFunscript).toHaveBeenCalledWith(validFunscript);
-    });
-
-    it('handles backend conversion failure gracefully', async () => {
-      window.funsync.convertFunscript.mockRejectedValue(new Error('fail'));
-      const info = await engine.loadContent(validFunscript);
-      expect(info.actionCount).toBe(3);
-      expect(info.localUrl).toBeNull();
-    });
   });
 
   describe('getPositionAt', () => {
@@ -140,7 +119,7 @@ describe('FunscriptEngine', () => {
     });
 
     it('returns 50 when no funscript loaded', () => {
-      const fresh = new FunscriptEngine({ backendPort: 5123 });
+      const fresh = new FunscriptEngine();
       expect(fresh.getPositionAt(100)).toBe(50);
     });
   });
@@ -160,9 +139,6 @@ describe('FunscriptEngine', () => {
         actionCount: 3,
         durationMs: 1000,
         durationFormatted: '0:01',
-        localUrl: 'http://localhost:5123/scripts/abc123.csv',
-        csvHash: 'abc123',
-        csvSizeBytes: 24,
       });
     });
   });
@@ -274,7 +250,7 @@ describe('getPositionAt — reflects what is actually played', () => {
   let engine;
 
   beforeEach(async () => {
-    engine = new FunscriptEngine({ backendPort: 5123 });
+    engine = new FunscriptEngine();
     // A deliberate 10s hole between 1000ms and 11000ms.
     await engine.loadContent(JSON.stringify({
       actions: [

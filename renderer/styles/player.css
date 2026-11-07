@@ -520,7 +520,6 @@ html, body {
 .player-container--mini .player__controls,
 .player-container--mini .player__top-bar,
 .player-container--mini .center-play,
-.player-container--mini .script-loading-overlay,
 /* Gap-skip ("Skip to next action") overlay — the manual skip buttons don't
    belong in the tiny corner overlay (they'd sit mispositioned over the video).
    Hide them in mini mode; auto-skip, if enabled, still runs silently. */
@@ -1521,12 +1520,12 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   white-space: nowrap;
 }
 
-/* Handy button LED indicator */
-.control-btn--handy {
+/* Devices button LED indicator */
+.control-btn--devices {
   position: relative;
 }
 
-.handy-led {
+.device-led {
   display: none;
   position: absolute;
   top: 4px;
@@ -1536,13 +1535,13 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   border-radius: 50%;
 }
 
-.handy-led--connected {
+.device-led--connected {
   display: block;
   background: #4caf50;
   box-shadow: 0 0 4px #4caf50;
 }
 
-.handy-led--connecting {
+.device-led--connecting {
   display: block;
   background: #ff9800;
   animation: pulse 1s ease-in-out infinite;
@@ -1602,30 +1601,15 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   margin: 0 3px;
 }
 
-/* === Funscript Badge (bottom bar) ===
- * Now interactive — click opens the script editor (matches the
- * E shortcut). Was a non-interactive marker with hover style;
- * giving it real action removes the false-affordance signifier
- * (Norman). Hover/focus styling matches .control-btn for visual
- * consistency. */
+/* === Funscript Badge (bottom bar) === */
 .funscript-badge {
   display: flex;
   align-items: center;
   justify-content: center;
   color: #4caf50;
-  cursor: pointer;
   min-width: 36px;
   min-height: 36px;
   padding: 8px;
-  border-radius: 4px;
-  transition: background var(--transition-fast);
-}
-.funscript-badge:hover {
-  background: var(--video-overlay-control-hover);
-}
-.funscript-badge:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .funscript-badge svg {
@@ -1842,11 +1826,8 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   padding: 24px;
-  /* Was 520–650px. Widened to 620–760px after the Audience tab landed
-     in 2026-06-02 — 7 tabs (Handy / Buttplug.io / TCode / Autoblow /
-     Audience / Sync / Settings) didn't fit in the old cap and the
-     row started wrapping. min/max stay capped at 90vw so a narrow
-     viewport can't push the modal off-screen. */
+  /* min/max stay capped at 90vw so a narrow viewport can't push the
+     modal off-screen. */
   min-width: min(90vw, 620px);
   max-width: min(90vw, 760px);
   max-height: 90vh;
@@ -2064,37 +2045,7 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   margin-bottom: 12px;
 }
 
-.connection-panel__info-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  padding: 4px 0;
-  color: var(--text-secondary);
-}
-
-.connection-panel__warning {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: rgba(255, 152, 0, 0.15);
-  border-radius: 6px;
-  font-size: 12px;
-  color: #ff9800;
-}
-
-.connection-panel__sync {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 12px;
-}
-
-.connection-panel__sync-quality {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* Connection Panel — Offset / Stroke / Reset sections */
+/* Connection Panel — sections */
 .connection-panel__section {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
@@ -2107,158 +2058,6 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   color: var(--text-secondary);
   margin-bottom: 8px;
   font-weight: 500;
-}
-
-.connection-panel__offset-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Offset slider — Fitts: track 4→6px, thumb 14→18px. */
-.connection-panel__offset-slider {
-  flex: 1;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--progress-bg);
-  border-radius: 3px;
-  outline: none;
-  cursor: pointer;
-}
-
-.connection-panel__offset-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  background: var(--accent);
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.connection-panel__offset-slider:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-}
-
-.connection-panel__offset-number {
-  width: 56px;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  padding: 4px 6px;
-  color: var(--text-primary);
-  font-family: var(--font-family);
-  font-size: 12px;
-  text-align: center;
-  outline: none;
-}
-
-.connection-panel__offset-number:focus {
-  border-color: var(--accent);
-}
-
-.connection-panel__offset-unit {
-  font-size: 12px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.connection-panel__stroke-container {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.connection-panel__stroke-value {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
-  min-width: 24px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.connection-panel__stroke-track-wrapper {
-  position: relative;
-  flex: 1;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-}
-
-/* Stroke range slider (dual-overlap min/max). Track 4→6px, thumb 16→18px.
-   Fitts: dual-overlap thumbs are inherently misclick-prone; bigger thumbs
-   each give a clearer hit zone. */
-.connection-panel__stroke-track {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 6px;
-  background: var(--progress-bg);
-  border-radius: 3px;
-  pointer-events: none;
-}
-
-.connection-panel__stroke-fill {
-  position: absolute;
-  height: 6px;
-  background: var(--accent);
-  border-radius: 3px;
-  pointer-events: none;
-}
-
-.connection-panel__stroke-input {
-  position: absolute;
-  width: 100%;
-  height: 28px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  outline: none;
-  pointer-events: none;
-  margin: 0;
-  padding: 0;
-}
-
-.connection-panel__stroke-input::-webkit-slider-runnable-track {
-  height: 6px;
-  background: transparent;
-  border: none;
-}
-
-.connection-panel__stroke-input::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  background: var(--accent);
-  border-radius: 50%;
-  cursor: pointer;
-  pointer-events: auto;
-  /* Center thumb on the 6px track: thumb-radius (9) - track-half (3) = 6 above */
-  margin-top: -6px;
-  position: relative;
-  z-index: 1;
-}
-
-.connection-panel__stroke-input:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.3);
-}
-
-.connection-panel__action--reset,
-.connection-panel__btn--reset {
-  margin-top: 8px;
-  width: 100%;
-  background: var(--state-warning-soft);
-  color: var(--state-warning);
-  border: 1px solid var(--state-warning-soft);
-}
-
-.connection-panel__action--reset:hover,
-.connection-panel__btn--reset:hover {
-  background: var(--state-warning-soft);
-  filter: brightness(1.2);
 }
 
 /* Tab strip — uses the canonical modal-tab pattern (underline-on-active
@@ -2533,13 +2332,6 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   width: 100%;
 }
 
-.settings-panel__filler-test-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-
 .connection-panel__motion-preview-row {
   display: flex;
   width: 100%;
@@ -2730,160 +2522,6 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   min-width: 30px;
   text-align: right;
   flex-shrink: 0;
-}
-
-.connection-panel__setting-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 4px 0 2px;
-  line-height: 1.4;
-}
-
-/* === Device Simulator === */
-
-.device-sim {
-  position: fixed;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-  /* User-set in Settings > Playback (20-100). Applied to the whole widget so
-     the bar, its border and the readout fade together. Default matches the
-     inline-viz overlay so the two video overlays agree out of the box. */
-  opacity: var(--device-sim-opacity, 0.8);
-}
-
-/* Shape follows OpenFunscripter's simulator (OFS_ScriptSimulator.cpp): a
-   chunky square-cornered bar with a heavy border, filled from the bottom,
-   with height lines every 10%.
-
-   DELIBERATELY THINNER THAN OFS. Its bar is 120 wide x 400 long (ratio 0.3);
-   ours is 42 x 200 (ratio 0.21). That is Dave's call for how it sits over
-   video, not an oversight — do not "correct" it back to OFS's proportions.
-   The border IS scaled with the width (OFS border:width is ~6.7%; 3px of
-   42px is ~7%), because a fixed border on a narrower bar reads as heavier.
-
-   Colours are ours, not OFS's — its cyan front becomes the FunSync accent,
-   and its indicator pink is near-identical to our --accent-hover already. */
-.device-sim__track {
-  position: relative;
-  width: 42px;
-  height: 200px;
-  /* Video-overlay context, like .device-sim__info below — deliberately dark
-     on BOTH themes so the bar stays readable over bright footage. */
-  background: rgba(16, 16, 16, 0.75);
-  border: 3px solid rgba(var(--accent-rgb), 0.5);
-  /* OFS draws quads, so corners are square; 2px only takes the jaggies off. */
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.device-sim__fill {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: linear-gradient(to top, var(--accent), var(--accent-hover));
-  transition: height 50ms linear;
-}
-
-/* Height lines at every 10%, drawn OVER the fill as OFS does. One repeating
-   gradient rather than nine elements. */
-.device-sim__lines {
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    to top,
-    transparent 0 calc(10% - 1px),
-    rgba(var(--accent-rgb), 0.5) calc(10% - 1px) 10%
-  );
-}
-
-.device-sim__marker {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--accent-hover);
-  transform: translateY(50%);
-  transition: bottom 50ms linear;
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.65);
-}
-
-.device-sim__info {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  /* Video-overlay context — stays white-on-dark on both themes. */
-  color: var(--video-overlay-text-dim);
-  background: rgba(16, 16, 16, 0.75);
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
-  border-radius: 2px;
-  padding: 3px 6px;
-}
-
-.device-sim__pos {
-  color: var(--accent-hover);
-  font-weight: 600;
-}
-
-.device-sim__pos::after {
-  content: '%';
-}
-
-.device-sim__speed::after {
-  content: '/s';
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .device-sim__fill,
-  .device-sim__marker { transition: none; }
-}
-
-/* === Script Loading Overlay === */
-.script-loading-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 60;
-}
-
-.script-loading-overlay__content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-.script-loading-overlay__spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--border-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.script-loading-overlay__text {
-  font-size: 14px;
-  /* Video-overlay context — white-on-dark on both themes. */
-  color: var(--video-overlay-text);
-  font-weight: 500;
 }
 
 /* === Info Overlay === */
@@ -3334,191 +2972,6 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 .update-toast__btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-/* === Audience Broadcast — Slim tab content + buzz flash overlay =========
- * SCOPE: notes/features/SCOPE-audience-broadcast.md §3.1, §3.2, §3.4.
- * Pop-out window has its own stylesheet (audience-room.css). The bits
- * here are everything that lives in the main app's chrome: the slim
- * Audience tab content, the buzz-calibration screen-flash overlay, and
- * the broadcasting chip in the player top bar. */
-
-.audience-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-}
-
-.audience-panel__info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-overlay));
-  border: 1px solid color-mix(in srgb, var(--state-warning) 35%, transparent);
-  border-radius: 6px;
-}
-
-.audience-panel__info-header {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.audience-panel__info-warn-icon {
-  color: var(--state-warning);
-}
-
-.audience-panel__info-title {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--state-warning);
-}
-
-.audience-panel__info-intro {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--text-primary);
-}
-
-.audience-panel__info-bullets {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.audience-panel__info-bullets li {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
-.audience-panel__divider {
-  height: 1px;
-  background: var(--border-subtle);
-}
-
-.audience-panel__actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 0;
-}
-
-.audience-panel__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.audience-panel__status-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.audience-panel__status-dot--connected { background: var(--state-connected); box-shadow: 0 0 8px var(--state-connected-glow); }
-.audience-panel__status-dot--warning   { background: var(--state-warning); }
-.audience-panel__status-dot--error     { background: var(--accent); }
-.audience-panel__status-dot--dim       { background: var(--text-muted); }
-
-.audience-panel__buttons {
-  display: flex;
-  gap: 8px;
-}
-
-.audience-panel__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  font-size: 13px;
-  font-weight: 500;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  min-height: 36px;
-  transition: background 0.15s, opacity 0.15s;
-}
-
-.audience-panel__btn--primary {
-  background: var(--accent);
-  color: #fff;
-}
-
-.audience-panel__btn--primary:hover {
-  background: var(--accent-hover, var(--accent));
-}
-
-.audience-panel__btn--danger {
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  color: var(--accent);
-}
-
-.audience-panel__btn--danger:hover {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
-/* Buzz-calibration screen flash — 80ms white overlay. Drawn outside any
- * stacking context (body child) so it covers the whole window. */
-.audience-buzz-flash {
-  position: fixed;
-  inset: 0;
-  background: #fff;
-  opacity: 0;
-  pointer-events: none;
-  z-index: 99999;
-  transition: opacity 40ms ease-out;
-}
-
-.audience-buzz-flash--active {
-  opacity: 0.85;
-  transition: opacity 0ms;
-}
-
-/* Broadcasting indicator in the player top bar — mirrors the existing
- * sync chip's shape (DESIGN.md §2.2 video-overlay tokens). */
-.player__broadcast-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: var(--video-overlay-bg-soft);
-  color: var(--video-overlay-text);
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.player__broadcast-chip:hover {
-  background: var(--video-overlay-control-hover);
-}
-
-.player__broadcast-chip-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--state-connected);
-  box-shadow: 0 0 6px var(--state-connected-glow);
-}
-
-.player__broadcast-chip[hidden] {
-  display: none;
 }
 
 /* === Detached player pop-out window (Phase 2) === */

@@ -11,7 +11,6 @@ function createMockSettings() {
   const data = {
     'library.collections': [],
     'library.activeCollectionId': null,
-    'library.directory': '/test/videos',
   };
 
   return {

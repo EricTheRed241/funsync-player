@@ -284,9 +284,9 @@ describe('RemoteBridge — sendToPhone', () => {
     const b = new RemoteBridge();
     b.connect();
     latest().simulateOpen();
-    b.sendToPhone({ type: 'device-status', handy: 'connected' });
+    b.sendToPhone({ type: 'device-status', buttplug: 'connected' });
     expect(latest().sent.length).toBe(1);
-    expect(JSON.parse(latest().sent[0])).toEqual({ type: 'device-status', handy: 'connected' });
+    expect(JSON.parse(latest().sent[0])).toEqual({ type: 'device-status', buttplug: 'connected' });
   });
 
   it('drops silently when the socket is not open', () => {

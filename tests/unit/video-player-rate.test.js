@@ -7,8 +7,7 @@
 //
 // VideoPlayer is the single source of truth for rate state. The editor
 // dropdown, player-controls speed button, keyboard <  / > shortcuts,
-// and (Phase 2) web-remote all route through setPlaybackRate. The HSSP↔
-// HDSP mode switch that keeps Handy in sync at non-1× rates lives here.
+// and (Phase 2) web-remote all route through setPlaybackRate.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VideoPlayer, PLAYBACK_RATE_PRESETS } from '../../renderer/js/video-player.js';
@@ -121,50 +120,6 @@ describe('VideoPlayer.cyclePlaybackRate', () => {
       observed.push(player.video.playbackRate);
     }
     expect(observed).toEqual([...PLAYBACK_RATE_PRESETS]);
-  });
-});
-
-describe('VideoPlayer Handy HSSP↔HDSP mode switch', () => {
-  let player;
-  let syncEngine, handyHdsp, handyManager;
-
-  beforeEach(() => {
-    player = makePlayer();
-    syncEngine = { start: vi.fn(), stop: vi.fn() };
-    handyHdsp = { active: false, start: vi.fn(), stop: vi.fn() };
-    handyManager = { connected: true };
-    player.setHandySyncRefs({
-      handyManager,
-      handySyncEngine: syncEngine,
-      handyHdspSync: handyHdsp,
-    });
-  });
-
-  it('on non-1× — stops HSSP sync engine and starts HDSP polled engine', () => {
-    handyHdsp.active = false;
-    player.setPlaybackRate(1.5);
-    expect(syncEngine.stop).toHaveBeenCalledTimes(1);
-    expect(handyHdsp.start).toHaveBeenCalledTimes(1);
-  });
-
-  it('on 1× — stops HDSP and restarts HSSP', () => {
-    handyHdsp.active = true;
-    player.setPlaybackRate(1);
-    expect(handyHdsp.stop).toHaveBeenCalledTimes(1);
-    expect(syncEngine.start).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not double-start HDSP when already active', () => {
-    handyHdsp.active = true;
-    player.setPlaybackRate(0.5);
-    expect(handyHdsp.start).not.toHaveBeenCalled();
-  });
-
-  it('no-op on rate change when Handy is disconnected', () => {
-    handyManager.connected = false;
-    player.setPlaybackRate(1.5);
-    expect(syncEngine.stop).not.toHaveBeenCalled();
-    expect(handyHdsp.start).not.toHaveBeenCalled();
   });
 });
 

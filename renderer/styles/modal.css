@@ -1020,27 +1020,6 @@
  * inline-style hack).
  */
 
-.vr-modal__experimental {
-  padding: 8px 12px;
-  background: var(--state-warning-soft);
-  border: 1px solid var(--state-warning);
-  border-radius: 6px;
-  margin-bottom: 12px;
-}
-
-.vr-modal__experimental-label {
-  font-weight: 600;
-  color: var(--state-warning);
-  font-size: 11px;
-  letter-spacing: 0.5px;
-  margin-right: 6px;
-}
-
-.vr-modal__experimental-text {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
 /* Section block — purpose-labelled, numbered to convey ordering. The
  * h2 + border-bottom mirrors `.settings-panel__section-header` so the
  * VR modal reads as a sibling to the Settings modal at the eye-level
@@ -1100,8 +1079,8 @@
 }
 
 /* Subnet-mismatch warning under the Device-Sync host field. Soft amber
- * state token, matching the experimental banner — a hint the entered IP
- * is on a different network than this PC, not a hard error. */
+ * state token — a hint the entered IP is on a different network than
+ * this PC, not a hard error. */
 .vr-modal__subnet-warning {
   font-size: 12px;
   color: var(--state-warning);
@@ -1470,235 +1449,6 @@
  * primary action (Open GitHub Issue) lands at the right edge — the
  * commit position users expect. */
 
-/* === Custom position keys — Settings → Playback === */
-/* SCOPE: notes/features/SCOPE-editor-custom-position-keys.md
-   Pattern: defaults block (read-only) + custom bindings list + add-row
-   form + reset action. Reuses the panel-level --36px Fitts floor for
-   primary controls (capture, save, remove). */
-
-.custom-position-keys {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.custom-position-keys__section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.custom-position-keys__heading {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-}
-
-.custom-position-keys__defaults-body {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.custom-position-keys__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.custom-position-keys__empty {
-  font-size: 13px;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.custom-position-keys__row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto auto auto;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 8px;
-  background: var(--surface-overlay);
-  border-radius: 6px;
-}
-
-.custom-position-keys__cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.custom-position-keys__cell--key {
-  font-family: var(--font-mono, monospace);
-  font-weight: 600;
-}
-
-.custom-position-keys__cell--position {
-  font-variant-numeric: tabular-nums;
-}
-
-.custom-position-keys__cell-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.custom-position-keys__row-warn {
-  font-size: 11px;
-  color: var(--state-warning);
-}
-
-.custom-position-keys__remove-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, color 0.15s;
-}
-
-.custom-position-keys__remove-btn:hover {
-  background: var(--surface-overlay-strong);
-  color: var(--accent);
-}
-
-.custom-position-keys__add-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto auto;
-  gap: 12px;
-  align-items: center;
-  padding: 8px;
-  background: var(--surface-overlay);
-  border: 1px dashed var(--border-subtle);
-  border-radius: 6px;
-}
-
-.custom-position-keys__pos-input {
-  width: 64px;
-  padding: 6px 8px;
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.custom-position-keys__save-btn {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  min-height: 36px;
-  transition: background 0.15s, opacity 0.15s;
-}
-
-.custom-position-keys__save-btn:hover:not(:disabled) {
-  background: var(--accent-hover, var(--accent));
-}
-
-.custom-position-keys__save-btn:disabled,
-.custom-position-keys__save-btn--disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.custom-position-keys__warning {
-  font-size: 12px;
-  color: var(--state-warning);
-}
-
-.custom-position-keys__actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.custom-position-keys__reset-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  min-height: 36px;
-  transition: background 0.15s, color 0.15s;
-}
-
-.custom-position-keys__reset-btn:hover {
-  background: var(--surface-overlay-strong);
-  color: var(--text-primary);
-}
-
-.custom-position-keys__hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* Key-capture component — single field that listens for a keydown.
-   Used inside the custom-position-keys add-row, but designed reusable. */
-.key-capture {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 120px;
-  min-height: 36px;
-  padding: 6px 12px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-family: var(--font-mono, monospace);
-  font-weight: 600;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.key-capture:hover {
-  background: var(--surface-card-hover);
-}
-
-.key-capture:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.key-capture--capturing {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  font-weight: 400;
-  font-style: italic;
-  color: var(--text-secondary);
-}
-
-.key-capture--empty {
-  font-weight: 400;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-
 /* === Remote Video ("Load from URL") modal === */
 .remote-video-modal { display: flex; flex-direction: column; gap: 10px; min-width: 380px; }
 .remote-video-modal__label { font-size: 13px; color: var(--text-secondary); }
@@ -1988,4 +1738,59 @@
 .categories__icon-emoji-input {
   font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
                "Twemoji Mozilla", "Segoe UI Symbol", sans-serif;
+}
+
+/* === Keyboard-help overlay (`?` shortcut) ===
+ * Two-column dl: keys → description, grouped by topic. Theme-aware via
+ * semantic tokens. <kbd> chips have the same shape on both themes. */
+.kbd-help {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  margin-bottom: 16px;
+}
+.kbd-help__section { min-width: 0; }
+.kbd-help__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 8px;
+}
+.kbd-help__list {
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.kbd-help__keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+.kbd-help__desc {
+  font-size: 12px;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.4;
+  align-self: center;
+}
+.kbd-help kbd {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+@media (max-width: 720px) {
+  .kbd-help { grid-template-columns: 1fr; }
 }

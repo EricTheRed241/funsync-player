@@ -1,32 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeBins, renderBins, speedToColor } from '../../renderer/js/heatmap-strip.js';
-
-describe('speedToColor', () => {
-  it('returns a blue tone for zero speed', () => {
-    const c = speedToColor(0);
-    expect(c).toBe('rgb(0,0,255)');
-  });
-
-  it('returns red for max speed (saturated)', () => {
-    const c = speedToColor(0.5);
-    expect(c).toBe('rgb(255,0,0)');
-  });
-
-  it('clamps above-max speeds', () => {
-    const c = speedToColor(5);
-    expect(c).toBe('rgb(255,0,0)');
-  });
-
-  it('clamps negative speeds to zero', () => {
-    const c = speedToColor(-1);
-    expect(c).toBe('rgb(0,0,255)');
-  });
-
-  it('transitions through green mid-range', () => {
-    const c = speedToColor(0.25);
-    expect(c).toBe('rgb(0,255,0)');
-  });
-});
+import { computeBins, renderBins } from '../../renderer/js/heatmap-strip.js';
 
 describe('computeBins', () => {
   it('returns empty array when actions are missing', () => {

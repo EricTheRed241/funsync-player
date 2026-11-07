@@ -581,8 +581,8 @@ export class ButtplugManager {
    * The OutputType enum in buttplug-js v4 is: Vibrate, Rotate, Oscillate,
    * Constrict, Inflate, Position, HwPositionWithDuration, Temperature,
    * Spray, Led. Different device drivers expose different output types
-   * for the same physical function — e.g. the FW4+ Handy driver in
-   * Intiface advertises HwPositionWithDuration (used by timed linear
+   * for the same physical function — e.g. some stroker drivers in
+   * Intiface advertise HwPositionWithDuration (used by timed linear
    * commands) but not the step-based Position. We accept both so the
    * device is correctly flagged as linear.
    *

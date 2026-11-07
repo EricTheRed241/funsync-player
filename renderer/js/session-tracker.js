@@ -30,7 +30,7 @@ const HISTORY_MAX = 50;
  * @property {string|null}    videoId        null when idle
  * @property {number}         currentTime    seconds
  * @property {number}         duration       seconds
- * @property {object}         devices        { handy, buttplug, tcode, autoblow } booleans — true = actively driven
+ * @property {object}         devices        { buttplug, tcode } booleans — true = actively driven
  * @property {number|null}    actionCount    total actions in current script
  * @property {Array<{name:string, startedAt:number, endedAt:number|null, duration:number}>} videos
  */
@@ -41,9 +41,7 @@ export class SessionTracker extends EventTarget {
     this._settings = settings || null;
     /** @type {Session|null} */
     this._session = null;
-    this._lastDeviceStatus = {
-      handy: false, buttplug: false, tcode: false, autoblow: false,
-    };
+    this._lastDeviceStatus = { buttplug: false, tcode: false };
   }
 
   // --- Public read API -----------------------------------------------------
@@ -180,7 +178,7 @@ export class SessionTracker extends EventTarget {
   /**
    * Snapshot of which devices are currently being driven. Set by app.js
    * whenever the sync-engine → device wiring changes.
-   * @param {{handy?:boolean,buttplug?:boolean,tcode?:boolean,autoblow?:boolean}} d
+   * @param {{buttplug?:boolean,tcode?:boolean}} d
    */
   setDeviceStatus(d) {
     this._lastDeviceStatus = { ...this._lastDeviceStatus, ...d };

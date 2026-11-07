@@ -144,42 +144,6 @@ export class TCodeSync {
     this._resetIndices();
   }
 
-  /** Whether a video is currently driving this engine. */
-  isDriving() {
-    return !!this._active;
-  }
-
-  /**
-   * Push one L0 target from OUTSIDE the video clock (the filler test button).
-   *
-   * Applies the same per-axis invert/range/cutoff a scripted position gets,
-   * for the same reason the Buttplug side does: a test that skipped them
-   * would not be a test of what the user will actually feel.
-   *
-   * @param {number} position 0-100
-   * @param {number} durationMs time to reach it
-   * @returns {boolean} false when refused
-   */
-  sendPositionNow(position, durationMs) {
-    if (this._active) return false;
-    if (!this.tcode?.connected) return false;
-    if (!this.isAxisEnabled('L0')) return false;
-
-    let value = applyInvert(position, this.isAxisInverted('L0'));
-    const range = this.getAxisRange('L0');
-    value = range.min + (value / 100) * (range.max - range.min);
-    value = applyCutoff(value, this._axisCutoff.get('L0'));
-
-    this.tcode.sendAxes({ L0: value }, undefined, { L0: this._clampMove(durationMs) });
-    return true;
-  }
-
-  /** Idle the device after an off-clock run. */
-  stopTestOutput() {
-    if (this._active) return;
-    try { this.tcode?.stop?.(); } catch { /* best-effort */ }
-  }
-
   /** Set actions for a companion axis. */
   setAxisActions(tcode, actions) {
     if (!actions || actions.length < 2) {

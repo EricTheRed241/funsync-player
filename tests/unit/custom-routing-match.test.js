@@ -16,8 +16,8 @@ const dev = (index, name) => ({ index, name });
 describe('matchButtplugRoute', () => {
   describe('index + name both match (happy path)', () => {
     it('returns matchedBy:index when stored index points to the right-named device', () => {
-      const devices = [dev(0, 'The Handy'), dev(1, 'Lovense')];
-      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 0 };
+      const devices = [dev(0, 'Kiiroo Keon'), dev(1, 'Lovense')];
+      const route = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 0 };
       const result = matchButtplugRoute(route, devices);
       expect(result?.matchedBy).toBe('index');
       expect(result.dev.index).toBe(0);
@@ -35,16 +35,16 @@ describe('matchButtplugRoute', () => {
 
   describe('name-only fallback (no stored index)', () => {
     it('matches by name when route has no buttplugIndex', () => {
-      const devices = [dev(0, 'Lovense'), dev(1, 'The Handy')];
-      const route = { deviceId: 'buttplug:The Handy' };
+      const devices = [dev(0, 'Lovense'), dev(1, 'Kiiroo Keon')];
+      const route = { deviceId: 'buttplug:Kiiroo Keon' };
       const result = matchButtplugRoute(route, devices);
       expect(result?.matchedBy).toBe('name');
       expect(result.dev.index).toBe(1);
     });
 
     it('matches by name when buttplugIndex is explicitly undefined', () => {
-      const devices = [dev(0, 'The Handy')];
-      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: undefined };
+      const devices = [dev(0, 'Kiiroo Keon')];
+      const route = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: undefined };
       const result = matchButtplugRoute(route, devices);
       expect(result?.matchedBy).toBe('name');
     });
@@ -60,30 +60,30 @@ describe('matchButtplugRoute', () => {
 
   describe('name confirms index (safety rule)', () => {
     it('rejects an index hit when the name at that slot differs, and falls back to name', () => {
-      // Scenario: route saved with OG Handy at index 0. User removed OG Handy
-      // from Intiface; Intiface now has Handy 2 at slot 0 and the real OG
-      // Handy reconnected at index 3.
-      const devices = [dev(0, 'Handy 2'), dev(3, 'OG Handy')];
-      const route = { deviceId: 'buttplug:OG Handy', buttplugIndex: 0 };
+      // Scenario: route saved with OG Keon at index 0. User removed OG Keon
+      // from Intiface; Intiface now has Keon 2 at slot 0 and the real OG
+      // Keon reconnected at index 3.
+      const devices = [dev(0, 'Keon 2'), dev(3, 'OG Keon')];
+      const route = { deviceId: 'buttplug:OG Keon', buttplugIndex: 0 };
       const result = matchButtplugRoute(route, devices);
       expect(result?.matchedBy).toBe('name');
-      expect(result.dev.index).toBe(3);          // correctly finds real OG Handy
+      expect(result.dev.index).toBe(3);          // correctly finds real OG Keon
       expect(result.indexMismatch).toBe(true);    // signals that we rejected the index hit
     });
 
     it('returns null when index-hit name mismatches and stored name is not connected anywhere', () => {
-      const devices = [dev(0, 'Handy 2')];
-      const route = { deviceId: 'buttplug:OG Handy', buttplugIndex: 0 };
-      // Slot 0 is now Handy 2, OG Handy nowhere to be found
+      const devices = [dev(0, 'Keon 2')];
+      const route = { deviceId: 'buttplug:OG Keon', buttplugIndex: 0 };
+      // Slot 0 is now Keon 2, OG Keon nowhere to be found
       const result = matchButtplugRoute(route, devices);
       expect(result).toBeNull();
     });
 
     it('prefers index when name matches even if another device shares the same name', () => {
-      // Both slots are "The Handy" (two OG Handys in Intiface); stored index
+      // Both slots are "Kiiroo Keon" (two Keons in Intiface); stored index
       // must win over picking the first one by name.
-      const devices = [dev(0, 'The Handy'), dev(1, 'The Handy')];
-      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 1 };
+      const devices = [dev(0, 'Kiiroo Keon'), dev(1, 'Kiiroo Keon')];
+      const route = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 1 };
       const result = matchButtplugRoute(route, devices);
       expect(result?.matchedBy).toBe('index');
       expect(result.dev.index).toBe(1);
@@ -93,7 +93,7 @@ describe('matchButtplugRoute', () => {
   describe('no match', () => {
     it('returns null when neither index nor name is found', () => {
       const devices = [dev(0, 'Lovense')];
-      const route = { deviceId: 'buttplug:OG Handy', buttplugIndex: 5 };
+      const route = { deviceId: 'buttplug:OG Keon', buttplugIndex: 5 };
       expect(matchButtplugRoute(route, devices)).toBeNull();
     });
 
@@ -121,25 +121,25 @@ describe('matchButtplugRoute', () => {
   describe('backwards compat — legacy routes without buttplugIndex', () => {
     it('matches legacy routes by name exactly like pre-fix behaviour', () => {
       // Route saved before we started storing buttplugIndex
-      const devices = [dev(0, 'The Handy'), dev(1, 'Lovense')];
-      const route = { deviceId: 'buttplug:The Handy' };  // no index field
+      const devices = [dev(0, 'Kiiroo Keon'), dev(1, 'Lovense')];
+      const route = { deviceId: 'buttplug:Kiiroo Keon' };  // no index field
       const result = matchButtplugRoute(route, devices);
       expect(result?.matchedBy).toBe('name');
       expect(result.dev.index).toBe(0);
     });
   });
 
-  describe('two same-name devices (two-Handy regression)', () => {
-    // Scenario from user report: two OG Handys both reported as "The Handy"
+  describe('two same-name devices regression', () => {
+    // Scenario from user report: two Keons both reported as "Kiiroo Keon"
     // over Intiface BT. Each route carries a distinct buttplugIndex; both
     // must index-match independently without clobbering each other.
-    const twoHandys = [dev(0, 'The Handy'), dev(1, 'The Handy')];
+    const twoKeons = [dev(0, 'Kiiroo Keon'), dev(1, 'Kiiroo Keon')];
 
     it('two routes with distinct indices each match their own device', () => {
-      const route0 = { deviceId: 'buttplug:The Handy', buttplugIndex: 0 };
-      const route1 = { deviceId: 'buttplug:The Handy', buttplugIndex: 1 };
-      const r0 = matchButtplugRoute(route0, twoHandys);
-      const r1 = matchButtplugRoute(route1, twoHandys);
+      const route0 = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 0 };
+      const route1 = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 1 };
+      const r0 = matchButtplugRoute(route0, twoKeons);
+      const r1 = matchButtplugRoute(route1, twoKeons);
       expect(r0?.matchedBy).toBe('index');
       expect(r0.dev.index).toBe(0);
       expect(r1?.matchedBy).toBe('index');
@@ -150,9 +150,9 @@ describe('matchButtplugRoute', () => {
       // Route had buttplugIndex 5 (no longer present). Name-fallback would
       // normally pick device 0 — but if caller claims index 0, fallback
       // must step to index 1.
-      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 5 };
+      const route = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 5 };
       const claimed = new Set([0]);
-      const result = matchButtplugRoute(route, twoHandys, { excludeIndices: claimed });
+      const result = matchButtplugRoute(route, twoKeons, { excludeIndices: claimed });
       expect(result?.matchedBy).toBe('name');
       expect(result.dev.index).toBe(1);
     });
@@ -160,17 +160,17 @@ describe('matchButtplugRoute', () => {
     it('excludeIndices does not affect a direct index-hit (authoritative)', () => {
       // Even if caller claims index 0, a route whose own stored index IS 0
       // still wins at the index-hit path — index-match is authoritative.
-      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 0 };
+      const route = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 0 };
       const claimed = new Set([0]);
-      const result = matchButtplugRoute(route, twoHandys, { excludeIndices: claimed });
+      const result = matchButtplugRoute(route, twoKeons, { excludeIndices: claimed });
       expect(result?.matchedBy).toBe('index');
       expect(result.dev.index).toBe(0);
     });
 
     it('returns null if every same-name device is already claimed and index is stale', () => {
-      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 9 };
+      const route = { deviceId: 'buttplug:Kiiroo Keon', buttplugIndex: 9 };
       const claimed = new Set([0, 1]);
-      expect(matchButtplugRoute(route, twoHandys, { excludeIndices: claimed })).toBeNull();
+      expect(matchButtplugRoute(route, twoKeons, { excludeIndices: claimed })).toBeNull();
     });
   });
 });

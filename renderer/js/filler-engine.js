@@ -321,52 +321,6 @@ export function mergeFiller(authoredActions, fillerActions) {
 }
 
 /**
- * Bake filler into raw funscript JSON for cloud upload.
- *
- * Handy HSSP and Autoblow/Vacuglide upload the script and play it from the
- * device's own clock — there is no per-tick hook to inject through, which is
- * the same reason the extender and cutoff are applied at upload time. Without
- * this, the tick-driven devices (T-Code, Buttplug, Handy HDSP) would get
- * filler and the two most popular devices would silently get none.
- *
- * ORDER MATTERS at the call site: extend -> fill -> clamp.
- *   - the extender runs first because it measures the AUTHORED natural range,
- *     which filler would corrupt
- *   - the cutoff runs last so filler obeys the same comfort limit as the
- *     main script
- * Running after the extender also means filler joins to post-extender
- * positions, which is what keeps joins seamless when the extender is on.
- *
- * Lives here rather than in device-transform-stack.js to keep the dependency
- * one-way — this module already imports from there, and the reverse would be
- * a cycle.
- *
- * @param {string} rawContent — funscript JSON
- * @param {object|null} fillerOptions
- * @returns {string} JSON with filler merged, or the original string on no-op
- */
-export function fillRawScriptContent(rawContent, fillerOptions) {
-  if (typeof rawContent !== 'string' || rawContent.length === 0) return rawContent;
-  if (!fillerOptions || !fillerOptions.enabled) return rawContent;
-  let parsed;
-  try {
-    parsed = JSON.parse(rawContent);
-  } catch {
-    return rawContent;
-  }
-  if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
-    return rawContent;
-  }
-  const merged = applyFiller(parsed.actions, fillerOptions);
-  if (!merged.some((a) => a._filler)) return rawContent;   // nothing qualified
-  return JSON.stringify({
-    ...parsed,
-    // Strip the marker — this is going to a device, not back into our engine.
-    actions: merged.map((a) => ({ at: a.at, pos: a.pos })),
-  });
-}
-
-/**
  * One-shot: authored actions in, filler-merged actions out.
  * Returns the input unchanged when disabled or when nothing qualifies.
  */

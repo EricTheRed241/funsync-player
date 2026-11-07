@@ -262,14 +262,14 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
  * One class for ALL right-side buttons (EroScripts, Devices, Web
  * Remote, VR, Settings). Was four different shapes pre-redesign:
  *   - .nav-bar__eroscripts   bordered pill
- *   - .nav-bar__handy        multi-element widget
+ *   - .nav-bar__devices      multi-element widget
  *   - .nav-bar__settings     icon-only square (also used by VR + Remote)
  * Visual fragmentation made the bar read as four separate categories.
  * Unified into .nav-bar__action — Shneiderman #1 consistency, Nielsen
  * #4 standards.
  *
  * Modifier classes layered on top:
- *   .nav-bar__handy           multi-element widget shape (LED + 2 spans)
+ *   .nav-bar__devices         multi-element widget shape (LED + 2 spans)
  *   .nav-bar__eroscripts      reuses base — no special border anymore
  *   .nav-bar__remote-btn      icon button with optional --connected tint
  *   .nav-bar__vr-btn          icon button with --connected tint
@@ -322,7 +322,7 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
    adds material recognition). Same for the Devices widget — its label
    is part of its multi-element shape. */
 .nav-bar__eroscripts .nav-bar__action-label,
-.nav-bar__handy .nav-bar__action-label {
+.nav-bar__devices .nav-bar__action-label {
   display: inline;
   font-size: 12px;
   font-weight: 500;
@@ -351,11 +351,11 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
 /* Devices widget — LED dot + label + status text. Inherits the
    .nav-bar__action base; the only differences are the multi-element
    gap and the LED-specific styling. */
-.nav-bar__handy {
+.nav-bar__devices {
   gap: 8px;
 }
 
-.nav-bar__handy-led {
+.nav-bar__device-led {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -363,23 +363,23 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
   flex-shrink: 0;
   transition: box-shadow 150ms ease;
 }
-.nav-bar__handy-led--connected {
+.nav-bar__device-led--connected {
   background: #4caf50;
   box-shadow: 0 0 6px #4caf50;
 }
-.nav-bar__handy-led--connecting {
+.nav-bar__device-led--connecting {
   background: #ff9800;
   animation: pulse 1s ease-in-out infinite;
 }
-.nav-bar__handy-led--active {
+.nav-bar__device-led--active {
   box-shadow: 0 0 8px 2px #4caf50;
 }
 
-.nav-bar__handy-label {
+.nav-bar__device-label {
   line-height: 1;
 }
 
-.nav-bar__handy-text {
+.nav-bar__device-text {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1;
@@ -394,7 +394,7 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
 }
 
 /* VR toolbar button — tints accent when the PCVR companion bridge is
-   connected, same signal pattern as the Handy LED. Without this the user
+   connected, same signal pattern as the device LED. Without this the user
    has no way to tell from the toolbar whether the VR bridge is live. */
 .nav-bar__vr-btn--connected,
 .nav-bar__vr-btn--connected:hover {

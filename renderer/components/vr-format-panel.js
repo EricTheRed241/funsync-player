@@ -10,8 +10,7 @@
 //
 // What it does:
 //   - Lets the user override the auto-detected stereo packing for the
-//     current video. Lives in `library.vrFormat[path]` (richer than the
-//     legacy `library.vrFlatten` two-string shape — see store.js).
+//     current video. Lives in `library.vrFormat[path]` (see store.js).
 //   - Eye picker (left/top vs right/bottom) when a stereo projection is
 //     active.
 //   - Zoom slider (1.0×–2.0×) when planar; lets users override the

@@ -1,4 +1,4 @@
-// ConnectionPanel — UI for connecting to Handy or Buttplug.io devices
+// ConnectionPanel — UI for connecting to Buttplug.io and TCode devices
 
 import { PATTERN_TYPES, DEFAULT_PATTERN, sampleMotion } from '../js/motion-source.js';
 import { icon, X, Info } from '../js/icons.js';
@@ -10,10 +10,7 @@ import {
 } from '../js/auto-offset.js';
 import { eventBus } from '../js/event-bus.js';
 import { showToast } from '../js/toast.js';
-import { medianLatency, isApplicableLatency, clampToOffsetRange } from '../js/latency-sample.js';
 
-/** Probes per "Measure" press. Odd, so the median is a real sample. */
-const LATENCY_SAMPLE_COUNT = 5;
 // TCode v0.3 axes exposed in the Axis Ranges UI. Naming + type match the
 // multi-axis spec module (renderer/js/multi-axis.js) and the official TCode
 // specification. L0 is the main stroke; R0-R2 are rotation, V* are vibration,
@@ -41,48 +38,29 @@ const TCODE_UI_AXES = [
 ];
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete, onButtplugResync, onHandyCutoffChanged, audienceBridge }) {
-    this.handy = handyManager;
+  constructor({ buttplugManager, buttplugSync, tcodeManager, tcodeSync, vrBridge, settings, onButtplugResync }) {
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
     this.tcodeManager = tcodeManager || null;
     this.tcodeSync = tcodeSync || null;
-    this.autoblowManager = autoblowManager || null;
-    this.autoblowSync = autoblowSync || null;
     this.vrBridge = vrBridge || null;
-    this.audienceBridge = audienceBridge || null;
     this.settings = settings;
-    // Called after the Re-sync time button completes a successful sync.
-    // App wires this to hsspStop + hsspPlay at the current video position
-    // so the device is left in a clean HSSP state. Without it, the SDK's
-    // `.sync()` routine can leave the device in maintenance mode and
-    // subsequent pause / setScript / next-video commands silently fail.
-    // Community-reported bug 2026-06-01: "after Re-sync time, script
-    // doesn't pause when video pauses, doesn't switch on new video".
-    this.onResyncComplete = onResyncComplete || null;
     // Called by the Buttplug "Reload script" button. App re-arms the
     // Buttplug sync engine at the current video position. Returns true
     // if a device was available to re-arm. Optional.
     this.onButtplugResync = onButtplugResync || null;
-    // Called when the Handy output-limits (cutoff) sliders change. App
-    // wires this to push the new clamp into the per-tick HDSP engine
-    // (HSSP picks it up on the next upload). Optional.
-    this.onHandyCutoffChanged = onHandyCutoffChanged || null;
     this._panel = null;
     this._visible = false;
-    this._activeTab = 'handy'; // 'handy' | 'buttplug'
+    this._activeTab = 'buttplug';
 
     this._createPanel();
     this._bindEvents();
     this._loadSavedSettings();
 
-    // Initial tab LED state — all four start "not connected" so the
-    // strip reads the correct neutral state on first show. Real status
-    // updates flow in via SDK callbacks once auto-connect kicks off.
-    this._setTabLedState('handy', 'disconnected');
+    // Initial tab LED state — all start "not connected" so the strip
+    // reads the correct neutral state on first show.
     this._setTabLedState('buttplug', 'disconnected');
     this._setTabLedState('tcode', 'disconnected');
-    this._setTabLedState('autoblow', 'disconnected');
   }
 
   _createPanel() {
@@ -99,11 +77,7 @@ export class ConnectionPanel {
         <button class="connection-panel__close control-btn" data-i18n-aria-label="connection.closeAria" aria-label="${_esc(t('connection.closeAria'))}"><i data-lucide="x"></i></button>
       </div>
       <div class="connection-panel__tabs" role="tablist" data-i18n-aria-label="connection.tabsAria" aria-label="${_esc(t('connection.tabsAria'))}">
-        <button class="connection-panel__tab connection-panel__tab--active" role="tab" id="connection-panel__tab-btn-handy" aria-selected="true" aria-controls="tab-handy" data-tab="handy">
-          <span class="connection-panel__tab-led" data-tab-led="handy" aria-hidden="true"></span>
-          <span class="connection-panel__tab-label">Handy</span>
-        </button>
-        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-buttplug" aria-selected="false" aria-controls="tab-buttplug" data-tab="buttplug" tabindex="-1">
+        <button class="connection-panel__tab connection-panel__tab--active" role="tab" id="connection-panel__tab-btn-buttplug" aria-selected="true" aria-controls="tab-buttplug" data-tab="buttplug">
           <span class="connection-panel__tab-led" data-tab-led="buttplug" aria-hidden="true"></span>
           <span class="connection-panel__tab-label">Buttplug.io</span>
         </button>
@@ -111,128 +85,12 @@ export class ConnectionPanel {
           <span class="connection-panel__tab-led" data-tab-led="tcode" aria-hidden="true"></span>
           <span class="connection-panel__tab-label">TCode</span>
         </button>
-        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-autoblow" aria-selected="false" aria-controls="tab-autoblow" data-tab="autoblow" tabindex="-1">
-          <span class="connection-panel__tab-led" data-tab-led="autoblow" aria-hidden="true"></span>
-          <span class="connection-panel__tab-label">Autoblow</span>
-        </button>
-        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-audience" aria-selected="false" aria-controls="tab-audience" data-tab="audience" tabindex="-1">
-          <span class="connection-panel__tab-led" data-tab-led="audience" aria-hidden="true"></span>
-          <span class="connection-panel__tab-label" data-i18n="audience.tab.label">Audience</span>
-        </button>
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-sync" aria-selected="false" aria-controls="tab-sync" data-tab="sync" tabindex="-1">
           <span class="connection-panel__tab-label" data-i18n="connection.tabSync">Sync</span>
         </button>
       </div>
 
-      <div class="connection-panel__tab-content" id="tab-handy" role="tabpanel" aria-labelledby="connection-panel__tab-btn-handy">
-
-      <div class="connection-panel__status">
-        <span class="connection-panel__led" id="connection-led"></span>
-        <span class="connection-panel__status-text" id="connection-status-text" data-i18n="connection.status.notConnected">${_esc(t('connection.status.notConnected'))}</span>
-      </div>
-
-      <div class="connection-panel__form">
-        <label for="connection-key-input" class="connection-panel__label" data-i18n="connection.handy.connectionKey">${_esc(t('connection.handy.connectionKey'))}</label>
-        <div class="connection-panel__input-row">
-          <input type="text" id="connection-key-input"
-                 class="connection-panel__input"
-                 data-i18n-placeholder="connection.handy.connectionKeyPlaceholder"
-                 placeholder="${_esc(t('connection.handy.connectionKeyPlaceholder'))}"
-                 maxlength="32"
-                 data-i18n-aria-label="connection.handy.connectionKeyAria"
-                 aria-label="${_esc(t('connection.handy.connectionKeyAria'))}">
-          <button id="btn-connect" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
-        </div>
-      </div>
-
-      <div class="connection-panel__info" id="device-info-section" hidden>
-        <div class="connection-panel__info-row">
-          <span data-i18n="connection.handy.firmware">${_esc(t('connection.handy.firmware'))}</span>
-          <span id="device-firmware">—</span>
-        </div>
-        <div class="connection-panel__info-row">
-          <span data-i18n="connection.handy.model">${_esc(t('connection.handy.model'))}</span>
-          <span id="device-model">—</span>
-        </div>
-        <div class="connection-panel__info-row">
-          <span data-i18n="connection.handy.rtd">${_esc(t('connection.handy.rtd'))}</span>
-          <span id="device-rtd">—</span>
-        </div>
-        <div id="firmware-warning" class="connection-panel__warning" hidden data-i18n="connection.handy.firmwareUpdate">
-          ${_esc(t('connection.handy.firmwareUpdate'))}
-        </div>
-      </div>
-
-      <div class="connection-panel__sync" id="sync-section" hidden>
-        <button id="btn-resync" class="connection-panel__btn connection-panel__btn--secondary" data-i18n="connection.btn.resync">
-          ${_esc(t('connection.btn.resync'))}
-        </button>
-        <span id="sync-quality" class="connection-panel__sync-quality"></span>
-      </div>
-
-      <div class="connection-panel__section" id="offset-section" hidden>
-        <label class="connection-panel__section-label" data-i18n="connection.handy.syncOffset">${_esc(t('connection.handy.syncOffset'))}</label>
-        <div class="connection-panel__offset-row">
-          <input type="range" class="connection-panel__offset-slider" id="offset-slider"
-                 min="-1000" max="1000" step="10" value="0"
-                 data-i18n-aria-label="connection.handy.offsetSliderAria"
-                 aria-label="${_esc(t('connection.handy.offsetSliderAria'))}">
-          <input type="number" class="connection-panel__offset-number" id="offset-number"
-                 min="-1000" max="1000" step="10" value="0"
-                 data-i18n-aria-label="connection.handy.offsetValueAria"
-                 aria-label="${_esc(t('connection.handy.offsetValueAria'))}">
-          <span class="connection-panel__offset-unit">ms</span>
-        </div>
-      </div>
-
-      <div class="connection-panel__section" id="stroke-section" hidden>
-        <label class="connection-panel__section-label" data-i18n="connection.handy.strokeRange">${_esc(t('connection.handy.strokeRange'))}</label>
-        <div class="connection-panel__stroke-container">
-          <span class="connection-panel__stroke-value" id="stroke-min-val">0</span>
-          <div class="connection-panel__stroke-track-wrapper">
-            <div class="connection-panel__stroke-track"></div>
-            <div class="connection-panel__stroke-fill" id="stroke-fill"></div>
-            <input type="range" class="connection-panel__stroke-input" id="stroke-min-slider"
-                   min="0" max="100" value="0"
-                   data-i18n-aria-label="connection.handy.strokeMinAria"
-                   aria-label="${_esc(t('connection.handy.strokeMinAria'))}">
-            <input type="range" class="connection-panel__stroke-input" id="stroke-max-slider"
-                   min="0" max="100" value="100"
-                   data-i18n-aria-label="connection.handy.strokeMaxAria"
-                   aria-label="${_esc(t('connection.handy.strokeMaxAria'))}">
-          </div>
-          <span class="connection-panel__stroke-value" id="stroke-max-val">100</span>
-        </div>
-        <button id="btn-reset-stroke" class="connection-panel__btn connection-panel__btn--reset" data-i18n="connection.btn.resetStroke">
-          ${_esc(t('connection.btn.resetStroke'))}
-        </button>
-
-        <!-- Output limits (cutoff): a HARD floor/ceiling clamp, distinct
-             from Stroke range above. Stroke range REMAPS the script into a
-             window; Output limits PIN out-of-band positions to the boundary
-             and leave the rest untouched ("commands below 20 are ignored").
-             Applies on the next video load / variant switch (same as the
-             Range Extender — HSSP bakes it into the uploaded script). -->
-        <label class="connection-panel__section-label" style="margin-top:12px" data-i18n="connection.handy.outputLimits">${_esc(t('connection.handy.outputLimits'))}</label>
-        <div class="connection-panel__device-safety">
-          <span class="connection-panel__tcode-range-label" data-i18n="connection.handy.cutoffMin">${_esc(t('connection.handy.cutoffMin'))}</span>
-          <input type="range" id="handy-cutoff-min-slider" min="0" max="99" value="0"
-                 class="connection-panel__safety-slider"
-                 data-i18n-aria-label="connection.handy.cutoffMinAria"
-                 aria-label="${_esc(t('connection.handy.cutoffMinAria'))}">
-          <span class="connection-panel__tcode-range-label" data-i18n="connection.handy.cutoffMax">${_esc(t('connection.handy.cutoffMax'))}</span>
-          <input type="range" id="handy-cutoff-max-slider" min="1" max="100" value="100"
-                 class="connection-panel__safety-slider"
-                 data-i18n-aria-label="connection.handy.cutoffMaxAria"
-                 aria-label="${_esc(t('connection.handy.cutoffMaxAria'))}">
-          <span class="connection-panel__safety-value" id="handy-cutoff-val">0-100%</span>
-        </div>
-        <div class="connection-panel__setting-hint" data-i18n="connection.handy.cutoffHint">${_esc(t('connection.handy.cutoffHint'))}</div>
-      </div>
-
-      </div><!-- end tab-handy -->
-
-      <div class="connection-panel__tab-content" id="tab-buttplug" role="tabpanel" aria-labelledby="connection-panel__tab-btn-buttplug" hidden>
+      <div class="connection-panel__tab-content" id="tab-buttplug" role="tabpanel" aria-labelledby="connection-panel__tab-btn-buttplug">
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="bp-connection-led"></span>
@@ -267,8 +125,7 @@ export class ConnectionPanel {
 
       <!-- Output tuning. Moved here from Settings ▸ Playback (2026-08-05):
            these only mean anything with a Buttplug device connected, and
-           every comparable per-device setting for the Handy, T-Code and
-           Autoblow already lives in this panel. -->
+           every comparable per-device setting already lives in this panel. -->
       <div class="connection-panel__form">
         <div class="connection-panel__section-label" data-i18n="connection.buttplug.tuning">${_esc(t('connection.buttplug.tuning'))}</div>
 
@@ -375,73 +232,6 @@ export class ConnectionPanel {
 
       </div><!-- end tab-tcode -->
 
-      <div class="connection-panel__tab-content" id="tab-autoblow" role="tabpanel" aria-labelledby="connection-panel__tab-btn-autoblow" hidden>
-
-      <div class="connection-panel__status">
-        <span class="connection-panel__led" id="ab-led"></span>
-        <span class="connection-panel__status-text" id="ab-status-text" data-i18n="connection.status.notConnected">${_esc(t('connection.status.notConnected'))}</span>
-      </div>
-
-      <div class="connection-panel__form">
-        <label for="ab-token-input" class="connection-panel__label" data-i18n="connection.autoblow.deviceToken">${_esc(t('connection.autoblow.deviceToken'))}</label>
-        <div class="connection-panel__input-row">
-          <input type="password" id="ab-token-input"
-                 class="connection-panel__input"
-                 data-i18n-placeholder="connection.autoblow.deviceTokenPlaceholder"
-                 placeholder="${_esc(t('connection.autoblow.deviceTokenPlaceholder'))}"
-                 data-i18n-aria-label="connection.autoblow.deviceTokenAria"
-                 aria-label="${_esc(t('connection.autoblow.deviceTokenAria'))}">
-          <button id="ab-connect-btn" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
-        </div>
-      </div>
-
-      <div id="ab-device-info" class="connection-panel__section" hidden>
-        <label class="connection-panel__section-label" data-i18n="connection.autoblow.device">${_esc(t('connection.autoblow.device'))}</label>
-        <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label" data-i18n="connection.autoblow.type">${_esc(t('connection.autoblow.type'))}</span>
-          <span id="ab-device-type" class="connection-panel__setting-value">—</span>
-        </div>
-        <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label" data-i18n="connection.autoblow.latency">${_esc(t('connection.autoblow.latency'))}</span>
-          <span id="ab-latency" class="connection-panel__setting-value">—</span>
-          <button id="ab-latency-btn" class="connection-panel__action connection-panel__action--utility" data-i18n="connection.btn.measure">${_esc(t('connection.btn.measure'))}</button>
-          <button id="ab-latency-apply" class="connection-panel__action connection-panel__action--utility" data-i18n="connection.btn.applyLatency" hidden>${_esc(t('connection.btn.applyLatency'))}</button>
-        </div>
-        <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label" data-i18n="connection.autoblow.offset">${_esc(t('connection.autoblow.offset'))}</span>
-          <input type="range" id="ab-offset" min="-1000" max="1000" value="0" class="connection-panel__safety-slider" style="flex:1">
-          <span id="ab-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
-        </div>
-
-        <!-- Output limits (cutoff): hard floor/ceiling clamp. Autoblow is a
-             cloud device, so this bakes into the uploaded script — applies
-             on the next video load / variant switch. -->
-        <label class="connection-panel__section-label" style="margin-top:10px" data-i18n="connection.autoblow.outputLimits">${_esc(t('connection.autoblow.outputLimits'))}</label>
-        <div class="connection-panel__device-safety">
-          <span class="connection-panel__tcode-range-label" data-i18n="connection.autoblow.cutoffMin">${_esc(t('connection.autoblow.cutoffMin'))}</span>
-          <input type="range" id="ab-cutoff-min-slider" min="0" max="99" value="0"
-                 class="connection-panel__safety-slider"
-                 data-i18n-aria-label="connection.autoblow.cutoffMinAria"
-                 aria-label="${_esc(t('connection.autoblow.cutoffMinAria'))}">
-          <span class="connection-panel__tcode-range-label" data-i18n="connection.autoblow.cutoffMax">${_esc(t('connection.autoblow.cutoffMax'))}</span>
-          <input type="range" id="ab-cutoff-max-slider" min="1" max="100" value="100"
-                 class="connection-panel__safety-slider"
-                 data-i18n-aria-label="connection.autoblow.cutoffMaxAria"
-                 aria-label="${_esc(t('connection.autoblow.cutoffMaxAria'))}">
-          <span class="connection-panel__safety-value" id="ab-cutoff-val">0-100%</span>
-        </div>
-        <div class="connection-panel__setting-hint" data-i18n="connection.autoblow.cutoffHint">${_esc(t('connection.autoblow.cutoffHint'))}</div>
-      </div>
-
-      </div><!-- end tab-autoblow -->
-
-      <!-- Audience tab — SCOPE-audience-broadcast.md §3.1. Slim by design:
-           info block + status + Create / Bring to front / End Room.
-           All viewer management lives in the pop-out window. -->
-      <div class="connection-panel__tab-content" id="tab-audience" role="tabpanel" aria-labelledby="connection-panel__tab-btn-audience" hidden>
-        <div id="audience-panel-mount"></div>
-      </div>
-
       <div class="connection-panel__tab-content" id="tab-sync" role="tabpanel" aria-labelledby="connection-panel__tab-btn-sync" hidden>
 
       <div class="connection-panel__section" style="padding:8px 12px;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:6px;margin-bottom:10px">
@@ -457,10 +247,6 @@ export class ConnectionPanel {
         <div class="connection-panel__setting-row">
           <span class="connection-panel__setting-label" data-i18n="connection.sync.vrJitter">${_esc(t('connection.sync.vrJitter'))}</span>
           <span id="sync-vr-jitter" class="connection-panel__setting-value">—</span>
-        </div>
-        <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label" data-i18n="connection.sync.handyRtd">${_esc(t('connection.sync.handyRtd'))}</span>
-          <span id="sync-handy-rtd" class="connection-panel__setting-value">—</span>
         </div>
         <div class="connection-panel__setting-row">
           <span class="connection-panel__setting-label" data-i18n="connection.sync.vrTransport">${_esc(t('connection.sync.vrTransport'))}</span>
@@ -531,35 +317,6 @@ export class ConnectionPanel {
       this.hide();
     });
 
-    // Connect button
-    const btnConnect = this._panel.querySelector('#btn-connect');
-    const keyInput = this._panel.querySelector('#connection-key-input');
-
-    btnConnect.addEventListener('click', () => this._onConnect());
-    keyInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this._onConnect();
-    });
-
-    // Re-sync button
-    this._panel.querySelector('#btn-resync').addEventListener('click', () => this._onResync());
-
-    // Offset slider + number input
-    const offsetSlider = this._panel.querySelector('#offset-slider');
-    const offsetNumber = this._panel.querySelector('#offset-number');
-
-    offsetSlider.addEventListener('input', (e) => {
-      const val = parseInt(e.target.value, 10);
-      offsetNumber.value = val;
-      this._onOffsetChange(val);
-    });
-
-    offsetNumber.addEventListener('change', (e) => {
-      const val = Math.max(-1000, Math.min(1000, parseInt(e.target.value, 10) || 0));
-      offsetSlider.value = val;
-      offsetNumber.value = val;
-      this._onOffsetChange(val);
-    });
-
     // Re-render dynamic strings when the active locale changes. The
     // global translatePage() handles all `data-i18n*` attributes in the
     // static markup, but the per-device rows, status text (set via JS
@@ -567,12 +324,10 @@ export class ConnectionPanel {
     // them here. Idempotent — re-rendering doesn't lose user state.
     eventBus.on('language:changed', () => {
       try {
-        // Re-derive status text on all four device tabs from current
+        // Re-derive status text on the device tabs from current
         // connection state — picks up the new locale immediately.
-        if (this.handy) this._updateStatus(this.handy.connected ? 'connected' : 'disconnected');
         if (this.buttplug) this._updateButtplugStatus(this.buttplug.connected ? 'connected' : 'disconnected');
         if (this.tcodeManager) this._updateTCodeStatus(this.tcodeManager.connected ? 'connected' : 'disconnected');
-        if (this.autoblowManager) this._updateAutoblowStatus(this.autoblowManager.connected ? 'connected' : 'disconnected');
         if (this.buttplug?.connected) this._updateButtplugDeviceList();
         if (this._activeTab === 'sync') this._refreshSyncTab();
       } catch (err) {
@@ -580,98 +335,18 @@ export class ConnectionPanel {
       }
     });
 
-    // Keep the Handy tab slider + Sync tab Handy row in sync with each
-    // other. Both write the same `handy.defaultOffset` setting, so
-    // whichever the user adjusts, the other one mirrors it without
-    // needing a panel rebuild. Without this, each view read its value
-    // once at panel-show and showed stale numbers after the user moved
-    // the other control — confusing and easy to accidentally double-tune.
-    eventBus.on('settings:changed', ({ path, value }) => {
-      if (path === 'handy.defaultOffset') {
-        if (offsetSlider && String(offsetSlider.value) !== String(value)) {
-          offsetSlider.value = value;
-        }
-        if (offsetNumber && String(offsetNumber.value) !== String(value)) {
-          offsetNumber.value = value;
-        }
-      }
+    eventBus.on('settings:changed', ({ path }) => {
       // Refresh the Sync tab if it's the one being viewed — device
       // offsets or VR offset just changed and the row values (plus the
       // "total effective" hint in VR mode) need to reflect it.
       if (this._activeTab === 'sync' && (
-        path === 'handy.defaultOffset'
-        || path === 'buttplug.defaultOffset'
+        path === 'buttplug.defaultOffset'
         || path === 'tcode.defaultOffset'
         || path === 'vr.offset'
       )) {
         this._refreshSyncTab();
       }
     });
-
-    // Stroke range sliders (dual-thumb)
-    const minSlider = this._panel.querySelector('#stroke-min-slider');
-    const maxSlider = this._panel.querySelector('#stroke-max-slider');
-    const minVal = this._panel.querySelector('#stroke-min-val');
-    const maxVal = this._panel.querySelector('#stroke-max-val');
-    const trackWrapper = this._panel.querySelector('.connection-panel__stroke-track-wrapper');
-
-    // Click anywhere on track to move nearest thumb
-    trackWrapper.addEventListener('click', (e) => {
-      const rect = trackWrapper.getBoundingClientRect();
-      const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
-      const minV = parseInt(minSlider.value, 10);
-      const maxV = parseInt(maxSlider.value, 10);
-      const distToMin = Math.abs(pct - minV);
-      const distToMax = Math.abs(pct - maxV);
-
-      if (distToMin <= distToMax) {
-        const clamped = Math.min(pct, maxV - 1);
-        minSlider.value = clamped;
-        minVal.textContent = clamped;
-        this._updateStrokeFill();
-        this._onStrokeChange(clamped, maxV);
-      } else {
-        const clamped = Math.max(pct, minV + 1);
-        maxSlider.value = clamped;
-        maxVal.textContent = clamped;
-        this._updateStrokeFill();
-        this._onStrokeChange(minV, clamped);
-      }
-    });
-
-    minSlider.addEventListener('input', (e) => {
-      let val = parseInt(e.target.value, 10);
-      const maxV = parseInt(maxSlider.value, 10);
-      if (val >= maxV) {
-        val = maxV - 1;
-        e.target.value = val;
-      }
-      minVal.textContent = val;
-      this._updateStrokeFill();
-      this._onStrokeChange(val, maxV);
-    });
-
-    maxSlider.addEventListener('input', (e) => {
-      let val = parseInt(e.target.value, 10);
-      const minV = parseInt(minSlider.value, 10);
-      if (val <= minV) {
-        val = minV + 1;
-        e.target.value = val;
-      }
-      maxVal.textContent = val;
-      this._updateStrokeFill();
-      this._onStrokeChange(minV, val);
-    });
-
-    // Reset stroke button
-    this._panel.querySelector('#btn-reset-stroke').addEventListener('click', () => this._onResetStroke());
-
-    // Handy output-limits (cutoff) sliders — a hard floor/ceiling clamp,
-    // separate from the stroke-range remap above. Persisted to
-    // `handy.cutoff`; read at upload time by app.js `_cutoffFromSettings`,
-    // so changes take effect on the next video load / variant switch (same
-    // model as the Range Extender — HSSP bakes it into the uploaded script).
-    this._initHandyCutoff();
 
     // Tab switching — click activates a tab; arrow keys move focus
     // within the tablist per WAI-ARIA APG (Left/Right + Home/End,
@@ -694,11 +369,6 @@ export class ConnectionPanel {
         }
       });
     }
-
-    // SDK callbacks
-    this.handy.onConnect = () => this._updateStatus('connected');
-    this.handy.onDisconnect = () => this._updateStatus('disconnected');
-    this.handy.onError = (msg) => this._showError(msg);
 
     // Buttplug callbacks + events
     if (this.buttplug) {
@@ -785,180 +455,17 @@ export class ConnectionPanel {
       this._refreshTCodePorts(savedPort);
     }
 
-    // Settings tab — language dropdown (Phase 4 of the i18n rollout)
-
-    // Autoblow callbacks + events
-    if (this.autoblowManager) {
-      this._panel.querySelector('#ab-connect-btn').addEventListener('click', () => this._onAutoblowConnect());
-
-      const savedToken = this.settings.get('autoblow.token') || '';
-      if (savedToken) this._panel.querySelector('#ab-token-input').value = savedToken;
-
-      const savedOffset = this.settings.get('autoblow.offset') || 0;
-      this._panel.querySelector('#ab-offset').value = String(savedOffset);
-      this._panel.querySelector('#ab-offset-value').textContent = `${savedOffset}ms`;
-
-      this._panel.querySelector('#ab-offset').addEventListener('input', (e) => {
-        const v = parseInt(e.target.value, 10);
-        this._panel.querySelector('#ab-offset-value').textContent = `${v}ms`;
-      });
-      this._panel.querySelector('#ab-offset').addEventListener('change', (e) => {
-        const v = parseInt(e.target.value, 10);
-        this.settings.set('autoblow.offset', v);
-        if (this.autoblowManager?.connected) this.autoblowManager.syncOffset(v);
-      });
-
-      this._initAutoblowCutoff();
-
-      // Measure, then OFFER to apply. Deliberately not automatic: the offset
-      // may have been tuned by hand and silently overwriting that is worse
-      // than making the user press one more button.
-      this._panel.querySelector('#ab-latency-btn')?.addEventListener('click', async () => {
-        const btn = this._panel.querySelector('#ab-latency-btn');
-        const display = this._panel.querySelector('#ab-latency');
-        const applyBtn = this._panel.querySelector('#ab-latency-apply');
-        const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = t('connection.btn.measuring');
-        try {
-          // Several probes, not one. A single cloud round trip is noisy and
-          // one unlucky sample written into the offset silently breaks sync.
-          const samples = [];
-          for (let i = 0; i < LATENCY_SAMPLE_COUNT; i++) {
-            samples.push(await this.autoblowManager.estimateLatency());
-          }
-          const latency = medianLatency(samples);
-          this._measuredLatencyMs = latency;
-
-          if (isApplicableLatency(latency)) {
-            display.textContent = `${latency}ms`;
-            if (applyBtn) applyBtn.hidden = false;
-            showToast(t('connection.autoblow.latencyToast', { ms: latency }), 'info', 2500);
-          } else {
-            // estimateLatency() returns 0 when disconnected AND on error, so
-            // 0 means "no reading" — never write it over a good offset.
-            display.textContent = '—';
-            if (applyBtn) applyBtn.hidden = true;
-            showToast(t('connection.autoblow.latencyNoReading'), 'warn', 3500);
-          }
-        } catch (err) {
-          showToast(t('connection.autoblow.latencyFailed', { error: err?.message || 'unknown error' }), 'error', 4000);
-        } finally {
-          btn.textContent = originalText;
-          btn.disabled = false;
-        }
-      });
-
-      this._panel.querySelector('#ab-latency-apply')?.addEventListener('click', () => {
-        const measured = this._measuredLatencyMs;
-        if (!isApplicableLatency(measured)) return;
-        const value = clampToOffsetRange(measured);
-        this.settings.set('autoblow.offset', value);
-        const slider = this._panel.querySelector('#ab-offset');
-        const label = this._panel.querySelector('#ab-offset-value');
-        if (slider) slider.value = String(value);
-        if (label) label.textContent = `${value}ms`;
-        if (this.autoblowManager?.connected) this.autoblowManager.syncOffset(value);
-        showToast(t('connection.autoblow.latencyApplied', { ms: value }), 'success', 2500);
-      });
-
-      this.autoblowManager.onConnect = () => this._updateAutoblowStatus('connected');
-      this.autoblowManager.onDisconnect = () => this._updateAutoblowStatus('disconnected');
-    }
-
     // VR Bridge UI + offset slider live in components/vr-modal.js now —
-    // this panel stays focused on physical devices (Handy / Buttplug /
-    // TCode / Autoblow). The bridge itself still runs; only the UI moved.
+    // this panel stays focused on physical devices (Buttplug / TCode).
+    // The bridge itself still runs; only the UI moved.
   }
 
   _loadSavedSettings() {
-    const savedKey = this.settings.get('handy.connectionKey');
-    if (savedKey) {
-      this._panel.querySelector('#connection-key-input').value = savedKey;
-    }
-
-    const savedOffset = this.settings.get('handy.defaultOffset');
-    if (savedOffset != null) {
-      this._panel.querySelector('#offset-slider').value = savedOffset;
-      this._panel.querySelector('#offset-number').value = savedOffset;
-    }
-
-    const savedMin = this.settings.get('handy.slideMin');
-    const savedMax = this.settings.get('handy.slideMax');
-    if (savedMin != null) {
-      this._panel.querySelector('#stroke-min-slider').value = savedMin;
-      this._panel.querySelector('#stroke-min-val').textContent = savedMin;
-    }
-    if (savedMax != null) {
-      this._panel.querySelector('#stroke-max-slider').value = savedMax;
-      this._panel.querySelector('#stroke-max-val').textContent = savedMax;
-    }
-    this._updateStrokeFill();
-
     // Load saved Buttplug port
     const savedPort = this.settings.get('buttplug.port');
     if (savedPort != null) {
       const portInput = this._panel.querySelector('#bp-port-input');
       if (portInput) portInput.value = savedPort;
-    }
-  }
-
-  async _onConnect() {
-    const keyInput = this._panel.querySelector('#connection-key-input');
-    const key = keyInput.value.trim();
-
-    if (!key || key.length < 5) {
-      this._showError(t('error.connectionKeyTooShort'));
-      return;
-    }
-
-    if (this.handy.connected) {
-      await this.handy.disconnect();
-      this._updateStatus('disconnected');
-      return;
-    }
-
-    this._updateStatus('connecting');
-    const success = await this.handy.connect(key);
-
-    if (success) {
-      // Save key
-      this.settings.set('handy.connectionKey', key);
-
-      // Update device info display
-      this._updateDeviceInfo();
-
-      // Run time sync
-      await this._onResync();
-
-      this._updateStatus('connected');
-    } else {
-      this._updateStatus('error');
-    }
-  }
-
-  async _onResync() {
-    const syncQuality = this._panel.querySelector('#sync-quality');
-    syncQuality.textContent = t('connection.handy.syncing');
-
-    const result = await this.handy.syncTime();
-    if (result) {
-      syncQuality.textContent = t('connection.handy.rtdResult', { rtd: Math.round(result.avgRtd) });
-      // Re-engage HSSP playback at the current video position. The SDK's
-      // `.sync()` routine leaves the device in a state where the next
-      // hsspStop / setScript can be ignored; the app then thinks
-      // playback is being controlled but pause / next-video commands
-      // never reach the device. Mirrors the auto-drift recovery in
-      // sync-engine.js — same fix shape, manual trigger.
-      if (this.onResyncComplete) {
-        try {
-          await this.onResyncComplete();
-        } catch (err) {
-          console.warn('[ConnectionPanel] onResyncComplete failed:', err?.message || err);
-        }
-      }
-    } else {
-      syncQuality.textContent = t('connection.handy.syncFailed');
     }
   }
 
@@ -980,210 +487,13 @@ export class ConnectionPanel {
     }
   }
 
-  _updateStatus(status) {
-    const led = this._panel.querySelector('#connection-led');
-    const text = this._panel.querySelector('#connection-status-text');
-    const btn = this._panel.querySelector('#btn-connect');
-    const infoSection = this._panel.querySelector('#device-info-section');
-    const syncSection = this._panel.querySelector('#sync-section');
-    const offsetSection = this._panel.querySelector('#offset-section');
-    const strokeSection = this._panel.querySelector('#stroke-section');
-
-    this._setTabLedState('handy', status);
-    led.className = 'connection-panel__led';
-
-    switch (status) {
-      case 'connected':
-        led.classList.add('connection-panel__led--connected');
-        text.textContent = t('connection.status.connected');
-        btn.textContent = t('connection.btn.disconnect');
-        infoSection.hidden = false;
-        syncSection.hidden = false;
-        offsetSection.hidden = false;
-        strokeSection.hidden = false;
-        this._handyEverConnected = true;
-        // Apply saved offset and stroke zone to device
-        this._applySavedDeviceSettings();
-        break;
-
-      case 'connecting':
-        led.classList.add('connection-panel__led--connecting');
-        text.textContent = t('connection.status.connecting');
-        btn.textContent = t('connection.status.connecting');
-        btn.disabled = true;
-        break;
-
-      case 'error':
-        led.classList.add('connection-panel__led--error');
-        text.textContent = t('connection.status.failed');
-        btn.textContent = t('connection.btn.connect');
-        btn.disabled = false;
-        break;
-
-      case 'disconnected':
-      default:
-        // "Disconnected" only when the device was previously connected
-        // in this session (real drop-out). On first launch / after error
-        // we say "Not connected" — neutral, not failure framing.
-        text.textContent = this._handyEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected');
-        btn.textContent = t('connection.btn.connect');
-        btn.disabled = false;
-        infoSection.hidden = true;
-        syncSection.hidden = true;
-        offsetSection.hidden = true;
-        strokeSection.hidden = true;
-        break;
-    }
-  }
-
-  _updateDeviceInfo() {
-    const info = this.handy.deviceInfo;
-    if (!info) return;
-
-    this._panel.querySelector('#device-firmware').textContent = info.fwVersion || '—';
-    this._panel.querySelector('#device-model').textContent = info.model || '—';
-
-    // Check firmware status
-    const fwWarning = this._panel.querySelector('#firmware-warning');
-    if (info.fwStatus && info.fwStatus !== 0) {
-      fwWarning.hidden = false;
-    } else {
-      fwWarning.hidden = true;
-    }
-  }
-
-  _showError(message) {
-    console.error('[ConnectionPanel]', message);
-    const text = this._panel.querySelector('#connection-status-text');
-    text.textContent = message;
-  }
-
-  async _onOffsetChange(value) {
-    this.settings.set('handy.defaultOffset', value);
-    if (this.handy.connected) {
-      await this.handy.setOffset(value);
-    }
-  }
-
-  async _onStrokeChange(min, max) {
-    this.settings.set('handy.slideMin', min);
-    this.settings.set('handy.slideMax', max);
-    if (this.handy.connected) {
-      await this.handy.setStrokeZone(min, max);
-    }
-  }
-
-  async _onResetStroke() {
-    this._panel.querySelector('#stroke-min-slider').value = 0;
-    this._panel.querySelector('#stroke-max-slider').value = 100;
-    this._panel.querySelector('#stroke-min-val').textContent = '0';
-    this._panel.querySelector('#stroke-max-val').textContent = '100';
-    this._updateStrokeFill();
-    await this._onStrokeChange(0, 100);
-  }
-
-  _updateStrokeFill() {
-    const min = parseInt(this._panel.querySelector('#stroke-min-slider').value, 10);
-    const max = parseInt(this._panel.querySelector('#stroke-max-slider').value, 10);
-    const fill = this._panel.querySelector('#stroke-fill');
-    if (fill) {
-      fill.style.left = `${min}%`;
-      fill.style.width = `${max - min}%`;
-    }
-  }
-
-  /**
-   * Wire the Handy output-limits (cutoff) sliders. Loads the saved
-   * `handy.cutoff` and commits changes back to settings with a min<max
-   * guard. Unlike the stroke-range remap (live via setStrokeZone), the
-   * cutoff is baked into the uploaded HSSP script, so it applies on the
-   * next video load / variant switch — matching the Range Extender model.
-   */
-  _initHandyCutoff() {
-    const minS = this._panel.querySelector('#handy-cutoff-min-slider');
-    const maxS = this._panel.querySelector('#handy-cutoff-max-slider');
-    const readout = this._panel.querySelector('#handy-cutoff-val');
-    if (!minS || !maxS || !readout) return;
-
-    const saved = this.settings.get('handy.cutoff');
-    const sMin = (saved && Number.isFinite(saved.min)) ? saved.min : 0;
-    const sMax = (saved && Number.isFinite(saved.max)) ? saved.max : 100;
-    minS.value = String(sMin);
-    maxS.value = String(sMax);
-    readout.textContent = `${sMin}-${sMax}%`;
-
-    const commit = () => {
-      let mn = parseInt(minS.value, 10);
-      let mx = parseInt(maxS.value, 10);
-      if (mn >= mx) {  // prevent collapsed window
-        if (document.activeElement === minS) { mn = mx - 1; minS.value = String(mn); }
-        else { mx = mn + 1; maxS.value = String(mx); }
-      }
-      readout.textContent = `${mn}-${mx}%`;
-      // Persist only if non-default, so an absent key reliably means "no clamp".
-      if (mn === 0 && mx === 100) this.settings.set('handy.cutoff', null);
-      else this.settings.set('handy.cutoff', { min: mn, max: mx });
-      // Update the per-tick HDSP engine live (HSSP picks it up on next upload).
-      if (this.onHandyCutoffChanged) this.onHandyCutoffChanged();
-    };
-    minS.addEventListener('input', commit);
-    maxS.addEventListener('input', commit);
-  }
-
-  /**
-   * Wire the Autoblow output-limits (cutoff) sliders. Persists to
-   * `autoblow.cutoff`; read at upload time by app.js `_cutoffFromSettings`,
-   * so it applies on the next video load / variant switch (Autoblow is a
-   * cloud device — the clamp is baked into the uploaded script).
-   */
-  _initAutoblowCutoff() {
-    const minS = this._panel.querySelector('#ab-cutoff-min-slider');
-    const maxS = this._panel.querySelector('#ab-cutoff-max-slider');
-    const readout = this._panel.querySelector('#ab-cutoff-val');
-    if (!minS || !maxS || !readout) return;
-
-    const saved = this.settings.get('autoblow.cutoff');
-    const sMin = (saved && Number.isFinite(saved.min)) ? saved.min : 0;
-    const sMax = (saved && Number.isFinite(saved.max)) ? saved.max : 100;
-    minS.value = String(sMin);
-    maxS.value = String(sMax);
-    readout.textContent = `${sMin}-${sMax}%`;
-
-    const commit = () => {
-      let mn = parseInt(minS.value, 10);
-      let mx = parseInt(maxS.value, 10);
-      if (mn >= mx) {
-        if (document.activeElement === minS) { mn = mx - 1; minS.value = String(mn); }
-        else { mx = mn + 1; maxS.value = String(mx); }
-      }
-      readout.textContent = `${mn}-${mx}%`;
-      if (mn === 0 && mx === 100) this.settings.set('autoblow.cutoff', null);
-      else this.settings.set('autoblow.cutoff', { min: mn, max: mx });
-    };
-    minS.addEventListener('input', commit);
-    maxS.addEventListener('input', commit);
-  }
-
-  async _applySavedDeviceSettings() {
-    const offset = this.settings.get('handy.defaultOffset') || 0;
-    const min = this.settings.get('handy.slideMin') ?? 0;
-    const max = this.settings.get('handy.slideMax') ?? 100;
-
-    try {
-      await this.handy.setOffset(offset);
-      await this.handy.setStrokeZone(min, max);
-    } catch (err) {
-      console.warn('[ConnectionPanel] Failed to apply saved device settings:', err.message);
-    }
-  }
-
   /**
    * Mirror per-tab connection state onto the tab button's LED dot and
-   * aria-label. Lets the user see "Handy is connected, Buttplug is not"
+   * aria-label. Lets the user see "Buttplug is connected, TCode is not"
    * across the whole tab strip without clicking through. The LED is
    * visual; the aria-label is the canonical semantic value for screen
    * readers (Norman signifier — text canonical, colour secondary).
-   * @param {string} tabId — 'handy' | 'buttplug' | 'tcode' | 'autoblow'
+   * @param {string} tabId — 'buttplug' | 'tcode'
    * @param {string} status — 'connected' | 'connecting' | 'error' | 'disconnected'
    */
   _setTabLedState(tabId, status) {
@@ -1195,10 +505,7 @@ export class ConnectionPanel {
       else if (status === 'connecting') led.classList.add('connection-panel__tab-led--connecting');
       else if (status === 'error') led.classList.add('connection-panel__tab-led--error');
     }
-    const labels = {
-      handy: 'Handy', buttplug: 'Buttplug.io',
-      tcode: 'TCode', autoblow: 'Autoblow',
-    };
+    const labels = { buttplug: 'Buttplug.io', tcode: 'TCode' };
     const stateMap = {
       connected: t('connection.status.connected'),
       connecting: t('connection.status.connecting'),
@@ -1226,57 +533,11 @@ export class ConnectionPanel {
       tab.tabIndex = isActive ? 0 : -1;
     }
 
-    this._panel.querySelector('#tab-handy').hidden = tabId !== 'handy';
     this._panel.querySelector('#tab-buttplug').hidden = tabId !== 'buttplug';
     this._panel.querySelector('#tab-tcode').hidden = tabId !== 'tcode';
-    this._panel.querySelector('#tab-autoblow').hidden = tabId !== 'autoblow';
-    const audienceTab = this._panel.querySelector('#tab-audience');
-    if (audienceTab) audienceTab.hidden = tabId !== 'audience';
     this._panel.querySelector('#tab-sync').hidden = tabId !== 'sync';
     if (tabId === 'sync') this._refreshSyncTab();
-    if (tabId === 'audience') this._ensureAudiencePanelMounted();
   }
-
-  /**
-   * Lazy-mount the AudiencePanel + sync the Audience tab LED to the
-   * bridge's aggregate status. Idempotent.
-   */
-  _ensureAudiencePanelMounted() {
-    if (this._audiencePanel) return;
-    const mountSlot = this._panel.querySelector('#audience-panel-mount');
-    if (!mountSlot) return;
-    if (!this.audienceBridge) return;  // bridge not wired yet — no-op
-    import('./audience-panel.js').then(({ AudiencePanel }) => {
-      this._audiencePanel = new AudiencePanel({
-        element: mountSlot,
-        bridge: this.audienceBridge,
-        onOpenPopout: () => window.funsync.audiencePopoutOpen?.(),
-        onClosePopout: () => window.funsync.audiencePopoutClose?.(),
-        isPopoutOpen: async () => {
-          const s = await window.funsync.audiencePopoutStatus?.();
-          return !!s?.open;
-        },
-      });
-    });
-  }
-
-  /**
-   * Refresh the Audience tab LED. Called from the constructor wiring
-   * by app.js when the bridge's aggregate state changes.
-   */
-  setAudienceTabLed(state) {
-    this._setTabLedState('audience', this._mapAudienceAggregateToLed(state));
-  }
-
-  _mapAudienceAggregateToLed(state) {
-    switch (state) {
-      case 'connected': return 'connected';
-      case 'warning':   return 'connecting';
-      case 'error':     return 'error';
-      default:          return 'disconnected';
-    }
-  }
-
   // --- Buttplug ---
 
   async _onButtplugConnect() {
@@ -1975,8 +1236,7 @@ export class ConnectionPanel {
     const devices = this.buttplug.devices;
 
     for (const dev of devices) {
-      // Try index:name key first (new format), fall back to name-only (backwards compat)
-      const saved = perDevice[`${dev.index}:${dev.name}`] || perDevice[dev.name];
+      const saved = perDevice[`${dev.index}:${dev.name}`];
       if (saved) {
         // Defensive: ignore stale CR-prefixed assignments that may have
         // been written before the save-side filter existed. Re-applying
@@ -1989,7 +1249,7 @@ export class ConnectionPanel {
         // (typically an `L0`/`L1` left over from an earlier multi-axis
         // session) would clobber the route's `CR1`/`CR2`/... assignment
         // and leave the second device in a 2+-device routing setup
-        // silently unassigned. This is the "two-Handy custom routing
+        // silently unassigned. This is the "two-device custom routing
         // doesn't work for the second device" bug.
         if (
           saved.axisAssignment
@@ -2717,62 +1977,6 @@ export class ConnectionPanel {
     this.settings.set('tcode.axes', all);
   }
 
-  // --- Autoblow ---
-
-  async _onAutoblowConnect() {
-    if (!this.autoblowManager) return;
-
-    if (this.autoblowManager.connected) {
-      await this.autoblowManager.disconnect();
-      return;
-    }
-
-    const tokenInput = this._panel.querySelector('#ab-token-input');
-    const token = tokenInput.value.trim();
-    if (!token) {
-      const text = this._panel.querySelector('#ab-status-text');
-      if (text) text.textContent = t('connection.autoblow.errEnterToken');
-      return;
-    }
-
-    this._updateAutoblowStatus('connecting');
-    const success = await this.autoblowManager.connect(token);
-
-    if (success) {
-      this.settings.set('autoblow.token', token);
-    }
-  }
-
-  _updateAutoblowStatus(status) {
-    const led = this._panel.querySelector('#ab-led');
-    const text = this._panel.querySelector('#ab-status-text');
-    const btn = this._panel.querySelector('#ab-connect-btn');
-    const infoSection = this._panel.querySelector('#ab-device-info');
-    const typeEl = this._panel.querySelector('#ab-device-type');
-
-    this._setTabLedState('autoblow', status);
-    if (led) {
-      led.className = 'connection-panel__led';
-      if (status === 'connected') led.classList.add('connection-panel__led--connected');
-      else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
-    }
-    if (status === 'connected') this._autoblowEverConnected = true;
-    if (text) {
-      text.textContent = status === 'connected' ? t('connection.status.connected')
-        : status === 'connecting' ? t('connection.status.connecting')
-        : (this._autoblowEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
-    }
-    if (btn) {
-      btn.textContent = status === 'connected' ? t('connection.btn.disconnect') : t('connection.btn.connect');
-    }
-    if (infoSection) {
-      infoSection.hidden = status !== 'connected';
-    }
-    if (typeEl && this.autoblowManager?.deviceType) {
-      typeEl.textContent = this.autoblowManager.isUltra ? t('connection.autoblow.deviceUltra') : t('connection.autoblow.deviceVacu2');
-    }
-  }
-
   // VR Bridge UI is now in components/vr-modal.js. The panel still
   // accepts `vrBridge` in the constructor but doesn't own any UI for it.
 
@@ -2922,9 +2126,6 @@ export class ConnectionPanel {
 
     // 1) Latency readouts
     const jitter = this.vrBridge?.getNetworkJitterMs?.();
-    const handyRtd = this.handy?.syncQuality?.avgRtd
-      ?? this.handy?._syncQuality?.avgRtd
-      ?? null;
     const transport = jitter != null ? classifyTransport(jitter) : null;
 
     const set = (id, txt) => {
@@ -2932,7 +2133,6 @@ export class ConnectionPanel {
       if (el) el.textContent = txt;
     };
     set('#sync-vr-jitter', jitter != null ? `${jitter} ms` : t('connection.sync.noVrSession'));
-    set('#sync-handy-rtd', handyRtd != null ? `${Math.round(handyRtd)} ms` : t('connection.sync.handyNotConnected'));
     set('#sync-vr-transport', transport ?? '—');
 
     // 2) Per-device offset rows
@@ -2951,33 +2151,6 @@ export class ConnectionPanel {
     const vrOffsetMs = this.vrBridge?.connected
       ? (this.settings.get('vr.offset') || 0)
       : 0;
-
-    // Handy device row (only meaningful when Handy is connected via WiFi API)
-    if (this.handy?.connected) {
-      const suggested = computeSuggestedOffset({
-        device: 'handy', context: ctx,
-        handyRtdMs: handyRtd ?? 0,
-        vrJitterMs: jitter ?? 0,
-        vrPlayerType,
-      });
-      rowsEl.appendChild(this._buildSyncRow({
-        label: t('connection.sync.deviceHandy'),
-        currentMs: this.settings.get('handy.defaultOffset') || 0,
-        suggestedMs: suggested,
-        vrOffsetMs,
-        onChange: async (v) => {
-          this.settings.set('handy.defaultOffset', v);
-          this.settings.set('handy.defaultOffsetSource', 'user');
-          if (this.handy.connected) await this.handy.setOffset(v);
-        },
-        onApply: async (v) => {
-          this.settings.set('handy.defaultOffset', v);
-          this.settings.set('handy.defaultOffsetSource', 'user');
-          if (this.handy.connected) await this.handy.setOffset(v);
-          this._refreshSyncTab();
-        },
-      }));
-    }
 
     // Buttplug device row (single global offset for all Intiface devices)
     if (this.buttplug?.connected) {
@@ -3049,24 +2222,9 @@ export class ConnectionPanel {
     const refreshBtn = this._panel.querySelector('#sync-refresh-btn');
     if (refreshBtn && !refreshBtn._wired) {
       refreshBtn._wired = true;
-      refreshBtn.addEventListener('click', async () => {
-        const originalText = refreshBtn.textContent;
-        refreshBtn.disabled = true;
-        refreshBtn.textContent = t('connection.btn.refreshing');
-        try {
-          // Re-measure Handy RTD; the SDK's measurement cycle returns a
-          // refreshed avgRtd. Rest is read fresh on every paint.
-          if (this.handy?.connected && this.handy.syncTime) {
-            await this.handy.syncTime(10);
-          }
-          this._refreshSyncTab();
-          showToast(t('connection.sync.latencyRefreshed'), 'info', 2000);
-        } catch (err) {
-          showToast(t('connection.sync.refreshFailed', { error: err?.message || 'unknown error' }), 'error', 4000);
-        } finally {
-          refreshBtn.textContent = originalText;
-          refreshBtn.disabled = false;
-        }
+      refreshBtn.addEventListener('click', () => {
+        this._refreshSyncTab();
+        showToast(t('connection.sync.latencyRefreshed'), 'info', 2000);
       });
     }
   }

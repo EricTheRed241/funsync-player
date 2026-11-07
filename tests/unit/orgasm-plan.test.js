@@ -38,9 +38,8 @@ const SNAP_ALL = {
     { index: 3, name: 'Hush', canVibrate: true },
   ],
   tcodeConnected: true,
-  handyConnected: true,
 };
-const SNAP_NONE = { buttplugDevices: [], tcodeConnected: false, handyConnected: false };
+const SNAP_NONE = { buttplugDevices: [], tcodeConnected: false };
 
 const customEntry = (routes, single = null) =>
   buildAssociationEntry('custom', single, null, { routes });
@@ -73,10 +72,8 @@ describe('resolveOrgasmPlan — single', () => {
     expect(plan.loopMs).toBe(2000);
     expect(plan.tcodeAxes).toEqual({ L0: MAIN });
     expect(plan.bpMode).toBe('broadcast');
-    expect(plan.handyPath).toBe('C:/f/main.funscript');
     expect(plan.stopsButtplug).toBe(true);
     expect(plan.stopsTcode).toBe(true);
-    expect(plan.stopsHandy).toBe(true);
   });
 
   it('returns null plan for empty entry / unreadable script', () => {
@@ -99,7 +96,6 @@ describe('resolveOrgasmPlan — multi', () => {
     expect(plan.tcodeAxes).toEqual({ L0: MAIN, R0: TWIST, V0: VIB });
     expect(plan.vib).toBe(VIB); // buttplugVib=true routes vib to vibe devices
     expect(plan.loopMs).toBe(2000); // main's duration anchors the loop
-    expect(plan.handyPath).toBe('C:/f/main.funscript');
   });
 
   it('without buttplugVib the vib axis stays TCode-only', () => {
@@ -111,15 +107,13 @@ describe('resolveOrgasmPlan — multi', () => {
     expect(plan.tcodeAxes.V0).toBe(VIB);
   });
 
-  it('axis-only bundle (no main): longest axis sets loop length, Handy not engaged', () => {
+  it('axis-only bundle (no main): longest axis sets loop length', () => {
     const e = buildAssociationEntry('multi', null, {
       main: null, axes: { twist: 'C:/f/main.twist.funscript' }, buttplugVib: false,
     }, null);
     const { plan } = resolveOrgasmPlan(e, SNAP_NONE, getActions);
     expect(plan.main).toBeNull();
     expect(plan.loopMs).toBe(1500);
-    expect(plan.handyPath).toBeNull();
-    expect(plan.stopsHandy).toBe(false);
   });
 
   it('never gates on connections — a disconnected snapshot still yields a plan', () => {
@@ -140,8 +134,6 @@ describe('resolveOrgasmPlan — custom', () => {
     ]);
     expect(plan.main).toBe(MAIN);       // main-role route anchors the loop
     expect(plan.loopMs).toBe(2000);
-    expect(plan.handyPath).toBeNull();  // no handy route → Handy keeps the main script
-    expect(plan.stopsHandy).toBe(false);
     expect(plan.stopsTcode).toBe(false);
     expect(plan.stopsButtplug).toBe(true);
   });
@@ -172,14 +164,12 @@ describe('resolveOrgasmPlan — custom', () => {
     expect(promoted.demotedFrom).toBeNull();
   });
 
-  it('handy + tcode routes gate on their connected flags', () => {
+  it('tcode route gates on its connected flag', () => {
     const routes = [
-      { role: 'main', deviceId: 'handy', scriptPath: 'C:/f/main.funscript' },
       { role: 'axis', deviceId: 'tcode', scriptPath: 'C:/f/vibe-route.funscript' },
     ];
     const ok = resolveOrgasmPlan(customEntry(routes), SNAP_ALL, getActions);
     expect(ok.plan.mode).toBe('custom');
-    expect(ok.plan.handyPath).toBe('C:/f/main.funscript');
     expect(ok.plan.tcodeAxes).toEqual({ L0: ROUTED });
     expect(ok.plan.bpMode).toBe('keep'); // no bp routes → bp engine keeps running
 
@@ -193,7 +183,7 @@ describe('resolveOrgasmPlan — custom', () => {
     const routes = [{ role: 'main', deviceId: 'buttplug:Hush', buttplugIndex: 0, scriptPath: 'C:/f/main.funscript' }];
     const snap = {
       buttplugDevices: [{ index: 0, name: 'Stroker' }, { index: 7, name: 'Hush' }],
-      tcodeConnected: false, handyConnected: false,
+      tcodeConnected: false,
     };
     const { plan } = resolveOrgasmPlan(customEntry(routes), snap, getActions);
     expect(plan.mode).toBe('custom');
@@ -202,12 +192,12 @@ describe('resolveOrgasmPlan — custom', () => {
 
   it('two same-name devices: claim set keeps the fallback from stealing an index-matched device', () => {
     const routes = [
-      { role: 'main', deviceId: 'buttplug:The Handy', buttplugIndex: 2, scriptPath: 'C:/f/main.funscript' },
-      { role: 'axis', deviceId: 'buttplug:The Handy', scriptPath: 'C:/f/vibe-route.funscript' }, // no index
+      { role: 'main', deviceId: 'buttplug:Stroker', buttplugIndex: 2, scriptPath: 'C:/f/main.funscript' },
+      { role: 'axis', deviceId: 'buttplug:Stroker', scriptPath: 'C:/f/vibe-route.funscript' }, // no index
     ];
     const snap = {
-      buttplugDevices: [{ index: 1, name: 'The Handy' }, { index: 2, name: 'The Handy' }],
-      tcodeConnected: false, handyConnected: false,
+      buttplugDevices: [{ index: 1, name: 'Stroker' }, { index: 2, name: 'Stroker' }],
+      tcodeConnected: false,
     };
     const { plan } = resolveOrgasmPlan(customEntry(routes), snap, getActions);
     expect(plan.mode).toBe('custom');
@@ -226,11 +216,11 @@ describe('resolveOrgasmPlan — custom', () => {
     expect(plan.mode).toBe('single'); // single slot saves the hold
   });
 
-  it('unknown deviceIds (e.g. autoblow from a hand-edited config) demote with a label', () => {
-    const routes = [{ role: 'main', deviceId: 'autoblow', scriptPath: 'C:/f/main.funscript' }];
+  it('unknown deviceIds (e.g. from a hand-edited config) demote with a label', () => {
+    const routes = [{ role: 'main', deviceId: 'mystery-device', scriptPath: 'C:/f/main.funscript' }];
     const { demotedFrom, missing } = resolveOrgasmPlan(customEntry(routes), SNAP_ALL, getActions);
     expect(demotedFrom).toBe('custom');
-    expect(missing).toEqual(['autoblow']);
+    expect(missing).toEqual(['mystery-device']);
   });
 
   it('does not mutate the routes in the entry (settings-owned objects)', () => {

@@ -129,7 +129,7 @@ export function hasFeet({ tags = [], title = '' }) {
 }
 
 /** True when a post's tags or title say FFM (two women, one man). */
-export function hasFfm({ tags = [], title = '' }) {
+function hasFfm({ tags = [], title = '' }) {
   return tags.some((t) => FFM_TAGS.has(t)) || FFM_TITLE.test(title);
 }
 
@@ -178,9 +178,8 @@ export function scoreCandidate({ vr = false, artistInLibrary = false, multiAxis 
  * current RANKING, tag scores and favourite artist bonus, from what the list
  * keeps, so a weight change reorders lists saved before it. A favourite
  * (`c.favourite`, a name) counts as an artist in the library plus the bonus.
- * Monster / feet / FFM named outside the tags come from its title, the
- * first-post flags saved with it (`monster`, `feet`, `ffm`), or an older
- * `--recheck` mark. Two decimals.
+ * Monster / feet / FFM named outside the tags come from its title or the
+ * first-post flags saved with it (`monster`, `feet`, `ffm`). Two decimals.
  *
  * @param {object} c
  * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring]
@@ -193,8 +192,8 @@ export function candidateScore(c, { tagScores, favouriteScore = RANKING.favourit
     vr: !!c.vr, artistInLibrary: !!(c.artistInLibrary || c.favourite), multiAxis: c.axisType === 'multi',
     likes: Number(c.likes) || 0, hentaiOnly: isHentaiOnly(c), favourite: !!c.favourite, favouriteScore,
   }) + tagScoreSum(c.tags, tagScores, {
-    monster: named.monster || !!c.monster || c.contentBreak === 'monster',
-    feet: named.feet || !!c.feet || c.contentBreak === 'feet',
+    monster: named.monster || !!c.monster,
+    feet: named.feet || !!c.feet,
     ffm: named.ffm || !!c.ffm,
   })).toFixed(2);
 }

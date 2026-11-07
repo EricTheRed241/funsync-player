@@ -19,7 +19,7 @@
 //                   custom automatically.
 //
 // Custom-mode kind semantics (mirrors video custom routing where sensible):
-//   - A kind (buttplug / tcode / handy) WITH routes: only routed devices are
+//   - A kind (buttplug / tcode) WITH routes: only routed devices are
 //     driven, with their routed scripts; unrouted Buttplug devices stay
 //     silent for the hold (same as _customRoutingActive in normal playback).
 //   - A kind with NO routes: its sync engine is left running, so those
@@ -81,10 +81,8 @@ function buildSinglePlan(path, getActions) {
     vib: null,
     bpMode: 'broadcast',
     bpRoutes: null,
-    handyPath: path,
     stopsButtplug: true,
     stopsTcode: true,
-    stopsHandy: true,
   };
 }
 
@@ -118,10 +116,8 @@ function buildMultiPlan(multi, getActions) {
     vib,
     bpMode: 'broadcast',
     bpRoutes: null,
-    handyPath: multi.main || null,
     stopsButtplug: true,
     stopsTcode: true,
-    stopsHandy: !!multi.main,
   };
 }
 
@@ -137,7 +133,6 @@ function buildCustomPlan(custom, snapshot, getActions) {
   const missing = [];
   const bpRoutes = [];
   let tcodeActions = null;
-  let handyPath = null;
   let mainActions = null;
   let mainPath = null;
   let longest = 0;
@@ -180,9 +175,7 @@ function buildCustomPlan(custom, snapshot, getActions) {
       continue;
     }
     let matched = false;
-    if (route.deviceId === 'handy') {
-      if (snapshot.handyConnected) { handyPath = handyPath || route.scriptPath; matched = true; }
-    } else if (route.deviceId === 'tcode') {
+    if (route.deviceId === 'tcode') {
       if (snapshot.tcodeConnected) { tcodeActions = tcodeActions || actions; matched = true; }
     } else if (route.deviceId?.startsWith('buttplug:')) {
       const idx = resolvedIndex.get(route);
@@ -195,11 +188,10 @@ function buildCustomPlan(custom, snapshot, getActions) {
         matched = true;
       }
     }
-    // Unknown deviceIds (autoblow, hand-edited configs) are unmatchable —
-    // the finisher loop has no drive path for them.
+    // Unknown deviceIds (hand-edited configs) are unmatchable — the
+    // finisher loop has no drive path for them.
     if (!matched) {
-      missing.push(route.deviceId === 'handy' ? 'The Handy'
-        : route.deviceId === 'tcode' ? 'T-Code'
+      missing.push(route.deviceId === 'tcode' ? 'T-Code'
         : route.deviceId?.startsWith('buttplug:') ? route.deviceId.slice('buttplug:'.length)
         : (route.deviceId || label));
       continue;
@@ -222,13 +214,11 @@ function buildCustomPlan(custom, snapshot, getActions) {
       vib: null,
       bpMode: bpRoutes.length > 0 ? 'routed' : 'keep',
       bpRoutes: bpRoutes.length > 0 ? bpRoutes : null,
-      handyPath,
       // A kind with no routes keeps its engine running (devices continue
       // the MAIN video script through the hold — the user scoped the
       // finisher to other hardware).
       stopsButtplug: bpRoutes.length > 0,
       stopsTcode: !!tcodeActions,
-      stopsHandy: !!handyPath,
     },
   };
 }
@@ -237,7 +227,7 @@ function buildCustomPlan(custom, snapshot, getActions) {
  * Resolve the orgasm config entry + device snapshot into a drive plan.
  *
  * @param {object|null} entry — normalized association entry (association-shape.js)
- * @param {object} snapshot — { buttplugDevices: [{index,name,...}], tcodeConnected, handyConnected }
+ * @param {object} snapshot — { buttplugDevices: [{index,name,...}], tcodeConnected }
  * @param {(path: string) => Array|null} getActions — parsed actions for a
  *   script path (from the app's content cache), null when unavailable
  * @returns {{ plan: object|null, demotedFrom: 'custom'|null, missing: string[] }}

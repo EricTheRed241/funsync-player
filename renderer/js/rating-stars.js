@@ -39,7 +39,7 @@ export function starFill(index, rating) {
 }
 
 /** Localised accessible label for a rating, e.g. "4.5 stars" / "Not rated". */
-export function ratingLabel(rating) {
+function ratingLabel(rating) {
   return rating > 0 ? t('rating.stars', { n: rating }) : t('rating.unrated');
 }
 

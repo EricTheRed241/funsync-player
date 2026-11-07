@@ -1,6 +1,6 @@
 # AGENTS.md — FunSync Player (fork)
 
-Local desktop video player that plays funscripts on stroker and vibration devices (Handy, Buttplug/Intiface, Autoblow, TCode serial/UDP), with a web remote and a VR content server for HereSphere/DeoVR. `README.md` is the feature documentation: every user-visible feature has a section there, so update it with each change.
+Local desktop video player that plays funscripts on stroker and vibration devices (Buttplug/Intiface, TCode serial/UDP/WebSocket), with a web remote and a VR content server for HereSphere/DeoVR. `README.md` is the feature documentation: every user-visible feature has a section there, so update it with each change.
 
 ## Repository and remotes
 - `fork` = `EricTheRed241/funsync-player` (ours, public). `origin` = `DaveMakesWaves/funsync-player` (upstream). **Never push to `origin`.**

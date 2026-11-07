@@ -11,10 +11,9 @@
  *     out to. Moving them out of the tree would break the app and the docs,
  *     and a backup you had to move back isn't a backup.
  *
- *  2. It skips what a clone can regenerate. node_modules (800M), .venv
- *     (101M) and dist/build/backend-dist (1.3G+) all come back from
- *     `npm install` / `pip install` / `npm run build`. Copying them would
- *     make the backup ~3GB of material that is stale the moment a dependency
+ *  2. It skips what a clone can regenerate. node_modules (800M) and .venv
+ *     (101M) come back from `npm install` / `pip install`. Copying them would
+ *     make the backup ~1GB of material that is stale the moment a dependency
  *     changes, and would bury the 2.8MB of notes that actually matter.
  *
  * Additive by default: files removed from the repo are REPORTED, not deleted
@@ -87,9 +86,6 @@ const INCLUDE = [
 const SKIPPED = [
   ['node_modules/', '~800M', 'npm install'],
   ['backend/.venv/', '~101M', 'python -m venv + pip install -r requirements.txt'],
-  ['dist/', '~1.3G', 'npm run build'],
-  ['build/', '~19M', 'npm run build'],
-  ['backend-dist/', '~24M', 'PyInstaller (see notes/RELEASE.md)'],
   ['**/__pycache__/, .pytest_cache/', '-', 'regenerated on next run'],
   ['*.log, eroscripts-debug.log', '-', 'runtime logs, not data'],
   ['thumbs/, scripts_cache/, .funsync/', '-', 'runtime caches, rebuilt on demand'],

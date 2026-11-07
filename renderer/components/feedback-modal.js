@@ -52,7 +52,6 @@ export function formatDiagnostics(d) {
   lines.push(`Backend: ${backend.running ? 'running' : 'not running'} (port ${backend.port || '?'})`);
   lines.push(
     'Devices: ' +
-    `Handy=${devices.handy ? 'connected' : 'no'}  ` +
     `Buttplug=${devices.buttplug ? 'connected' : 'no'}  ` +
     `VR=${devices.vr ? 'connected' : 'no'}  ` +
     `count=${devices.deviceCount || 0}`,
@@ -143,7 +142,7 @@ export function buildIssueUrl({ title, description, steps, diagnostics }) {
  *
  * @param {Object} args
  * @param {() => Object} args.getConnectionState — returns
- *   { handyConnected, buttplugConnected, vrConnected, deviceCount }
+ *   { buttplugConnected, vrConnected, deviceCount }
  *   so the dialog can pass it to the main process. Renderer-side because
  *   device managers live in the renderer.
  * @returns {Promise<void>}

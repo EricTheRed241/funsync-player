@@ -215,7 +215,7 @@ describe('blacklist filter — fuzz', () => {
       if (rng() < 0.8) lib.collections = [{ id: 'c1' }, { id: 'c2' }];
       if (rng() < 0.5) lib.customRouting = { dev: 'L0' };
       const input = {
-        settings: { library: lib, handy: { connectionKey: 'TEST' + seed } },
+        settings: { library: lib, tcode: { port: 'TEST' + seed } },
         playlists: [{ id: 'p1' }],
       };
       const inputCopy = JSON.parse(JSON.stringify(input));
@@ -229,7 +229,7 @@ describe('blacklist filter — fuzz', () => {
       expect(out.settings.library.thumbnailCache).toBeUndefined();
 
       // Non-blacklisted fields preserved.
-      expect(out.settings.handy.connectionKey).toBe(`TEST${seed}`);
+      expect(out.settings.tcode.port).toBe(`TEST${seed}`);
       if (lib.sources)        expect(out.settings.library.sources).toEqual(lib.sources);
       if (lib.collections)    expect(out.settings.library.collections).toEqual(lib.collections);
       if (lib.customRouting)  expect(out.settings.library.customRouting).toEqual(lib.customRouting);

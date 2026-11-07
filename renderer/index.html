@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com https://discuss.eroscripts.com; media-src 'self' file: blob: http://localhost:* http://127.0.0.1:*; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com https://*.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://discuss.eroscripts.com; media-src 'self' file: blob: http://localhost:* http://127.0.0.1:*; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com https://*.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
   <title>FunSync Player</title>
   <link rel="stylesheet" href="styles/player.css">
   <link rel="stylesheet" href="styles/library.css">
@@ -12,7 +12,6 @@
   <link rel="stylesheet" href="styles/playlists.css">
   <link rel="stylesheet" href="styles/categories.css">
   <link rel="stylesheet" href="styles/library-overview.css">
-  <link rel="stylesheet" href="styles/editor.css">
   <link rel="stylesheet" href="styles/eroscripts.css">
   <link rel="stylesheet" href="styles/session-card.css">
   <link rel="stylesheet" href="styles/up-next.css">
@@ -55,14 +54,6 @@
           <button id="miniplayer-playpause" class="miniplayer-bar__btn" type="button" data-i18n-aria-label="player.miniPlayPause" data-i18n-title="player.miniPlayPause" aria-label="Play / pause" title="Play / pause"></button>
           <button id="miniplayer-expand" class="miniplayer-bar__btn" type="button" data-i18n-aria-label="player.miniExpand" data-i18n-title="player.miniExpand" aria-label="Back to player" title="Back to player"></button>
           <button id="miniplayer-close" class="miniplayer-bar__btn miniplayer-bar__btn--close" type="button" data-i18n-aria-label="player.miniClose" data-i18n-title="player.miniClose" aria-label="Close" title="Close"></button>
-        </div>
-      </div>
-
-      <!-- Script Loading Overlay (shown while uploading funscript to Handy cloud) -->
-      <div id="script-loading-overlay" class="script-loading-overlay" hidden>
-        <div class="script-loading-overlay__content">
-          <div class="script-loading-overlay__spinner"></div>
-          <div class="script-loading-overlay__text" data-i18n="player.preparingScript">Preparing script…</div>
         </div>
       </div>
 
@@ -145,8 +136,8 @@
                #1 consistency). The .controls-cluster-gap spacer is
                purely visual; aria-hidden so screen readers skip it.
 
-                 [SCRIPT cluster]    funscript / variant / subtitle / editor
-                 [DEVICE cluster]    handy
+                 [SCRIPT cluster]    funscript / variant / subtitle
+                 [DEVICE cluster]    devices
                  [WINDOW cluster]    pip / fullscreen
           -->
           <div class="controls__right">
@@ -191,27 +182,22 @@
               <i data-lucide="repeat-1"></i>
             </button>
 
-            <!-- Editor / Devices / Fullscreen carry persistent text
+            <!-- Devices / Fullscreen carry persistent text
                  labels at ≥1024px so first-time users don't have to
                  hover-learn their icons (Norman signifier; Nielsen #6
                  recognition over recall). The .control-btn--labelled
                  class drives the responsive show/hide via CSS. -->
-            <button id="btn-editor" class="control-btn control-btn--labelled" data-i18n-aria-label="player.scriptEditor" data-i18n-title="player.scriptEditor" aria-label="Script Editor" title="Script Editor (E)" hidden>
-              <i data-lucide="pencil"></i>
-              <span class="control-btn__label" data-i18n="player.editor">Editor</span>
-            </button>
-
             <span class="controls-cluster-gap" aria-hidden="true"></span>
 
-            <!-- Devices button — was a `bluetooth` icon, but Handy uses
-                 WiFi (HSSP), TCode uses USB serial, and Buttplug can be
+            <!-- Devices button — `cable` icon rather than `bluetooth`:
+                 TCode uses USB serial / network, and Buttplug can be
                  anything Intiface speaks. The bluetooth icon misled
                  users into thinking the app was BT-only. `cable` reads
                  as "the connection thing" without committing to a
                  specific transport (Nielsen #2 match real world). -->
-            <button id="btn-handy" class="control-btn control-btn--handy control-btn--labelled" data-i18n-aria-label="player.deviceConnection" data-i18n-title="player.devicesTitle" aria-label="Device Connection" title="Devices Connection (H)">
-              <span class="icon-handy"><i data-lucide="cable"></i></span>
-              <span class="handy-led" id="handy-led"></span>
+            <button id="btn-devices" class="control-btn control-btn--devices control-btn--labelled" data-i18n-aria-label="player.deviceConnection" data-i18n-title="player.devicesTitle" aria-label="Device Connection" title="Devices Connection (H)">
+              <span class="icon-devices"><i data-lucide="cable"></i></span>
+              <span class="device-led" id="device-led"></span>
               <span class="control-btn__label" data-i18n="player.devices">Devices</span>
             </button>
 
@@ -266,7 +252,7 @@
                      here 2026-08-04 (Dave) because two-letter tags read as
                      jargon and the bar was crowded. Checkbox items: these are
                      persistent on/off view state, not actions. Hidden until a
-                     script is loaded (same gating as the editor button). -->
+                     script is loaded. -->
                 <button id="btn-inline-tl" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.inlineTimeline" aria-label="Script timeline" hidden>
                   <i data-lucide="activity"></i>
                   <span data-i18n="player.inlineTimeline">Script timeline</span>
@@ -306,7 +292,7 @@
 
       <!-- Top Bar Overlay (back button + title + sync chip + category dots + quick-add)
            The sync chip is a single-source-of-truth indicator for device sync
-           state — aggregates Handy + Buttplug + TCode + Autoblow into one
+           state — aggregates Buttplug + TCode into one
            label visible at the top of the player view (Nielsen #1 visibility
            of system status). Live region so screen readers announce
            transitions ("Syncing • 2 devices" → "Disconnected"). -->
@@ -414,7 +400,6 @@
   <!-- Toast Notifications -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-  <script src="js/process-shim.js"></script>
   <script src="js/app.js" type="module"></script>
 </body>
 </html>

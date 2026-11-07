@@ -82,7 +82,7 @@ export function findPlaylist(playlists, playlistId, name) {
  *
  * @param {object} data DataService (get, set)
  */
-export function setTagScore(data, tag, score) {
+function setTagScore(data, tag, score) {
   const key = tagKey(tag);
   if (!key) throw new Error('tag score without a tag');
   const value = normalizeTagScore(score);

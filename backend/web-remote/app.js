@@ -3041,8 +3041,8 @@ async function renderPlayer(id) {
   }
   videoWrap.appendChild(videoEl);
 
-  // Loading overlay shown over the video during desktop-side script
-  // re-uploads (variant switch with Handy connected). `.hidden` toggles
+  // Loading overlay shown over the video while the desktop loads a
+  // script (variant switch). `.hidden` toggles
   // visibility; CSS positions it absolute inside the video wrapper.
   const loadingOverlay = document.createElement('div');
   loadingOverlay.className = 'player__loading-overlay';
@@ -3413,9 +3413,9 @@ async function renderPlayer(id) {
           return;
         }
         // `script-loading` / `script-ready` bracket the desktop's
-        // Handy re-upload during a variant switch. Mirror the desktop
+        // script load during a variant switch. Mirror the desktop
         // overlay: pause the video + show our own overlay so the phone
-        // doesn't keep playing audio/video while the Handy is silent.
+        // doesn't keep playing audio/video while the devices are idle.
         if (msg && msg.type === 'script-loading') {
           if (!videoEl.paused) {
             pausedForReupload = true;
@@ -3513,7 +3513,7 @@ async function renderPlayer(id) {
       // Timeout that clears the `--pending` state if the desktop never
       // confirms a switch (typical fail mode: observer disconnected
       // mid-switch, or the desktop's variant-switch path errored). 5 s
-      // is generous — Handy upload is the slowest leg and rarely takes
+      // is generous — a script load rarely takes
       // more than 2-3 s. Without this recovery the pending row stays
       // ghosted forever after a single failed tap.
       let pendingTimer = null;
@@ -4147,28 +4147,9 @@ function renderSyncPill(pill, msg) {
       pill.dataset.state = 'nomatch';
       pill.textContent = t('webRemote.player.noScriptMatch');
       break;
-    case 'device-status': {
-      // Prefer the detailed device list when the desktop sends one;
-      // fall back to the legacy booleans only for older desktop
-      // versions that haven't shipped the per-device payload yet.
-      const devices = Array.isArray(msg.devices) ? msg.devices : null;
-      if (devices) {
-        renderDevicePill(pill, devices);
-      } else {
-        const parts = [];
-        for (const k of ['handy', 'buttplug', 'tcode', 'autoblow']) {
-          if (msg[k] === 'connected') parts.push(k[0].toUpperCase() + k.slice(1));
-        }
-        if (parts.length > 0) {
-          pill.dataset.state = 'connected';
-          pill.textContent = t('webRemote.player.connected', { devices: parts.join(', ') });
-        } else {
-          pill.dataset.state = 'nodevice';
-          pill.textContent = t('webRemote.player.noDevices');
-        }
-      }
+    case 'device-status':
+      renderDevicePill(pill, Array.isArray(msg.devices) ? msg.devices : []);
       break;
-    }
     default:
       break;
   }

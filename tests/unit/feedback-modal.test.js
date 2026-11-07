@@ -24,15 +24,15 @@ describe('formatDiagnostics', () => {
       platform: { os: 'win32', release: '10.0.26200', arch: 'x64' },
       runtime: { electron: '41.0.0', chrome: '140.0.0', node: '22.18.0' },
       backend: { running: true, port: 5123 },
-      devices: { handy: true, buttplug: false, vr: false, deviceCount: 0 },
+      devices: { buttplug: true, vr: false, deviceCount: 0 },
       logTail: '[10:32] info: started',
     });
     expect(out).toContain('FunSync Player 0.5.1');
     expect(out).toContain('OS: win32 10.0.26200 (x64)');
     expect(out).toContain('Electron: 41.0.0');
     expect(out).toContain('Backend: running (port 5123)');
-    expect(out).toContain('Handy=connected');
-    expect(out).toContain('Buttplug=no');
+    expect(out).toContain('Buttplug=connected');
+    expect(out).toContain('VR=no');
     expect(out).toContain('[10:32] info: started');
   });
 

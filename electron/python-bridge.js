@@ -39,16 +39,6 @@ const HEALTH_INTERVAL_MS = 5000;
 const HEALTH_TIMEOUT_MS = 3000;
 const HEALTH_FAIL_THRESHOLD = 2;
 
-/**
- * Sentinel carried in the health 'detail' when the bundled backend
- * executable is missing from a packaged install. The renderer shows a
- * specific, actionable message for this instead of a generic timeout —
- * 'reinstall / check antivirus' is something a non-technical user can act
- * on, 'backend is not responding' is not.
- */
-const BACKEND_MISSING = 'backend-executable-missing';
-
-let backendMissing = false;
 let healthDetail = null;
 let healthState = 'unknown';   // 'unknown' | 'running' | 'down' | 'restarting'
 let healthConsecutiveFailures = 0;
@@ -127,68 +117,21 @@ async function startBackend() {
     const fs = require('fs');
     const backendDir = path.join(__dirname, '..', 'backend');
 
-    // In packaged app, look for the bundled executable in resources/backend
-    const electronApp = require('electron').app;
-    const isPackaged = electronApp.isPackaged;
-    const bundledBackend = isPackaged
-      ? path.join(process.resourcesPath, 'backend', 'funsync-backend' + (process.platform === 'win32' ? '.exe' : ''))
-      : null;
-
     // userData dir holds config.json — the web-remote locale endpoint
     // reads this file to mirror the desktop's chosen language onto the
     // phone without an extra picker. Optional — backend falls back to
     // 'en' if not provided.
-    const userDataDir = electronApp.getPath('userData');
+    const userDataDir = require('electron').app.getPath('userData');
 
-    let cmd, args, cwd;
-
-    // A PACKAGED build must never fall through to the developer path.
-    //
-    // 4wen's log, 2026-08-13: `Failed to start Python backend: spawn python
-    // ENOENT`. The installed app could not find its bundled backend, quietly
-    // dropped into the ELSE branch below — which is meant for running from a
-    // source checkout — and tried to spawn `python` off the PATH. He has no
-    // Python installed, because he should not need any, so it failed with an
-    // error that means nothing to him and the app simply said "backend is
-    // not responding" forever. Restart could never work either: it took the
-    // same path every time.
-    //
-    // The executable going missing after a successful install is almost
-    // always ANTIVIRUS QUARANTINE — PyInstaller one-file executables are a
-    // long-standing false positive, which is why this project already builds
-    // with `upx=False`. It can also be a partial or corrupted install.
-    //
-    // Either way it is an installation fault, not a runtime one, and the
-    // user needs telling that rather than being shown a generic timeout.
-    if (isPackaged && (!bundledBackend || !fs.existsSync(bundledBackend))) {
-      log.error(`[Backend] Bundled executable NOT FOUND at: ${bundledBackend}`);
-      log.error('[Backend] The app is packaged, so this file should exist. Most likely it was '
-        + 'quarantined by antivirus after install, or the install is incomplete.');
-      log.error('[Backend] NOT falling back to a system Python — that is a development-only path '
-        + 'and would fail with a misleading "spawn python ENOENT".');
-      backendMissing = true;
-      _emitHealthState('down', BACKEND_MISSING);
-      resolve();   // the app still runs; playback does not need the backend
-      return;
-    }
-
-    if (bundledBackend && fs.existsSync(bundledBackend)) {
-      // Production: use PyInstaller-bundled executable
-      cmd = bundledBackend;
-      args = ['--port', String(backendPort), '--host', backendHost(), '--user-data-dir', userDataDir];
-      cwd = path.dirname(bundledBackend);
-    } else {
-      // Development: use venv Python or system Python
-      const venvPython = process.platform === 'win32'
-        ? path.join(backendDir, '.venv', 'Scripts', 'python.exe')
-        : path.join(backendDir, '.venv', 'bin', 'python');
-
-      cmd = fs.existsSync(venvPython)
-        ? venvPython
-        : (process.platform === 'win32' ? 'python' : 'python3');
-      args = ['main.py', '--port', String(backendPort), '--host', backendHost(), '--user-data-dir', userDataDir];
-      cwd = backendDir;
-    }
+    // The backend's venv Python, else the system Python.
+    const venvPython = process.platform === 'win32'
+      ? path.join(backendDir, '.venv', 'Scripts', 'python.exe')
+      : path.join(backendDir, '.venv', 'bin', 'python');
+    const cmd = fs.existsSync(venvPython)
+      ? venvPython
+      : (process.platform === 'win32' ? 'python' : 'python3');
+    const args = ['main.py', '--port', String(backendPort), '--host', backendHost(), '--user-data-dir', userDataDir];
+    const cwd = backendDir;
     if (backendHost() === '127.0.0.1') {
       log.info('[Backend] Local-only: listening on 127.0.0.1, so the web remote, HereSphere and DeoVR are unreachable from other devices');
     }
@@ -254,7 +197,7 @@ function stopBackend() {
   if (pythonProcess) {
     const pid = pythonProcess.pid;
     try {
-      // On Windows, .kill() sends SIGTERM which PyInstaller exes can ignore.
+      // On Windows, .kill() sends SIGTERM which the Python process can ignore.
       // Use taskkill /T to kill the process tree (includes child processes).
       if (process.platform === 'win32' && pid) {
         execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
@@ -293,21 +236,13 @@ function getHealthState() {
 }
 
 /**
- * Why the backend is down, when we know something more specific than
- * "it stopped answering" — currently the BACKEND_MISSING sentinel.
- *
- * Read at first paint as well as pushed on transitions: the renderer
- * subscribes AFTER startBackend() has already run, so a reason emitted
- * during startup would otherwise be lost and the user would get the
- * generic timeout message instead of "reinstall / check antivirus".
+ * Why the backend is down, when known (the last detail passed with a
+ * state transition). Read at first paint as well as pushed on
+ * transitions: the renderer subscribes AFTER startBackend() has already
+ * run, so a reason emitted during startup would otherwise be lost.
  */
 function getHealthDetail() {
   return healthDetail;
-}
-
-/** True when a packaged install is missing its backend executable. */
-function isBackendMissing() {
-  return backendMissing;
 }
 
 /**
@@ -413,10 +348,7 @@ module.exports = {
   setHealthListener,
   getHealthState,
   getHealthDetail,
-  isBackendMissing,
-  BACKEND_MISSING,
   startHealthMonitor,
-  stopHealthMonitor,
   restartBackend,
   backendHost,
 };

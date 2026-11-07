@@ -20,15 +20,6 @@ export async function openWebRemoteModal({ settings } = {}) {
       const wrap = document.createElement('div');
       wrap.className = 'web-remote-modal';
 
-      // Experimental banner — match the styling used in Sync tab and VR
-      // modal for consistency.
-      const expBanner = document.createElement('div');
-      expBanner.style.cssText = 'padding:8px 12px;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:6px;margin-bottom:10px';
-      expBanner.innerHTML =
-        `<span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px">${t('webRemote.experimental')}</span>` +
-        `<span style="font-size:11px;opacity:0.85;margin-left:6px">${t('webRemote.experimentalDetail')}</span>`;
-      wrap.appendChild(expBanner);
-
       const intro = document.createElement('div');
       intro.className = 'web-remote-modal__intro';
       intro.textContent = t('webRemote.intro');

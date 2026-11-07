@@ -1,15 +1,16 @@
-// ActionGraph — Canvas-based time x position graph renderer for funscript editing
-// OFS (OpenFunscripter) style: centered playhead, speed-colored lines, dark purple bg
+// ActionGraph — read-only canvas renderer for a windowed funscript timeline
+// (time × position). OFS (OpenFunscripter) style: centered playhead,
+// speed-colored lines, dark purple bg. Mounted by the inline TL overlay.
 
 export class ActionGraph {
   /**
    * @param {HTMLCanvasElement} canvas
-   * @param {import('./editable-script.js').EditableScript} editableScript
+   * @param {{actions: Array<{at:number,pos:number}>}} source — read on every draw
    */
-  constructor(canvas, editableScript) {
+  constructor(canvas, source) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.script = editableScript;
+    this.script = source;
 
     // Viewport (visible time window)
     this._viewStartMs = 0;
@@ -19,57 +20,9 @@ export class ActionGraph {
     // Playback cursor
     this._cursorMs = 0;
 
-    // Hover state
-    this._hoveredIndex = -1;
-    this._hoverX = 0;
-    this._hoverY = 0;
-
-    // Rubber-band selection
-    this._rubberBand = null; // { x1, y1, x2, y2 } in canvas coords
-
-    // Waveform overlay
-    this._waveformData = null; // WaveformData from waveform.js
-    this._showWaveform = false;
-
-    // Multi-band waveform overlay (Audio Event Detection §2.1)
-    this._multiBandData = null;
-    this._showMultiBand = false;
-
-    // Voice-activity detection track (Audio Event Detection §2.2)
-    this._vadData = null;
-    this._showVAD = false;
-
-    // Beat markers
-    this._beatMarkers = null; // Float64Array of beat timestamps in ms
-    this._showBeatMarkers = false;
-
-    // Auto-follow playback cursor
-    this._autoFollow = true;
-
-    // Animation
-    this._rafId = null;
-    this._animating = false;
-
-    // Smooth zoom easing
-    this._targetViewDurationMs = null;
-    this._zoomCenterMs = 0;
-    this._zoomCenterRatio = 0.5;
-    this._zoomStartTime = 0;
-    this._zoomFromDuration = 0;
-
-    // Idle mode — throttle to ~10fps after 3s of no interaction
-    this._lastInteractionTime = performance.now();
-    this._idleThresholdMs = 3000;
-    this._idleFrameSkip = 0;
-
-    // Spline vs linear rendering
-    this._splineMode = true;
-
     // Drawing constants
     this._padding = { top: 10, right: 20, bottom: 28, left: 40 };
     this._dotRadius = 5;
-    this._selectedDotRadius = 6;
-    this._hitRadius = 8;
 
     // OFS Colors
     this._colors = {
@@ -78,15 +31,7 @@ export class ActionGraph {
       gridLabel: 'rgba(255, 255, 255, 0.35)',
       dot: '#e94560',                           // red with dark border
       dotBorder: 'rgba(0, 0, 0, 0.8)',
-      selectedDot: 'rgb(11, 252, 3)',           // OFS green
-      selectedGlow: 'rgba(11, 252, 3, 0.3)',
-      selectedLine: 'rgb(3, 194, 252)',         // cyan for selected segments
-      hoveredDot: '#ff6b81',
       cursor: '#4caf50',
-      rubberBand: 'rgba(3, 252, 207, 0.15)',   // OFS cyan
-      rubberBandBorder: 'rgba(3, 252, 207, 0.5)',
-      waveform: 'rgba(100, 180, 255, 0.35)',
-      beatMarker: 'rgba(255, 140, 50, 0.5)',
     };
   }
 
@@ -115,123 +60,10 @@ export class ActionGraph {
     }
   }
 
-  zoomAt(centerMs, factor) {
-    const currentDuration = this.viewDurationMs;
-    const newDuration = Math.max(1000, Math.min(300000, currentDuration * factor));
-
-    if (this._animating) {
-      // Smooth easing zoom during animation
-      this._targetViewDurationMs = newDuration;
-      this._zoomCenterMs = centerMs;
-      this._zoomCenterRatio = (centerMs - this._viewStartMs) / currentDuration;
-      this._zoomStartTime = performance.now();
-      this._zoomFromDuration = currentDuration;
-    } else {
-      // Instant zoom when paused
-      const ratio = (centerMs - this._viewStartMs) / currentDuration;
-      const newStart = centerMs - newDuration * ratio;
-      this.setViewport(newStart, newStart + newDuration);
-      this.draw();
-    }
-  }
-
-  panBy(deltaMs) {
-    this.setViewport(this._viewStartMs + deltaMs, this._viewEndMs + deltaMs);
-    this.draw();
-  }
-
   centerOnTime(ms) {
     const half = this.viewDurationMs / 2;
     this.setViewport(ms - half, ms + half);
   }
-
-  /** Fit viewport to show all actions (or full video if no actions). */
-  fitAll() {
-    const actions = this.script.actions;
-    if (actions.length > 0) {
-      const first = actions[0].at;
-      const last = actions[actions.length - 1].at;
-      const padding = Math.max(2000, (last - first) * 0.05);
-      this.setViewport(first - padding, last + padding);
-    } else if (this._videoDurationMs > 0) {
-      this.setViewport(0, Math.min(this._videoDurationMs, 5000));
-    } else {
-      this.setViewport(0, 5000);
-    }
-    this.draw();
-  }
-
-  /** Zoom to a comfortable editing window around the given time. */
-  smartZoom(centerMs) {
-    const half = 5000; // 10s total window
-    this.setViewport(centerMs - half, centerMs + half);
-    this.draw();
-  }
-
-  // --- Waveform ---
-
-  /**
-   * Set waveform peak data for rendering behind action lines.
-   * @param {import('./waveform.js').WaveformData|null} data
-   */
-  setWaveformData(data) {
-    this._waveformData = data;
-  }
-
-  /** Toggle waveform visibility. */
-  setShowWaveform(show) {
-    this._showWaveform = !!show;
-  }
-
-  get showWaveform() { return this._showWaveform; }
-
-  // --- Multi-band waveform (Audio Event Detection §2.1) ---
-
-  /**
-   * Set multi-band peak data. When non-null and `_showMultiBand` is on,
-   * the renderer paints N stacked bands (low / mid / high) behind the
-   * action graph, independent of the single-trace waveform.
-   * @param {import('./waveform.js').MultiBandWaveformData|null} data
-   */
-  setMultiBandData(data) {
-    this._multiBandData = data;
-  }
-
-  setShowMultiBand(show) {
-    this._showMultiBand = !!show;
-  }
-
-  get showMultiBand() { return !!this._showMultiBand; }
-
-  // --- Voice-activity track (Audio Event Detection §2.2) ---
-
-  /** @param {import('./vad.js').VADData|null} data */
-  setVADData(data) {
-    this._vadData = data;
-  }
-
-  setShowVAD(show) {
-    this._showVAD = !!show;
-  }
-
-  get showVAD() { return !!this._showVAD; }
-
-  // --- Beat markers ---
-
-  /**
-   * Set beat marker timestamps for rendering on the graph.
-   * @param {Float64Array|null} beats — beat timestamps in ms
-   */
-  setBeatMarkers(beats) {
-    this._beatMarkers = beats;
-  }
-
-  /** Toggle beat marker visibility. */
-  setShowBeatMarkers(show) {
-    this._showBeatMarkers = !!show;
-  }
-
-  get showBeatMarkers() { return this._showBeatMarkers; }
 
   // --- Coordinate mapping ---
 
@@ -266,11 +98,6 @@ export class ActionGraph {
     return area.y + (1 - pos / 100) * area.h;
   }
 
-  yToPos(py) {
-    const area = this._drawArea();
-    return Math.max(0, Math.min(100, (1 - (py - area.y) / area.h) * 100));
-  }
-
   // --- Binary search utilities ---
 
   /**
@@ -300,151 +127,10 @@ export class ActionGraph {
     return { first, last };
   }
 
-  // --- Hit testing ---
-
-  hitTestAction(x, y, radius) {
-    radius = radius || this._hitRadius;
-    const actions = this.script.actions;
-    if (actions.length === 0) return -1;
-
-    // Narrow search to time range around mouse position
-    const tMin = this.xToTime(x - radius);
-    const tMax = this.xToTime(x + radius);
-    const lo = Math.max(0, this._lowerBound(actions, tMin) - 1);
-    const hi = Math.min(actions.length - 1, this._lowerBound(actions, tMax) + 1);
-
-    let bestIdx = -1;
-    let bestDist = Infinity;
-
-    for (let i = lo; i <= hi; i++) {
-      const ax = this.timeToX(actions[i].at);
-      const ay = this.posToY(actions[i].pos);
-      const dx = x - ax;
-      const dy = y - ay;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < radius && dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-
-    return bestIdx;
-  }
-
-  hitTestRect(rect) {
-    const indices = new Set();
-    const actions = this.script.actions;
-    if (actions.length === 0) return indices;
-
-    const x1 = Math.min(rect.x1, rect.x2);
-    const x2 = Math.max(rect.x1, rect.x2);
-    const y1 = Math.min(rect.y1, rect.y2);
-    const y2 = Math.max(rect.y1, rect.y2);
-
-    // Narrow to time range of the rect
-    const tMin = this.xToTime(x1);
-    const tMax = this.xToTime(x2);
-    const lo = Math.max(0, this._lowerBound(actions, tMin) - 1);
-    const hi = Math.min(actions.length - 1, this._lowerBound(actions, tMax) + 1);
-
-    for (let i = lo; i <= hi; i++) {
-      const ax = this.timeToX(actions[i].at);
-      const ay = this.posToY(actions[i].pos);
-      if (ax >= x1 && ax <= x2 && ay >= y1 && ay <= y2) {
-        indices.add(i);
-      }
-    }
-
-    return indices;
-  }
-
   // --- Cursor ---
 
   setCursorTime(ms) {
     this._cursorMs = ms;
-    // During playback, center viewport on cursor (OFS centered playhead)
-    if (this._autoFollow && this._animating) {
-      this.centerOnTime(ms);
-    }
-  }
-
-  // --- Hover / Rubber band ---
-
-  setHover(index, x, y) {
-    this._hoveredIndex = index;
-    this._hoverX = x;
-    this._hoverY = y;
-  }
-
-  clearHover() {
-    this._hoveredIndex = -1;
-  }
-
-  setRubberBand(rect) {
-    this._rubberBand = rect;
-  }
-
-  clearRubberBand() {
-    this._rubberBand = null;
-  }
-
-  // --- Animation ---
-
-  /** Mark user interaction — exits idle mode. */
-  markInteraction() {
-    this._lastInteractionTime = performance.now();
-  }
-
-  startAnimation() {
-    if (this._animating) return;
-    this._animating = true;
-    this._idleFrameSkip = 0;
-    const loop = () => {
-      if (!this._animating) return;
-      this._updateZoomEasing();
-
-      // Idle mode: skip 5 of every 6 frames (~10fps) after 3s of no interaction
-      const idle = performance.now() - this._lastInteractionTime > this._idleThresholdMs;
-      if (idle) {
-        this._idleFrameSkip = (this._idleFrameSkip + 1) % 6;
-        if (this._idleFrameSkip !== 0) {
-          this._rafId = requestAnimationFrame(loop);
-          return;
-        }
-      }
-
-      this.draw();
-      this._rafId = requestAnimationFrame(loop);
-    };
-    this._rafId = requestAnimationFrame(loop);
-  }
-
-  stopAnimation() {
-    this._animating = false;
-    this._targetViewDurationMs = null;
-    if (this._rafId) {
-      cancelAnimationFrame(this._rafId);
-      this._rafId = null;
-    }
-  }
-
-  /** Process smooth zoom interpolation each frame. */
-  _updateZoomEasing() {
-    if (this._targetViewDurationMs === null) return;
-
-    const elapsed = performance.now() - this._zoomStartTime;
-    const duration = 150; // ms
-    const t = Math.min(1, elapsed / duration);
-    // easeOutExpo
-    const ease = t >= 1 ? 1 : 1 - Math.pow(2, -10 * t);
-
-    const currentDuration = this._zoomFromDuration + (this._targetViewDurationMs - this._zoomFromDuration) * ease;
-    const newStart = this._zoomCenterMs - currentDuration * this._zoomCenterRatio;
-    this.setViewport(newStart, newStart + currentDuration);
-
-    if (t >= 1) {
-      this._targetViewDurationMs = null;
-    }
   }
 
   // --- Resize ---
@@ -504,11 +190,11 @@ export class ActionGraph {
     const ctx = this.ctx;
 
     // Defensive auto-resize: if the canvas has zero pixel dimensions but
-    // its parent is sized (e.g. the editor was just un-hidden after the
-    // pop-out closed and resize() hasn't fired yet), pull the parent's
-    // current rect and resync. Without this, every position computed
-    // through posToY / timeToX lands at a non-positive area, so all dots
-    // / lines / cursor render outside the visible canvas.
+    // its parent is sized (e.g. the overlay was just un-hidden and resize()
+    // hasn't fired yet), pull the parent's current rect and resync. Without
+    // this, every position computed through posToY / timeToX lands at a
+    // non-positive area, so all dots / lines / cursor render outside the
+    // visible canvas.
     if (this.canvas.width === 0 || this.canvas.height === 0) {
       const parent = this.canvas.parentElement;
       const rect = parent ? parent.getBoundingClientRect() : null;
@@ -533,58 +219,20 @@ export class ActionGraph {
 
     const area = this._drawArea();
 
-    // 2. Waveform (behind everything else)
-    if (this._showWaveform && this._waveformData) {
-      this._drawWaveform(ctx, area);
-    }
-
-    // 2b. Multi-band waveform (3 stacked traces — low / mid / high).
-    // Mutually independent of the single-trace waveform so a user can
-    // toggle either or both — useful for confirming a slap shows in the
-    // high band but is absent from the mid/low bands.
-    if (this._showMultiBand && this._multiBandData) {
-      this._drawMultiBandWaveform(ctx, area);
-    }
-
-    // 2c. Voice-activity detection track — thin coloured strip at the
-    // top of the area showing voice-on segments. Sits in the topmost
-    // ~12 px so it doesn't compete with the action graph.
-    if (this._showVAD && this._vadData) {
-      this._drawVAD(ctx, area);
-    }
-
-    // 3. Beat markers (behind grid and actions, on top of waveform)
-    if (this._showBeatMarkers && this._beatMarkers) {
-      this._drawBeatMarkers(ctx, area);
-    }
-
-    // 4. Grid lines
+    // 2. Grid lines
     this._drawGrid(ctx, area);
 
-    // 5. Bookmark lines (gold dashed, before connections so they're behind)
-    this._drawBookmarks(ctx, area);
+    // 3. Connection lines (speed-colored, OFS style)
+    this._drawConnections(ctx);
 
-    // 6. Connection lines (speed-colored, OFS style)
-    this._drawConnections(ctx, area);
+    // 4. Action dots
+    this._drawDots(ctx);
 
-    // 7. Action dots
-    this._drawDots(ctx, area);
-
-    // 8. Playback cursor (centered during playback)
+    // 5. Playback cursor (centered during playback)
     this._drawCursor(ctx, area);
 
-    // 9. Heatmap bar at bottom
+    // 6. Heatmap bar at bottom
     this._drawHeatmapBar(ctx, area);
-
-    // 10. Rubber-band selection
-    if (this._rubberBand) {
-      this._drawRubberBand(ctx);
-    }
-
-    // 11. Hover tooltip
-    if (this._hoveredIndex >= 0) {
-      this._drawHoverTooltip(ctx);
-    }
 
     ctx.restore();
   }
@@ -629,158 +277,9 @@ export class ActionGraph {
     }
   }
 
-  _drawWaveform(ctx, area) {
-    const data = this._waveformData;
-    if (!data || !data.peaks || data.peaks.length === 0) return;
-
-    const { peaks, peaksPerSecond } = data;
-    const startIdx = Math.max(0, Math.floor(this._viewStartMs / 1000 * peaksPerSecond));
-    const endIdx = Math.min(peaks.length - 1, Math.ceil(this._viewEndMs / 1000 * peaksPerSecond));
-    if (startIdx >= endIdx) return;
-
-    const midY = area.y + area.h / 2;
-    const maxHalf = area.h / 2;
-
-    ctx.save();
-    ctx.fillStyle = this._colors.waveform;
-    ctx.beginPath();
-
-    // Top half (forward pass)
-    for (let i = startIdx; i <= endIdx; i++) {
-      const timeMs = (i / peaksPerSecond) * 1000;
-      const x = this.timeToX(timeMs);
-      const amp = peaks[i] * maxHalf;
-      if (i === startIdx) ctx.moveTo(x, midY - amp);
-      else ctx.lineTo(x, midY - amp);
-    }
-
-    // Bottom half (reverse pass — mirror)
-    for (let i = endIdx; i >= startIdx; i--) {
-      const timeMs = (i / peaksPerSecond) * 1000;
-      const x = this.timeToX(timeMs);
-      const amp = peaks[i] * maxHalf;
-      ctx.lineTo(x, midY + amp);
-    }
-
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  /**
-   * Render N stacked horizontal bands. Each band fills a `bandH` slice
-   * of `area` (top → bottom: low → mid → high). Each band is drawn as
-   * a centered, mirrored amplitude envelope with the band's own colour
-   * tint. A thin label is painted at the band's left edge so the user
-   * can map a peak to a band without consulting a legend.
-   */
-  _drawMultiBandWaveform(ctx, area) {
-    const data = this._multiBandData;
-    if (!data || !data.bands || data.bands.length === 0) return;
-    const { bands, peaksPerSecond } = data;
-
-    const bandH = area.h / bands.length;
-    const labelFont = '9px ui-monospace, Menlo, Consolas, monospace';
-
-    ctx.save();
-    for (let b = 0; b < bands.length; b++) {
-      const band = bands[b];
-      const peaks = band.peaks;
-      if (!peaks || peaks.length === 0) continue;
-
-      const startIdx = Math.max(0, Math.floor(this._viewStartMs / 1000 * peaksPerSecond));
-      const endIdx = Math.min(peaks.length - 1, Math.ceil(this._viewEndMs / 1000 * peaksPerSecond));
-      if (startIdx >= endIdx) continue;
-
-      const bandY = area.y + bandH * b;
-      const midY = bandY + bandH / 2;
-      const maxHalf = bandH / 2 - 1;
-
-      ctx.fillStyle = band.color || 'rgba(180, 180, 255, 0.4)';
-      ctx.beginPath();
-      for (let i = startIdx; i <= endIdx; i++) {
-        const x = this.timeToX((i / peaksPerSecond) * 1000);
-        const amp = peaks[i] * maxHalf;
-        if (i === startIdx) ctx.moveTo(x, midY - amp);
-        else ctx.lineTo(x, midY - amp);
-      }
-      for (let i = endIdx; i >= startIdx; i--) {
-        const x = this.timeToX((i / peaksPerSecond) * 1000);
-        const amp = peaks[i] * maxHalf;
-        ctx.lineTo(x, midY + amp);
-      }
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.font = labelFont;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(band.label, area.x + 4, bandY + 2);
-    }
-    ctx.restore();
-  }
-
-  /**
-   * Render voice-activity segments as a thin strip at the top of the
-   * draw area. Voice-on = filled rect in accent-soft tint; gaps =
-   * transparent. 12px tall — barely-noticeable when no voice is
-   * detected, clearly visible when active. Sits at the very top of the
-   * area so it doesn't compete with action dots / lines.
-   */
-  _drawVAD(ctx, area) {
-    const data = this._vadData;
-    if (!data || !data.segments || data.segments.length === 0) return;
-
-    const stripH = 12;
-    const stripY = area.y;
-    const viewStart = this._viewStartMs;
-    const viewEnd = this._viewEndMs;
-
-    ctx.save();
-    ctx.fillStyle = 'rgba(11, 252, 3, 0.35)'; // OFS-green accent-soft
-    for (const seg of data.segments) {
-      if (seg.endMs < viewStart || seg.startMs > viewEnd) continue;
-      const x1 = this.timeToX(seg.startMs);
-      const x2 = this.timeToX(seg.endMs);
-      ctx.fillRect(x1, stripY, Math.max(1, x2 - x1), stripH);
-    }
-
-    ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('VOICE', area.x + 4, stripY + 1);
-    ctx.restore();
-  }
-
-  _drawBeatMarkers(ctx, area) {
-    const beats = this._beatMarkers;
-    if (!beats || beats.length === 0) return;
-
-    ctx.save();
-    ctx.strokeStyle = this._colors.beatMarker;
-    ctx.lineWidth = 1;
-
-    for (let i = 0; i < beats.length; i++) {
-      const timeMs = beats[i];
-      if (timeMs < this._viewStartMs || timeMs > this._viewEndMs) continue;
-
-      const x = this.timeToX(timeMs);
-      ctx.beginPath();
-      ctx.moveTo(x, area.y + area.h - 12);
-      ctx.lineTo(x, area.y + area.h);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
   _drawConnections(ctx) {
     const actions = this.script.actions;
     if (actions.length < 2) return;
-
-    const selected = this.script.selectedIndices;
 
     // Viewport culling — only draw visible slice + 1 on each side
     const { first, last } = this._visibleRange(actions);
@@ -794,48 +293,34 @@ export class ActionGraph {
       ys[i - first] = this.posToY(actions[i].pos);
     }
 
-    // Compute tangents only for spline mode
-    const tangents = this._splineMode ? this._monotoneTangents(xs, ys) : null;
+    const tangents = this._monotoneTangents(xs, ys);
 
     // Draw each visible segment
     for (let si = 0; si < sliceLen - 1; si++) {
       const i = first + si;
-      const bothSelected = selected.has(i) && selected.has(i + 1);
-
-      let color;
-      if (bothSelected) {
-        color = this._colors.selectedLine;
-      } else {
-        const deltaTime = actions[i + 1].at - actions[i].at;
-        const deltaPos = Math.abs(actions[i + 1].pos - actions[i].pos);
-        const speed = deltaTime > 0 ? deltaPos / deltaTime : 0;
-        color = ActionGraph.speedToColor(speed);
-      }
+      const deltaTime = actions[i + 1].at - actions[i].at;
+      const deltaPos = Math.abs(actions[i + 1].pos - actions[i].pos);
+      const speed = deltaTime > 0 ? deltaPos / deltaTime : 0;
+      const color = ActionGraph.speedToColor(speed);
 
       const x1 = xs[si], y1 = ys[si], x2 = xs[si + 1], y2 = ys[si + 1];
 
+      // Cubic Hermite spline
       const path = new Path2D();
       path.moveTo(x1, y1);
-
-      if (tangents) {
-        // Cubic Hermite spline
-        const dx = x2 - x1;
-        const m1 = tangents[si] * dx;
-        const m2 = tangents[si + 1] * dx;
-        const steps = 16;
-        for (let s = 1; s <= steps; s++) {
-          const t = s / steps;
-          const t2 = t * t;
-          const t3 = t2 * t;
-          const h00 = 2 * t3 - 3 * t2 + 1;
-          const h10 = t3 - 2 * t2 + t;
-          const h01 = -2 * t3 + 3 * t2;
-          const h11 = t3 - t2;
-          path.lineTo(x1 + dx * t, h00 * y1 + h10 * m1 + h01 * y2 + h11 * m2);
-        }
-      } else {
-        // Linear mode — straight line
-        path.lineTo(x2, y2);
+      const dx = x2 - x1;
+      const m1 = tangents[si] * dx;
+      const m2 = tangents[si + 1] * dx;
+      const steps = 16;
+      for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + t;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+        path.lineTo(x1 + dx * t, h00 * y1 + h10 * m1 + h01 * y2 + h11 * m2);
       }
 
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
@@ -905,63 +390,24 @@ export class ActionGraph {
 
   _drawDots(ctx) {
     const actions = this.script.actions;
-    const selected = this.script.selectedIndices;
 
     // Viewport culling — only draw visible dots
     const { first, last } = this._visibleRange(actions);
 
-    // Draw non-selected dots first
+    ctx.strokeStyle = this._colors.dotBorder;
+    ctx.lineWidth = 1.5;
+    ctx.fillStyle = this._colors.dot;
     for (let i = first; i <= last; i++) {
-      if (selected.has(i) || i === this._hoveredIndex) continue;
       const x = this.timeToX(actions[i].at);
       const y = this.posToY(actions[i].pos);
-
-      ctx.strokeStyle = this._colors.dotBorder;
-      ctx.lineWidth = 1.5;
-      ctx.fillStyle = this._colors.dot;
       ctx.beginPath();
       ctx.arc(x, y, this._dotRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    // Draw hovered dot (larger)
-    if (this._hoveredIndex >= 0 && this._hoveredIndex >= first && this._hoveredIndex <= last && !selected.has(this._hoveredIndex)) {
-      const a = actions[this._hoveredIndex];
-      const x = this.timeToX(a.at);
-      const y = this.posToY(a.pos);
-      ctx.strokeStyle = this._colors.dotBorder;
-      ctx.lineWidth = 1.5;
-      ctx.fillStyle = this._colors.hoveredDot;
-      ctx.beginPath();
-      ctx.arc(x, y, this._dotRadius + 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    // Draw selected dots on top — only those in visible range
-    for (const i of selected) {
-      if (i < first || i > last || i >= actions.length) continue;
-      const x = this.timeToX(actions[i].at);
-      const y = this.posToY(actions[i].pos);
-
-      ctx.fillStyle = this._colors.selectedGlow;
-      ctx.beginPath();
-      ctx.arc(x, y, this._selectedDotRadius + 3, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = this._colors.selectedDot;
-      ctx.strokeStyle = this._colors.dotBorder;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(x, y, this._selectedDotRadius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
   }
 
   _drawCursor(ctx, area) {
-    // During playback, cursor is always at center (OFS centered playhead)
     const x = this.timeToX(this._cursorMs);
     if (x < area.x - 1 || x > area.x + area.w + 1) return;
 
@@ -1022,89 +468,6 @@ export class ActionGraph {
     ctx.globalAlpha = 1;
   }
 
-  _drawBookmarks(ctx, area) {
-    if (typeof this.script.getBookmarks !== 'function') return;
-    const bookmarks = this.script.getBookmarks();
-    if (bookmarks.length === 0) return;
-
-    ctx.save();
-    ctx.setLineDash([6, 4]);
-    ctx.lineWidth = 1.5;
-    ctx.font = '9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-
-    for (const bm of bookmarks) {
-      const x = this.timeToX(bm.at);
-      // Skip bookmarks outside current viewport
-      if (x < area.x - 10 || x > area.x + area.w + 10) continue;
-
-      // Gold dashed vertical line
-      ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
-      ctx.beginPath();
-      ctx.moveTo(x, area.y);
-      ctx.lineTo(x, area.y + area.h);
-      ctx.stroke();
-
-      // Small label at top
-      if (bm.name) {
-        ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
-        const label = bm.name.length > 12 ? bm.name.slice(0, 11) + '\u2026' : bm.name;
-        ctx.fillText(label, x, area.y - 2);
-      }
-    }
-
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
-  _drawRubberBand(ctx) {
-    const r = this._rubberBand;
-    const x = Math.min(r.x1, r.x2);
-    const y = Math.min(r.y1, r.y2);
-    const w = Math.abs(r.x2 - r.x1);
-    const h = Math.abs(r.y2 - r.y1);
-
-    ctx.fillStyle = this._colors.rubberBand;
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = this._colors.rubberBandBorder;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x, y, w, h);
-  }
-
-  _drawHoverTooltip(ctx) {
-    const action = this.script.actions[this._hoveredIndex];
-    if (!action) return;
-
-    const text = `${this._formatTime(action.at)}, pos: ${action.pos}`;
-    ctx.font = '11px sans-serif';
-    const metrics = ctx.measureText(text);
-    const px = 6;
-    const py = 4;
-    const tw = metrics.width + px * 2;
-    const th = 18;
-
-    let tx = this._hoverX - tw / 2;
-    let ty = this._hoverY - th - 12;
-
-    // Clamp to canvas bounds
-    const dpr = window.devicePixelRatio || 1;
-    const cw = this.canvas.width / dpr;
-    if (tx < 2) tx = 2;
-    if (tx + tw > cw - 2) tx = cw - 2 - tw;
-    if (ty < 2) ty = this._hoverY + 12;
-
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.beginPath();
-    ctx.roundRect(tx, ty, tw, th, 4);
-    ctx.fill();
-
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, tx + px, ty + th / 2);
-  }
-
   // --- Helpers ---
 
   _formatTime(ms) {
@@ -1118,16 +481,5 @@ export class ActionGraph {
       return `${min}:${String(sec).padStart(2, '0')}.${String(Math.floor(frac / 100))}`;
     }
     return `${min}:${String(sec).padStart(2, '0')}`;
-  }
-
-  /**
-   * Get canvas-relative coordinates from a MouseEvent.
-   */
-  getCanvasCoords(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
   }
 }

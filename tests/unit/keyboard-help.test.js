@@ -3,17 +3,15 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Tests for keyboard-help — the shared `?` overlay used by both the
-// editor and the player view. Pure rendering helper; the interesting
-// behaviours to pin down:
+// Tests for keyboard-help — the `?` overlay for the player view. Pure
+// rendering helper; the interesting behaviours to pin down:
 //
-//   1. The exported group constants are well-formed (every row has
-//      [keys, desc] strings — defends against accidental shape regression
-//      when adding new shortcut entries).
-//   2. Both the player and editor group sets contain the `?` row
-//      (since the SCOPE doc treats discoverability of the help itself
-//      as part of the help — a help screen that doesn't say how to
-//      open it is a small but real Nielsen #10 violation).
+//   1. The exported group set is well-formed (every row has [keys, desc]
+//      strings — defends against accidental shape regression when adding
+//      new shortcut entries).
+//   2. The player group set contains the `?` row (discoverability of the
+//      help itself is part of the help — a help screen that doesn't say
+//      how to open it is a small but real Nielsen #10 violation).
 
 import { describe, it, expect, vi } from 'vitest';
 
@@ -24,11 +22,10 @@ vi.mock('../../renderer/js/data-service.js', () => ({
   dataService: { get: (key) => SETTINGS[key] },
 }));
 
-import { getPlayerShortcutGroups, getEditorShortcutGroups } from '../../renderer/js/keyboard-help.js';
+import { getPlayerShortcutGroups } from '../../renderer/js/keyboard-help.js';
 import { t } from '../../renderer/js/i18n.js';
 
 const PLAYER_SHORTCUT_GROUPS = getPlayerShortcutGroups();
-const EDITOR_SHORTCUT_GROUPS = getEditorShortcutGroups();
 
 function assertWellFormed(groups, name) {
   expect(Array.isArray(groups), `${name} is an array`).toBe(true);
@@ -67,25 +64,6 @@ describe('PLAYER_SHORTCUT_GROUPS', () => {
   });
 });
 
-describe('EDITOR_SHORTCUT_GROUPS', () => {
-  it('is well-formed', () => {
-    assertWellFormed(EDITOR_SHORTCUT_GROUPS, 'editor');
-  });
-
-  it('lists the `?` shortcut', () => {
-    const allRows = EDITOR_SHORTCUT_GROUPS.flatMap(g => g.rows);
-    const hasQuestionMark = allRows.some(([keys]) => keys.includes('?'));
-    expect(hasQuestionMark).toBe(true);
-  });
-
-  it('covers editor essentials (Ctrl+Z, Ctrl+S, numpad, arrows)', () => {
-    const allKeys = EDITOR_SHORTCUT_GROUPS.flatMap(g => g.rows.map(r => r[0])).join(' | ');
-    expect(allKeys).toMatch(/Ctrl\+Z/);
-    expect(allKeys).toMatch(/Ctrl\+S/);
-    expect(allKeys).toMatch(/Numpad|0 –/);
-    expect(allKeys).toMatch(/Up|Down/);
-  });
-});
 
 // X and Z can each run as hold or press-to-toggle. A row that says "(hold)"
 // next to a key that toggles is worse than no row at all, so the label has to

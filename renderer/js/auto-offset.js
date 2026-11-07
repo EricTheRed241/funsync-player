@@ -3,7 +3,7 @@
 // per-device sync engines call into these.
 //
 // Two layers:
-//   1. Diagnostic: measure latencies we can (Handy RTD, network jitter,
+//   1. Diagnostic: measure latencies we can (network jitter,
 //      BLE ping) and surface them. Doesn't auto-apply.
 //   2. Presets: per-player + per-transport defaults. Apply on connect,
 //      respect user-tuned overrides via a 'source' tag stored alongside
@@ -26,7 +26,7 @@
  *
  * The number is the TOTAL offset for the VR proxy (`vr.offset`) — i.e.
  * what compensates for VR display lag. Per-device offsets stack on top
- * to compensate for the device's own command latency (Handy RTD, BLE).
+ * to compensate for the device's own command latency (BLE).
  */
 export const VR_OFFSET_PRESETS = {
   'heresphere:cable':       -100,
@@ -45,15 +45,10 @@ export const VR_OFFSET_PRESETS = {
  * command latency, which is independent of the playback context.
  */
 export const DEVICE_OFFSET_PRESETS = {
-  // Handy via native WiFi API: HSSP latency is mostly absorbed by the
-  // device's clock-sync, but a small early-fire helps in practice.
-  handy:    -50,
   // Buttplug devices over BLE: ~50-80ms BLE round-trip, fire that early.
   buttplug: -80,
   // TCode over USB serial: very low latency, minor adjustment.
   tcode:    -20,
-  // Autoblow — already has its own offset model; preset is conservative.
-  autoblow: -50,
 };
 
 /**
@@ -114,7 +109,7 @@ export function lookupVrPreset(playerType, jitterMs) {
  *   suggested = -( deviceOneWay + networkOneWay + displayLag )
  *
  * Where:
- *   deviceOneWay  = handyRtd/2  for Handy; buttplugPing/2  for Buttplug
+ *   deviceOneWay  = buttplugPing/2  for Buttplug
  *   networkOneWay = vrJitter    (jitter ≈ one-way variance, best proxy
  *                                we have given the one-way protocol)
  *   displayLag    = the unmeasurable VR display lag, taken from the
@@ -123,9 +118,8 @@ export function lookupVrPreset(playerType, jitterMs) {
  * For non-VR contexts (desktop, web remote), displayLag is omitted.
  *
  * @param {object} opts
- * @param {'handy'|'buttplug'|'tcode'|'autoblow'} opts.device
+ * @param {'buttplug'|'tcode'} opts.device
  * @param {'desktop'|'vr'|'remote'} opts.context
- * @param {number} [opts.handyRtdMs]    — device round-trip, when device='handy'
  * @param {number} [opts.buttplugPingMs] — device round-trip, when device='buttplug'
  * @param {number} [opts.vrJitterMs]    — network jitter, when context='vr'
  * @param {number} [opts.wsRttMs]       — WS round-trip, when context='remote'
@@ -136,9 +130,7 @@ export function computeSuggestedOffset(opts) {
   let total = 0;
 
   // Device-side one-way latency.
-  if (opts.device === 'handy' && opts.handyRtdMs != null) {
-    total += opts.handyRtdMs / 2;
-  } else if (opts.device === 'buttplug' && opts.buttplugPingMs != null) {
+  if (opts.device === 'buttplug' && opts.buttplugPingMs != null) {
     total += opts.buttplugPingMs / 2;
   }
 

@@ -39,7 +39,6 @@ def _wait_status(client, pred, timeout=2.0):
 WAITING_TCODE = {
     "at": "2026-11-03T09:00:00.000Z",
     "devices": {
-        "handy": {"connected": False},
         "buttplug": {"connected": False, "devices": []},
         "tcode": {
             "connected": False, "waiting": True, "syncActive": False,
@@ -49,7 +48,6 @@ WAITING_TCODE = {
                 "lastError": {"text": "mirabot.local does not resolve (ENOTFOUND)", "at": "2026-11-03T08:59:55.000Z"},
             },
         },
-        "autoblow": None,
     },
     "vr": {"connected": False, "linkState": "disconnected"},
     "session": None,

@@ -222,8 +222,6 @@ def _category_names(path: str, categories: list[dict], video_categories: dict) -
         for c in categories
         if c.get("id") in ids and (c.get("name") or "").strip()
     ]
-    out.sort(key=lambda v: v["name"].lower())
-    return {"videos": out}
 
 
 def _video_ids_from_paths(paths: list[str]) -> list[str]:

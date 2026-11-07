@@ -1,5 +1,5 @@
 // Integration tests using the real Test.funscript file through FunscriptEngine
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { FunscriptEngine } from '../../renderer/js/funscript-engine.js';
@@ -58,16 +58,7 @@ describe.skipIf(!hasTestFile)('FunscriptEngine with real Test.funscript', () => 
   let engine;
 
   beforeAll(async () => {
-    vi.clearAllMocks();
-    window.funsync.convertFunscript.mockResolvedValue({
-      csv: funscriptData.actions.map((a) => `${a.at},${a.pos}`).join('\n'),
-      hash: 'integration-test',
-      local_url: 'http://localhost:5123/scripts/integration-test.csv',
-      size_bytes: 1000,
-      action_count: funscriptData.actions.length,
-      duration_ms: funscriptData.actions[funscriptData.actions.length - 1].at,
-    });
-    engine = new FunscriptEngine({ backendPort: 5123 });
+    engine = new FunscriptEngine();
     await engine.loadContent(rawContent, 'Test.funscript');
   });
 

@@ -41,7 +41,6 @@ describe('KeyboardHandler — playback speed shortcuts', () => {
       videoPlayer: player,
       connectionPanel: null,
       onOpenFile: null,
-      scriptEditor: { isOpen: false },
     });
   });
 

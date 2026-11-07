@@ -35,31 +35,22 @@ export function isVideoInPip(video, doc = (typeof document !== 'undefined' ? doc
  *
  * @param {Object} deps
  * @param {{video: HTMLVideoElement|null}|null} [deps.videoPlayer]
- * @param {{stop: () => void}|null} [deps.syncEngine]
  * @param {{_active: boolean, stop: () => void}|null} [deps.buttplugSync]
  * @param {{_active: boolean, stop: () => void}|null} [deps.tcodeSync]
- * @param {{_active: boolean, stop: () => void}|null} [deps.autoblowSync]
- * @param {{connected: boolean, hsspStop: () => void}|null} [deps.handyManager]
  * @param {{connected: boolean, stopAll: () => void}|null} [deps.buttplugManager]
  * @param {{connected: boolean, stop: () => void}|null} [deps.tcodeManager]
- * @param {{connected: boolean, syncStop: () => void}|null} [deps.autoblowManager]
  */
 export function teardownPlayback(deps) {
   // Pause video first — stops playback immediately in the browser
   if (deps?.videoPlayer?.video) deps.videoPlayer.video.pause();
 
   // Stop all sync engines (prevents any new commands from being queued)
-  if (deps?.syncEngine) deps.syncEngine.stop();
-  if (deps?.handyHdspSync?.active) deps.handyHdspSync.stop();
   if (deps?.buttplugSync?._active) deps.buttplugSync.stop();
   if (deps?.tcodeSync?._active) deps.tcodeSync.stop();
-  if (deps?.autoblowSync?._active) deps.autoblowSync.stop();
 
-  // Stop all devices (network calls — async but fire-and-forget)
-  if (deps?.handyManager?.connected) deps.handyManager.hsspStop();
+  // Stop all devices
   if (deps?.buttplugManager?.connected) deps.buttplugManager.stopAll();
   if (deps?.tcodeManager?.connected) deps.tcodeManager.stop();
-  if (deps?.autoblowManager?.connected) deps.autoblowManager.syncStop();
 
   const doc = (typeof document !== 'undefined') ? document : null;
   if (doc && doc.fullscreenElement) {

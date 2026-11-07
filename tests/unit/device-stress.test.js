@@ -1,13 +1,13 @@
 // Device stress + combination tests.
 //
-// The per-device test files (handy-manager, buttplug-sync, tcode, autoblow,
-// sync-engine, device-expansion, custom-routing) already cover individual
+// The per-device test files (buttplug-sync, tcode, device-expansion,
+// custom-routing) already cover individual
 // behaviour in depth. This file covers what they don't: many devices at once,
 // all engine types running simultaneously, hot-plug scenarios, and
 // performance measurements so we know where the ceiling is.
 //
 // Everything runs against in-memory fakes — no real Buttplug SDK, no real
-// serial port, no Handy cloud. Ticks are stepped manually via `_tick()` so
+// serial port. Ticks are stepped manually via `_tick()` so
 // tests don't wait on setInterval.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -88,36 +88,12 @@ function makeButtplug(deviceSpecs) {
   };
 }
 
-function makeHandy() {
-  return {
-    connected: true,
-    uploadAndSetScript: vi.fn().mockResolvedValue(true),
-    hsspPlay: vi.fn().mockResolvedValue({ result: 0 }),
-    hsspStop: vi.fn().mockResolvedValue(undefined),
-    setupScript: vi.fn().mockResolvedValue(true),
-    sync: vi.fn().mockResolvedValue(undefined),
-    _lastCloudUrl: 'https://mock/script',
-  };
-}
-
 function makeTCode({ connected = true } = {}) {
   return {
     connected,
     sendAxes: vi.fn(),
     send: vi.fn().mockResolvedValue(true),
     stop: vi.fn(),
-  };
-}
-
-function makeAutoblowSync() {
-  // AutoblowSync has its own interval loop; we just need a stub that
-  // exposes start/stop/uploadScript so the multi-engine harness can call
-  // them. Real behaviour is tested in autoblow.test.js.
-  return {
-    start: vi.fn(),
-    stop: vi.fn(),
-    uploadScript: vi.fn().mockResolvedValue(true),
-    _active: false,
   };
 }
 
@@ -278,18 +254,16 @@ describe('Device stress — pairwise engine combinations', () => {
 
 // --- C. Full stack (all engine types at once) ----------------------------
 
-describe('Device stress — full device stack (Buttplug + TCode + Handy-equiv + Autoblow stub)', () => {
-  it('every engine fires commands on a shared funscript', async () => {
+describe('Device stress — full device stack (Buttplug + TCode)', () => {
+  it('every engine fires commands on a shared funscript', () => {
     const fs = makeFunscript();
     const bp = makeButtplug([
-      { name: 'Handy (Intiface)', canLinear: true },
+      { name: 'Stroker',          canLinear: true },
       { name: 'Lovense',          canVibrate: true },
       { name: 'Nora',             canRotate: true },
       { name: 'DG-LAB',           canScalar: true },
     ]);
     const tc = makeTCode();
-    const handy = makeHandy();
-    const autoblow = makeAutoblowSync();
 
     const bpSync = new ButtplugSync({ videoPlayer: makePlayer(), buttplugManager: bp, funscriptEngine: fs });
     const tcSync = new TCodeSync({ videoPlayer: makePlayer(), tcodeManager: tc, funscriptEngine: fs });
@@ -298,11 +272,6 @@ describe('Device stress — full device stack (Buttplug + TCode + Handy-equiv + 
     bpSync.setRampUp(3, false);
 
     bpSync.start(); tcSync.start();
-    // Native Handy doesn't tick — it uploads once then Handy plays the script
-    // itself. Emulate that upload step so the "handy participates" claim is
-    // asserted by the test.
-    await handy.uploadAndSetScript('{"actions":[]}');
-    autoblow.start();
 
     stepTick(bpSync, 0.3); stepTick(tcSync, 0.3);
 
@@ -313,12 +282,8 @@ describe('Device stress — full device stack (Buttplug + TCode + Handy-equiv + 
     expect(bp.sendScalar).toHaveBeenCalled();
     // TCode fires.
     expect(tc.sendAxes).toHaveBeenCalled();
-    // Handy upload fired.
-    expect(handy.uploadAndSetScript).toHaveBeenCalledTimes(1);
-    // Autoblow start fired.
-    expect(autoblow.start).toHaveBeenCalledTimes(1);
 
-    bpSync.stop(); tcSync.stop(); autoblow.stop();
+    bpSync.stop(); tcSync.stop();
   });
 
   it('stop tears down every engine cleanly (no orphaned intervals)', () => {

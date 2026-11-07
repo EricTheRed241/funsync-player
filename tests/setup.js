@@ -43,14 +43,6 @@ globalThis.funsync = {
   readFunscript: vi.fn().mockResolvedValue(null),
   writeFunscript: vi.fn().mockResolvedValue(null),
   saveFunscript: vi.fn().mockResolvedValue(null),
-  convertFunscript: vi.fn().mockResolvedValue({
-    csv: '',
-    hash: 'test',
-    local_url: 'http://localhost:5123/scripts/test.csv',
-    size_bytes: 0,
-    action_count: 0,
-    duration_ms: 0,
-  }),
   generateThumbnails: vi.fn().mockResolvedValue({ thumbnails: [], interval: 10, count: 0 }),
   fetchMetadata: vi.fn().mockResolvedValue(null),
   selectDirectory: vi.fn().mockResolvedValue(null),
@@ -82,16 +74,6 @@ globalThis.funsync = {
   onVrState: vi.fn().mockReturnValue(() => {}),
   onVrDisconnected: vi.fn().mockReturnValue(() => {}),
 
-  // Autoblow
-  autoblowConnect: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
-  autoblowDisconnect: vi.fn().mockResolvedValue({ success: true }),
-  autoblowStatus: vi.fn().mockResolvedValue({ connected: false }),
-  autoblowUploadScript: vi.fn().mockResolvedValue({ success: true }),
-  autoblowSyncStart: vi.fn().mockResolvedValue({ success: true }),
-  autoblowSyncStop: vi.fn().mockResolvedValue({ success: true }),
-  autoblowSyncOffset: vi.fn().mockResolvedValue({ success: true }),
-  autoblowLatency: vi.fn().mockResolvedValue({ success: true, latency: 50 }),
-
   // TCode Serial
   tcodeListPorts: vi.fn().mockResolvedValue([]),
   tcodeConnect: vi.fn().mockResolvedValue({ success: true }),
@@ -117,23 +99,9 @@ globalThis.funsync = {
   eroscriptsValidatePoster: vi.fn().mockResolvedValue({ error: 'unavailable' }),
   deleteEroScriptsThumbnail: vi.fn().mockResolvedValue(true),
 
-  // Auto-updater
-  updaterCheck: vi.fn().mockResolvedValue(undefined),
-  updaterDownload: vi.fn().mockResolvedValue(undefined),
-  updaterInstall: vi.fn().mockResolvedValue(undefined),
-  onUpdateEvent: vi.fn().mockReturnValue(() => {}),
-
   // Data store IPC methods
   getAllData: vi.fn().mockResolvedValue({
     settings: {
-      handy: {
-        connectionKey: '',
-        defaultOffset: 0,
-        slideMin: 0,
-        slideMax: 100,
-        scriptHostMode: 'local',
-        syncRounds: 30,
-      },
       player: {
         volume: 80,
         theme: 'dark',
@@ -150,16 +118,11 @@ globalThis.funsync = {
         localIp: 'auto',
       },
       library: {
-        directory: '',
         sources: [],
         associations: {},
         manualVariants: {},
         collections: [],
         activeCollectionId: null,
-      },
-      editor: {
-        defaultCreator: '',
-        patternPresets: [],
       },
       knownDevices: [],
       buttplug: {
@@ -171,15 +134,10 @@ globalThis.funsync = {
         axisRanges: {},
         axisEnabled: {},
       },
-      autoblow: {
-        token: '',
-        offset: 0,
-      },
     },
     playlists: [],
     categories: [],
     videoCategories: {},
-    _migrated: true,
   }),
   getSetting: vi.fn().mockResolvedValue(undefined),
   setSetting: vi.fn().mockResolvedValue(undefined),
@@ -203,7 +161,6 @@ globalThis.funsync = {
   unassignCategory: vi.fn().mockResolvedValue(undefined),
   getVideoCategories: vi.fn().mockResolvedValue([]),
   getVideosByCategory: vi.fn().mockResolvedValue([]),
-  migrateLocalStorage: vi.fn().mockResolvedValue({ success: true }),
 };
 
 // --- Canvas 2D context mock ---
