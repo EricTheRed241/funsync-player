@@ -13,13 +13,11 @@
 //   • Monsters, feet and FFM (tags, title words or first post) aren't
 //     preferred: they come in, ranked lower (lessPreferred, their
 //     TAG_SCORE_GROUPS group).
-//   • Animated: an animation tag and no `real` tag. A music post by a
-//     creator already in the library is accepted as well. Live action by a
-//     favourite (title, tags or poster; scripts/scout-live.mjs) is taken;
-//     other live action waits for the live quota (both scouts). Flat live
-//     action that shows it isn't POV (a non-POV tag, or a PMV / HMV / music
-//     compilation without POV) is turned down (liveNotPov, contentRuleBreak
-//     `live-not-pov`); favourites and picks skip that.
+//   • Animated and live action alike (user, 2026-11-07: the live quota is
+//     gone). Flat live action that shows it isn't POV (a non-POV tag, or a
+//     PMV / HMV / music compilation without POV) is turned down
+//     (liveNotPov, contentRuleBreak `live-not-pov`); favourites (title, tags
+//     or poster; scripts/scout-live.mjs) and picks skip that.
 //   • Sex required, picks included: a penetrative sex tag or sex word in the
 //     title, else in the first post. A music video counts unless it's a
 //     dance or its title is about a non-sex act. Never a post tagged sfw /
@@ -28,8 +26,9 @@
 //     break these content rules (contentRuleBreak).
 //   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
 //     downloaded; shorter scenes fetched under older rules stay.
-//   • Scenes with hand-made axes only (a partial set counts); single-axis
-//     scenes only as picks (`--add`).
+//   • Single-axis and multi-axis scenes alike (user, 2026-11-07: hand-made
+//     axes are a preference, not a requirement); multi-axis posts rank
+//     higher (RANKING.multiAxis) and download first.
 //   • Ranking: RANKING weights (VR, library creator, favourite artist,
 //     multi-axis, likes; 2D hentai only ranks lower) plus the tag scores
 //     (TAG_SCORE_GROUPS: creampie, riding, music, POV up; monster, feet, FFM
@@ -208,9 +207,9 @@ export function contentRuleBreak({ tags = [], title = '', author = '', artist = 
  * @param {string[]} ctx.creators creator names in the library (lower case)
  * @param {string[]} ctx.sceneNames normName of every library scene folder
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
- * @param {boolean} [ctx.picked] the user asked for this post by id: the live rule doesn't apply
+ * @param {boolean} [ctx.picked] the user asked for this post by id: the live-not-POV rule doesn't apply
  * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null,
- *   live: boolean, favourite: string|null, liveQuota: boolean, hentaiOnly: boolean}}
+ *   live: boolean, favourite: string|null, hentaiOnly: boolean}}
  *   reasons: known, excluded, blocked, not-sexual, live-not-pov, in-library
  */
 export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [], picked = false } = {}) {
@@ -228,7 +227,7 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   const music = tags.some((t) => MUSIC_TAGS.has(t));
   if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
   return {
-    ok: true, music, vr, artist, live, favourite, liveQuota: liveOnQuota({ live, favourite, music, artist }),
+    ok: true, music, vr, artist, live, favourite,
     hentaiOnly: isHentaiOnly({ tags, title: topic.title }),
   };
 }
@@ -256,29 +255,11 @@ export const FREE_SCRIPTS_CATEGORY = 14;
  * Screen a post the user picked by id (`--add`): the exclusions, the
  * content rules (also on the first post, judgeFirstPost), posts the library
  * already links or the user turned down, and scenes the library already has
- * count. The animation, live and multi-axis rules don't apply, and
- * a pick never waits for the live quota.
+ * count. The live-not-POV rule doesn't apply.
  */
 export function screenPick(topic, ctx) {
   const s = screenTopic(topic, { ...ctx, picked: true });
-  return s.ok ? { ...s, liveQuota: false, picked: true } : s;
-}
-
-/** True when a live post isn't a favourite's nor a library creator's music video, so it waits for the live quota. */
-export function liveOnQuota({ live, favourite, music, artist }) {
-  return !!live && !favourite && !(music && artist);
-}
-
-/**
- * The scenes of a post worth downloading: those with hand-made axes (a
- * partial set counts), and archives of a post tagged multi-axis (`packed`,
- * see archiveScenes: their axes are known once unpacked). Single-axis
- * scenes come in only as picks.
- *
- * @param {{scenes: {axes: string[], packed?: boolean}[]}} post
- */
-export function wantedScenes(post) {
-  return post.scenes.filter((sc) => sc.axes.length || sc.packed);
+  return s.ok ? { ...s, picked: true } : s;
 }
 
 /** Archives the scout unpacks after downloading (unar, else bsdtar). */
@@ -302,20 +283,18 @@ export function archiveScenes(files) {
 /**
  * The scenes in an unpacked archive (`files`: every file in it, `{name,
  * path, size}`), planned like a post's files (planScenes): scripts paired
- * with videos, axes from their names. A picked post keeps single-axis
- * scenes; otherwise only scenes with hand-made axes count.
+ * with videos, axes from their names.
  *
  * @param {{name: string, path: string, size?: number}[]} files
- * @param {{vr?: boolean, picked?: boolean}} [o]
+ * @param {{vr?: boolean}} [o]
  */
-export function unpackedScenes(files, { vr = false, picked = false } = {}) {
+export function unpackedScenes(files, { vr = false } = {}) {
   const local = files.filter((f) => !f.name.startsWith('._')).map((f) => ({ ...f, host: 'local' }));
-  const { scenes } = planScenes({
+  return planScenes({
     scripts: local.filter((f) => /\.funscript$/i.test(f.name)),
     videos: local.filter((f) => isVideoName(f.name)),
     vr,
-  });
-  return picked ? scenes : scenes.filter((sc) => sc.axes.length);
+  }).scenes;
 }
 
 /**
@@ -749,11 +728,11 @@ export function remapPaths(value, moves) {
 // page holds nothing to judge (or the page cap), then `backfill` more pages
 // from where the backfill stopped last time, so older posts get covered a
 // little on every run; `since` stops a feed's backfill at a date for good.
-// Verdicts made under older rules count as unseen, and a `no-video` or
-// `single-axis` post with activity after its verdict is judged again.
+// Verdicts made under older rules count as unseen, and a `no-video` post
+// with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 8;
+export const RULES_VERSION = 9;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
@@ -770,8 +749,8 @@ export function seenTopic(state, id, rules = RULES_VERSION) {
   return state.topics[id]?.rules === rules;
 }
 
-/** Verdicts scripters often fix later (adding a video or axes): judged again after new activity. */
-export const REJUDGE_ON_BUMP = new Set(['no-video', 'single-axis']);
+/** Verdicts scripters often fix later (adding a video): judged again after new activity. */
+export const REJUDGE_ON_BUMP = new Set(['no-video']);
 
 /**
  * True when a listed post needs a verdict: never judged under these rules,
@@ -916,12 +895,9 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
  * Download order: multi-axis posts first, then single-axis; each by score
  * (candidateScore with the user's tag scores and favourite artist bonus, and
  * each post's favourite under the current favourites, so a list saved under
- * older weights or favourites follows the current ones).
- * Live action on the quota comes last, so the run's other downloads can earn
- * it a slot. Posts a saved list holds that break the content rules
- * (contentRuleBreak) are dropped, picks included; so are scenes the rules no
- * longer want, except on posts the user picked (`--add`), which keep every
- * scene.
+ * older weights or favourites follows the current ones). Posts a saved list
+ * holds that break the content rules (contentRuleBreak) are dropped, picks
+ * included.
  *
  * @param {object[]} candidates
  * @param {{tagScores?: Object<string, number>, favouriteScore?: number}} [scoring] see candidateScore
@@ -930,15 +906,9 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
 export function downloadQueue(candidates, scoring = {}, favourites = undefined) {
   const ok = candidates
     .map((c) => withCurrentFavourite(c, favourites))
-    .filter((c) => !contentRuleBreak(c))
-    .map((c) => ({ ...c, scenes: c.picked ? c.scenes : wantedScenes(c) }))
-    .filter((c) => c.scenes.length);
+    .filter((c) => c.scenes.length && !contentRuleBreak(c));
   const byScore = (a, b) => candidateScore(b, scoring) - candidateScore(a, scoring);
-  const own = ok.filter((c) => !c.liveQuota);
-  return [
-    ...own.filter((c) => c.axisType === 'multi').sort(byScore), ...own.filter((c) => c.axisType !== 'multi').sort(byScore),
-    ...ok.filter((c) => c.liveQuota).sort(byScore),
-  ];
+  return [...ok.filter((c) => c.axisType === 'multi').sort(byScore), ...ok.filter((c) => c.axisType !== 'multi').sort(byScore)];
 }
 
 /**

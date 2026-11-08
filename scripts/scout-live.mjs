@@ -1,18 +1,13 @@
-// Live action in Discovery, for every scout (scripts/eroscripts-scout.mjs,
+// Favourites and preferences for every scout (scripts/eroscripts-scout.mjs,
 // scripts/faptap-scout.mjs).
 //
-// The scouts take animated scenes. Live action gets in two ways:
-//   • by a favourite: a creator or actress the user likes (FAVOURITES in
-//     renderer/js/content-preferences.js with the user's changes from the
-//     web remote's Artists view, `library.favouriteArtists`; see
-//     scoutPreferences);
-//   • on the quota: anyone else, one in every LIVE_QUOTA_EVERY downloads,
-//     to discover new live action. Every scene either scout downloads counts;
-//     `<userData>/scout-live-quota.json` holds `{ downloads, live }`.
+// The scouts take animated and live action alike (user, 2026-11-07: the live
+// quota is gone). A favourite is a creator or actress the user likes
+// (FAVOURITES in renderer/js/content-preferences.js with the user's changes
+// from the web remote's Artists view, `library.favouriteArtists`; see
+// scoutPreferences): favourites skip the live-not-POV and FapTap focus rules
+// and rank higher.
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { LIVE_QUOTA_EVERY } from '../renderer/js/content-preferences.js';
 import { effectiveFavourites, favouriteScore } from '../renderer/js/favourite-artists.js';
 
 // Letters and digits, single-spaced, like eroscripts-scout-lib's normName
@@ -76,41 +71,4 @@ export function scoutPreferences(config) {
  */
 export function currentFavourite(c, texts, favourites) {
   return (c.favourite && favouriteIn([c.favourite], favourites)) || favouriteIn(texts, favourites);
-}
-
-/** True when the next download may be a non-favourite live scene: one in every LIVE_QUOTA_EVERY. */
-export function liveAllowed(quota) {
-  return quota.live < Math.floor((quota.downloads + 1) / LIVE_QUOTA_EVERY);
-}
-
-/** Count one finished download (mutates `quota`). */
-export function countDownload(quota, quotaLive) {
-  quota.downloads++;
-  if (quotaLive) quota.live++;
-}
-
-// ── Files ───────────────────────────────────────────────────────────────
-
-const quotaPath = (userData) => path.join(userData, 'scout-live-quota.json');
-
-function writeJson(file, value) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 1)}\n`);
-  fs.renameSync(tmp, file);
-}
-
-export function readQuota(userData) {
-  try {
-    const q = JSON.parse(fs.readFileSync(quotaPath(userData), 'utf8'));
-    if (Number.isInteger(q?.downloads) && Number.isInteger(q?.live)) return q;
-  } catch { /* first download */ }
-  return { downloads: 0, live: 0 };
-}
-
-/** Read, count one download, write: both scouts may run at once. */
-export function recordDownload(userData, quotaLive) {
-  const q = readQuota(userData);
-  countDownload(q, quotaLive);
-  writeJson(quotaPath(userData), q);
-  return q;
 }

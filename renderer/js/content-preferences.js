@@ -65,7 +65,7 @@ export const isAudioRoleplayTag = (t) => t.includes('asmr') || t.includes('audio
 /** Shortest video worth downloading, by its main script's last action (FapTap also by listed length). */
 export const MIN_VIDEO_MS = 120_000;
 
-// ── Discovery: animated, sex required ───────────────────────────────────
+// ── Discovery: animated or live action, sex required ────────────────────
 
 /** Animation tags: a post with one (and no `real` tag) is animated; anything else is live action. AI video counts. */
 export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
@@ -103,11 +103,11 @@ export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm'];
 export const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
 /** … or by title. */
 export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{L}\p{N}])/iu;
-// EroScripts takes scenes with hand-made axes only (a partial set counts and
-// is left as made). Single-axis scenes come in only as picks (`--add`), and
-// those get generated twist / roll / pitch; hand-made axes always win.
-// FapTap has no multi-axis scripts, so its scout is paused while the library
-// works towards about half hand-made scenes.
+// Both scouts take single-axis and multi-axis scenes (user, 2026-11-07:
+// hand-made axes are a preference, not a requirement). Single-axis scenes
+// get generated twist / roll / pitch; hand-made axes always win, rank
+// RANKING.multiAxis higher and download first. FapTap has no multi-axis
+// scripts, so all of its scenes come in single-axis.
 /** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
 export const LIBRARY_MAX_VIDEOS = 500;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
@@ -122,17 +122,15 @@ export const FAPTAP_FOCUS_MIN = 2;
 // ── Discovery: favourites and live action ───────────────────────────────
 
 /**
- * Starting favourite creators and actresses: their live action is always
- * taken, they skip the FapTap focus rule, they rank RANKING.favouriteArtist
- * higher, and the app gives each an artist playlist from their first video
- * plus the FAVOURITES_PLAYLIST. Matched in titles, tags, uploaders and
- * performers (scripts/scout-live.mjs favouriteIn). The user adds and removes
- * favourites in the web remote's Artists view; `library.favouriteArtists`
- * holds only those changes (renderer/js/favourite-artists.js).
+ * Starting favourite creators and actresses: they skip the live-not-POV and
+ * FapTap focus rules, they rank RANKING.favouriteArtist higher, and the app
+ * gives each an artist playlist from their first video plus the
+ * FAVOURITES_PLAYLIST. Matched in titles, tags, uploaders and performers
+ * (scripts/scout-live.mjs favouriteIn). The user adds and removes favourites
+ * in the web remote's Artists view; `library.favouriteArtists` holds only
+ * those changes (renderer/js/favourite-artists.js).
  */
 export const FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle Mocap', 'Noodledude', 'NoFaceGirl', 'Candy Love', 'JJULEZ'];
-/** Other live action: one in every LIVE_QUOTA_EVERY Discovery downloads, counted across both scouts. */
-export const LIVE_QUOTA_EVERY = 20;
 /**
  * Flat live action is turned down only when something shows it isn't POV
  * (user, 2026-11-03: favourites exempt; "let's not bother if we don't have
@@ -149,7 +147,7 @@ export const COMPILATION_TITLE = /(?<![\p{L}\p{N}])compilations?(?![\p{L}\p{N}])
 
 // ── Discovery: ranking ──────────────────────────────────────────────────
 
-/** Music tags (the Music tag-score group; a library creator's music video also skips the live quota). */
+/** Music tags (the Music tag-score group). */
 export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
 /**
  * Candidate score for what isn't a single tag; higher downloads first. Likes

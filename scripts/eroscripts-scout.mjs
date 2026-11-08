@@ -64,7 +64,7 @@ Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.
 Pick:
   --add 1,2,3            judge these post ids and put them on the list: only the exclusions, the sex rule,
                          posts the library has or the user turned down, and library duplicates count (the
-                         animation and multi-axis rules don't; single-axis scenes get generated axes)
+                         live-not-POV rule doesn't); single-axis scenes get generated axes
 Download:
   --fetch                download the saved list (multi-axis first), add each scene to Discovery;
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
@@ -224,12 +224,12 @@ function scoutContext(config, userData, incoming) {
 }
 
 /** A judged post as a saved candidate, scored with the user's tag scores and favourite artist bonus. */
-function makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first, picked = false }, scoring) {
+function makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first, picked = false }, scoring) {
   const axisType = scenes.some((sc) => sc.axes.length || sc.packed) ? 'multi' : 'single';
   const c = {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
-    vr: s.vr, music: s.music, axisType, artistInLibrary, hosts, live: s.live, favourite, liveQuota, sexual: first.sexual,
+    vr: s.vr, music: s.music, axisType, artistInLibrary, hosts, live: s.live, favourite, sexual: first.sexual,
     ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(first.ffm ? { ffm: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
@@ -240,7 +240,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
   const { library, knownTopics, turnedDown, favourites, scoring } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
-  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'live-not-pov': 0, 'in-library': 0, 'no-video': 0, 'single-axis': 0 };
+  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'live-not-pov': 0, 'in-library': 0, 'no-video': 0 };
   const fresh = [];
   let listed = 0;
   let judged = 0;
@@ -286,16 +286,13 @@ async function scan(opts, { api, userData, config, incoming }) {
         vr: s.vr,
         libraryVideos: library.videos,
       });
-      // Scripts and videos packed in archives: a multi-axis post's archives are scenes (unpacked at --fetch).
-      const packed = plan.scenes.length || !t.tags.includes('multi-axis') ? [] : lib.archiveScenes(files);
-      if (!plan.scenes.length && !packed.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
+      // Scripts and videos packed in archives: the post's archives are scenes (unpacked at --fetch).
+      const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
+      if (!scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
-      const liveQuota = lib.liveOnQuota({ live: s.live, favourite, music: s.music, artist: s.artist });
-      const scenes = lib.wantedScenes({ scenes: plan.scenes.length ? plan.scenes : packed });
-      if (!scenes.length) { verdict('single-axis'); continue; }
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota, hosts, scenes, first }, scoring));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first }, scoring));
       verdict('candidate');
       process.stderr.write(`✓ ${t.id} ${t.title.slice(0, 70)}\n`);
     }
@@ -319,7 +316,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   console.log('\n| # | New | Post | Axis | Tags | Videos | GB | Host |\n|---|---|---|---|---|---|---|---|');
   candidates.slice(0, opts.top).forEach((c, i) => {
     const axis = c.axisType !== 'multi' ? 'Single' : c.scenes.every((sc) => sc.packed) ? 'Multi (packed)' : `Multi (${1 + new Set(c.scenes.flatMap((sc) => sc.axes)).size})`;
-    const tags = [c.vr && 'VR', ...(c.tags || []).filter((x) => (tagScore[x] ?? 0) > 0), c.favourite && `favourite: ${c.favourite}`, c.liveQuota && 'live (quota)'].filter(Boolean).join(', ');
+    const tags = [c.vr && 'VR', ...(c.tags || []).filter((x) => (tagScore[x] ?? 0) > 0), c.favourite && `favourite: ${c.favourite}`, c.live && 'live action'].filter(Boolean).join(', ');
     console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
   });
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
@@ -371,7 +368,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const author = op.username;
       const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
-      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, liveQuota: false, hosts, scenes, first, picked: true }, scoring));
+      fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first, picked: true }, scoring));
       lib.markTopic(state, id, 'candidate');
       const kind = scenes.every((sc) => sc.packed) ? 'packed in archives' : scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis';
       console.log(`✓ ${id} ${t.title} (${scenes.length} ${scenes.every((sc) => sc.packed) ? 'archive' : 'video'}${scenes.length > 1 ? 's' : ''}, ${kind})`);
@@ -499,7 +496,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
   const saved = readLocal();
   const byHand = (c) => c.scenes.some((sc) => [sc.video, ...sc.scripts].some((f) => lib.findLocalCopy(f, saved)));
   const order = [...queue].sort((a, b) => byHand(b) - byHand(a));
-  let ok = 0; let failed = 0; let generated = 0; let short = 0; let waiting = 0; let capped = false;
+  let ok = 0; let failed = 0; let generated = 0; let short = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of order) {
     if (capped) break;
@@ -508,7 +505,6 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
       if (ok >= room) { capped = true; break; }
       if (sc.packed) {
-        if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
         try {
           const r = await fetchPacked(c, sc, { api, userData, incoming, staging, local, now });
           ok += r.ok; short += r.short; generated += r.generated;
@@ -518,8 +514,6 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
         }
         continue;
       }
-      // Live action by a non-favourite: one in every LIVE_QUOTA_EVERY downloads (both scouts).
-      if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
       const creator = lib.creatorFolder(c.title, c.author);
       const stem = lib.sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 });
       const dir = path.join(incoming, creator, stem);
@@ -554,8 +548,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           if (up.status === 0) { generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
         }
         const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
-        live.recordDownload(userData, !!c.liveQuota);
-        const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
+        const kind = c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
         console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}${listed ? '' : ' (playlist pending: app is open)'}`);
         ok++;
       } catch (err) {
@@ -564,7 +557,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       }
     }
   }
-  return { ok, failed, generated, short, waiting, capped };
+  return { ok, failed, generated, short, capped };
 }
 
 /**
@@ -602,7 +595,7 @@ function filesUnder(dir) {
  * take the copy saved by hand), unpack it, and file every scene inside
  * (lib.unpackedScenes) like a downloaded one: named, scripts under the
  * library's axis names, sidecar (`video` = the archive, so it counts as
- * fetched), Discovery, the length rule. An archive with no wanted scene is
+ * fetched), Discovery, the length rule. An archive with no scene inside is
  * recorded as rejected so it isn't fetched again. The archive and its
  * unpacked files are removed once filed; a failed unpack keeps the archive
  * in staging for the next pass.
@@ -616,14 +609,14 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
   const r = { ok: 0, short: 0, generated: 0 };
   try {
     unpack(archive, out);
-    const scenes = lib.unpackedScenes(filesUnder(out), { vr: c.vr, picked: !!c.picked });
+    const scenes = lib.unpackedScenes(filesUnder(out), { vr: c.vr });
     const creator = lib.creatorFolder(c.title, c.author);
     const reject = (reason, extra = {}) => rejectedVideos.recordRejection(userData, {
       topicId: c.id, video: sc.video.name, title: c.title, url: c.url, reason, ...extra, at: new Date().toISOString(),
     });
     if (!scenes.length) {
-      reject(c.picked ? 'no-video' : 'single-axis');
-      console.log(`${now()} – ${creator}/${sc.video.name}: no ${c.picked ? '' : 'multi-axis '}scene inside; skipped`);
+      reject('no-video');
+      console.log(`${now()} – ${creator}/${sc.video.name}: no scene inside; skipped`);
       fs.rmSync(archive, { force: true });
       return r;
     }
@@ -654,7 +647,6 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
         if (up.status === 0) { r.generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
       }
       const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
-      live.recordDownload(userData, !!c.liveQuota);
       console.log(`${now()} ✓ ${creator}/${stem}${note} (unpacked from ${sc.video.name}${got === 'local' ? ', saved by hand' : ''})${listed ? '' : ' (playlist pending: app is open)'}`);
       r.ok++;
     }
@@ -709,7 +701,7 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
     const r = await fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir });
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (r.capped) break;
     if (!r.failed) return 0;
