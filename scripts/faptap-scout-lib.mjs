@@ -18,20 +18,19 @@
 //   • Never excluded content (tags, title or description), nor FURRY_TAGS.
 //     Monsters and feet (tags or title, as on EroScripts) come in, ranked
 //     lower.
-//   • Animated, unless a favourite: an animation tag, no live-action tag,
-//     and no FapTap model / pornstar named in the title or listed as the
-//     video's performer (FapTap tags are free text; live videos get
-//     animation tags too). A music video by a creator already in the
-//     library is taken too; a library folder named after a genre (`Cock
-//     Hero`, `PMV`) is no creator. Live action by a favourite (title,
-//     uploader, performer or tag; scripts/scout-live.mjs) is taken; other
-//     live action waits for the live quota. Flat live action that shows it
-//     isn't POV (liveNotPov, also once performers make a video live, through
-//     contentRuleBreak `live-not-pov`) is turned down; favourites skip that.
+//   • Animated and live action alike (user, 2026-11-07: the live quota is
+//     gone). Live action means a live-action tag, no animation tag, or a
+//     FapTap model / pornstar named in the title or listed as the video's
+//     performer (FapTap tags are free text; live videos get animation tags
+//     too). Flat live action that shows it isn't POV (liveNotPov, also once
+//     performers make a video live, through contentRuleBreak `live-not-pov`)
+//     is turned down; favourites (title, uploader, performer or tag;
+//     scripts/scout-live.mjs) skip that. A library folder named after a
+//     genre (`Cock Hero`, `PMV`) is no creator.
 //   • No audio roleplays.
 //   • Focus, except for favourites: at least FAPTAP_FOCUS_MIN of the
 //     FAPTAP_FOCUS themes.
-//   • Videos the user picks by id (`--add`) skip the animation and focus
+//   • Videos the user picks by id (`--add`) skip the live-not-POV and focus
 //     rules; the exclusions, content rules, audio, length and library
 //     checks stay.
 //   • Sex required (as on EroScripts; picks too), at least MIN_VIDEO_MS
@@ -251,7 +250,7 @@ export function faptapSceneName(video, ctx = {}) {
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
  * @param {boolean} [ctx.picked] the user asked for this video by id
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
- *   focus: string[], live: boolean, favourite: string|null, liveQuota: boolean, picked: boolean, hentaiOnly: boolean}}
+ *   focus: string[], live: boolean, favourite: string|null, picked: boolean, hentaiOnly: boolean}}
  *   reasons: excluded, blocked, audio-only, off-focus, not-sexual, live-not-pov, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
@@ -282,9 +281,8 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
   if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
-  const liveQuota = live && !picked && !favourite && !(music && artist);
   return {
-    ok: true, tags, vr, music, artist, focus, live, favourite, liveQuota, picked,
+    ok: true, tags, vr, music, artist, focus, live, favourite, picked,
     hentaiOnly: isHentaiOnly({ tags, title }),
   };
 }
@@ -301,8 +299,7 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
 export function withPerformers(screen, performers, favourites) {
   const live = screen.live || hasLivePerformer({ performers });
   const favourite = screen.favourite || favouriteIn((performers || []).map((p) => p?.name), favourites);
-  const liveQuota = live && !screen.picked && !favourite && !(screen.music && screen.artist);
-  return { ...screen, live, favourite, liveQuota };
+  return { ...screen, live, favourite };
 }
 
 /** Performer categories FapTap gives real people. */
@@ -381,7 +378,6 @@ export function toCandidate(video, screen, scoring = {}) {
     artistInLibrary: screen.artist,
     live: !!screen.live,
     favourite: screen.favourite || null,
-    liveQuota: !!screen.liveQuota,
     picked: !!screen.picked,
   };
   return { ...c, score: candidateScore(c, scoring) };

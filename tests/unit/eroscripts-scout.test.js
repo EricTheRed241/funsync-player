@@ -8,7 +8,7 @@
 // (scripts/eroscripts-scout-lib.mjs). No forum, MEGA or pixeldrain.
 import { describe, it, expect } from 'vitest';
 import {
-  screenTopic, hasExcludedText, isSexual, scriptDurationMs, wantedScenes, scoreCandidate, scriptParts, matchScore, planScenes,
+  screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
@@ -41,10 +41,10 @@ describe('screenTopic', () => {
     expect(screenTopic(topic(['sfm', 'sex'], '触手 セックス'))).toMatchObject({ ok: true });
   });
 
-  it('takes animated posts, including AI-generated video; POV or VR live action only waits for the live quota', () => {
-    expect(screenTopic(topic(['animation', 'ai-video']))).toMatchObject({ ok: true, live: false, liveQuota: false });
-    expect(screenTopic(topic(['animation', 'real', 'vr']))).toMatchObject({ ok: true, live: true, liveQuota: true });
-    expect(screenTopic(topic(['pov', 'blowjob', 'doggy']))).toMatchObject({ ok: true, live: true, liveQuota: true });
+  it('takes animated posts, including AI-generated video, and POV or VR live action alike', () => {
+    expect(screenTopic(topic(['animation', 'ai-video']))).toMatchObject({ ok: true, live: false });
+    expect(screenTopic(topic(['animation', 'real', 'vr']))).toMatchObject({ ok: true, live: true });
+    expect(screenTopic(topic(['pov', 'blowjob', 'doggy']))).toMatchObject({ ok: true, live: true });
   });
 
   it('turns down flat live action only when it shows it is not POV; POV, VR, favourites and picks pass', () => {
@@ -63,17 +63,17 @@ describe('screenTopic', () => {
     expect(screenPick(topic(['real', 'pmv', 'vaginal'], 'Jane rides'))).toMatchObject({ ok: true, picked: true });
   });
 
-  it('takes POV live action by a favourite, named in the title or a tag, without the quota', () => {
+  it('finds a favourite named in the title or a tag', () => {
     const favourites = ['Candy Love', 'NoFaceGirl'];
-    expect(screenTopic(topic(['real', 'pov'], 'Candy Love rides POV'), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Candy Love', liveQuota: false });
-    expect(screenTopic(topic(['real', 'pov', 'nofacegirl'], 'Reverse cowgirl'), { favourites })).toMatchObject({ favourite: 'NoFaceGirl', liveQuota: false });
-    expect(screenTopic(topic(['real', 'pov', 'vaginal'], 'Candy Lovers'), { favourites })).toMatchObject({ favourite: null, liveQuota: true });
+    expect(screenTopic(topic(['real', 'pov'], 'Candy Love rides POV'), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Candy Love' });
+    expect(screenTopic(topic(['real', 'pov', 'nofacegirl'], 'Reverse cowgirl'), { favourites })).toMatchObject({ favourite: 'NoFaceGirl' });
+    expect(screenTopic(topic(['real', 'pov', 'vaginal'], 'Candy Lovers'), { favourites })).toMatchObject({ ok: true, favourite: null });
   });
 
-  it('takes a POV or VR music post by a creator already in the library even without an animation tag', () => {
+  it('knows a music post by a creator already in the library', () => {
     const t = topic(['pmv', 'real', 'pov'], '[Multi-axis] [Bastati] Yuria Boss Battle 1');
-    expect(screenTopic(t, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, vr: false, artist: 'bastati', liveQuota: false });
-    expect(screenTopic(t, { creators: [] })).toMatchObject({ ok: true, liveQuota: true });
+    expect(screenTopic(t, { creators: ['bastati'] })).toMatchObject({ ok: true, music: true, vr: false, artist: 'bastati' });
+    expect(screenTopic(t, { creators: [] })).toMatchObject({ ok: true, artist: null });
   });
 
   it('skips posts the library already links or whose scene folder it has', () => {
@@ -534,21 +534,16 @@ describe('remapPaths', () => {
 });
 
 describe('downloadQueue', () => {
-  it('orders multi-axis posts by score and drops single-axis and empty ones, VR creampie PMVs too', () => {
+  it('orders multi-axis posts first, then single-axis, each by score; drops posts without scenes', () => {
     const vrCreampiePmv = { vr: true, tags: ['creampie', 'pmv'], artistInLibrary: true };
     const c = (id, axisType, likes, scenes = 1) => ({ id, axisType, likes, ...vrCreampiePmv, scenes: Array(scenes).fill({ axes: axisType === 'multi' ? ['twist'] : [] }) });
     const q = downloadQueue([c(1, 'single', 9), c(2, 'multi', 1), c(3, 'multi', 5), c(4, 'single', 2), c(5, 'multi', 8, 0)]);
-    expect(q.map((x) => x.id)).toEqual([3, 2]);
+    expect(q.map((x) => x.id)).toEqual([3, 2, 1, 4]);
   });
 
-  it('drops single-axis scenes a saved list holds that the rules no longer want', () => {
-    const q = downloadQueue([{ id: 1, axisType: 'multi', score: 1, tags: ['vaginal'], vr: false, scenes: [{ axes: ['roll'] }, { axes: [] }] }, { id: 2, axisType: 'single', score: 9, tags: ['creampie'], vr: false, scenes: [{ axes: [] }] }]);
-    expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[1, 1]]);
-  });
-
-  it('keeps every scene of a post the user picked, single-axis ones too', () => {
-    const q = downloadQueue([{ id: 3, axisType: 'single', score: 1, tags: ['riding'], vr: false, picked: true, scenes: [{ axes: [] }, { axes: [] }] }]);
-    expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[3, 2]]);
+  it('keeps every scene of a saved post, single-axis ones too', () => {
+    const q = downloadQueue([{ id: 1, axisType: 'multi', score: 1, tags: ['vaginal'], vr: false, scenes: [{ axes: ['roll'] }, { axes: [] }] }]);
+    expect(q.map((x) => [x.id, x.scenes.length])).toEqual([[1, 2]]);
   });
 
   it('drops saved posts that break the content rules, picks and favourites too; monster and feet posts stay, ranked lower', () => {
@@ -587,10 +582,10 @@ describe('downloadQueue', () => {
 });
 
 describe('screenPick', () => {
-  it('takes a picked post past the animation rule, never on the live quota', () => {
+  it('takes a picked post past the live-not-POV rule', () => {
     const s = screenPick(topic(['pmv', 'real'], '[JJULEZ] Some PMV', 5), { favourites: ['JJULEZ'] });
-    expect(s).toMatchObject({ ok: true, picked: true, liveQuota: false, favourite: 'JJULEZ' });
-    expect(screenPick(topic(['real', 'riding'], 'Somebody rides', 9))).toMatchObject({ ok: true, live: true, liveQuota: false });
+    expect(s).toMatchObject({ ok: true, picked: true, favourite: 'JJULEZ' });
+    expect(screenPick(topic(['real', 'pmv', 'riding'], 'Somebody rides', 9))).toMatchObject({ ok: true, live: true, picked: true });
   });
 
   it('still refuses exclusions, the content rules, posts the library links or the user turned down, and library scenes', () => {
@@ -599,14 +594,6 @@ describe('screenPick', () => {
     expect(screenPick(topic(['pmv', 'sfw'], 'X', 6))).toEqual({ ok: false, reason: 'not-sexual' });
     expect(screenPick(topic(['pmv'], 'X', 7), { knownTopics: new Set([7]) })).toEqual({ ok: false, reason: 'known' });
     expect(screenPick(topic(['pmv'], 'JJULEZ - Work That Body', 8), { sceneNames: ['jjulez work that body'] })).toEqual({ ok: false, reason: 'in-library' });
-  });
-});
-
-describe('wantedScenes', () => {
-  it('takes only scenes with hand-made axes, VR creampie PMVs included', () => {
-    const scenes = [{ axes: ['twist'] }, { axes: [] }];
-    expect(wantedScenes({ scenes })).toEqual([{ axes: ['twist'] }]);
-    expect(wantedScenes({ vr: true, tags: ['creampie', 'hmv'], artistInLibrary: true, scenes })).toEqual([{ axes: ['twist'] }]);
   });
 });
 
@@ -706,14 +693,12 @@ describe('scan state', () => {
     expect(more.topics.filter((t) => !seenTopic(state, t.id)).map((t) => t.id)).toEqual(Array.from({ length: 31 }, (_, i) => 99 - i)); // down to id 69 = 2024-12-01
   });
 
-  it('judges a no-video or single-axis post again after new activity, other verdicts never', async () => {
+  it('judges a no-video post again after new activity, other verdicts never', async () => {
     const state = emptyScoutState();
     const at = Date.parse('2026-10-01T00:00:00Z');
     markTopic(state, 5, 'no-video', at);
-    markTopic(state, 6, 'single-axis', at);
     markTopic(state, 7, 'excluded', at);
     expect(needsJudging(state, { id: 5, bumped: '2026-10-02T00:00:00Z' })).toBe(true);
-    expect(needsJudging(state, { id: 6, bumped: '2026-10-02T00:00:00Z' })).toBe(true);
     expect(needsJudging(state, { id: 5, bumped: '2026-09-30T00:00:00Z' })).toBe(false);
     expect(needsJudging(state, { id: 5 })).toBe(false);
     expect(needsJudging(state, { id: 7, bumped: '2026-10-02T00:00:00Z' })).toBe(false);
@@ -826,20 +811,19 @@ describe('files downloaded by hand', () => {
 describe('scenes packed in archives', () => {
   const rar = (name, size = 1e9) => ({ name, size, host: 'pixeldrain', url: `https://pixeldrain.com/api/file/${name}?download` });
 
-  it('makes one packed scene per archive, which a multi-axis post keeps as wanted', () => {
+  it('makes one packed scene per archive', () => {
     const scenes = archiveScenes([rar('lucyhowsthis.rar'), rar('lucyhowsthis.rar'), { name: 'notes.txt', host: 'forum' }, rar('b.zip')]);
     expect(scenes.map((s) => [s.base, s.packed, s.video.name])).toEqual([['lucyhowsthis', true, 'lucyhowsthis.rar'], ['b', true, 'b.zip']]);
-    expect(wantedScenes({ scenes: [...scenes, { axes: [], video: { name: 'x.mp4' } }] })).toHaveLength(2);
     expect(isArchiveName('a.7z') && isArchiveName('A.RAR') && !isArchiveName('a.mp4')).toBe(true);
   });
 
-  it('plans the unpacked files like a post: TCode channels become axes, single-axis only for picks', () => {
+  it('plans the unpacked files like a post: TCode channels become axes, single-axis scenes too', () => {
     const f = (name) => ({ name, path: `/x/${name}`, size: 10 });
     const files = [f('eve massage.funscript'), f('eve massage.L1.funscript'), f('eve massage.R2.funscript'), f('eve massage_8K_180_LR.mp4'), f('solo dance.funscript'), f('solo dance.mp4'), f('._eve massage.mp4')];
     const scenes = unpackedScenes(files, { vr: true });
-    expect(scenes.map((s) => [s.video.name, s.axes])).toEqual([['eve massage_8K_180_LR.mp4', ['pitch', 'surge']]]);
-    expect(scenes[0].scripts.map((s) => s.path).sort()).toEqual(['/x/eve massage.L1.funscript', '/x/eve massage.R2.funscript', '/x/eve massage.funscript']);
-    expect(unpackedScenes(files, { vr: true, picked: true }).map((s) => s.video.name).sort()).toEqual(['eve massage_8K_180_LR.mp4', 'solo dance.mp4']);
+    expect(scenes.map((s) => [s.video.name, s.axes]).sort()).toEqual([['eve massage_8K_180_LR.mp4', ['pitch', 'surge']], ['solo dance.mp4', []]]);
+    const eve = scenes.find((s) => s.axes.length);
+    expect(eve.scripts.map((s) => s.path).sort()).toEqual(['/x/eve massage.L1.funscript', '/x/eve massage.R2.funscript', '/x/eve massage.funscript']);
   });
 });
 

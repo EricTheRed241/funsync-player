@@ -58,14 +58,13 @@ Scan (default; only videos not judged before, see <userData>/faptap-scout-state.
   --full                 judge every listed video again, not only new ones
   --top N                candidates to print (default 40)
 Pick:
-  --add a,b,c            add these FapTap video ids to the list, skipping the animation and focus rules
+  --add a,b,c            add these FapTap video ids to the list, skipping the live-not-POV and focus rules
                          (exclusions, sex, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, add each scene to Discovery;
                          skips scripts under ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting videos now off focus or breaking the content rules
   --ids a,b,c            only these FapTap video ids
-                         (live action by non-favourites waits for the live quota: one in every ${prefs.LIVE_QUOTA_EVERY} downloads)
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -252,7 +251,7 @@ function saveList(userData, fresh, done, { top, listed = 0, judged = 0, rejected
   console.log('\n| # | New | Video | Axis | Length | Focus | Quality |\n|---|---|---|---|---|---|---|');
   candidates.slice(0, top).forEach((c, i) => {
     const why = [
-      ...lib.focusOf(c), c.favourite && `favourite: ${c.favourite}`, c.picked && 'picked', c.liveQuota && 'live (quota)',
+      ...lib.focusOf(c), c.favourite && `favourite: ${c.favourite}`, c.picked && 'picked', c.live && 'live action',
       c.artistInLibrary && `artist: ${c.artistInLibrary}`,
     ].filter(Boolean).join(', ');
     console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | Single | ${mins(c.duration)} | ${why} | ${c.quality}p |`);
@@ -316,8 +315,7 @@ async function scan(opts, { userData, config, incoming }) {
 
   const candidates = saveList(userData, fresh, done, { top: opts.top, listed, judged, rejected, scoring: ctx.scoring, favourites: ctx.favourites });
   const feed = state.feeds[lib.FEED];
-  const quota = candidates.filter((c) => c.liveQuota).length;
-  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${quota} live on the quota)`);
+  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length}`);
   console.log(`Backfill: ${feed?.exhausted ? 'done' : `page ${feed?.backfillPage ?? 0}`} · ${Object.keys(state.topics).length} videos judged so far`);
   console.log(`Saved: ${listPath(userData)}`);
   return 0;
@@ -406,12 +404,11 @@ function sceneDir(parent, stem, id) {
 /** One pass over the queue; downloads at most `room` videos (the library cap). */
 async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
   const done = doneScenes(incoming, userData);
-  let ok = 0; let failed = 0; let short = 0; let waiting = 0; let capped = false;
+  let ok = 0; let failed = 0; let short = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     if (done.has(lib.fetchedKey(c.id))) continue;
     if (ok >= room) { capped = true; break; }
-    if (c.liveQuota && !live.liveAllowed(live.readQuota(userData))) { waiting++; continue; }
     let creator = c.author;
     let stem = c.title;
     try {
@@ -445,8 +442,7 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
       const note = up.status === 0 ? ' + generated axes' : ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
       const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
-      live.recordDownload(userData, !!c.liveQuota);
-      const kind = c.liveQuota ? ' [live quota]' : c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
+      const kind = c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
       console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
       ok++;
     } catch (err) {
@@ -455,14 +451,13 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       failed++;
     }
   }
-  return { ok, failed, short, waiting, capped };
+  return { ok, failed, short, capped };
 }
 
 async function fetchAll(opts, { userData, config, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { favourites, scoring } = live.scoutPreferences(config);
   const candidates = JSON.parse(fs.readFileSync(listPath(userData), 'utf8')).candidates.map((c) => lib.withCurrentFavourite(c, favourites));
-  // Live action on the quota goes last, so this run's downloads can earn it a slot.
   const byScore = (a, b) => scout.candidateScore(b, scoring) - scout.candidateScore(a, scoring);
   const breaks = {};
   for (const c of candidates) {
@@ -472,7 +467,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting videos that break the content rules ${JSON.stringify(breaks)}`);
   const wanted = candidates.filter(lib.stillWanted).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
-  const queue = [...wanted.filter((c) => !c.liveQuota).sort(byScore), ...wanted.filter((c) => c.liveQuota).sort(byScore)];
+  const queue = wanted.sort(byScore);
   console.log(`Queue: ${queue.length} videos → ${incoming}`);
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.id} ${c.quality}p ${c.title}`);
@@ -490,7 +485,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
     const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming), room: prefs.LIBRARY_MAX_VIDEOS - held });
-    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.waiting ? `, ${r.waiting} live waiting for the quota (one in every ${prefs.LIVE_QUOTA_EVERY} downloads)` : ''}${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (r.capped) break;
     if (!r.failed) return 0;
