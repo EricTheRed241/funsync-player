@@ -1,8 +1,12 @@
 // Video facts for duplicate checks (scripts/scene-dedupe-lib.mjs): length,
 // picture size, fps and bitrate from ffprobe, cached in
 // `<userData>/scene-probe-cache.json` by path, size and mtime so a library
-// of hundreds of videos is read once. Used by `npm run dedupe:scenes` and
-// the FapTap scout.
+// of hundreds of videos is read once. Frame hashes `npm run dedupe:scenes`
+// takes are cached the same way in `<userData>/scene-frame-cache.json`.
+// Whether a video is VR comes from the backend's stereo check
+// (`<userData>/vr-stereo-cache.json`, backend/services/stereo_detect.py,
+// only read here) when it has looked at the file. Used by `npm run
+// dedupe:scenes` and the FapTap scout.
 
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,17 +17,62 @@ import { projectionOf, titleWords } from './scene-dedupe-lib.mjs';
 
 const run = promisify(execFile);
 const cachePath = (userData) => path.join(userData, 'scene-probe-cache.json');
+const frameCachePath = (userData) => path.join(userData, 'scene-frame-cache.json');
+// stereo_detect.ANALYSIS_VERSION: entries of another version are stale.
+const STEREO_ANALYSIS_VERSION = 1;
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+
+// Save a per-path cache without entries for files that are gone.
+function writeCache(file, cache) {
+  for (const f of Object.keys(cache)) if (!fs.existsSync(f)) delete cache[f];
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cache));
+  fs.renameSync(tmp, file);
+}
 
 export function readProbeCache(userData) {
-  try { return JSON.parse(fs.readFileSync(cachePath(userData), 'utf8')); } catch { return {}; }
+  return readJson(cachePath(userData));
 }
 
 /** Save the cache without entries for files that are gone. */
 export function writeProbeCache(userData, cache) {
-  for (const f of Object.keys(cache)) if (!fs.existsSync(f)) delete cache[f];
-  const tmp = `${cachePath(userData)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(cache));
-  fs.renameSync(tmp, cachePath(userData));
+  writeCache(cachePath(userData), cache);
+}
+
+/** Frame hashes per video: `{[path]: {size, mtimeMs, bursts: {[key]: string[]}}}` (scripts/dedupe-scenes.mjs). */
+export function readFrameCache(userData) {
+  return readJson(frameCachePath(userData));
+}
+
+/** Save the frame cache without entries for files that are gone. */
+export function writeFrameCache(userData, cache) {
+  writeCache(frameCachePath(userData), cache);
+}
+
+/** The backend's stereo check results by path (`vr-stereo-cache.json` entries); `{}` without one. */
+export function readStereoCache(userData) {
+  const entries = readJson(path.join(userData, 'vr-stereo-cache.json')).entries;
+  return entries && typeof entries === 'object' ? entries : {};
+}
+
+/**
+ * VR by the backend's look at the frames: true for two eyes side by side,
+ * false for one picture (a VR-shaped or VR-named frame too), undefined when
+ * it has no current answer for `file` (not looked at, undecided, or the file
+ * changed since).
+ *
+ * @param {object} stereo readStereoCache
+ * @param {string} file
+ * @param {{size: number, mtimeMs: number}} stat
+ */
+export function stereoVr(stereo, file, stat) {
+  const e = stereo[file] ?? stereo[file.normalize('NFC')] ?? stereo[file.normalize('NFD')];
+  if (!e || e.version !== STEREO_ANALYSIS_VERSION || e.size !== stat.size) return undefined;
+  if (!(Math.abs(Number(e.mtimeNs) / 1e6 - stat.mtimeMs) < 1)) return undefined;
+  return e.layout === 'sbs' ? true : e.layout === 'mono' ? false : undefined;
 }
 
 /** `{duration, width, height, fps, bitrate, size, mtimeMs}`; duration 0 when unreadable. */
@@ -49,8 +98,12 @@ export async function probeVideo(file, cache, stat = fs.statSync(file)) {
 /**
  * Every video under `roots` with what a title + length duplicate check needs:
  * `{video, duration, width, height, vr, portrait, words, source}`.
+ *
+ * @param {string[]} roots
+ * @param {object} cache readProbeCache
+ * @param {object} [stereo] readStereoCache
  */
-export async function libraryVideos(roots, cache) {
+export async function libraryVideos(roots, cache, stereo = {}) {
   const out = [];
   const visit = async (dir, root) => {
     let names;
@@ -65,7 +118,7 @@ export async function libraryVideos(roots, cache) {
       if (stat.isDirectory()) { await visit(full, root); continue; }
       if (!VIDEO_EXTS.has(path.extname(n).toLowerCase())) continue;
       const info = await probeVideo(full, cache, stat);
-      const p = projectionOf({ name: n, ...info });
+      const p = projectionOf({ name: n, ...info, vr: stereoVr(stereo, full, stat) });
       out.push({ video: full, ...info, vr: p.vr, portrait: p.portrait, words: titleWords(n.slice(0, -path.extname(n).length), artist), source });
     }
   };

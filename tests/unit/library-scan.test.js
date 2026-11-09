@@ -118,4 +118,19 @@ describe('scanLibrary', () => {
     expect(r.failedPaths).toEqual([path.join(tmp, 'missing')]);
     expect(r.videos).toEqual([]);
   });
+
+  it('logs overlapping-source duplicates and skipped AppleDouble files as separate counts', async () => {
+    touch('A/Creator/Scene/Scene.mp4');
+    touch('A/Creator/Scene/Scene.funscript');
+    touch('A/Creator/Scene/._Scene.mp4');
+    touch('A/Creator/Scene/._Scene.funscript');
+    const lines = [];
+    const log = { info: (m) => lines.push(m), warn: (m) => lines.push(m) };
+    await scanLibrary([path.join(tmp, 'A'), path.join(tmp, 'A/Creator')], {}, { log });
+    // Creator/, Scene/ and Scene's two files are 4 entries; the second source lists 3 of them again.
+    expect(lines[0]).toMatch(/Scanned 4 unique entries \(3 duplicates dropped from overlapping sources, 4 AppleDouble \._ files skipped\)/);
+    lines.length = 0;
+    await scanLibrary([path.join(tmp, 'A')], {}, { log });
+    expect(lines[0]).toMatch(/Scanned 4 entries \(2 AppleDouble \._ files skipped\)/);
+  });
 });
