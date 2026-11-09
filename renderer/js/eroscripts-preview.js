@@ -83,8 +83,8 @@ function writeEntry(settings, videoPath, entry, dataUrl) {
   const map = { ...(settings.get(CUSTOM_THUMBS_KEY) || {}) };
   map[videoPath] = entry;
   settings.set(CUSTOM_THUMBS_KEY, map);
-  thumbCache.remove(videoPath, 0);
-  if (dataUrl) thumbCache.set(videoPath, 0, dataUrl);
+  thumbCache.remove(videoPath);
+  if (dataUrl) thumbCache.set(videoPath, thumbCache.mtimeOf(videoPath), dataUrl);
   eventBus.emit(PREVIEW_EVENT, { videoPath, dataUrl: dataUrl || null });
 }
 
@@ -194,7 +194,7 @@ export async function revalidatePreviews({ settings, api, videos, onProgress }) 
     summary.removed++;
     delete map[videoPath];
     settings.set(CUSTOM_THUMBS_KEY, map);
-    thumbCache.remove(videoPath, 0);
+    thumbCache.remove(videoPath);
     await api.deleteEroScriptsThumbnail?.(entry.imagePath);
     eventBus.emit(PREVIEW_EVENT, { videoPath, dataUrl: null });
   }

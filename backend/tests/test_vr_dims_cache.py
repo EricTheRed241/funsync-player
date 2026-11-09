@@ -66,7 +66,7 @@ def probe(monkeypatch, tmp_path):
     video_info._reset_for_tests()
     fake = FakeProbe()
     monkeypatch.setattr(video_info, "probe_video_info", fake)
-    monkeypatch.setattr(media, "_thumb_cache_dir", None)
+    monkeypatch.setattr(media, "_queue_thumb_warmup", lambda prune=False: 0)
     monkeypatch.setattr(media, "_queue_duration_probes", lambda: None)
     monkeypatch.setattr(media, "_queue_speed_probes", lambda: None)
     fake.user_data = tmp_path / "userData"

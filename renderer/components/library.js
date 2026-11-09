@@ -30,6 +30,8 @@ import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/m
 import { preferHandmadeAxes, filesBeside } from '../js/handmade-axes.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
+import { captureVideoThumb, forgetMissingThumbs } from '../js/thumb-request.js';
+import { pruneThumbConfig } from '../js/thumb-config-prune.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf } from '../js/folder-index.js';
 import { canonicalPath, commonAncestorOfFiles, pathToFileURL } from '../js/path-utils.js';
@@ -853,6 +855,10 @@ export class Library {
     this._allFunscripts = Array.isArray(result) ? [] : (result?.allFunscripts || []);
     this._videos = videos;
     this._videosByPath = new Map(videos.map(v => [v.path, v]));
+    // Thumbnail state follows the scan: tiles are keyed by each file's mtime,
+    // and files the backend called missing get another chance.
+    thumbCache.rememberMtimes(videos);
+    forgetMissingThumbs();
 
     // Sources that FAILED TO SCAN this pass (ENOENT on a disconnected drive).
     //
@@ -872,6 +878,12 @@ export class Library {
       const names = failedPaths.map(p => p.split(/[\\/]/).pop());
       showToast(t('library.sourceUnavailable', { names: names.join(', ') }), 'warn', 5000);
     }
+    // Every enabled source was read: only then may "not in this scan" mean
+    // "gone" (playlist cleanup and thumbnail config below, the backend's
+    // thumbnail cache prune at registration). A source the reachability
+    // probe left out counts as not read.
+    this._scanComplete = failedPaths.length === 0 && videos.length > 0
+      && !sources.some((s) => s.enabled !== false && unavailable.has(s.path));
 
     this._applyManualAssociations();
 
@@ -933,7 +945,7 @@ export class Library {
     // read every source: a disconnected drive would make every playlist
     // look empty.
     const scannedPaths = (this._videos || []).map((v) => v.path);
-    const scanComplete = this._failedScanPaths.size === 0 && scannedPaths.length > 0;
+    const scanComplete = this._scanComplete;
     const favourites = favouritesOf(this._settings);
     applyArtistPlaylists(this._settings, scannedPaths, favourites)
       .then((r) => {
@@ -944,6 +956,23 @@ export class Library {
         if (playlistsChanged || c.removed.length) this._registerWithBackend();
       })
       .catch((err) => console.warn('[Library] Artist playlists failed:', err?.message || err));
+
+    // Thumbnail config of videos that are gone (thumb-config-prune.js):
+    // posters, FapTap attempts and cached durations, with their files in
+    // custom-thumbs. Same complete-scan condition, plus the association
+    // rule per entry, so an unplugged drive keeps everything.
+    if (scanComplete) {
+      pruneThumbConfig(this._settings, {
+        scannedPaths,
+        pathState: (p) => window.funsync.pathState(p),
+        skip: (p) => this._isUnderUnavailableSource(p),
+        deleteFiles: (videoPaths, images, keep) => window.funsync.deleteCustomThumbsForVideos?.(videoPaths, images, keep),
+      })
+        .then((r) => {
+          if (r.gone) console.log('[Library] Thumbnail config of videos that are gone removed:', r);
+        })
+        .catch((err) => console.warn('[Library] Thumbnail config prune failed:', err?.message || err));
+    }
 
     // Collections by medium, length, franchise and script style
     // (auto-collections.js). Durations come from the persistent cache.
@@ -2483,7 +2512,7 @@ export class Library {
     // async queue.
     const thumb = document.createElement('div');
     thumb.className = 'library__list-thumb';
-    const cachedDataUrl = thumbCache.get(video.path, 0);
+    const cachedDataUrl = thumbCache.get(video.path, thumbCache.mtimeOf(video.path));
     if (cachedDataUrl) {
       const img = document.createElement('img');
       img.alt = '';
@@ -2685,7 +2714,7 @@ export class Library {
     }
 
     const firstFour = descendantsOf(this._folderIndex, node.path).slice(0, 4);
-    const cached = firstFour.map(v => thumbCache.get(v.path, 0));
+    const cached = firstFour.map(v => thumbCache.get(v.path, thumbCache.mtimeOf(v.path)));
     const n = cached.filter(Boolean).length;
 
     if (n === 0) {
@@ -2850,7 +2879,7 @@ export class Library {
     // backed up by stale in-flight loads for cards that already
     // scrolled out). Result was thumbnails visibly "disappearing" on
     // scroll then re-appearing slowly. Inline cache hit is instant.
-    const cachedDataUrl = thumbCache.get(video.path, 0);
+    const cachedDataUrl = thumbCache.get(video.path, thumbCache.mtimeOf(video.path));
     if (cachedDataUrl) {
       const img = document.createElement('img');
       img.alt = '';
@@ -3099,7 +3128,7 @@ export class Library {
   async _loadThumbnail(cardEl, videoPath) {
     try {
       // Check thumbnail cache first
-      let result = thumbCache.get(videoPath, 0);
+      let result = thumbCache.get(videoPath, thumbCache.mtimeOf(videoPath));
       let dataUrl, duration;
 
       if (result) {
@@ -3111,7 +3140,7 @@ export class Library {
         // Duration goes in too: the playlists/categories views read it back
         // for their duration badge, so a tile cached here stays complete
         // when those views reuse it.
-        if (dataUrl) thumbCache.set(videoPath, 0, dataUrl, duration);
+        if (dataUrl) thumbCache.set(videoPath, thumbCache.mtimeOf(videoPath), dataUrl, duration);
 
         if (duration) {
           const video = this._videos.find(v => v.path === videoPath);
@@ -3251,7 +3280,7 @@ export class Library {
     const map = { ...(this._settings.get('library.customThumbnails') || {}) };
     map[video.path] = { seekPct };
     this._settings.set('library.customThumbnails', map);
-    thumbCache.remove(video.path, 0);
+    thumbCache.remove(video.path);
     await this._refreshCardThumbnail(video.path, cardEl);
     const { showToast } = await import('../js/toast.js');
     showToast(t('library.customThumbSaved'), 'success');
@@ -3276,10 +3305,10 @@ export class Library {
     const map = { ...(this._settings.get('library.customThumbnails') || {}) };
     map[video.path] = { type: 'image', imagePath: imported.path };
     this._settings.set('library.customThumbnails', map);
-    thumbCache.remove(video.path, 0);
+    thumbCache.remove(video.path);
     // Seed the cache with the import's data URL so the tile updates
     // instantly without a read round-trip.
-    if (imported.dataUrl) thumbCache.set(video.path, 0, imported.dataUrl);
+    if (imported.dataUrl) thumbCache.set(video.path, thumbCache.mtimeOf(video.path), imported.dataUrl);
     await this._refreshCardThumbnail(video.path, cardEl);
     showToast(t('library.customThumbSaved'), 'success');
   }
@@ -3453,7 +3482,7 @@ export class Library {
     const map = { ...(this._settings.get('library.customThumbnails') || {}) };
     delete map[video.path];
     this._settings.set('library.customThumbnails', map);
-    thumbCache.remove(video.path, 0);
+    thumbCache.remove(video.path);
     await this._refreshCardThumbnail(video.path, cardEl);
     const { showToast } = await import('../js/toast.js');
     showToast(t('library.customThumbResetDone'), 'info');
@@ -3510,89 +3539,10 @@ export class Library {
       } catch { /* fall through to frame path */ }
     }
     const { seekPct, exact } = thumbRequestOpts(custom);
-    // Backend ffmpeg path — fast, cached on disk by content hash.
-    if (window.funsync?.generateSingleThumbnail) {
-      try {
-        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct, width: 320, exact });
-        if (result?.dataUrl) {
-          return { dataUrl: result.dataUrl, duration: result.duration || 0 };
-        }
-      } catch {
-        // Fall through to renderer fallback below.
-      }
-    }
-    // Fallback — original renderer-side <video> decode. Honors a pinned
-    // frame too (it previously hardcoded the 10% mark).
-    return this._captureVideoFrameViaVideoElement(videoPath, exact ? seekPct : null);
-  }
-
-  /**
-   * Original renderer-side decode. Slow (loads entire video file) but
-   * works without a backend. Kept as a safety net for the case where
-   * the Python ffmpeg path is broken or unavailable.
-   *
-   * @param {string} videoPath
-   * @param {number|null} [pinnedSeekPct] — user-picked frame position
-   *   (0..1); when set, seek there instead of the default 10%/5s mark.
-   *   <video> currentTime seeks are frame-accurate, matching the picker.
-   */
-  _captureVideoFrameViaVideoElement(videoPath, pinnedSeekPct = null) {
-    return new Promise((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.muted = true;
-      video.playsInline = true;
-      video.style.position = 'fixed';
-      video.style.left = '-9999px';
-      video.style.width = '1px';
-      video.style.height = '1px';
-      document.body.appendChild(video);
-
-      const cleanup = () => {
-        video.removeAttribute('src');
-        video.load();
-        video.remove();
-      };
-
-      const timeout = setTimeout(() => {
-        cleanup();
-        resolve(null);
-      }, 10000);
-
-      video.addEventListener('loadedmetadata', () => {
-        const seekTo = (typeof pinnedSeekPct === 'number' && isFinite(pinnedSeekPct))
-          ? video.duration * pinnedSeekPct
-          : Math.min(video.duration * 0.1, 5);
-        video.currentTime = seekTo;
-      }, { once: true });
-
-      video.addEventListener('seeked', () => {
-        clearTimeout(timeout);
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 320;
-          canvas.height = Math.round(320 * (video.videoHeight / video.videoWidth)) || 180;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-
-          const duration = isFinite(video.duration) ? video.duration : 0;
-          cleanup();
-          resolve({ dataUrl, duration });
-        } catch (e) {
-          cleanup();
-          resolve(null);
-        }
-      }, { once: true });
-
-      video.addEventListener('error', () => {
-        clearTimeout(timeout);
-        cleanup();
-        resolve(null);
-      }, { once: true });
-
-      video.src = pathToFileURL(videoPath);
-    });
+    // Backend ffmpeg frame (cached on disk, shared with the headset), else
+    // the renderer-side <video> decode — unless the backend said the file
+    // is gone (thumb-request.js). Honors a pinned frame either way.
+    return captureVideoThumb(window.funsync, videoPath, { seekPct, exact });
   }
 
   /**
@@ -6870,6 +6820,9 @@ export class Library {
     }
     const payload = {
       videos: videosWithOverride,
+      // The backend may drop cached thumbnails no registered video uses only
+      // when this list is the whole library (every source was read).
+      thumbPrune: this._scanComplete === true,
       customThumbnails: this._settings.get('library.customThumbnails') || {},
       // Sources are needed by the phone's folder-browse tree view — it
       // uses {id, name, path} to seed the source-root nodes so the tree

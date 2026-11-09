@@ -215,16 +215,15 @@ class TestGenerateSingleThumbnail:
         seek_arg = captured["args"][captured["args"].index("-ss") + 1]
         assert float(seek_arg) == 3.0  # 10% of 30s, no clamp
 
-    def test_vf_chain_is_simple_scale_only(self, monkeypatch, tmp_path):
-        """The -vf chain must be `scale=W:-2` and nothing else. An earlier
-        revision added `thumbnail=N` for black-frame rejection but had to
-        be reverted — the filter forces N full-resolution decodes per
-        thumbnail, which on 8K HEVC content (typical for VR libraries)
-        timed out the 30s subprocess budget under the renderer's 8-way
-        concurrent queue. The seek-time fix in `seek_time` above is the
-        actual fix for studio-ident black thumbnails; this test pins the
-        revert so a well-meaning refactor can't reintroduce the perf
-        regression."""
+    def test_filter_graph_decodes_one_frame_without_analysis_filters(self, monkeypatch, tmp_path):
+        """The graph is `scale=W:-2` for the tile plus a 32×32 grey copy of
+        the SAME frame for the dark / title-card check — nothing that
+        decodes more. An earlier revision added `thumbnail=N` for
+        black-frame rejection but had to be reverted: the filter forces N
+        full-resolution decodes per thumbnail, which on 8K HEVC content
+        (typical for VR libraries) timed out the subprocess budget under
+        the renderer's 8-way concurrent queue. This pins that a bad frame
+        is caught by measuring one frame per attempt instead."""
         from services.ffmpeg import generate_single_thumbnail
 
         video = tmp_path / "v.mp4"
@@ -232,13 +231,11 @@ class TestGenerateSingleThumbnail:
         captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=300.0)
 
         generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
-        vf_arg = captured["args"][captured["args"].index("-vf") + 1]
-        assert vf_arg == "scale=320:-2", (
-            f"-vf must be simple scale only (no thumbnail/select filters that "
-            f"force multi-frame decode); got {vf_arg!r}. See the comment in "
-            f"generate_single_thumbnail explaining why the thumbnail filter "
-            f"was reverted."
-        )
+        args = captured["args"]
+        graph = args[args.index("-filter_complex") + 1]
+        assert graph == "[0:v]scale=320:-2,split=2[o][s];[s]scale=32:32:flags=area,format=gray[g]"
+        assert "thumbnail" not in graph and "select" not in graph
+        assert args.count("-frames:v") == 2  # one frame per output
 
     def test_uses_skip_frame_nokey(self, monkeypatch, tmp_path):
         """`-skip_frame nokey` is the cross-platform performance win that
@@ -320,11 +317,11 @@ class TestGenerateSingleThumbnail:
         default = generate_single_thumbnail(str(video), seek_pct=0.5, width=320)
         exact = generate_single_thumbnail(str(video), seek_pct=0.5, width=320, exact=True)
         assert default["path"] != exact["path"]
-        assert "_v4e_" in os.path.basename(exact["path"])
+        assert "_single_v5e_" in os.path.basename(exact["path"])
         # And the exact call actually re-ran ffmpeg (not a cache hit on
-        # the default file): its output path is the exact-namespace one.
-        out_arg = captured["args"][captured["args"].index("-y") + 1]
-        assert out_arg == exact["path"]
+        # the default file): the last run was the frame-accurate one.
+        assert "-skip_frame" not in captured["args"]
+        assert os.path.isfile(exact["path"])
 
     def test_metadata_cache_survives_backend_restart(self, monkeypatch, tmp_path, _isolated_metadata_cache):
         """THE startup fix (2026-08-03): the ffprobe metadata cache used to
@@ -490,21 +487,19 @@ class TestGenerateSingleThumbnail:
         assert captured_kwargs.get("timeout") == THUMBNAIL_TIMEOUT_SEC
         assert THUMBNAIL_TIMEOUT_SEC < 60  # meaningfully lowered for slow drives
 
-    def test_cache_key_uses_v4_prefix(self, monkeypatch, tmp_path):
-        """Bumping the cache prefix to `v4` evicts every prior generation:
-        v1 black-frame thumbs, v2 timed-out-on-HEVC stubs, and v3 plain
-        software-decode versions. After the `-skip_frame nokey` switch
-        the decoder produces a different (nearest-keyframe) frame than
-        plain software decode, so the visual content can differ —
-        regenerating ensures users see the new behaviour immediately."""
+    def test_cache_key_uses_v5_marker(self, monkeypatch, tmp_path):
+        """Bumping the marker to `v5` evicts every prior generation: v1
+        black-frame thumbs, v2 timed-out-on-HEVC stubs, v3 plain
+        software-decode versions and v4 frames picked without the dark /
+        blank / title-card check, so those regenerate on next view."""
         from services.ffmpeg import generate_single_thumbnail
 
         video = tmp_path / "v.mp4"
         video.write_bytes(b"placeholder")  # non-zero so size guard passes
-        captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=300.0)
+        self._patch_ffmpeg(monkeypatch, tmp_path, duration=300.0)
 
         result = generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
-        assert "single_v4_" in os.path.basename(result["path"])
+        assert "_single_v5_" in os.path.basename(result["path"])
 
 
 # --- Container remux (MKV → MP4) ---

@@ -78,16 +78,18 @@ describe('thumbnail-cache', () => {
   });
 
   describe('remove', () => {
-    it('removes a specific entry', () => {
+    it('removes every entry of that video, whatever its mtime', () => {
       cache.set('/v/a.mp4', 1000, 'data:a');
+      cache.set('/v/a.mp4', 3000, 'data:a2');
       cache.set('/v/b.mp4', 2000, 'data:b');
-      cache.remove('/v/a.mp4', 1000);
+      cache.remove('/v/a.mp4');
       expect(cache.has('/v/a.mp4', 1000)).toBe(false);
+      expect(cache.has('/v/a.mp4', 3000)).toBe(false);
       expect(cache.has('/v/b.mp4', 2000)).toBe(true);
     });
 
     it('no-op for non-existent entry', () => {
-      cache.remove('/v/x.mp4', 9999);
+      cache.remove('/v/x.mp4');
       expect(cache.size()).toBe(0);
     });
   });
@@ -217,16 +219,31 @@ describe('thumbnail-cache', () => {
     });
   });
 
-  describe('all three views share one entry (mtime key 0)', () => {
-    it('a tile cached under key 0 is readable by every view', () => {
+  describe('all views share one entry, keyed by the scanned mtime', () => {
+    it('a tile cached under the scan mtime is readable by every view', () => {
       // If any view drifted to a different mtime key the sharing would
       // silently stop and each view would re-fetch again.
-      cache.set('/v/shared.mp4', 0, 'data:image/jpeg;base64,SHARED', 60);
-      expect(cache.get('/v/shared.mp4', 0)).toBe('data:image/jpeg;base64,SHARED');
-      expect(cache.getEntry('/v/shared.mp4', 0).duration).toBe(60);
+      cache.rememberMtimes([{ path: '/v/shared.mp4', dateAdded: 1700000000123.5 }]);
+      const mtime = cache.mtimeOf('/v/shared.mp4');
+      expect(mtime).toBe(1700000000123.5);
+      cache.set('/v/shared.mp4', mtime, 'data:image/jpeg;base64,SHARED', 60);
+      expect(cache.get('/v/shared.mp4', cache.mtimeOf('/v/shared.mp4'))).toBe('data:image/jpeg;base64,SHARED');
+      expect(cache.getEntry('/v/shared.mp4', cache.mtimeOf('/v/shared.mp4')).duration).toBe(60);
       // Library invalidation (custom thumb / pin change) clears it for all.
-      cache.remove('/v/shared.mp4', 0);
-      expect(cache.getEntry('/v/shared.mp4', 0)).toBeNull();
+      cache.remove('/v/shared.mp4');
+      expect(cache.getEntry('/v/shared.mp4', mtime)).toBeNull();
+    });
+
+    it('a file replaced at the same path misses after the next scan', () => {
+      cache.rememberMtimes([{ path: '/v/r.mp4', dateAdded: 1000 }]);
+      cache.set('/v/r.mp4', cache.mtimeOf('/v/r.mp4'), 'data:old');
+      cache.rememberMtimes([{ path: '/v/r.mp4', dateAdded: 2000 }]);
+      expect(cache.get('/v/r.mp4', cache.mtimeOf('/v/r.mp4'))).toBeNull();
+    });
+
+    it('a path the scan did not see keys as 0', () => {
+      cache.rememberMtimes([]);
+      expect(cache.mtimeOf('/v/unknown.mp4')).toBe(0);
     });
   });
 });

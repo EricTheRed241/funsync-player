@@ -9,7 +9,7 @@ const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
 const dataBackup = require('./data-backup');
 const { EroScriptsAPI } = require('./eroscripts-api');
-const { importThumbnail, thumbStem, decodeWithChromium, decodeGrayFrames, closeDecoder } = require('./custom-thumbs');
+const { importThumbnail, thumbStem, deleteVideoThumbs, decodeWithChromium, decodeGrayFrames, closeDecoder } = require('./custom-thumbs');
 const { createPreviewValidator } = require('./preview-validator');
 const { MATCH_THRESHOLD } = require('./preview-match');
 const { matchFaptapThumbnail } = require('./faptap-thumbnail');
@@ -948,7 +948,9 @@ ipcMain.handle('generate-thumbnails', async (_event, videoPath, interval) => {
  * grab one frame; ffmpeg with `-ss before -i` (fast seek) does the
  * same job in tens of ms.
  *
- * Returns { dataUrl, duration, width, height } or null on failure.
+ * Returns { dataUrl, duration, width, height }, { missing: true } when the
+ * backend answered 404 (the file is gone or empty: the renderer remembers
+ * that until the next scan instead of asking again), or null on failure.
  */
 ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {}) => {
   const { getBackendPort } = require('./python-bridge');
@@ -964,9 +966,15 @@ ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {})
   });
   const url = `http://localhost:${port}/thumbnails/single?${params}`;
   try {
-    // 15s: a single fast-seek thumbnail is ~50-500ms; ceiling protects
-    // against a hung ffmpeg.
-    const resp = await fetchWithTimeout(url, { method: 'POST' }, 15000);
+    // 40 s: the backend gives ffmpeg 25 s for all of a thumbnail's frame
+    // attempts (THUMBNAIL_TIMEOUT_SEC) plus the ffprobe before them. A
+    // shorter wait gave up on slow drives while the backend was still
+    // working, and the renderer then decoded the video itself.
+    const resp = await fetchWithTimeout(url, { method: 'POST' }, 40000);
+    if (resp.status === 404) {
+      log.warn(`Single thumbnail: ${videoPath} is missing or empty (backend 404)`);
+      return { missing: true };
+    }
     if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
     const meta = await resp.json();
     if (!meta?.path || !fs.existsSync(meta.path)) {
@@ -1274,6 +1282,23 @@ ipcMain.handle('delete-eroscripts-thumbnail', async (_event, imagePath) => {
     return true;
   } catch {
     return false;
+  }
+});
+
+// After a complete library scan the renderer drops thumbnail config of
+// videos that are gone (renderer/js/thumb-config-prune.js); this removes
+// their files from custom-thumbs, except images other entries still use.
+ipcMain.handle('delete-custom-thumbs-for-videos', async (_event, videoPaths, imagePaths, keep) => {
+  try {
+    const deleted = await deleteVideoThumbs(customThumbsDir(), (videoPaths || []).map(String), {
+      imagePaths: (imagePaths || []).map(String),
+      keep: (keep || []).map(String),
+    });
+    if (deleted) log.info(`[Thumbnails] Deleted ${deleted} custom thumbnail file(s) of videos that are gone`);
+    return deleted;
+  } catch (err) {
+    log.warn('[Thumbnails] Deleting custom thumbnails of gone videos failed:', err.message);
+    return 0;
   }
 });
 

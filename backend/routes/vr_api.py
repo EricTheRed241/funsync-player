@@ -52,7 +52,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity
+from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity, thumb_url
 from routes.remote_sync import submit_library_edit
 from services import library_edits, stereo_detect, video_info, vr_sections
 from services.network import get_local_ip
@@ -352,6 +352,20 @@ def vr_decision(vid_id, video):
             or stereo_detect.cached_layout(video.get('path'))):
         return False
     return None
+
+
+def thumb_vr_crop(vid_id, video):
+    """How thumbnails of this video crop the frame
+    (`services.ffmpeg.THUMB_VR_CROPS` key), or None for flat video.
+
+    VR the backend knows about (`detect_vr_format_for_video`: the desktop's
+    decision, the filename, the frames) shows the left eye of a side-by-side
+    frame or the top eye of a top-bottom one; anything but a flat screen
+    (180°, 360°, fisheye) also takes the middle of that eye. Never probes."""
+    screen, stereo, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
+    if not is_3d or stereo not in ('sbs', 'tb'):
+        return None
+    return stereo if screen == 'flat' else f'{stereo}c'
 
 
 def vr_flags(registry):
@@ -696,7 +710,7 @@ async def deovr_library(request: Request):
         item = {
             'title': os.path.splitext(video.get('name', ''))[0],
             'videoLength': _get_duration(video),
-            'thumbnailUrl': f'{base_url}/api/media/thumb/{vid_id}',
+            'thumbnailUrl': thumb_url(vid_id, video, base_url),
             'video_url': f'{base_url}/deovr/{vid_id}',
         }
         entries.append((item, video, is_3d))
@@ -793,7 +807,7 @@ async def deovr_scene(video_id: str, request: Request):
         'screenType': screen_type,
         'stereoMode': stereo_mode,
         'videoLength': duration,
-        'thumbnailUrl': f'{base_url}/api/media/thumb/{video_id}',
+        'thumbnailUrl': thumb_url(video_id, video, base_url),
         'encodings': encodings,
         'fleshlight': fleshlight,
         'timeStamps': timestamps,
@@ -980,7 +994,7 @@ async def heresphere_scene(video_id: str, request: Request):
         'access': 1,
         'title': title,
         'description': '',
-        'thumbnailImage': f'{base_url}/api/media/thumb/{video_id}',
+        'thumbnailImage': thumb_url(video_id, video, base_url),
         'dateReleased': '',
         'dateAdded': '',
         'duration': duration * 1000,  # HereSphere uses milliseconds

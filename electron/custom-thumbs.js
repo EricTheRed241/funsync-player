@@ -129,6 +129,51 @@ async function importThumbnail(bytes, { dir, stem, nativeImage, decodeFallback }
 }
 
 /**
+ * Delete the custom-thumbs files of videos that are gone: every file named
+ * after one of the videos (`thumbStem` for uploads, EroScripts previews and
+ * FapTap thumbnails, any extension) plus `imagePaths` (the pruned config
+ * entries' images, which a reorganised library may have kept under the old
+ * path's hash). Only files directly inside `dir`; `keep` (images still used
+ * by other entries) is never removed.
+ *
+ * @param {string} dir custom-thumbs directory
+ * @param {string[]} videoPaths
+ * @param {{imagePaths?: string[], keep?: string[]}} [opts]
+ * @returns {Promise<number>} files deleted
+ */
+async function deleteVideoThumbs(dir, videoPaths, { imagePaths = [], keep = [] } = {}) {
+  const root = path.resolve(dir);
+  let names;
+  try {
+    names = await fs.promises.readdir(root);
+  } catch {
+    return 0;
+  }
+  const stems = new Set();
+  for (const p of videoPaths) {
+    for (const source of ['user', 'eroscripts', 'faptap']) stems.add(thumbStem(p, source));
+  }
+  const targets = new Set();
+  for (const name of names) {
+    const dot = name.indexOf('.');
+    if (dot > 0 && stems.has(name.slice(0, dot))) targets.add(path.join(root, name));
+  }
+  for (const img of imagePaths) {
+    const resolved = path.resolve(String(img));
+    if (path.dirname(resolved) === root) targets.add(resolved);
+  }
+  for (const k of keep) targets.delete(path.resolve(String(k)));
+  let deleted = 0;
+  for (const file of targets) {
+    try {
+      await fs.promises.unlink(file);
+      deleted++;
+    } catch { /* already gone */ }
+  }
+  return deleted;
+}
+
+/**
  * Decode an image with Chromium (the hidden decoder window) and return its
  * first frame as PNG bytes (≤ MAX_WIDTH wide), or null.
  *
@@ -250,6 +295,7 @@ module.exports = {
   MAX_WIDTH,
   thumbStem,
   importThumbnail,
+  deleteVideoThumbs,
   decodeWithChromium,
   decodeGrayFrames,
   closeDecoder,

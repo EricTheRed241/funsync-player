@@ -60,7 +60,7 @@ def thumbs(tmp_path, monkeypatch):
     src_dir = tmp_path / "gen"
     src_dir.mkdir()
 
-    monkeypatch.setattr(media, "_thumb_cache_dir", str(cache))
+    monkeypatch.setattr(ffmpeg_service, "_thumb_cache_dir", str(cache))
     monkeypatch.setattr(media, "_custom_thumbs", {})
     monkeypatch.setattr(media, "_custom_thumbs_dir", None)
     monkeypatch.setattr(media, "_queue_duration_probes", lambda: None)
@@ -69,7 +69,7 @@ def thumbs(tmp_path, monkeypatch):
     gen = types.SimpleNamespace(calls=[], block={}, fail=set())
     lock = threading.Lock()
 
-    def fake_generate(filepath, seek_pct=0.1, width=320, exact=False):
+    def fake_generate(filepath, seek_pct=0.1, width=320, exact=False, vr_crop=None):
         with lock:
             gen.calls.append((filepath, seek_pct if exact else None))
         ev = gen.block.get(filepath)
@@ -113,6 +113,12 @@ def _register(paths):
     return [media._path_to_id(p) for p in paths]
 
 
+def _served_file(path):
+    """The generated file `/thumb` serves for `path` (registered, no poster)."""
+    vid = media._path_to_id(path)
+    return media._thumb_target(vid, path, media.get_video_registry().get(vid))[1]
+
+
 @pytest.mark.anyio
 async def test_cache_miss_waits_and_serves_the_real_jpeg(client, thumbs):
     video = thumbs.make_video("a.mp4")
@@ -131,7 +137,7 @@ async def test_cache_miss_waits_and_serves_the_real_jpeg(client, thumbs):
         assert r.headers["content-type"] == "image/jpeg"
         assert r.content == JPEG, "a placeholder image was served instead of the thumbnail"
     assert thumbs.calls == [(video, None)]
-    assert (thumbs.cache / f"{vid}.jpg").read_bytes() == JPEG
+    assert open(_served_file(video), "rb").read() == JPEG
     assert not [f for f in os.listdir(thumbs.cache) if f.endswith(".tmp")]
 
 
@@ -139,7 +145,8 @@ async def test_cache_miss_waits_and_serves_the_real_jpeg(client, thumbs):
 async def test_cached_thumbnail_is_served_without_generating(client, thumbs):
     video = thumbs.make_video("a.mp4")
     (vid,) = _register([video])
-    (thumbs.cache / f"{vid}.jpg").write_bytes(JPEG)
+    with open(_served_file(video), "wb") as f:
+        f.write(JPEG)
 
     r = await client.get(f"/api/media/thumb/{vid}")
 
@@ -200,8 +207,8 @@ async def test_registration_warms_only_missing_thumbnails(client, thumbs, tmp_pa
     poster_img = custom_dir / "poster.png"
     poster_img.write_bytes(b"\x89PNG")
 
-    cached_id = media._path_to_id(cached)
-    (thumbs.cache / f"{cached_id}.jpg").write_bytes(JPEG)
+    with open(_served_file(cached), "wb") as f:
+        f.write(JPEG)
 
     r = await client.post("/api/media/register", json={
         "videos": [{"path": p, "name": os.path.basename(p), "duration": 60}
@@ -217,9 +224,12 @@ async def test_registration_warms_only_missing_thumbnails(client, thumbs, tmp_pa
     _wait_idle()
 
     assert sorted(thumbs.calls) == sorted([(missing, None), (pinned, 0.5)])
-    assert (thumbs.cache / f"{media._path_to_id(missing)}.jpg").read_bytes() == JPEG
-    assert (thumbs.cache / f"{media._path_to_id(pinned)}_p0500.jpg").read_bytes() == JPEG
-    assert not (thumbs.cache / f"{media._path_to_id(poster)}.jpg").exists()
+    assert open(_served_file(missing), "rb").read() == JPEG
+    pinned_file = _served_file(pinned)
+    assert "_single_v5e_0500_" in os.path.basename(pinned_file)
+    assert open(pinned_file, "rb").read() == JPEG
+    poster_id = media._path_to_id(poster)
+    assert not [f for f in os.listdir(thumbs.cache) if f.startswith(poster_id)]
 
     # Re-registering the same library queues nothing new.
     assert media._queue_thumb_warmup() == 0

@@ -4279,26 +4279,28 @@ function formatDuration(seconds) {
 }
 
 /**
- * Point an <img> at a thumbnail URL, re-requesting while the server is still
- * generating it. `/api/media/thumb/<id>` returns a 1x1 transparent PNG
- * placeholder for an uncached (e.g. newly-added) video and generates the real
- * frame in the background. Without a retry the phone shows a black card until
- * the whole page is reloaded — the reported "takes a few restarts" bug. We
- * detect the placeholder (naturalWidth <= 1) and re-fetch with a cache-buster
- * (the placeholder is served `no-cache`, but browsers won't re-load an
- * identical src) until the real thumbnail lands or we exhaust the retries.
+ * Point an <img> at a thumbnail URL, re-requesting while the server can't
+ * serve it yet. On a cache miss `/api/media/thumb/<id>` waits up to 30 s for
+ * the frame; when generation fails or overruns it answers 503 with
+ * `Cache-Control: no-store` (never a placeholder image), which lands in
+ * `onerror` here. Without a retry the phone shows a black card until the
+ * whole page is reloaded — the reported "takes a few restarts" bug. Retries
+ * add a cache-buster (`_r`), because browsers won't re-load an identical
+ * src. The URL itself carries the server's `?v=` version, so a new poster or
+ * re-pinned frame is a new URL. The `naturalWidth <= 1` check stays as a
+ * guard against a blank image from an older backend.
  * @param {HTMLImageElement} img
  * @param {string} url
  * @param {Function} onGiveUp — called if it errors or never generates.
  */
 function wireThumb(img, url, onGiveUp) {
   let attempts = 0;
-  // Generation is semaphore-capped at 2 concurrent ffmpeg jobs backend-side,
-  // so on a cold cache the queue TAIL of a full library takes minutes. The
-  // old ladder (8 tries, 4s cap ≈ 26s budget) expired for the back half of
-  // the grid and those cards stayed black until a full page reload — even
-  // though the server was happily serving the JPEGs by then. ~3.5 minutes
-  // covers a cold 40-video library with margin.
+  // On a cold cache the backend works through a full library with 3
+  // on-demand ffmpeg workers plus one warm-up thread, so the TAIL of a big
+  // grid can take minutes. The old ladder (8 tries, 4s cap ≈ 26s budget)
+  // expired for the back half of the grid and those cards stayed black until
+  // a full page reload — even though the server was happily serving the
+  // JPEGs by then. ~3.5 minutes covers a cold 40-video library with margin.
   const MAX_ATTEMPTS = 15;
   const retry = () => {
     if (attempts >= MAX_ATTEMPTS) { if (onGiveUp) onGiveUp(); return; }
