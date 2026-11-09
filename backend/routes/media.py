@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from services import library_edits, video_tags
+from services import ffmpeg as ffmpeg_service, library_edits, video_tags
 from services.funscript import companion_axes, embedded_axes, may_have_embedded_axes
 
 router = APIRouter()
@@ -86,8 +86,8 @@ _favourite_artist_score: dict = {"score": None, "default": None}
 # headset changes are queue edits.
 _queue: dict = {"manual": [], "auto": [], "autoFill": True}
 
-# Thumbnail cache directory
-_thumb_cache_dir = None
+# Thumbnails live in `services.ffmpeg`'s cache directory (shared with the
+# desktop's library cards); `set_thumb_cache_dir` points it somewhere.
 
 # Phone-triggered rescan handshake. The web remote can only ever see the
 # snapshot the desktop last pushed via /register — dropping a new file into a
@@ -112,10 +112,8 @@ def get_rescan_request_seq() -> int:
 
 
 def set_thumb_cache_dir(path: str):
-    """Set the thumbnail cache directory."""
-    global _thumb_cache_dir
-    _thumb_cache_dir = path
-    os.makedirs(path, exist_ok=True)
+    """Set the thumbnail cache directory (created on the first thumbnail)."""
+    ffmpeg_service.set_thumb_cache_dir(path)
 
 
 def register_videos(videos: list[dict]):
@@ -1006,8 +1004,10 @@ async def register_library(request: Request):
     ({groups: {tag: group}, rules: {id: number}}), `artists` ([{name,
     videoPaths}], one per artist folder), `favouriteArtists` ([name], the
     effective favourites), `favouriteArtistScore` ({score, default}, the
-    favourite-artist bonus) and `queue` ({manual: [path], auto: [path],
-    autoFill: bool}, the shared play queue). Every field is independent: omit
+    favourite-artist bonus), `queue` ({manual: [path], auto: [path],
+    autoFill: bool}, the shared play queue) and `thumbPrune` (true with the
+    `videos` of a scan that read every source: drop cached thumbnails no
+    registered video uses). Every field is independent: omit
     a key to leave that slice untouched on the backend.
     That lets the renderer push groupings FAST (in-memory, no filesystem
     work) ahead of the slower video scan — the phone can render
@@ -1086,19 +1086,23 @@ def _apply_registration(data: dict):
     if data.get("customThumbsDir"):
         _custom_thumbs_dir = str(data["customThumbsDir"])
 
-    # Last, once the cache dir and custom-thumb map are in place: make sure
-    # every registered video gets its thumbnail without anyone browsing to
-    # it first. Only when something that decides the target file changed —
-    # grouping-only pushes leave the warm-up alone.
-    if "videos" in data or thumb_dir or "customThumbnails" in data:
-        _queue_thumb_warmup()
-
-    # Same for resolutions: an untagged VR master only lands in the headset's
-    # "VR" section once its dimensions are known, and the listings
-    # never probe. Deferred import: vr_api imports this module.
+    # Resolutions: an untagged VR master only lands in the headset's "VR"
+    # section once its dimensions are known, and the listings never probe.
+    # First, because it also answers the cached stereo layouts at once, and
+    # the thumbnail warm-up below crops VR to one eye by them. Deferred
+    # import: vr_api imports this module.
     if "videos" in data:
         from routes.vr_api import queue_dims_warmup
         queue_dims_warmup(_video_registry)
+
+    # Last, once the cache dir and custom-thumb map are in place: make sure
+    # every registered video gets its thumbnail without anyone browsing to
+    # it first. Only when something that decides the target file changed
+    # (the VR format decides the eye crop) — grouping-only pushes leave the
+    # warm-up alone. `thumbPrune` (sent with the videos of a scan that read
+    # every source) also clears thumbnails no registered video uses.
+    if "videos" in data or thumb_dir or "customThumbnails" in data or "vrFormat" in data:
+        _queue_thumb_warmup(prune="videos" in data and data.get("thumbPrune") is True)
 
 
 # --- Video Streaming ---
@@ -1339,30 +1343,78 @@ def _custom_thumb_for(filepath: str):
     return entry if isinstance(entry, dict) else None
 
 
-def _thumb_target(video_id: str, filepath: str):
+def _poster_for(custom):
+    """The uploaded poster image of a custom-thumbnail entry, or None when
+    there is none or it isn't a file inside the custom-thumbs dir."""
+    if not (custom and custom.get("type") == "image" and custom.get("imagePath") and _custom_thumbs_dir):
+        return None
+    img = os.path.abspath(str(custom["imagePath"]))
+    root = os.path.abspath(_custom_thumbs_dir)
+    # Untrusted path from a pushed payload — only serve from inside the
+    # registered custom-thumbs dir; anything else falls through to the
+    # normal auto-thumb path.
+    return img if img.startswith(root + os.sep) and os.path.isfile(img) else None
+
+
+def _pin_for(custom):
+    """The pinned frame position (0..0.999) of a custom-thumbnail entry, or None."""
+    if custom and isinstance(custom.get("seekPct"), (int, float)):
+        return min(0.999, max(0.0, float(custom["seekPct"])))
+    return None
+
+
+def _thumb_vr_crop(video_id: str, video: dict | None):
+    # Deferred import: vr_api imports this module.
+    from routes.vr_api import thumb_vr_crop
+    return thumb_vr_crop(video_id, video) if video else None
+
+
+def _thumb_target(video_id: str, filepath: str, video: dict | None = None, stat_key: str | None = None):
     """Decide what `/thumb/{video_id}` serves for this video.
 
-    Returns `(image_path, None, None)` for a valid uploaded poster, else
-    `(None, thumb_path, pin_pct)` for the generated JPEG — `<id>.jpg` for the
-    auto thumb, `<id>_p####.jpg` for a pinned frame (pin-keyed so a re-pin
-    regenerates and busts the client's cached tile)."""
+    Returns `(image_path, None, None, None)` for a valid uploaded poster,
+    else `(None, thumb_path, pin_pct, vr_crop)` for the generated JPEG in the
+    shared thumbnail cache (`services.ffmpeg.single_thumbnail_path`: the
+    desktop's library card for the same video is the same file). Stats the
+    video unless `stat_key` is given; raises OSError when it can't."""
     custom = _custom_thumb_for(filepath)
+    poster = _poster_for(custom)
+    if poster:
+        return poster, None, None, None
+    pin_pct = _pin_for(custom)
+    vr_crop = _thumb_vr_crop(video_id, video)
+    thumb_path = ffmpeg_service.single_thumbnail_path(
+        filepath,
+        seek_pct=0.1 if pin_pct is None else pin_pct,
+        width=320,
+        exact=pin_pct is not None,
+        vr_crop=vr_crop,
+        stat_key=stat_key,
+    )
+    return None, thumb_path, pin_pct, vr_crop
 
-    if custom and custom.get("type") == "image" and custom.get("imagePath") and _custom_thumbs_dir:
-        img = os.path.abspath(str(custom["imagePath"]))
-        root = os.path.abspath(_custom_thumbs_dir)
-        # Untrusted path from a pushed payload — only serve from inside
-        # the registered custom-thumbs dir; anything else falls through
-        # to the normal auto-thumb path.
-        if img.startswith(root + os.sep) and os.path.isfile(img):
-            return img, None, None
 
-    pin_pct = None
-    if custom and isinstance(custom.get("seekPct"), (int, float)):
-        pin_pct = min(0.999, max(0.0, float(custom["seekPct"])))
-
-    thumb_name = f"{video_id}.jpg" if pin_pct is None else f"{video_id}_p{int(pin_pct * 1000):04d}.jpg"
-    return None, os.path.join(_thumb_cache_dir, thumb_name), pin_pct
+def thumb_url(video_id: str, video: dict, base_url: str = "") -> str:
+    """`/api/media/thumb/{id}` with a `?v=` version, so a client that caches
+    images by URL (HereSphere, DeoVR, the web remote) fetches the new image
+    after a new poster, a re-pinned frame, a replaced video file, a new VR
+    crop or a THUMB_MARKER bump. The version hashes what decides the served
+    file: the poster's path and mtime, else the generation settings plus the
+    video's size and mtime as the desktop registered them (listings never
+    stat the video itself)."""
+    path = video.get("path") or ""
+    custom = _custom_thumb_for(path)
+    poster = _poster_for(custom)
+    if poster:
+        try:
+            ident = f"poster:{poster}:{os.stat(poster).st_mtime_ns}"
+        except OSError:
+            ident = f"poster:{poster}"
+    else:
+        ident = (f"frame:{ffmpeg_service.THUMB_MARKER}:{_pin_for(custom)}:"
+                 f"{_thumb_vr_crop(video_id, video)}:{video.get('size')}:{video.get('dateAdded')}")
+    version = hashlib.md5(ident.encode("utf-8")).hexdigest()[:8]
+    return f"{base_url}/api/media/thumb/{video_id}?v={version}"
 
 
 @router.get("/thumb/{video_id}")
@@ -1379,8 +1431,9 @@ async def get_thumbnail(video_id: str):
 
     Custom thumbnails (F7): an uploaded poster image is served directly
     (path-validated inside the desktop's custom-thumbs dir); a pinned frame
-    generates at the picked timestamp (frame-accurate) under a pin-keyed
-    cache name so re-pins bust the phone's cached tile.
+    generates at the picked timestamp (frame-accurate). Clients see a new
+    poster or a re-pinned frame because the listings' URLs carry a version
+    (`thumb_url`); this route ignores the `?v=` query itself.
     """
     video = _video_registry.get(video_id)
     if not video:
@@ -1390,10 +1443,10 @@ async def get_thumbnail(video_id: str):
     if not filepath or not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="File not found")
 
-    if not _thumb_cache_dir:
-        raise HTTPException(status_code=500, detail="Thumbnail cache not configured")
-
-    image_path, thumb_path, pin_pct = _thumb_target(video_id, filepath)
+    try:
+        image_path, thumb_path, pin_pct, vr_crop = _thumb_target(video_id, filepath, video)
+    except OSError:
+        raise HTTPException(status_code=404, detail="File not found")
 
     # Uploaded poster image — serve the cached file itself.
     if image_path:
@@ -1406,7 +1459,7 @@ async def get_thumbnail(video_id: str):
         # Not cached — generate now (or join the in-flight job) and wait.
         # `shield` keeps a timed-out waiter from cancelling the shared job:
         # it finishes in the background and the next request is a cache hit.
-        future = _request_thumb(video_id, filepath, thumb_path, pin_pct)
+        future = _request_thumb(video_id, filepath, thumb_path, pin_pct, vr_crop)
         try:
             await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), THUMB_WAIT_SEC)
         except asyncio.TimeoutError:
@@ -1459,13 +1512,14 @@ THUMB_WAIT_SEC = 30.0
 
 
 class _ThumbJob:
-    __slots__ = ("video_id", "filepath", "thumb_path", "seek_pct", "future", "claimed")
+    __slots__ = ("video_id", "filepath", "thumb_path", "seek_pct", "vr_crop", "future", "claimed")
 
-    def __init__(self, video_id, filepath, thumb_path, seek_pct):
+    def __init__(self, video_id, filepath, thumb_path, seek_pct, vr_crop):
         self.video_id = video_id
         self.filepath = filepath
         self.thumb_path = thumb_path
         self.seek_pct = seek_pct
+        self.vr_crop = vr_crop
         self.future: concurrent.futures.Future = concurrent.futures.Future()
         self.claimed = False
 
@@ -1477,22 +1531,22 @@ _warmup_queue: collections.deque = collections.deque()
 _warmup_running = False
 
 
-def _get_or_create_job(video_id, filepath, thumb_path, seek_pct):
+def _get_or_create_job(video_id, filepath, thumb_path, seek_pct, vr_crop):
     """Return `(job, created)`. Caller must hold `_thumb_jobs_lock`."""
     job = _thumb_jobs.get(thumb_path)
     if job is not None:
         return job, False
-    job = _ThumbJob(video_id, filepath, thumb_path, seek_pct)
+    job = _ThumbJob(video_id, filepath, thumb_path, seek_pct, vr_crop)
     _thumb_jobs[thumb_path] = job
     return job, True
 
 
-def _request_thumb(video_id, filepath, thumb_path, seek_pct=None) -> concurrent.futures.Future:
+def _request_thumb(video_id, filepath, thumb_path, seek_pct=None, vr_crop=None) -> concurrent.futures.Future:
     """On-demand lane: start or join the job for `thumb_path`; returns its
     future (result = thumb_path, or the generation exception)."""
     global _thumb_executor
     with _thumb_jobs_lock:
-        job, _ = _get_or_create_job(video_id, filepath, thumb_path, seek_pct)
+        job, _ = _get_or_create_job(video_id, filepath, thumb_path, seek_pct, vr_crop)
         if not job.claimed:
             # New, or still waiting in the warm-up queue — run it now on
             # the on-demand lane rather than behind the warm-up backlog.
@@ -1510,7 +1564,7 @@ def _run_thumb_job(job: _ThumbJob):
             return
         job.claimed = True
     try:
-        _generate_thumb(job.filepath, job.thumb_path, job.seek_pct)
+        _generate_thumb(job.filepath, job.thumb_path, job.seek_pct, job.vr_crop)
     except Exception as e:
         log.warning("thumbnail generation failed for %s: %s", job.filepath, e)
         job.future.set_exception(e)
@@ -1522,32 +1576,32 @@ def _run_thumb_job(job: _ThumbJob):
                 del _thumb_jobs[job.thumb_path]
 
 
-def _generate_thumb(filepath: str, thumb_path: str, seek_pct):
+def _generate_thumb(filepath: str, thumb_path: str, seek_pct, vr_crop):
     """Produce `thumb_path` for `filepath`, or raise.
 
-    Reuses the desktop library's thumbnail generator instead of a bespoke
-    ffmpeg command. It seeks past studio-ident / fade-in windows
-    (max(10s, 10%)), uses the fast `-skip_frame nokey` decode, and caches on
-    disk by content hash. `seek_pct` set = a user-pinned frame (F7) →
-    frame-accurate `exact` generation at that timestamp.
-
-    The copy lands under a temp name and is renamed into place, so a
-    concurrent cache-hit request never serves a half-written JPEG."""
-    from services.ffmpeg import generate_single_thumbnail
+    The desktop library's thumbnail generator writes straight into the
+    shared cache: it seeks past studio-ident / fade-in windows (max(10s,
+    10%)), retries past dark / blank / title-card frames, uses the fast
+    `-skip_frame nokey` decode and renames the JPEG into place, so a
+    concurrent cache-hit request never serves a half-written file.
+    `seek_pct` set = a user-pinned frame (F7) → frame-accurate `exact`
+    generation at that timestamp. A generator that hands back another file
+    has it copied into place the same way."""
     import shutil
 
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"Video not found: {filepath}")
     result = (
-        generate_single_thumbnail(filepath, seek_pct=seek_pct, width=320, exact=True)
+        ffmpeg_service.generate_single_thumbnail(filepath, seek_pct=seek_pct, width=320, exact=True, vr_crop=vr_crop)
         if seek_pct is not None
-        else generate_single_thumbnail(filepath, seek_pct=0.1, width=320)
+        else ffmpeg_service.generate_single_thumbnail(filepath, seek_pct=0.1, width=320, vr_crop=vr_crop)
     )
     src = result.get("path") if result else None
     if not src or not os.path.isfile(src) or os.path.getsize(src) == 0:
         raise RuntimeError(f"generator produced no image ({src!r})")
     if os.path.abspath(src) == os.path.abspath(thumb_path):
         return
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
     tmp = f"{thumb_path}.{threading.get_ident()}.tmp"
     try:
         shutil.copyfile(src, tmp)
@@ -1557,29 +1611,45 @@ def _generate_thumb(filepath: str, thumb_path: str, seek_pct):
             os.remove(tmp)
 
 
-def _queue_thumb_warmup() -> int:
+def _queue_thumb_warmup(prune: bool = False) -> int:
     """Warm-up lane: queue generation for every registered video whose
     served thumbnail file is missing. Uploaded posters need nothing; pinned
     frames warm their pin-keyed file. Videos already queued or running are
-    skipped. Returns the number of jobs newly queued."""
+    skipped. Returns the number of jobs newly queued.
+
+    `prune`: also delete cached thumbnails no registered video uses (a
+    deleted or moved video, an older version of a file, an older pin or VR
+    crop, an older generator version). The desktop asks for it only after a
+    scan that read every source, so a drive that failed to scan keeps its
+    thumbnails."""
     global _warmup_running
-    if not _thumb_cache_dir:
-        return 0
     registry = _video_registry   # one snapshot; registration rebinds atomically
     targets = []
+    in_use: dict[str, set[str] | None] = {}
     for vid_id, v in registry.items():
         filepath = v.get("path")
         if not filepath:
             continue
-        image_path, thumb_path, pin_pct = _thumb_target(vid_id, filepath)
+        try:
+            stat_key = ffmpeg_service.thumb_stat_key(filepath)
+        except OSError:
+            in_use[vid_id] = None   # unreadable right now: leave its files alone
+            continue
+        image_path, thumb_path, pin_pct, vr_crop = _thumb_target(vid_id, filepath, v, stat_key)
+        in_use[vid_id] = set() if image_path else {os.path.basename(thumb_path)}
         if image_path or os.path.isfile(thumb_path):
             continue
-        targets.append((vid_id, filepath, thumb_path, pin_pct))
+        targets.append((vid_id, filepath, thumb_path, pin_pct, vr_crop))
+
+    if prune and in_use:
+        removed = ffmpeg_service.prune_thumb_cache(in_use)
+        if removed:
+            log.info("thumbnail cache: removed %d file(s) no registered video uses", removed)
 
     queued = 0
     with _thumb_jobs_lock:
-        for vid_id, filepath, thumb_path, pin_pct in targets:
-            job, created = _get_or_create_job(vid_id, filepath, thumb_path, pin_pct)
+        for vid_id, filepath, thumb_path, pin_pct, vr_crop in targets:
+            job, created = _get_or_create_job(vid_id, filepath, thumb_path, pin_pct, vr_crop)
             if created:
                 _warmup_queue.append(job)
                 queued += 1

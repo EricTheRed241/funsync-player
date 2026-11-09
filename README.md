@@ -27,6 +27,13 @@ A local desktop video player with device synchronization for funscript playback.
 ### Library
 - Browse and organize your video collection from one or more source folders
 - **Grid / list / folder-tree** view toggle with thumbnail cards and live hover preview
+- **Generated thumbnails** (when a video has no poster or pinned frame):
+  - The frame comes from 10 % into the video (at least 10 s in for videos over a minute). A frame that is black, washed out, blank or a title card is retried at 25 %, 40 % and 60 %; if every try is bad, the best one is kept. Pinned frames are used exactly as picked.
+  - VR videos show one eye instead of the side-by-side pair; 180°, 360° and fisheye videos show the middle of that eye, so the tile isn't a distorted circle. Pinned frames too.
+  - The desktop, HereSphere / DeoVR and the web remote share one cache, `thumb-cache` in the app's data folder, so every screen shows the same frame and a temp-folder cleanup doesn't regenerate the library. A replaced video file gets a new thumbnail. After a scan that read every source, cached thumbnails of deleted or moved videos are removed.
+  - HereSphere, DeoVR and the web remote get a new poster or re-pinned frame without clearing their caches (thumbnail URLs carry a version).
+  - A missing video file is asked for once per scan instead of over and over. When the backend can't answer, the app grabs a frame itself with the same 10 % / 10 s rule, and waits up to 40 s for a thumbnail.
+  - After a scan that read every source, saved posters, FapTap thumbnail attempts and cached durations of deleted or moved videos are removed, with their image files. Nothing is removed for drives that are unplugged or unreachable.
 - Drag-to-reorder sources, per-source enable/disable, overlap detection, hot-plug drive detection
 - Funscript auto-pairing by filename with auto/manual badges; subtitle auto-detection
 - Fuzzy search with exact-title precedence, path + collection + category matching, diacritic folding

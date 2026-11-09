@@ -650,7 +650,7 @@ export class QueuePanel {
     // Use the existing in-memory thumbnail cache first.
     try {
       const mod = await import('../js/thumbnail-cache.js');
-      const cached = mod.get(path, 0);
+      const cached = mod.get(path, mod.mtimeOf(path));
       if (cached) {
         this._applyThumb(thumb, cached);
         return;

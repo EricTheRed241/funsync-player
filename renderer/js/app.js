@@ -51,6 +51,7 @@ import { resolveFillerOptions } from './filler-presets.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library, thumbRequestOpts, customThumbImagePath } from '../components/library.js';
+import { requestBackendThumb } from './thumb-request.js';
 import { QueuePanel } from '../components/queue-panel.js';
 import { NavBar } from '../components/nav-bar.js';
 import { Modal } from '../components/modal.js';
@@ -7028,57 +7029,41 @@ class App {
    *      ffmpeg → renderer-<video> fallback) — populates the cache as a
    *      side-effect.
    *   3. Backend ffmpeg directly (works even before the library has
-   *      ever scanned the path).
+   *      ever scanned the path), skipped once the backend answered 404 for
+   *      it since the last scan (thumb-request.js).
    * Returns `{ dataUrl }` or `null`.
    */
   async _captureUpNextThumb(path) {
     if (!path) return null;
-    try {
-      const mod = await import('./thumbnail-cache.js');
-      const cached = mod.get(path, 0);
-      if (cached) return { dataUrl: cached };
-    } catch { /* cache miss path */ }
+    const cache = await import('./thumbnail-cache.js');
+    const remember = (dataUrl) => cache.set(path, cache.mtimeOf(path), dataUrl);
+    const cached = cache.get(path, cache.mtimeOf(path));
+    if (cached) return { dataUrl: cached };
     if (this.library?._captureVideoFrame) {
       try {
         const result = await this.library._captureVideoFrame(path);
         if (result?.dataUrl) {
-          try {
-            const mod = await import('./thumbnail-cache.js');
-            mod.set(path, 0, result.dataUrl);
-          } catch { /* non-fatal */ }
+          remember(result.dataUrl);
           return { dataUrl: result.dataUrl };
         }
       } catch { /* fall through */ }
     }
-    if (window.funsync?.generateSingleThumbnail) {
-      try {
-        // Honor a user-pinned thumbnail frame or uploaded poster image
-        // (parity with the library path above, which resolves both inside
-        // _captureVideoFrame).
-        const custom = (this.settings?.get?.('library.customThumbnails') || {})[path];
-        const imagePath = customThumbImagePath(custom);
-        if (imagePath && window.funsync?.readCustomThumbnail) {
-          const img = await window.funsync.readCustomThumbnail(imagePath).catch(() => null);
-          if (img?.dataUrl) {
-            try {
-              const mod = await import('./thumbnail-cache.js');
-              mod.set(path, 0, img.dataUrl);
-            } catch { /* non-fatal */ }
-            return { dataUrl: img.dataUrl };
-          }
-        }
-        const { seekPct, exact } = thumbRequestOpts(custom);
-        const result = await window.funsync.generateSingleThumbnail(path, { seekPct, width: 320, exact });
-        if (result?.dataUrl) {
-          try {
-            const mod = await import('./thumbnail-cache.js');
-            mod.set(path, 0, result.dataUrl);
-          } catch { /* non-fatal */ }
-          return { dataUrl: result.dataUrl };
-        }
-      } catch { /* fall through */ }
+    // Honor a user-pinned thumbnail frame or uploaded poster image (parity
+    // with the library path above, which resolves both inside
+    // _captureVideoFrame).
+    const custom = (this.settings?.get?.('library.customThumbnails') || {})[path];
+    const imagePath = customThumbImagePath(custom);
+    if (imagePath && window.funsync?.readCustomThumbnail) {
+      const img = await window.funsync.readCustomThumbnail(imagePath).catch(() => null);
+      if (img?.dataUrl) {
+        remember(img.dataUrl);
+        return { dataUrl: img.dataUrl };
+      }
     }
-    return null;
+    const result = await requestBackendThumb(window.funsync, path, thumbRequestOpts(custom));
+    if (!result?.dataUrl) return null;
+    remember(result.dataUrl);
+    return { dataUrl: result.dataUrl };
   }
 
   _upNextBackToSource(sourceContext) {

@@ -42,6 +42,7 @@ from routes.media import (
     get_sources,
     bump_rescan_request,
     _path_to_id,
+    thumb_url,
 )
 from routes.remote_sync import desktop_connected, submit_library_edit
 from routes.vr_api import vr_decision
@@ -186,7 +187,9 @@ async def list_videos():
             "streamUrl": f"/api/media/stream/{vid_id}?v={_BOOT_TOKEN}",
             "scriptUrl": f"/api/media/script/{vid_id}" if v.get("funscriptPath") else None,
             "subtitleUrl": f"/api/media/subtitle/{vid_id}" if v.get("subtitlePath") else None,
-            "thumbUrl": f"/api/media/thumb/{vid_id}",
+            # Versioned (`thumb_url`): a new poster, re-pinned frame or
+            # replaced file is a new URL, so the browser's cached tile goes.
+            "thumbUrl": thumb_url(vid_id, v),
             "variants": variants_out,
             # Manual VR override (`'vr'` or `'flat'`); absent / null = use the
             # filename heuristic. The phone-side `vr-detect.js` consults its

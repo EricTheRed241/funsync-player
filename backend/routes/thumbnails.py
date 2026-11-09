@@ -4,6 +4,8 @@ import base64
 from fastapi import APIRouter, HTTPException, Query
 
 from services.ffmpeg import generate_thumbnails, generate_single_thumbnail, sample_gray_frames
+from routes.media import get_video_registry, _path_to_id
+from routes.vr_api import thumb_vr_crop
 
 router = APIRouter()
 
@@ -38,18 +40,25 @@ def single(
                         "fast path and the 10s minimum-seek heuristic)"),
 ):
     """Generate ONE thumbnail for library card display. Cached on disk
-    by content hash so repeat calls are nearly free. Replaces the
-    renderer's hidden-<video> decode path which was the dominant
-    startup cost on small libraries (~3s per thumbnail × 12 visible
-    cards × concurrency 3 = ~12s).
+    (`services.ffmpeg`, shared with the headset's `/api/media/thumb`) so
+    repeat calls are nearly free. Replaces the renderer's hidden-<video>
+    decode path which was the dominant startup cost on small libraries
+    (~3s per thumbnail × 12 visible cards × concurrency 3 = ~12s).
+
+    VR videos the backend knows about get the left (or top) eye, like the
+    headset tile (`routes.vr_api.thumb_vr_crop`).
 
     Declared `def` (not `async def`) because `generate_single_thumbnail`
-    calls `subprocess.run(ffmpeg, timeout=30)` synchronously; FastAPI
-    runs sync handlers in its threadpool so parallel library card
-    requests don't serialise on the event loop.
+    calls ffmpeg synchronously; FastAPI runs sync handlers in its
+    threadpool so parallel library card requests don't serialise on the
+    event loop.
     """
+    video_id = _path_to_id(video_path)
+    video = get_video_registry().get(video_id)
+    vr_crop = thumb_vr_crop(video_id, video) if video else None
     try:
-        return generate_single_thumbnail(video_path, seek_pct=seek_pct, width=width, exact=exact)
+        return generate_single_thumbnail(video_path, seek_pct=seek_pct, width=width,
+                                         exact=exact, vr_crop=vr_crop)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:

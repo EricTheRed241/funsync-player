@@ -1,5 +1,9 @@
 // ThumbnailCache — In-memory cache for video thumbnail data URLs
-// Keyed by video path + modification time to detect stale entries
+// Keyed by video path + modification time to detect stale entries. The
+// modification times come from the library scan (`rememberMtimes`, the
+// scan's `dateAdded` = file mtimeMs), so every view (library, playlists,
+// categories, Up Next) uses the same key through `mtimeOf(path)`, and a
+// file replaced at the same path misses after the next scan.
 
 /**
  * @typedef {Object} CacheEntry
@@ -20,6 +24,31 @@ const _cache = new Map();
 // on-disk cache (near-free). Map preserves insertion order, so the oldest
 // key is always at the front — get() re-inserts to make this a true LRU.
 export const MAX_ENTRIES = 600;
+
+/** videoPath → mtime (ms) from the last library scan. */
+const _mtimes = new Map();
+
+/**
+ * Record each scanned video's file mtime (`dateAdded`, ms). Replaces the
+ * previous scan's.
+ * @param {{path: string, dateAdded?: number}[]} videos
+ */
+export function rememberMtimes(videos) {
+  _mtimes.clear();
+  for (const v of videos || []) {
+    if (v?.path) _mtimes.set(v.path, Number(v.dateAdded) || 0);
+  }
+}
+
+/**
+ * The mtime to key `videoPath`'s thumbnail with: its file mtime from the last
+ * scan, 0 when the scan didn't see it.
+ * @param {string} videoPath
+ * @returns {number}
+ */
+export function mtimeOf(videoPath) {
+  return _mtimes.get(videoPath) || 0;
+}
 
 /**
  * Generate a cache key from a video path and modification time.
@@ -125,12 +154,14 @@ export function has(videoPath, mtime) {
 }
 
 /**
- * Remove a specific cache entry.
+ * Remove every cached thumbnail of a video, whatever mtime it was cached
+ * under (a custom thumbnail or pin changed).
  * @param {string} videoPath
- * @param {number} mtime
  */
-export function remove(videoPath, mtime) {
-  _cache.delete(cacheKey(videoPath, mtime));
+export function remove(videoPath) {
+  for (const [key, entry] of _cache) {
+    if (key === cacheKey(videoPath, entry.mtime)) _cache.delete(key);
+  }
 }
 
 /**

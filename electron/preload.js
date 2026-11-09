@@ -103,6 +103,8 @@ contextBridge.exposeInMainWorld('funsync', {
   importCustomThumbnail: (videoPath, imagePath) => ipcRenderer.invoke('import-custom-thumbnail', videoPath, imagePath),
   readCustomThumbnail: (cachedPath) => ipcRenderer.invoke('read-custom-thumbnail', cachedPath),
   getCustomThumbsDir: () => ipcRenderer.invoke('get-custom-thumbs-dir'),
+  deleteCustomThumbsForVideos: (videoPaths, imagePaths, keep) =>
+    ipcRenderer.invoke('delete-custom-thumbs-for-videos', videoPaths, imagePaths, keep),
 
   // Funscript files
   saveFunscript: (content, name) => ipcRenderer.invoke('save-funscript', content, name),

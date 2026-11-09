@@ -6,13 +6,13 @@ import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, File
 import { computeSpeedStats } from '../js/library-search.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
-import { pathToFileURL } from '../js/path-utils.js';
 import { promptCreateCategory, promptCategoryDetails, PRESET_COLORS } from '../js/category-create-modal.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { thumbRequestOpts, customThumbImagePath } from './library.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
+import { captureVideoThumb } from '../js/thumb-request.js';
 
 export class Categories {
   constructor({ settings, onPlayVideo, library }) {
@@ -411,15 +411,16 @@ export class Categories {
     // Shared in-memory cache FIRST — same rationale as playlists.js: the
     // dedup below only collapses concurrent in-flight requests, so without
     // this every Library → Categories switch re-fetched every visible tile.
-    // mtime key 0 matches library.js so all three views share one set of
-    // entries, including the library's invalidation on thumbnail changes.
-    const cached = thumbCache.getEntry(videoPath, 0);
+    // `mtimeOf` gives the same key library.js uses, so all three views share
+    // one set of entries, including the library's invalidation on thumbnail
+    // changes.
+    const cached = thumbCache.getEntry(videoPath, thumbCache.mtimeOf(videoPath));
     if (cached) return cached;
     // Deduped: shares in-flight captures with the library/playlists views.
     const result = await dedupeThumbRequest(videoPath, () => this._captureFrameUncached(videoPath));
     const dataUrl = result?.dataUrl || result;
     if (typeof dataUrl === 'string' && dataUrl) {
-      thumbCache.set(videoPath, 0, dataUrl, result?.duration);
+      thumbCache.set(videoPath, thumbCache.mtimeOf(videoPath), dataUrl, result?.duration);
     }
     return result;
   }
@@ -437,58 +438,7 @@ export class Categories {
       } catch { /* fall through to frame path */ }
     }
     const { seekPct, exact } = thumbRequestOpts(custom);
-    if (window.funsync?.generateSingleThumbnail) {
-      try {
-        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct, width: 320, exact });
-        if (result?.dataUrl) return { dataUrl: result.dataUrl, duration: result.duration || 0 };
-      } catch { /* fall through */ }
-    }
-    return this._captureFrameViaVideoElement(videoPath, exact ? seekPct : null);
-  }
-
-  _captureFrameViaVideoElement(videoPath, pinnedSeekPct = null) {
-    return new Promise((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.muted = true;
-      video.playsInline = true;
-      video.style.position = 'fixed';
-      video.style.left = '-9999px';
-      video.style.width = '1px';
-      video.style.height = '1px';
-      document.body.appendChild(video);
-
-      const cleanup = () => {
-        video.removeAttribute('src');
-        video.load();
-        video.remove();
-      };
-
-      const timeout = setTimeout(() => { cleanup(); resolve(null); }, 8000);
-
-      video.addEventListener('loadedmetadata', () => {
-        video.currentTime = (typeof pinnedSeekPct === 'number' && isFinite(pinnedSeekPct))
-          ? video.duration * pinnedSeekPct
-          : Math.min(video.duration * 0.1, 5);
-      }, { once: true });
-
-      video.addEventListener('seeked', () => {
-        clearTimeout(timeout);
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 320;
-          canvas.height = Math.round(320 * (video.videoHeight / video.videoWidth)) || 180;
-          canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          const duration = isFinite(video.duration) ? video.duration : 0;
-          cleanup();
-          resolve({ dataUrl, duration });
-        } catch { cleanup(); resolve(null); }
-      }, { once: true });
-
-      video.addEventListener('error', () => { clearTimeout(timeout); cleanup(); resolve(null); }, { once: true });
-      video.src = pathToFileURL(videoPath);
-    });
+    return captureVideoThumb(window.funsync, videoPath, { seekPct, exact }, { timeoutMs: 8000 });
   }
 
   async _playVideo(videoPath, playContext) {
