@@ -278,10 +278,10 @@ describe('isHentaiOnly', () => {
 });
 
 describe('scriptDurationMs', () => {
-  it('is the last action time, so a 1:59 script is under the two-minute minimum', () => {
-    expect(scriptDurationMs({ actions: [{ at: 0, pos: 0 }, { at: 119_000, pos: 90 }, { at: 120, pos: 10 }] })).toBe(119_000);
-    expect(scriptDurationMs({ actions: [{ at: 119_000 }] })).toBeLessThan(MIN_VIDEO_MS);
-    expect(scriptDurationMs({ actions: [{ at: 120_000 }] })).not.toBeLessThan(MIN_VIDEO_MS);
+  it('is the last action time, so a 1:49 script is under the 1:50 minimum', () => {
+    expect(scriptDurationMs({ actions: [{ at: 0, pos: 0 }, { at: 109_000, pos: 90 }, { at: 120, pos: 10 }] })).toBe(109_000);
+    expect(scriptDurationMs({ actions: [{ at: 109_000 }] })).toBeLessThan(MIN_VIDEO_MS);
+    expect(scriptDurationMs({ actions: [{ at: 110_000 }] })).not.toBeLessThan(MIN_VIDEO_MS);
     expect(scriptDurationMs({})).toBe(0);
   });
 });

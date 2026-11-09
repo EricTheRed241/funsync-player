@@ -57,8 +57,8 @@ import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/pref
 // score) is part of this module's API for the scouts.
 export { candidateScore, effectiveTagScores, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../renderer/js/preference-score.js';
 
-/** The minimum as words for messages: `2 min`. */
-export const MIN_VIDEO_LABEL = `${MIN_VIDEO_MS / 60_000} min`;
+/** The minimum as words for messages: `1:50`. */
+export const MIN_VIDEO_LABEL = `${Math.floor(MIN_VIDEO_MS / 60_000)}:${String(Math.round(MIN_VIDEO_MS / 1000) % 60).padStart(2, '0')}`;
 
 export const DISCOVERY_NAME = 'Discovery';
 
