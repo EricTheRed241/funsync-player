@@ -109,7 +109,7 @@ export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{
 // RANKING.multiAxis higher and download first. FapTap has no multi-axis
 // scripts, so all of its scenes come in single-axis.
 /** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
-export const LIBRARY_MAX_VIDEOS = 500;
+export const LIBRARY_MAX_VIDEOS = 1000;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
 export const FAPTAP_FOCUS = [
   { name: 'PMV / HMV', tags: [...PMV_TAGS], title: PMV_TITLE },
