@@ -361,6 +361,7 @@ class App {
       },
       onSpeedLimitChanged: (maxSpeed) => {
         if (this.buttplugSync) this.buttplugSync.setSpeedLimit(maxSpeed);
+        if (this.tcodeSync) this.tcodeSync.setSpeedLimit(maxSpeed);
       },
       onLinearStrategyChanged: (strategy) => {
         if (this.buttplugSync) this.buttplugSync.setLinearStrategy(strategy);
@@ -836,8 +837,11 @@ class App {
         this.buttplugSync.setInterpolationMode(savedSmoothing);
         this.buttplugSync.setSpeedLimit(savedSpeedLimit);
         // B2 boot path — keep tcodeSync in sync with the saved
-        // smoothing mode (parallel to the runtime callback above).
-        if (this.tcodeSync) this.tcodeSync.setInterpolationMode(savedSmoothing);
+        // smoothing mode and speed limit (parallel to the runtime callbacks above).
+        if (this.tcodeSync) {
+          this.tcodeSync.setInterpolationMode(savedSmoothing);
+          this.tcodeSync.setSpeedLimit(savedSpeedLimit);
+        }
 
         // Range Extender boot — push the saved state into both per-tick
         // sync engines. Without this, a user with the extender saved as

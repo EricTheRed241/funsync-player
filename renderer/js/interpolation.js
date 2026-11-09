@@ -240,7 +240,7 @@ export function clamp(value, min, max) {
  * Apply speed limiting to a target position.
  * @param {number} targetPos — desired position 0-100
  * @param {number} lastPos — previous sent position
- * @param {number} deltaMs — time since last send
+ * @param {number} deltaMs — time the move may take (since the last send, or until the next keyframe)
  * @param {number} maxSpeed — maximum speed in pos-units per second (0 = no limit)
  * @returns {number} clamped position
  */
