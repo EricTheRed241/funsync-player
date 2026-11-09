@@ -6,6 +6,8 @@
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
+//   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
+//                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (sex required for
 // every post, favourites and picks too; monster, feet and 2D hentai posts
@@ -45,25 +47,34 @@ const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist,
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const streams = await import('./stream-hosts.mjs');
+const vrbHost = await import('./vrbangers-host.mjs');
+const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError } = await import('./vrbangers-browser.mjs');
+const { redactUrl } = await import('./vrbangers-lib.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // One per run: every rule34video request goes through its pacing (≥ 400 ms apart, 60 s after a 429).
 const rule34video = streams.createRule34video();
+// Set in main (it needs the data folder and the credentials file): vrbangers.com reads, and Chrome for --fetch.
+let vrbangers = null;
 const FOLDER = 'EroScripts';
 const DOWNLOADS = path.join(os.homedir(), 'Downloads');
 
 const USAGE = `Usage: npm run eroscripts:scout -- [options]
+       npm run vrbangers:scout -- [options]   (the same, VRBangers posts only: --vrbangers)
 Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.json):
   --pages N              most pages of new posts on the multi-axis feed (30 posts each, default 6)
   --anim-pages N         most pages of new posts on each animation feed (${prefs.FEED_TAGS.filter((f) => f !== 'multi-axis').join(', ')}; default 3)
   --backfill N           older pages to read per feed, continuing from the last run (default 2; 0 = none)
-  --feeds a,b            only these feeds (${prefs.FEED_TAGS.join(', ')}; default all)
+  --feeds a,b            only these feeds (${prefs.FEED_TAGS.join(', ')}; default all), or the search feed
+                         ${Object.keys(prefs.SEARCH_FEEDS).join(', ')} (Free Scripts first posts naming it; not in the default)
   --since YYYY-MM-DD     backfill only down to posts last active on that date; a feed that gets there
                          isn't backfilled again unless a later run passes an earlier date
   --full                 judge every listed post again, not only new ones
   --top N                candidates to print (default 40)
+  --vrbangers            VRBangers posts only: the scan reads the vrbangers feed (unless --feeds is given) and
+                         prints only posts with a vrbangers.com video; --fetch and --manual-list take only those
 Pick:
   --add 1,2,3            judge these post ids and put them on the list: only the exclusions, the sex rule,
                          posts the library has or the user turned down, and library duplicates count (the
@@ -79,6 +90,10 @@ Download:
                          Files saved by hand (any host) are taken from --manual-dir or ~/Downloads first.
                          Videos on rule34video.com are read from their pages (paced, ≥ 400 ms apart) and must
                          fit the main script's length (checked again with ffprobe; needs ffprobe on PATH).
+                         vrbangers.com scenes come from the paid account through headless Google Chrome (logged in
+                         once per pass; ≤ 8K, the planned file); with --dry-run the signed link is resolved and
+                         probed for 1 byte instead
+  --vrb-credentials <f>  VRBangers account file (default: ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
 By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
                          their pages and instructions (with --ids: only those posts); no login needed
@@ -91,7 +106,7 @@ Both:
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
 
 function parseArgs(argv) {
-  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs') };
+  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs'), vrbCredentials: VRB_CREDENTIALS };
   const value = (i, flag) => {
     if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
     return argv[i + 1];
@@ -117,14 +132,17 @@ function parseArgs(argv) {
       case '--since': opts.since = value(i, a); i++; break;
       case '--user-data': opts.userData = path.resolve(value(i, a)); i++; break;
       case '--incoming': opts.incoming = path.resolve(value(i, a)); i++; break;
+      case '--vrbangers': opts.vrbangers = true; break;
+      case '--vrb-credentials': opts.vrbCredentials = path.resolve(value(i, a)); i++; break;
       case '-h': case '--help': opts.help = true; break;
       default: throw new Error(`Unknown option: ${a}`);
     }
   }
   for (const k of ['pages', 'animPages', 'backfill', 'top', 'passes']) if (!(opts[k] >= 0)) throw new Error(`--${k} must be 0 or more`);
-  const unknownFeed = opts.feeds?.find((f) => !prefs.FEED_TAGS.includes(f));
-  if (unknownFeed !== undefined) throw new Error(`Unknown feed "${unknownFeed}" (feeds: ${prefs.FEED_TAGS.join(', ')})`);
+  const unknownFeed = opts.feeds?.find((f) => !lib.ALL_FEEDS.includes(f));
+  if (unknownFeed !== undefined) throw new Error(`Unknown feed "${unknownFeed}" (feeds: ${lib.ALL_FEEDS.join(', ')})`);
   if (opts.feeds && !opts.feeds.length) throw new Error('--feeds needs at least one feed');
+  if (opts.vrbangers && !opts.feeds) opts.feeds = ['vrbangers'];
   if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   return opts;
@@ -160,8 +178,12 @@ async function pixeldrainFiles(kind, id) {
   return d?.name ? [{ name: d.name, size: d.size, host: 'pixeldrain', url: fileUrl(id) }] : [];
 }
 
-/** Every script and video a post offers: author's forum uploads first, then MEGA, pixeldrain and rule34video pages (one pseudo file per quality). */
-async function topicFiles(api, pacer, topicId, cooked) {
+/**
+ * Every script and video a post offers: author's forum uploads first, then MEGA, pixeldrain, rule34video pages
+ * (one pseudo file per quality) and VRBangers scenes (one pseudo file each, the best quality within the VR caps:
+ * a vrbangers.com/video link, a `VRBANGERS_<folder>…` file name, else the parts of a title naming VRBangers).
+ */
+async function topicFiles(api, pacer, topicId, cooked, title) {
   await pacer.wait();
   const att = await api.getTopicAttachments(topicId);
   if (att.rateLimited) throw new RateLimitedError();
@@ -181,6 +203,15 @@ async function topicFiles(api, pacer, topicId, cooked) {
     try { files.push(...await rule34video.files(u)); } catch (err) {
       hosts.add('rule34video (unreadable)');
       process.stderr.write(`! ${topicId} ${err.message}\n`);
+    }
+  }
+  const leads = vrbHost.vrbangersLeads({ hrefs, names: files.map((f) => f.name), title });
+  if (leads.length) {
+    const { files: scenes, missed } = await vrbangers.filesFor(leads);
+    if (scenes.length) hosts.add(vrbHost.VRBANGERS_HOST);
+    files.push(...scenes);
+    for (const { lead, why } of missed) {
+      if (lead.from !== 'title') process.stderr.write(`! ${topicId} vrbangers ${lead.from} ${lead.folder || lead.slugs[0]}: ${why}\n`);
     }
   }
   const byName = new Map();
@@ -224,8 +255,9 @@ const clock = (ms) => `${Math.floor(ms / 60_000)}:${String(Math.round(ms / 1000)
 
 /**
  * A post's scenes (lib.planWithStreams): its scripts paired with its video
- * files; a scene with a rule34video page is checked by the length of its
- * main script (read now) and gets the chosen quality's size.
+ * files; a scene with a streaming page (rule34video, vrbangers.com) is
+ * checked by the length of its main script (read now); a rule34video one
+ * gets the chosen quality's size (a vrbangers.com page gives it).
  */
 async function planTopic(api, pacer, topicId, files, { vr, libraryVideos }) {
   const lengths = new Map();
@@ -279,18 +311,6 @@ function writeScoutState(userData, state) {
   writeAtomic(statePath(userData), JSON.stringify(state));
 }
 
-/** One page of a Free Scripts tag feed, paced; forum errors become exceptions. */
-function feedPage(api, pacer) {
-  return async (tag, page) => {
-    await pacer.wait();
-    const r = await api.listFreeTagTopics(tag, page);
-    if (r.rateLimited) throw new RateLimitedError();
-    if (r.authExpired) throw new SessionExpiredError();
-    if (r.error) throw new Error(r.error);
-    return r;
-  };
-}
-
 /** What screening needs: the library, the posts it already links or the user turned down, favourites, scoring. */
 function scoutContext(config, userData, incoming) {
   const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
@@ -333,9 +353,10 @@ async function scan(opts, { api, userData, config, incoming }) {
     const topics = new Map();
     let pages = 0;
     const carried = lib.pendingTopics(state).length;
+    const listPage = lib.feedPage(api, { pacer });
     for (const tag of opts.feeds || prefs.FEED_TAGS) {
-      const maxNew = tag === 'multi-axis' ? opts.pages : opts.animPages;
-      const r = await lib.listFeed(state, tag, feedPage(api, pacer), { maxNew, backfill: opts.backfill, full: opts.full, since: opts.since, keepPending: true });
+      const maxNew = tag === 'multi-axis' || Object.hasOwn(prefs.SEARCH_FEEDS, tag) ? opts.pages : opts.animPages;
+      const r = await lib.listFeed(state, tag, listPage, { maxNew, backfill: opts.backfill, full: opts.full, since: opts.since, keepPending: true });
       pages += r.pagesRead;
       for (const t of r.topics) topics.set(t.id, t);
     }
@@ -360,7 +381,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       const first = lib.judgeFirstPost(t, text);
       if (!first.ok) { verdict(first.reason); continue; }
       let files, hosts;
-      try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked)); } catch (err) {
+      try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked, t.title)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         process.stderr.write(`! ${t.id} ${err.message}\n`);
         continue;
@@ -390,20 +411,23 @@ async function scan(opts, { api, userData, config, incoming }) {
   const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
   fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
 
+  // npm run vrbangers:scout: only the posts with a vrbangers.com video (the saved list keeps all).
+  const shown = opts.vrbangers ? candidates.filter(lib.isVrbangersCandidate) : candidates;
   const gb = (c) => c.scenes.reduce((n, sc) => n + (sc.video.size || 0), 0) / 1e9;
   const freshIds = new Set(fresh.map((c) => c.id));
   const tagScore = lib.effectiveTagScores(scoring.tagScores);
   console.log('\n| # | New | Post | Axis | Tags | Videos | GB | Host |\n|---|---|---|---|---|---|---|---|');
-  candidates.slice(0, opts.top).forEach((c, i) => {
+  shown.slice(0, opts.top).forEach((c, i) => {
     const axis = c.axisType !== 'multi' ? 'Single' : c.scenes.every((sc) => sc.packed) ? 'Multi (packed)' : `Multi (${1 + new Set(c.scenes.flatMap((sc) => sc.axes)).size})`;
     const tags = [c.vr && 'VR', ...(c.tags || []).filter((x) => (tagScore[x] ?? 0) > 0), c.favourite && `favourite: ${c.favourite}`, c.live && 'live action'].filter(Boolean).join(', ');
     console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
   });
-  const multi = candidates.filter((c) => c.axisType === 'multi').length;
+  const multi = shown.filter((c) => c.axisType === 'multi').length;
   const feedStatus = (f) => (f?.exhausted ? 'done' : f?.doneSince ? `done to ${f.doneSince} (p${f.backfillPage})` : `p${f?.backfillPage ?? 0}`);
-  const backfill = prefs.FEED_TAGS.map((tag) => `${tag} ${feedStatus(state.feeds[tag])}`).join(', ');
+  const backfill = lib.ALL_FEEDS.filter((tag) => prefs.FEED_TAGS.includes(tag) || state.feeds[tag]).map((tag) => `${tag} ${feedStatus(state.feeds[tag])}`).join(', ');
   const left = Object.keys(state.pending || {}).length;
-  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · waiting to download ${candidates.length} (${multi} multi-axis, ${candidates.length - multi} single-axis), ${candidates.reduce((n, c) => n + c.scenes.length, 0)} videos, ${candidates.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
+  const waiting = `waiting to download ${shown.length}${opts.vrbangers ? ` with a vrbangers.com video (of ${candidates.length})` : ''}`;
+  console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · ${waiting} (${multi} multi-axis, ${shown.length - multi} single-axis), ${shown.reduce((n, c) => n + c.scenes.length, 0)} videos, ${shown.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
   console.log(`Backfill: ${backfill} · ${Object.keys(state.topics).length} posts judged so far${left ? ` · ${left} listed, not judged yet (next run goes on with them)` : ''}`);
   console.log(`Saved: ${out}`);
   return 0;
@@ -432,7 +456,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const first = lib.judgeFirstPost(t, cooked.replace(/<[^>]+>/g, ' '));
       if (!first.ok) { console.log(`✗ ${id} ${t.title}: ${first.reason}`); continue; }
       let files, hosts;
-      try { ({ files, hosts } = await topicFiles(api, pacer, id, cooked)); } catch (err) {
+      try { ({ files, hosts } = await topicFiles(api, pacer, id, cooked, t.title)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         console.log(`✗ ${id} ${t.title}: ${err.message}`);
         continue;
@@ -458,7 +482,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
   const done = fetchedScenes(incoming, userData);
   const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
   fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
-  console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run eroscripts:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
+  console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run ${opts.vrbangers ? 'vrbangers' : 'eroscripts'}:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
   return 0;
 }
 
@@ -505,7 +529,9 @@ function videoSeconds(file) {
  * used instead of the network and removed from Downloads once it's in place.
  * A rule34video page is read again for a fresh link, and the video must fit
  * the main script (`scriptMs`, else the page's length) before and after
- * the download (streams.durationMatches; ffprobe afterwards).
+ * the download (streams.durationMatches; ffprobe afterwards). A vrbangers.com
+ * scene's signed link is read right now (logged-in Chrome), and the host
+ * checks size and length itself (vrbangers-host.mjs download).
  */
 async function download(api, file, dest, staging, local = [], { scriptMs = null } = {}) {
   if (fs.existsSync(dest)) return 'have';
@@ -544,11 +570,13 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
       }
       const resp = await rule34video.stream(direct);
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
+    } else if (file.host === vrbHost.VRBANGERS_HOST) {
+      await vrbangers.download(file, tmp, { scriptMs, videoSeconds });
     } else {
       throw new Error(`unknown host ${file.host}`);
     }
     const size = fs.statSync(tmp).size;
-    if (file.size && size !== file.size) throw new Error(`size ${size} ≠ ${file.size}`);
+    if (file.size && size !== file.size && (byHand || file.host !== vrbHost.VRBANGERS_HOST)) throw new Error(`size ${size} ≠ ${file.size}`);
     if (file.host === streams.RULE34VIDEO_HOST) {
       const want = scriptMs || (file.duration ? file.duration * 1000 : null);
       const got = videoSeconds(tmp);
@@ -613,8 +641,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
         }
         continue;
       }
-      const creator = lib.creatorFolder(c.title, c.author);
-      const stem = lib.sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 });
+      const { creator, stem } = lib.sceneNameOf(c, sc);
       const dir = path.join(incoming, creator, stem);
       const video = path.join(dir, stem + path.extname(sc.video.name).toLowerCase());
       // Another post already brought this scene (same folder and video file): leave the
@@ -637,9 +664,13 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           continue;
         }
         const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs });
+        const v = sc.video;
         fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
           topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
-          video: sc.video.name, file: path.basename(video), scenes: c.scenes.length, at: new Date().toISOString(),
+          video: v.name, file: path.basename(video), scenes: c.scenes.length,
+          // A vrbangers.com scene keeps its site name (--retitle reads it): lib.vrbangersSceneName.
+          ...(v.host === vrbHost.VRBANGERS_HOST ? { vrbangers: { slug: v.slug, url: v.url, title: v.title, performers: v.performers, projection: v.projection } } : {}),
+          at: new Date().toISOString(),
         }, null, 1));
         let note = '';
         if (!sc.axes.length) {
@@ -651,6 +682,8 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
         console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}${listed ? '' : ' (playlist pending: app is open)'}`);
         ok++;
       } catch (err) {
+        // Not logged in to vrbangers.com: every later VRBangers scene would fail the same way.
+        if (err instanceof LoginError) throw err;
         console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
         failed++;
       }
@@ -756,7 +789,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
   }
 }
 
-/** The saved list as a download queue (content-rule breaks dropped, `--ids` applied). */
+/** The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a vrbangers.com video only). */
 function savedQueue(opts, { userData, config }) {
   const file = path.join(userData, 'eroscripts-scout.json');
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
@@ -769,7 +802,8 @@ function savedQueue(opts, { userData, config }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
-  return lib.downloadQueue(candidates, scoring, favourites).filter((c) => !opts.ids || opts.ids.has(c.id));
+  return lib.downloadQueue(candidates, scoring, favourites)
+    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)));
 }
 
 /** Write ~/Downloads/download-for-fs.txt: the waiting posts' files to download by hand. */
@@ -789,7 +823,7 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.axisType.padEnd(6)} ${c.id} ${c.title}`);
-    return 0;
+    return probeVrbangers(queue, { userData, incoming });
   }
   const staging = path.join(path.dirname(incoming), '_staging');
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
@@ -799,7 +833,8 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
       break;
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
-    const r = await fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir });
+    // Chrome (vrbangers.com) starts with the pass's first VRBangers scene and is closed when the pass ends, failed or not.
+    const r = await vrbangers.run(() => fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir }));
     console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (r.capped) break;
@@ -811,6 +846,37 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   }
   flushPlaylist(userData, { name: FOLDER, path: incoming }, []);
   return 2;
+}
+
+/**
+ * `--fetch --dry-run`: each waiting vrbangers.com scene's signed link is
+ * read (logged in) and asked for its first byte, nothing downloaded; the
+ * file taken, its size and when the link expires are printed (the token
+ * redacted). Chrome is closed at the end.
+ */
+async function probeVrbangers(queue, { userData, incoming }) {
+  const done = fetchedScenes(incoming, userData);
+  const scenes = queue.flatMap((c) => c.scenes.filter((sc) => sc.video.host === vrbHost.VRBANGERS_HOST && !done.has(lib.fetchedKey(c.id, sc.video.name))).map((sc) => ({ c, sc })));
+  if (!scenes.length) return 0;
+  console.log(`vrbangers.com: resolving ${scenes.length} signed link${scenes.length > 1 ? 's' : ''} (1-byte probe, nothing downloaded)`);
+  let failed = 0;
+  await vrbangers.run(async () => {
+    for (const { c, sc } of scenes) {
+      const { creator, stem } = lib.sceneNameOf(c, sc);
+      try {
+        const { link, status, total } = await vrbangers.probe(sc.video);
+        const hours = link.expires ? Math.round((link.expires * 1000 - Date.now()) / 3_600_000) : null;
+        const planned = link.file === sc.video.name ? 'as planned' : `planned ${sc.video.name}`;
+        console.log(`  ${c.id} ${creator}/${stem}\n    ${link.file} (${link.quality}, ${planned}) → HTTP ${status}, ${total ? `${(total / 1e9).toFixed(2)} GB` : 'size unknown'}${link.expires ? `, link expires ${new Date(link.expires * 1000).toISOString()} (in ${hours} h)` : ''}\n    ${redactUrl(link.url)}`);
+        if (status !== 206 && status !== 200) failed++;
+      } catch (err) {
+        if (err instanceof LoginError) throw err;
+        console.log(`  ${c.id} ${creator}/${stem}: ✗ ${err.message}`);
+        failed++;
+      }
+    }
+  });
+  return failed ? 2 : 0;
 }
 
 // ── Retitle ─────────────────────────────────────────────────────────────
@@ -857,6 +923,7 @@ async function main() {
   const { EroScriptsAPI } = require('../electron/eroscripts-api.js');
   const api = new EroScriptsAPI();
   api.restoreSession(session.cookie, session.username);
+  vrbangers = vrbHost.createVrbangers({ userData, credentialsFile: opts.vrbCredentials, log: (m) => process.stderr.write(`  vrbangers.com: ${m}\n`) });
 
   try {
     if (opts.add) return await addPicked(opts, { api, userData, config, incoming });
@@ -864,6 +931,7 @@ async function main() {
   } catch (err) {
     if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
     if (err instanceof SessionExpiredError) { console.error(err.message); return 3; }
+    if (err instanceof LoginError) { console.error(`vrbangers.com: ${err.message}`); return 3; }
     throw err;
   }
 }

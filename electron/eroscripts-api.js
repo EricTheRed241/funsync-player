@@ -526,6 +526,35 @@ class EroScriptsAPI {
   }
 
   /**
+   * Free Scripts topics whose first post a forum search finds, one page (up
+   * to 50, newest post first): `search.json?q=<query> category:14 in:first
+   * order:latest`, `page` counted from 0 like listFreeTagTopics. Same shape:
+   * `{ topics: [{id, title, tags, likes, created, bumped}], more }`. Used by
+   * `npm run eroscripts:scout` for feeds no tag lists (SEARCH_FEEDS: vrbangers).
+   */
+  async listFreeSearchTopics(query, page = 0) {
+    try {
+      const params = new URLSearchParams({ q: `${query} category:14 in:first order:latest`, page: String(page + 1) });
+      const resp = await fetch(`${BASE_URL}/search.json?${params}`, { headers: this._headers() });
+      if (resp.status === 429) return { topics: [], error: 'Rate limited', rateLimited: true };
+      if (resp.status === 403 || resp.status === 401) return { topics: [], error: 'Access denied — try logging in again', authExpired: true };
+      const data = await this._safeJson(resp);
+      if (!data) return { topics: [], error: `Failed to search "${query}" (${resp.status})` };
+      const topics = (data.topics || []).filter((t) => t.category_id === undefined || t.category_id === 14).map((t) => ({
+        id: t.id,
+        title: t.title,
+        tags: (t.tags || []).map((x) => (typeof x === 'string' ? x : (x.name || x.text || String(x)))),
+        likes: t.like_count || 0,
+        created: t.created_at || null,
+        bumped: t.bumped_at || null,
+      }));
+      return { topics, more: !!data.grouped_search_result?.more_full_page_results };
+    } catch (err) {
+      return { topics: [], error: err.message };
+    }
+  }
+
+  /**
    * Script files in a topic: attachments on every post (the author's
    * first, in post order, then other users'). Funscripts the posts link on
    * pixeldrain come back in `linked` (name + page URL, opened in the

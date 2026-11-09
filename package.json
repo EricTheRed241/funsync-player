@@ -15,6 +15,7 @@
     "eroscripts:sync": "node scripts/eroscripts-sync.mjs",
     "eroscripts:preview-check": "node scripts/eroscripts-preview-check.mjs",
     "eroscripts:scout": "node scripts/eroscripts-scout.mjs",
+    "vrbangers:scout": "node scripts/eroscripts-scout.mjs --vrbangers",
     "manual:open": "node scripts/manual-open.mjs",
     "faptap:scout": "node scripts/faptap-scout.mjs",
     "dedupe:scenes": "node scripts/dedupe-scenes.mjs",
