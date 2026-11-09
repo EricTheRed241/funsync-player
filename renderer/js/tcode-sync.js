@@ -103,6 +103,12 @@ export class TCodeSync {
     this._interpolationMode = 'linear';
     this._interpolator = linearInterpolate;
     this._speedLimit = 0;
+    // Speed cap bookkeeping: the keyframe index the cap was last decided for,
+    // the capped target it produced, and the last sent L0 target before the
+    // range remap (the cap works in script units, like the setting).
+    this._speedCapIndex = -1;
+    this._speedCapPos = 0;
+    this._lastScriptPos = -1;
 
     // Track last sent values for delta optimization
     this._lastSentAxes = {};
@@ -294,6 +300,7 @@ export class TCodeSync {
 
   setSpeedLimit(maxSpeed) {
     this._speedLimit = maxSpeed || 0;
+    this._speedCapIndex = -1;
   }
 
   /**
@@ -339,6 +346,8 @@ export class TCodeSync {
   _resetState() {
     this._lastActionIndex = -1;
     this._lastSentPos = -1;
+    this._lastScriptPos = -1;
+    this._speedCapIndex = -1;
     this._lastSendTime = 0;
     this._lastSentAxes = {};
     this._resetGeneratedAxes();
@@ -354,6 +363,8 @@ export class TCodeSync {
       this._lastActionIndex = -1;
     }
     this._lastSentPos = -1;
+    this._lastScriptPos = -1;
+    this._speedCapIndex = -1;
     this._lastSendTime = 0;
 
     // Companion axes
@@ -530,12 +541,20 @@ export class TCodeSync {
             );
             targetPos = applyInvert(targetPos, this.isAxisInverted('L0'));
 
-            // Optional damping (off by default) — a user-enabled velocity clamp,
-            // parity with XTEngine's damping. Left off, fast motion is untouched.
-            if (this._speedLimit > 0 && this._lastSentPos >= 0) {
-              const deltaMs = now - this._lastSendTime;
-              targetPos = applySpeedLimit(targetPos, this._lastSentPos, deltaMs, this._speedLimit);
+            // Optional speed cap (off by default), in script units per second.
+            // The device gets moveMs to reach this keyframe, so a target more
+            // than speedLimit × moveMs away from the previous one is pulled in:
+            // fast strokes get shorter instead of faster, and stay on the beat.
+            // Decided once per keyframe; re-deciding on every tick would let the
+            // target creep by another full allowance each tick.
+            if (this._speedLimit > 0 && !firstSend && this._lastScriptPos >= 0) {
+              if (this._speedCapIndex !== i) {
+                this._speedCapIndex = i;
+                this._speedCapPos = applySpeedLimit(targetPos, this._lastScriptPos, moveMs, this._speedLimit);
+              }
+              targetPos = this._speedCapPos;
             }
+            const scriptPos = targetPos;
 
             const range = this.getAxisRange('L0');
             targetPos = range.min + (targetPos / 100) * (range.max - range.min);
@@ -545,6 +564,7 @@ export class TCodeSync {
               axisValues.L0 = targetPos;
               axisIntervals.L0 = this._clampMove(moveMs);
               this._lastSentPos = targetPos;
+              this._lastScriptPos = scriptPos;
             }
           }
         }

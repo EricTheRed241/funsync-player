@@ -176,7 +176,7 @@ A local desktop video player with device synchronization for funscript playback.
 ### Script Smoothing
 - PCHIP interpolation (shape-preserving, no overshoot) for smoother device motion
 - Makima interpolation (less aggressive, good for oscillatory patterns)
-- Configurable speed limit to prevent impossible device moves
+- Configurable speed limit (Settings → Playback, script units per second, off by default) for Buttplug and TCode devices. On TCode it caps the main stroke axis per keyframe: a move too fast for the limit becomes a shorter stroke on the same beat, so the device stays in sync while its motors are spared. The axis range applies after the cap, so a 5–95 range moves the device at 90% of the limit
 - Per-setting persistence — configure once, applies to all playback
 
 ### Device Integration

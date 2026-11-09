@@ -351,6 +351,55 @@ describe('TCodeSync', () => {
     sync._tick(); // same time, same target → suppressed
     expect(tcode.sendAxes).not.toHaveBeenCalled();
   });
+
+  describe('speed limit', () => {
+    // 0 ↔ 100 every 100 ms = 1000 units/s, far beyond a 400 units/s cap.
+    const fast = Array.from({ length: 11 }, (_, k) => ({ at: k * 100, pos: k % 2 ? 100 : 0 }));
+
+    // Plays 1 s at 60 Hz through a device that, like TCode firmware, moves in a
+    // straight line from where it is to each new target over the given interval.
+    // Returns where the device was at every tick; it starts parked where the script starts.
+    function playDevice(limit) {
+      sync = new TCodeSync({ videoPlayer: mockPlayer(), tcodeManager: tcode, funscriptEngine: mockFunscript(fast) });
+      sync.setAxisRange('L0', 5, 95);
+      sync.setSpeedLimit(limit);
+      sync.start();
+      sync.player.paused = false;
+      let move = null; // { from, to, start, ms }
+      const at = (t) => (move ? move.from + (move.to - move.from) * Math.min(1, (t - move.start) / move.ms) : 5);
+      const samples = [];
+      for (let t = 0; t <= 1000; t += 17) {
+        tcode.sendAxes.mockClear();
+        sync.player.currentTime = t / 1000;
+        sync._tick();
+        const now = at(t);
+        samples.push({ t, pos: now });
+        const call = tcode.sendAxes.mock.calls.find((c) => c[0].L0 !== undefined);
+        if (call) move = { from: now, to: call[0].L0, start: t, ms: call[2].L0 };
+      }
+      return samples;
+    }
+
+    it('moves the device no faster than the cap, scaled by the axis range', () => {
+      const samples = playDevice(400);
+      for (let k = 1; k < samples.length; k++) {
+        const speed = Math.abs(samples[k].pos - samples[k - 1].pos) / (17 / 1000);
+        expect(speed).toBeLessThanOrEqual(400 * 0.9 * 1.05); // 5–95 range = 0.9 of full travel
+      }
+    });
+
+    it('keeps stroking on the beat with the stroke the cap allows', () => {
+      // 400 units/s × 100 ms = 40 script units per stroke = 36 device units in 5–95.
+      const steady = playDevice(400).filter((s) => s.t >= 200).map((s) => s.pos);
+      expect(Math.max(...steady) - Math.min(...steady)).toBeGreaterThan(30);
+    });
+
+    it('without a cap the same script reaches both ends of the range', () => {
+      const positions = playDevice(0).map((s) => s.pos);
+      expect(Math.max(...positions)).toBeGreaterThan(90);
+      expect(Math.min(...positions)).toBeLessThan(10);
+    });
+  });
 });
 
 describe('TCodeSync — Multi-Axis', () => {
