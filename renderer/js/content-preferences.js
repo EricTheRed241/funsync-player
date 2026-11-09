@@ -62,8 +62,8 @@ export const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 
 export const AUDIO_TITLE = /(?<![\p{L}\p{N}])(erotic audio|asmr|audio role ?play|f4m)(?![\p{L}\p{N}])/iu;
 /** Audio roleplay tags: `asmr-audio-roleplay`, `erotic-audio-for-men`, `lewdlexiaudio`. */
 export const isAudioRoleplayTag = (t) => t.includes('asmr') || t.includes('audio-roleplay') || (t.endsWith('audio') && t !== 'audio');
-/** Shortest video worth downloading, by its main script's last action (FapTap also by listed length). */
-export const MIN_VIDEO_MS = 120_000;
+/** Shortest video worth downloading, by its main script's last action (FapTap also by listed length). 1:50 since 2026-11-09 (was 2:00). */
+export const MIN_VIDEO_MS = 110_000;
 
 // ── Discovery: animated or live action, sex required ────────────────────
 
