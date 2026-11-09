@@ -44,10 +44,13 @@ const lib = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
+const streams = await import('./stream-hosts.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+// One per run: every rule34video request goes through its pacing (≥ 400 ms apart, 60 s after a 429).
+const rule34video = streams.createRule34video();
 const FOLDER = 'EroScripts';
 const DOWNLOADS = path.join(os.homedir(), 'Downloads');
 
@@ -74,6 +77,8 @@ Download:
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
                          Files saved by hand (any host) are taken from --manual-dir or ~/Downloads first.
+                         Videos on rule34video.com are read from their pages (paced, ≥ 400 ms apart) and must
+                         fit the main script's length (checked again with ffprobe; needs ffprobe on PATH).
 By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
                          their pages and instructions (with --ids: only those posts); no login needed
@@ -155,7 +160,7 @@ async function pixeldrainFiles(kind, id) {
   return d?.name ? [{ name: d.name, size: d.size, host: 'pixeldrain', url: fileUrl(id) }] : [];
 }
 
-/** Every script and video a post offers: author's forum uploads first, then MEGA and pixeldrain. */
+/** Every script and video a post offers: author's forum uploads first, then MEGA, pixeldrain and rule34video pages (one pseudo file per quality). */
 async function topicFiles(api, pacer, topicId, cooked) {
   await pacer.wait();
   const att = await api.getTopicAttachments(topicId);
@@ -170,9 +175,89 @@ async function topicFiles(api, pacer, topicId, cooked) {
   for (const m of cooked.matchAll(/https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/(u|l)\/([A-Za-z0-9]+)/g)) {
     try { files.push(...await pixeldrainFiles(m[1], m[2])); } catch { hosts.add('pixeldrain (unreadable)'); }
   }
+  const r34 = streams.rule34videoLinks(hrefs);
+  if (r34.length) hosts.add(streams.RULE34VIDEO_HOST);
+  for (const u of r34) {
+    try { files.push(...await rule34video.files(u)); } catch (err) {
+      hosts.add('rule34video (unreadable)');
+      process.stderr.write(`! ${topicId} ${err.message}\n`);
+    }
+  }
   const byName = new Map();
   for (const f of files) if (!byName.has(f.name)) byName.set(f.name, f);
   return { files: [...byName.values()], hosts: [...hosts] };
+}
+
+/** A script file's contents (forum, MEGA or pixeldrain), or null when it can't be read; forum errors become exceptions. */
+async function scriptBytes(api, pacer, file) {
+  if (file.host === 'forum') {
+    await pacer.wait();
+    const r = await api.fetchScript(file.url);
+    if (r.rateLimited) throw new RateLimitedError();
+    if (r.authExpired) throw new SessionExpiredError();
+    return r.success ? r.bytes : null;
+  }
+  if (file.host === 'mega') {
+    const { File } = await import('megajs');
+    const root = File.fromURL(file.url);
+    await root.loadAttributes();
+    const find = (n) => {
+      for (const c of n.children || []) {
+        if (c.directory) { const hit = find(c); if (hit) return hit; } else if (c.name === file.remote) return c;
+      }
+      return null;
+    };
+    const node = root.directory ? find(root) : root;
+    if (!node) return null;
+    const chunks = [];
+    for await (const chunk of node.download({})) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+  if (file.host === 'pixeldrain') {
+    const resp = await fetch(file.url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    return resp.ok ? Buffer.from(await resp.arrayBuffer()) : null;
+  }
+  return null;
+}
+
+const clock = (ms) => `${Math.floor(ms / 60_000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}`;
+
+/**
+ * A post's scenes (lib.planWithStreams): its scripts paired with its video
+ * files; a scene with a rule34video page is checked by the length of its
+ * main script (read now) and gets the chosen quality's size.
+ */
+async function planTopic(api, pacer, topicId, files, { vr, libraryVideos }) {
+  const lengths = new Map();
+  const scriptMs = async (f) => {
+    const key = `${f.url}|${f.remote || ''}`;
+    if (!lengths.has(key)) {
+      let ms = null;
+      try {
+        const bytes = await scriptBytes(api, pacer, f);
+        if (bytes) ms = lib.scriptDurationMs(JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''))) || null;
+      } catch (err) {
+        if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
+      }
+      lengths.set(key, ms);
+    }
+    return lengths.get(key);
+  };
+  const plan = await lib.planWithStreams({
+    scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
+    videos: files.filter((f) => lib.isVideoName(f.name)),
+    vr, libraryVideos, scriptMs,
+  });
+  for (const d of plan.dropped) {
+    process.stderr.write(`! ${topicId} ${d.url}: video ${clock(d.durationSec * 1000)}, script ${clock(d.scriptMs)}; not this scene's video\n`);
+  }
+  for (const sc of plan.scenes) {
+    if (sc.video.host !== streams.RULE34VIDEO_HOST) continue;
+    let size = 0;
+    try { size = await rule34video.probeSize(sc.video); } catch { /* size unknown */ }
+    sc.video = { ...sc.video, size };
+  }
+  return plan;
 }
 
 // ── Scan ────────────────────────────────────────────────────────────────
@@ -280,12 +365,7 @@ async function scan(opts, { api, userData, config, incoming }) {
         process.stderr.write(`! ${t.id} ${err.message}\n`);
         continue;
       }
-      const plan = lib.planScenes({
-        scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
-        videos: files.filter((f) => lib.isVideoName(f.name)),
-        vr: s.vr,
-        libraryVideos: library.videos,
-      });
+      const plan = await planTopic(api, pacer, t.id, files, { vr: s.vr, libraryVideos: library.videos });
       // Scripts and videos packed in archives: the post's archives are scenes (unpacked at --fetch).
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
       if (!scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
@@ -357,12 +437,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
         console.log(`✗ ${id} ${t.title}: ${err.message}`);
         continue;
       }
-      const plan = lib.planScenes({
-        scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
-        videos: files.filter((f) => lib.isVideoName(f.name)),
-        vr: s.vr,
-        libraryVideos: library.videos,
-      });
+      const plan = await planTopic(api, pacer, id, files, { vr: s.vr, libraryVideos: library.videos });
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
       if (!scenes.length) { console.log(`✗ ${id} ${t.title}: ${plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
       const author = op.username;
@@ -371,7 +446,8 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first, picked: true }, scoring));
       lib.markTopic(state, id, 'candidate');
       const kind = scenes.every((sc) => sc.packed) ? 'packed in archives' : scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis';
-      console.log(`✓ ${id} ${t.title} (${scenes.length} ${scenes.every((sc) => sc.packed) ? 'archive' : 'video'}${scenes.length > 1 ? 's' : ''}, ${kind})`);
+      const on = [...new Set(scenes.map((sc) => sc.video.host).filter(Boolean))].join('+');
+      console.log(`✓ ${id} ${t.title} (${scenes.length} ${scenes.every((sc) => sc.packed) ? 'archive' : 'video'}${scenes.length > 1 ? 's' : ''}, ${kind}${on ? `, ${on}` : ''})`);
     }
   } finally {
     writeScoutState(userData, state);
@@ -415,13 +491,23 @@ function localDownloads(dirs) {
   return out;
 }
 
+/** Length of a video file in seconds (ffprobe), 0 when it can't be read. */
+function videoSeconds(file) {
+  const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8' });
+  if (r.error) throw new Error(`ffprobe not found (brew install ffmpeg): ${r.error.message}`);
+  return Number(String(r.stdout).trim()) || 0;
+}
+
 /**
  * Download `file` to `dest` through `<staging>/<name>.part`. Every attempt
  * starts from scratch, so a failed one deletes its `.part` rather than leave
  * it behind. A copy the user saved by hand (`local`, see localDownloads) is
  * used instead of the network and removed from Downloads once it's in place.
+ * A rule34video page is read again for a fresh link, and the video must fit
+ * the main script (`scriptMs`, else the page's length) before and after
+ * the download (streams.durationMatches; ffprobe afterwards).
  */
-async function download(api, file, dest, staging, local = []) {
+async function download(api, file, dest, staging, local = [], { scriptMs = null } = {}) {
   if (fs.existsSync(dest)) return 'have';
   fs.mkdirSync(staging, { recursive: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -451,11 +537,24 @@ async function download(api, file, dest, staging, local = []) {
       const resp = await fetch(file.url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}${resp.status === 403 ? ' (download it by hand: --manual-list)' : ''}`);
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
+    } else if (file.host === streams.RULE34VIDEO_HOST) {
+      const { direct, durationSec } = await rule34video.fresh(file);
+      if (scriptMs && durationSec && !streams.durationMatches(durationSec, scriptMs)) {
+        throw new Error(`rule34video: video ${clock(durationSec * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
+      }
+      const resp = await rule34video.stream(direct);
+      await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else {
       throw new Error(`unknown host ${file.host}`);
     }
     const size = fs.statSync(tmp).size;
     if (file.size && size !== file.size) throw new Error(`size ${size} ≠ ${file.size}`);
+    if (file.host === streams.RULE34VIDEO_HOST) {
+      const want = scriptMs || (file.duration ? file.duration * 1000 : null);
+      const got = videoSeconds(tmp);
+      if (!got) throw new Error('rule34video: the download isn\'t a readable video (ffprobe)');
+      if (want && !streams.durationMatches(got, want)) throw new Error(`rule34video: downloaded video ${clock(got * 1000)}, script ${clock(want)}; not this scene's video`);
+    }
     fs.renameSync(tmp, dest);
   } catch (err) {
     fs.rmSync(tmp, { force: true });
@@ -537,7 +636,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           short++;
           continue;
         }
-        const got = await download(api, sc.video, video, staging, local);
+        const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs });
         fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
           topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
           video: sc.video.name, file: path.basename(video), scenes: c.scenes.length, at: new Date().toISOString(),
