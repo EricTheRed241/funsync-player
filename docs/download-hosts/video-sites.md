@@ -1,6 +1,8 @@
 # Video streaming sites (rule34video, hanime1, iwara, hmvmania, spankbang, newgrounds, pornhub, xvideos, eporner)
 Verdict: auto-with-limits (rule34video, hmvmania: plain Node `fetch`; iwara, hanime1, spankbang, pornhub, xvideos, eporner: through yt-dlp with curl_cffi impersonation) · browser-handoff (newgrounds, private iwara videos) · not-feasible (Patreon / Fanbox / Fantia / Gumroad paywalls)
 
+Status (2026-11-09): **rule34video is implemented** in `npm run eroscripts:scout` (`scripts/stream-hosts.mjs`, `planWithStreams` in `scripts/eroscripts-scout-lib.mjs`; see the README's scout section). The other sites aren't.
+
 Seen on EroScripts:
 A random sample of 50 of the 1,038 `no-video` posts (seed 7, 49 readable, 1 deleted → 404), fetched 2026-11-03. Every one of the 49 had forum script attachments. They had passed content screening (animated, sex, exclusions) and then failed `planScenes`, because their video sits on a site the scout can't read.
 

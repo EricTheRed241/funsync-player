@@ -52,6 +52,7 @@ import {
   VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
+import { durationMatches, RULE34VIDEO_HOST } from './stream-hosts.mjs';
 
 // The ranking (renderer/js/preference-score.js, shared with the app's library
 // score) is part of this module's API for the scouts.
@@ -359,6 +360,9 @@ function resolutionOf(n) {
   if (/1440|2k/.test(n)) return 2.5;
   if (/1080/.test(n)) return 2;
   if (/720/.test(n)) return 1;
+  // Only with the `p`: a bare 360 is a VR projection (`_360`).
+  if (/(^|[^0-9])(480|540|576)p/.test(n)) return 0.75;
+  if (/(^|[^0-9])(240|360)p/.test(n)) return 0.5;
   return 3;
 }
 
@@ -455,6 +459,80 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
     scenes.push({ base: g.base, axes, scripts: g.files, video, match: top });
   }
   return { scenes, inLibrary };
+}
+
+/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs). */
+export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST]);
+
+/**
+ * planScenes, with each scene paired to a streaming page's video checked by
+ * length: the main script (`scriptMs(file)`, its last action in ms; null
+ * when it can't be read) must fit the page's `duration` (durationMatches:
+ * ≤ video + 2 s and ≥ 80 % of it). A page that fails, a teaser of a full
+ * scene say, is dropped with all its qualities, and the post is planned
+ * again without it, so the script can pair with another video. Unknown
+ * lengths pass (the download is checked again with ffprobe).
+ *
+ * Then pages no scene took pair by length with script sets no video took
+ * (page titles rarely name the script: `Yuffie's Interrogation Techniques`
+ * for `FF - Yuffie Kisaragi (Hardcore)`): each page, in link order, takes the
+ * set whose main script fits it, the one with the most axes when several do
+ * (soft and hardcore versions of one video).
+ *
+ * @param {Parameters<typeof planScenes>[0] & {scriptMs: (file: object) => Promise<number|null>}} o
+ * @returns {Promise<ReturnType<typeof planScenes> & {dropped: {url: string, durationSec: number, scriptMs: number}[]}>}
+ */
+export async function planWithStreams({ scripts, videos, vr = false, libraryVideos = [], scriptMs }) {
+  let pool = videos;
+  const dropped = [];
+  let plan;
+  for (;;) {
+    plan = planScenes({ scripts, videos: pool, vr, libraryVideos });
+    const bad = new Set();
+    for (const sc of plan.scenes) {
+      if (!STREAM_HOSTS.has(sc.video.host) || !(sc.video.duration > 0)) continue;
+      const main = sc.scripts.find((f) => f.axis === '');
+      const ms = main ? await scriptMs(main) : null;
+      if (ms == null || durationMatches(sc.video.duration, ms)) continue;
+      bad.add(sc.video.url);
+      dropped.push({ url: sc.video.url, durationSec: sc.video.duration, scriptMs: ms });
+    }
+    if (!bad.size) break;
+    pool = pool.filter((v) => !(STREAM_HOSTS.has(v.host) && bad.has(v.url)));
+  }
+
+  const usedPages = new Set(plan.scenes.filter((sc) => STREAM_HOSTS.has(sc.video.host)).map((sc) => sc.video.url));
+  const pages = new Map();
+  for (const v of videos) {
+    if (STREAM_HOSTS.has(v.host) && v.duration > 0 && !usedPages.has(v.url)) pages.set(v.url, [...(pages.get(v.url) || []), v]);
+  }
+  if (!pages.size) return { ...plan, dropped };
+  const keyOf = (base) => coreName(base) || base;
+  const paired = new Set(plan.scenes.map((sc) => keyOf(sc.base)));
+  const sets = new Map();
+  for (const f of scripts) {
+    const p = scriptParts(f.name);
+    if (!p || /(^|[^a-z])handy([^a-z]|$)/i.test(p.base) || paired.has(keyOf(p.base))) continue;
+    const set = sets.get(keyOf(p.base)) || [];
+    sets.set(keyOf(p.base), [...set, f]);
+  }
+  const open = [];
+  for (const files of sets.values()) {
+    const main = files.find((f) => scriptParts(f.name).axis === '');
+    const ms = main ? await scriptMs(main) : null;
+    if (ms != null) open.push({ files, ms, axes: new Set(files.map((f) => scriptParts(f.name).axis).filter(Boolean)).size });
+  }
+  const scenes = [...plan.scenes];
+  let { inLibrary } = plan;
+  for (const variants of pages.values()) {
+    const fits = open.filter((s) => durationMatches(variants[0].duration, s.ms)).sort((a, b) => b.axes - a.axes);
+    if (!fits.length) continue;
+    open.splice(open.indexOf(fits[0]), 1);
+    const sub = planScenes({ scripts: fits[0].files, videos: variants, vr, libraryVideos });
+    scenes.push(...sub.scenes);
+    inLibrary += sub.inLibrary;
+  }
+  return { scenes, inLibrary, dropped };
 }
 
 /**
@@ -739,8 +817,8 @@ export function remapPaths(value, moves) {
 // Verdicts made under older rules count as unseen, and a `no-video` post
 // with activity after its verdict is judged again.
 
-/** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 10;
+/** Bump when the screening rules change, so every post is judged again (11: rule34video links count as videos). */
+export const RULES_VERSION = 11;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
