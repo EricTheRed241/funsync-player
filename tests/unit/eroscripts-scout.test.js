@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
-  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, DISCOVERY_NAME,
+  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, normName, sameVideo, DISCOVERY_NAME,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk,
@@ -79,6 +79,16 @@ describe('screenTopic', () => {
   it('skips posts the library already links or whose scene folder it has', () => {
     expect(screenTopic(topic(['animation'], 'X', 7), { knownTopics: new Set([7]) }).reason).toBe('known');
     expect(screenTopic(topic(['animation'], 'Fap Hero - Fantasy Play'), { sceneNames: ['fap hero fantasy play'] }).reason).toBe('in-library');
+  });
+
+  it('counts a library scene only for a title that says which video it is, by whole words', () => {
+    const scenes = { sceneNames: ['agapilord bad', 'theobrobine fap hero', 'tifa lockhart ridings', 'jjulez work that body'] };
+    expect(screenTopic(topic(['animation'], 'Bad'), scenes).ok).toBe(true);
+    expect(screenTopic(topic(['animation'], 'Fap Hero'), scenes).ok).toBe(true);
+    expect(screenTopic(topic(['animation'], '🔥🔥🔥'), scenes).ok).toBe(true);
+    expect(screenTopic(topic(['animation'], 'Tifa Lockhart Riding'), scenes).ok).toBe(true);
+    expect(screenTopic(topic(['animation'], '[Funscript] JJULEZ - Work That Body'), scenes).reason).toBe('in-library');
+    expect(screenTopic(topic(['animation'], 'Agapilord - Bad (HMV)'), { sceneNames: ['agapilord bad'] }).reason).toBe('in-library');
   });
 
   it('turns down posts tagged sfw or non-porn before reading them; the sex rule waits for the first post', () => {
@@ -335,6 +345,24 @@ describe('matchScore', () => {
 
   it('does not pair scenes that only share the creator and a word', () => {
     expect(matchScore('[Sodeno19] Xianyun - Library', '[Sodeno19] Rosaria - Library.mp4')).toBe(0);
+  });
+});
+
+describe('library names', () => {
+  it('fold Unicode like the dedupe: decomposed and styled spellings equal plain ones', () => {
+    expect(normName('maechoon - Nicole - NE\u0302MESIS.mp4')).toBe('maechoon nicole nemesis');
+    expect(normName('maechoon - Nicole - NÊMESIS')).toBe('maechoon nicole nemesis');
+    expect(normName('manluo77 - 𝓣𝓪𝓷𝓪 #5')).toBe('manluo77 tana 5');
+  });
+
+  it('drop the shared quality and variant words', () => {
+    expect(coreName('Baxtyr - SK3L3T0K. DARK ELF LINK (1080p60).mp4')).toBe('baxtyr sk3l3t0k dark elf link');
+    expect(coreName('Gebby - Rondoudou Blacked II (1080) QHD 4K60 alt.mp4')).toBe('gebby rondoudou blacked ii');
+  });
+
+  it('compare names by whole words, not characters', () => {
+    expect(sameVideo('mercy hentai', 'mercy hentaiz compilation')).toBe(false);
+    expect(sameVideo('mercy hentai', 'gebby mercy hentai')).toBe(true);
   });
 });
 

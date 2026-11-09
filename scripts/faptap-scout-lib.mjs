@@ -51,7 +51,8 @@
 // `overwatch`.
 
 import {
-  candidateScore, contentRuleBreak, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, liveNotPov, normName, sameVideo, sceneTitle,
+  candidateScore, contentRuleBreak, coreName, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, liveNotPov, normName, sameVideo,
+  sceneTitle,
   titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import {
@@ -64,7 +65,7 @@ import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
 /** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 8;
+export const FAPTAP_RULES_VERSION = 9;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -245,7 +246,7 @@ export function faptapSceneName(video, ctx = {}) {
  *   vr?: boolean, projection?: string, user?: {username?: string}, performers?: {name: string}[]}} video
  * @param {object} ctx
  * @param {string[]} ctx.creators creator names in the library (lower case)
- * @param {string[]} ctx.knownTitles normName of every library scene folder and video, and of the EroScripts scout's waiting posts
+ * @param {string[]} ctx.knownTitles coreName of every library scene folder and video, and of the EroScripts scout's waiting posts
  * @param {string[]} [ctx.livePerformers] normName of FapTap's models and pornstars (see livePerformerNames)
  * @param {string[]} [ctx.favourites] favourite creators and actresses (scripts/scout-live.mjs)
  * @param {boolean} [ctx.picked] the user asked for this video by id
@@ -280,7 +281,8 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   if (liveNotPov({ tags, title, live, vr, picked, favourite })) return { ok: false, reason: 'live-not-pov' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
-  if (knownTitles.some((k) => k.length > 8 && sameVideo(name, k) && sameVideo(k, name))) return { ok: false, reason: 'in-library' };
+  const core = coreName(title);
+  if (knownTitles.some((k) => k.length > 8 && sameVideo(core, k) && sameVideo(k, core))) return { ok: false, reason: 'in-library' };
   return {
     ok: true, tags, vr, music, artist, focus, live, favourite, picked,
     hentaiOnly: isHentaiOnly({ tags, title }),

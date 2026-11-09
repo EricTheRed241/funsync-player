@@ -42,7 +42,7 @@ const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, libraryVideoCount, readConfig, walk } = await import('./discovery-io.mjs');
 const dedupe = await import('./scene-dedupe-lib.mjs');
-const { libraryVideos, readProbeCache, writeProbeCache } = await import('./scene-probe.mjs');
+const { libraryVideos, readProbeCache, readStereoCache, writeProbeCache } = await import('./scene-probe.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
@@ -207,13 +207,13 @@ function doneScenes(incoming, userData) {
   return done;
 }
 
-/** Titles the library has (Discovery included) and the EroScripts scout is about to fetch. */
+/** Titles the library has (Discovery included) and the EroScripts scout is about to fetch, as coreName. */
 function knownTitles(userData, library) {
-  const titles = [...library.sceneNames, ...library.videos];
+  const titles = [...library.sceneNames, ...library.videos].map(scout.coreName);
   try {
     const { candidates } = JSON.parse(fs.readFileSync(path.join(userData, 'eroscripts-scout.json'), 'utf8'));
     // As the scene will be named: without `[Multi-axis]`-style labels.
-    for (const c of candidates || []) titles.push(scout.normName(scout.sceneTitle({ title: c.title, author: c.author, video: 'x.mp4' })));
+    for (const c of candidates || []) titles.push(scout.coreName(scout.sceneTitle({ title: c.title, author: c.author, video: 'x.mp4' })));
   } catch { /* no EroScripts list */ }
   return titles.filter(Boolean);
 }
@@ -265,7 +265,7 @@ async function scan(opts, { userData, config, incoming }) {
   // Every library video (Discovery included) with its length, for the duplicate check.
   const roots = [...new Set([...(config.settings?.library?.sources || []).filter((s) => s.enabled !== false && s.path).map((s) => s.path), incoming])].filter((p) => fs.existsSync(p));
   const probeCache = readProbeCache(userData);
-  const libVideos = await libraryVideos(roots, probeCache);
+  const libVideos = await libraryVideos(roots, probeCache, readStereoCache(userData));
   writeProbeCache(userData, probeCache);
 
   const state = readState(userData);
@@ -294,7 +294,8 @@ async function scan(opts, { userData, config, incoming }) {
       if (done.has(lib.fetchedKey(v.id))) { verdict('known'); continue; }
       const s = lib.screenVideo(v, ctx);
       if (!s.ok) { verdict(s.reason); continue; }
-      // Same title and length as a library video (an EroScripts scene always wins over FapTap).
+      // Same title and length as a library video (an EroScripts scene always wins over FapTap). FapTap
+      // gives no picture size, so either orientation matches.
       if (dedupe.firstDuplicate({ words: dedupe.titleWords(v.name || ''), duration: Number(v.duration) || 0, vr: s.vr }, libVideos)) { verdict('duplicate'); continue; }
       let plan;
       try { plan = await videoPlan(v.id, s.vr); } catch (err) {

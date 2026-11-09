@@ -7,7 +7,10 @@
 //   npm run dedupe:scenes -- --apply       delete the extra copies
 //
 // Every enabled library source is read (Discovery included). Video lengths,
-// sizes and resolutions are cached in `<userData>/scene-probe-cache.json`.
+// sizes and resolutions are cached in `<userData>/scene-probe-cache.json`,
+// frame hashes in `<userData>/scene-frame-cache.json`; whether a video is VR
+// comes from the app's stereo check (`<userData>/vr-stereo-cache.json`) when
+// it has looked at the file.
 // When the scripts that stay belong to another copy, that copy's main script
 // and its axis files are copied next to the kept video under its name,
 // replacing the kept video's own. An extra copy then goes the way the app's
@@ -39,7 +42,7 @@ const { DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER } = await import('../renderer/js/
 const { appRunning, readConfig, writeConfig } = await import('./discovery-io.mjs');
 const { defaultUserDataDir } = await import('./eroscripts-sync-lib.mjs');
 const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes, actionsHash, isStrokeScriptName } = await import('./handmade-scenes.mjs');
-const { probeVideo, readProbeCache, writeProbeCache } = await import('./scene-probe.mjs');
+const { probeVideo, readFrameCache, readProbeCache, readStereoCache, stereoVr, writeFrameCache, writeProbeCache } = await import('./scene-probe.mjs');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const run = promisify(execFile);
@@ -67,25 +70,55 @@ function parseArgs(argv) {
 
 // ── Frames ──────────────────────────────────────────────────────────────
 
-// Five small grey frames per video (left eye for VR), kept for the run.
-const frameCache = new Map();
-async function frames(scene) {
-  if (frameCache.has(scene.video)) return frameCache.get(scene.video);
-  const vf = `${lib.projectionOf(scene).vr ? 'crop=iw/2:ih:0:0,' : ''}scale=48:27:flags=area,format=gray`;
-  const out = [];
-  for (let k = 1; k <= 5; k++) {
-    try {
-      const { stdout } = await run('ffmpeg', ['-v', 'error', '-ss', (scene.duration * k / 6).toFixed(2), '-i', scene.video,
-        '-frames:v', '1', '-vf', vf, '-f', 'rawvideo', '-'], { encoding: 'buffer', maxBuffer: 1 << 20 });
-      out.push(stdout);
-    } catch { out.push(Buffer.alloc(0)); }
-  }
-  frameCache.set(scene.video, out);
-  return out;
+// Bursts of frame hashes (left eye for VR) by video and time, kept in
+// `<userData>/scene-frame-cache.json`; the centre frame keeps its fine grid.
+let frameCache = {};
+let frameCacheDir = null;
+let unsaved = 0;
+const failed = new Set();
+const FRAME_BYTES = lib.FRAME_W * lib.FRAME_H;
+const BURST_STEP = lib.BURST_OFFSETS_S[1] - lib.BURST_OFFSETS_S[0];
+
+const encodeFrame = (f, centre) => (f ? [f.hash, f.detail, ...(centre ? [Buffer.from(f.cells).toString('base64')] : [])].join(':') : null);
+function decodeFrame(s) {
+  if (!s) return null;
+  const [hash, detail, cells] = s.split(':');
+  return { hash, detail: Number(detail), cells: cells ? new Uint8Array(Buffer.from(cells, 'base64')) : undefined };
 }
 
-async function sameFrames(a, b, { strict = false } = {}) {
-  return lib.framesMatch(await frames(a), await frames(b), { strict });
+async function burstAt(scene, at) {
+  let entry = frameCache[scene.video];
+  if (!entry || entry.size !== scene.size || entry.mtimeMs !== scene.mtimeMs) {
+    entry = frameCache[scene.video] = { size: scene.size, mtimeMs: scene.mtimeMs, bursts: {} };
+  }
+  const vr = lib.projectionOf(scene).vr;
+  const key = `${vr ? 'L' : 'F'}${at.toFixed(2)}`;
+  if (entry.bursts[key]) return entry.bursts[key].map(decodeFrame);
+  if (failed.has(`${scene.video}\n${key}`)) return null;
+  const start = Math.max(0, at + lib.BURST_OFFSETS_S[0]);
+  const vf = `fps=${1 / BURST_STEP},${vr ? 'crop=iw/2:ih:0:0,' : ''}scale=${lib.FRAME_W}:${lib.FRAME_H}:flags=area,format=gray`;
+  let frames = [];
+  let error = 'no frames';
+  try {
+    const { stdout } = await run('ffmpeg', ['-v', 'error', '-ss', start.toFixed(2), '-i', scene.video,
+      '-vf', vf, '-frames:v', String(lib.BURST_OFFSETS_S.length), '-f', 'rawvideo', '-'], { encoding: 'buffer', maxBuffer: 1 << 22 });
+    frames = lib.BURST_OFFSETS_S.map((_, i) => (stdout.length >= (i + 1) * FRAME_BYTES ? lib.frameHash(stdout.subarray(i * FRAME_BYTES, (i + 1) * FRAME_BYTES)) : null));
+  } catch (err) {
+    error = String(err.stderr || err.message).trim().split('\n')[0];
+  }
+  if (!frames[lib.BURST_CENTRE]) {
+    // Not cached: tried again next run, not again this run.
+    failed.add(`${scene.video}\n${key}`);
+    console.error(`! ${scene.video}: no frame at ${at.toFixed(1)} s (${error}); compared as unknown`);
+    return null;
+  }
+  entry.bursts[key] = frames.map((f, i) => encodeFrame(f, i === lib.BURST_CENTRE));
+  if (++unsaved >= 25) { writeFrameCache(frameCacheDir, frameCache); unsaved = 0; }
+  return frames;
+}
+
+function sameFrames(a, b, opts) {
+  return lib.framesMatch(a, b, burstAt, opts);
 }
 
 // Axis files that go with a stroke script `<stem>.funscript`: `<stem>.<axis>.funscript`, generated ones too.
@@ -124,8 +157,8 @@ function takeScripts(keep, donor) {
 
 // ── Library ─────────────────────────────────────────────────────────────
 
-/** Every scene video under the enabled library sources. */
-async function readScenes(roots, cache) {
+/** Every scene video under the enabled library sources (VR by the app's stereo check when it has one). */
+async function readScenes(roots, cache, stereo) {
   const scenes = [];
   const visitDir = async (dir, root) => {
     let names;
@@ -148,12 +181,13 @@ async function readScenes(roots, cache) {
         const scripts = own.length ? own : strokeScripts;
         if (!scripts.length) continue;
         const file = path.join(dir, v);
-        const info = await probeVideo(file, cache);
+        const stat = fs.statSync(file);
+        const info = await probeVideo(file, cache, stat);
         const main = await parse(scripts[0]);
         const { handmade } = await sceneHandmadeAxes(scripts, visible, parse);
         const stem = v.slice(0, -path.extname(v).length);
         scenes.push({
-          video: file, dir, source, artist, ...info,
+          video: file, dir, source, artist, ...info, vr: stereoVr(stereo, file, stat),
           handmadeAxes: handmade.length,
           passthrough: /passthrough/i.test(path.relative(root, file)),
           speed: lib.scriptSpeed(main?.actions),
@@ -200,9 +234,12 @@ async function main() {
   if (!roots.length) throw new Error('No library source found.');
 
   const cache = readProbeCache(userData);
-  const scenes = await readScenes(roots, cache);
+  const scenes = await readScenes(roots, cache, readStereoCache(userData));
   writeProbeCache(userData, cache);
+  frameCache = readFrameCache(userData);
+  frameCacheDir = userData;
   const groups = await lib.findDuplicates(scenes, sameFrames);
+  writeFrameCache(userData, frameCache);
 
   const rel = (f) => {
     const r = roots.find((x) => f.startsWith(x + path.sep));

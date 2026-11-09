@@ -45,7 +45,7 @@
 
 import path from 'node:path';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
-import { titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
+import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
   ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS,
   NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS,
@@ -66,21 +66,24 @@ const VIDEO_EXT_RE = /\.(mp4|m4v|mkv|webm|mov)$/i;
 const SCRIPT_AXES = new Set(['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve']);
 // TCode channel suffixes some posts use instead of names (`Scene.R0.funscript`).
 const TCODE_AXES = { L0: '', L1: 'surge', L2: 'sway', R0: 'twist', R1: 'roll', R2: 'pitch' };
-// Words that only describe the encode, never the scene.
-const QUALITY_WORD = /^(\d{3,4}p|\d+k|\d+k\d+fps|\d+fps|vr|sbs|low|high|bitrate|source|uncompressed|hq|lq|h264|h265|hevc|x264|x265|hd|uhd)$/;
 
 // ── Names ───────────────────────────────────────────────────────────────
 
 export const isVideoName = (name) => VIDEO_EXT_RE.test(String(name || ''));
 
-/** Lower-case letters and digits of any script (CJK included), single-spaced. */
+/** Letters and digits of any script (CJK included), folded (scene-dedupe-lib fold: NFKC, lower case, no accents), single-spaced. */
 export function normName(name) {
-  return String(name || '').toLowerCase().replace(VIDEO_EXT_RE, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return foldName(name).replace(VIDEO_EXT_RE, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
-/** normName without encode words (`1080p`, `8K60FPS`, `VR`, `low bitrate` …). */
+/** normName without encode, variant and projection words (`1080p`, `8K60FPS`, `VR`, `low bitrate`, `alt` …; NAME_NOISE_WORDS). */
 export function coreName(name) {
-  return normName(name).split(' ').filter((w) => w && !QUALITY_WORD.test(w)).join(' ');
+  return normName(name).split(' ').filter((w) => w && !isNoiseWord(w)).join(' ');
+}
+
+/** True when the words of `small` appear in `large` in a row (`work that body` in `jjulez work that body`, not `art` in `artoria`). */
+export function containsWords(large, small) {
+  return !!small && ` ${large} `.includes(` ${small} `);
 }
 
 /**
@@ -127,7 +130,7 @@ export function sameVideo(a, b) {
   const bWords = new Set(b.split(' '));
   const aWords = a.split(' ');
   if (digitWords(a).some((n) => !bWords.has(n))) return false;
-  if (Math.min(a.length, b.length) >= 8 && (a.includes(b) || b.includes(a))) return true;
+  if (Math.min(a.length, b.length) >= 8 && (containsWords(a, b) || containsWords(b, a))) return true;
   return aWords.length >= 3 && aWords.filter((w) => bWords.has(w)).length / aWords.length >= 0.75;
 }
 
@@ -225,7 +228,12 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
   const favourite = favouriteIn([topic.title, ...tags], favourites);
   if (liveNotPov({ tags, title: topic.title, live, vr, picked, favourite })) return { ok: false, reason: 'live-not-pov' };
   const music = tags.some((t) => MUSIC_TAGS.has(t));
-  if (sceneNames.some((s) => s.length > 8 && (title.includes(s) || s.includes(title)))) return { ok: false, reason: 'in-library' };
+  // In the library: a scene folder's name in the title or the title in it, as whole words. Only a
+  // title that says which video it is (two distinctive words, or 8+ letters of them; not `Pain`,
+  // `Fap Hero` or an emoji-only title) counts.
+  const distinct = [...titleWords(topic.title)].filter(isDistinctive);
+  const telling = distinct.length >= 2 || distinct.join(' ').length >= 8;
+  if (telling && sceneNames.some((s) => s.length > 8 && (containsWords(title, s) || containsWords(s, title)))) return { ok: false, reason: 'in-library' };
   return {
     ok: true, music, vr, artist, live, favourite,
     hentaiOnly: isHentaiOnly({ tags, title: topic.title }),
@@ -732,7 +740,7 @@ export function remapPaths(value, moves) {
 // with activity after its verdict is judged again.
 
 /** Bump when the screening rules change, so every post is judged again. */
-export const RULES_VERSION = 9;
+export const RULES_VERSION = 10;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };

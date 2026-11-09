@@ -73,18 +73,18 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
   let entries = [];
   const seenPaths = new Set(); // canonical full paths — drops dupes when sources overlap
   const failedPaths = [];
-  let rawEntryCount = 0;
+  let dupesDropped = 0;
+  let sidecarsSkipped = 0;
   const scanStart = Date.now();
   for (const dp of dirPaths) {
     if (!dp) continue;
     try {
       const dirEntries = await fs.promises.readdir(dp, { withFileTypes: true, recursive: true });
-      rawEntryCount += dirEntries.length;
       for (const entry of dirEntries) {
-        if (isAppleDoubleSidecar(entry.name)) continue;
+        if (isAppleDoubleSidecar(entry.name)) { sidecarsSkipped++; continue; }
         const parent = entry.parentPath || entry.path || dp;
         const full = canonicalise(path.join(parent, entry.name));
-        if (seenPaths.has(full)) continue;
+        if (seenPaths.has(full)) { dupesDropped++; continue; }
         seenPaths.add(full);
         entries.push(entry);
       }
@@ -93,12 +93,11 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = SILENT_LOG } = {})
       failedPaths.push(dp);
     }
   }
-  const dupesDropped = rawEntryCount - entries.length;
-  if (dupesDropped > 0) {
-    log.info(`[Library] Scanned ${entries.length} unique entries (${dupesDropped} duplicates dropped from overlapping sources) in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
-  } else {
-    log.info(`[Library] Scanned ${entries.length} entries in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
-  }
+  const skipped = [
+    dupesDropped > 0 && `${dupesDropped} duplicates dropped from overlapping sources`,
+    sidecarsSkipped > 0 && `${sidecarsSkipped} AppleDouble ._ files skipped`,
+  ].filter(Boolean);
+  log.info(`[Library] Scanned ${entries.length} ${dupesDropped > 0 ? 'unique ' : ''}entries${skipped.length ? ` (${skipped.join(', ')})` : ''} in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
 
   // Normalize a basename for matching: lowercase, replace separators with spaces, collapse
   const normalizeName = (name) => name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
