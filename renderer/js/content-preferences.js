@@ -99,6 +99,11 @@ export const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダ�
 
 /** EroScripts feeds the scout lists (Free Scripts tagged …). No hentai feed: hentai comes in through the others; no mmd feed: MMD is blocked (BLOCKED_TAGS). */
 export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm'];
+/**
+ * Feeds the forum has no tag for, listed by a search of Free Scripts first posts instead (feed → search words).
+ * Not in a default scan: `--feeds vrbangers`, or `npm run vrbangers:scout` (VRBangers posts only).
+ */
+export const SEARCH_FEEDS = { vrbangers: 'vrbangers' };
 /** PMV / HMV / Cock Hero / Fap Hero, by tag … */
 export const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
 /** … or by title. */

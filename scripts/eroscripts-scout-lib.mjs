@@ -47,12 +47,14 @@ import path from 'node:path';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS,
-  NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS,
-  VR_MAX_HEIGHT,
+  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS,
+  NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS,
+  VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
 import { durationMatches, RULE34VIDEO_HOST } from './stream-hosts.mjs';
+import { VRBANGERS_HOST } from './vrbangers-host.mjs';
+import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
 
 // The ranking (renderer/js/preference-score.js, shared with the app's library
 // score) is part of this module's API for the scouts.
@@ -376,7 +378,7 @@ export function videoPreference(name, size, vr) {
   const n = String(name).toLowerCase();
   const res = resolutionOf(n);
   const fps = Number((n.match(/(\d{2,3})\s*fps/) || [])[1] || 60);
-  const isVr = /(^|[^a-z])(vr|sbs|180|fisheye)([^a-z]|$)/.test(n);
+  const isVr = /(^|[^a-z])(vr|sbs|180|fisheye|180x180|3dh|3dv)([^a-z]|$)/.test(n);
   let score = 0;
   if (vr) {
     score += (isVr ? 100 : 0) + (res <= kOf(VR_MAX_HEIGHT) ? res * 5 : -50);
@@ -461,8 +463,8 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
   return { scenes, inLibrary };
 }
 
-/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs). */
-export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST]);
+/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs, scripts/vrbangers-host.mjs). */
+export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, VRBANGERS_HOST]);
 
 /**
  * planScenes, with each scene paired to a streaming page's video checked by
@@ -705,6 +707,39 @@ export function sceneTitle({ title, author, video, shared = false }) {
   return capBytes(named(meta), STEM_BYTES).replace(/[\s\-–—,;.(]+$/, '') + vrTail;
 }
 
+/**
+ * Name of a scene whose video comes from vrbangers.com (the pseudo file of
+ * vrbangers-host.mjs, or a sidecar's `vrbangers` record: `{performers, title,
+ * slug, projection}`): folder = the first performer, stem = `<Performers> -
+ * <Scene title> (VRBangers)` plus the projection suffix (`_180x180_3dh`), as
+ * `Riley Reid - Anal Virginity (VRBangers)_180x180_3dh`. Bracket parts that
+ * only name the encode (`(Remastered)`, `[8K]`) leave the title; performers
+ * past the length cap are left out from the end.
+ */
+export function vrbangersSceneName({ performers = [], title = null, slug = '', projection = null }) {
+  const people = (performers || []).map((p) => safeName(p)).filter(Boolean);
+  const encodeOnly = (inner) => inner.split(/\s+/).filter(Boolean).every((w) => isNoiseWord(foldName(w).replace(/[^\p{L}\p{N}]/gu, '')));
+  const core = safeName(String(title || String(slug).replace(/-/g, ' '))
+    .replace(/\s*[([]([^()[\]]*)[)\]]/g, (all, inner) => (encodeOnly(inner) ? '' : all))) || safeName(slug);
+  const tail = projection ? `_${projection}` : '';
+  const named = (who) => `${who.length ? who.join(', ') : 'VRBangers'} - ${core} (VRBangers)`;
+  let who = people;
+  while (who.length > 1 && Buffer.byteLength(named(who)) > STEM_BYTES) who = who.slice(0, -1);
+  return { creator: people[0] || 'VRBangers', stem: capBytes(named(who), STEM_BYTES).replace(/[\s\-–—,;.(]+$/, '') + tail };
+}
+
+/**
+ * Folder and stem of a post's scene: vrbangersSceneName for a vrbangers.com
+ * video, else the post's `<artist>/<Artist - Title (metadata)>` (creatorFolder, sceneTitle).
+ */
+export function sceneNameOf(c, sc) {
+  if (sc.video?.host === VRBANGERS_HOST) return vrbangersSceneName(sc.video);
+  return {
+    creator: creatorFolder(c.title, c.author),
+    stem: sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 }),
+  };
+}
+
 /** File name for a scene's script in the scan's spelling. */
 export function scriptFileName(stem, axis) {
   return `${stem}${axis ? `.${axis}` : ''}.funscript`;
@@ -756,9 +791,10 @@ export function retitlePlan(scenes, incoming, exists = () => false, nameOf = pos
   return moves;
 }
 
-/** An EroScripts scene's name from its post (`eroscripts.json`). */
+/** An EroScripts scene's name from its post (`eroscripts.json`); a vrbangers.com video keeps its site name. */
 function postSceneName(s, video, shared) {
   const { title, author } = s.rec;
+  if (s.rec.vrbangers) return vrbangersSceneName(s.rec.vrbangers);
   return { creator: creatorFolder(title, author), stem: sceneTitle({ title, author, video: s.rec.video || video, shared }) };
 }
 
@@ -817,8 +853,8 @@ export function remapPaths(value, moves) {
 // Verdicts made under older rules count as unseen, and a `no-video` post
 // with activity after its verdict is judged again.
 
-/** Bump when the screening rules change, so every post is judged again (11: rule34video links count as videos). */
-export const RULES_VERSION = 11;
+/** Bump when the screening rules change, so every post is judged again (11: rule34video links count as videos; 12: vrbangers.com links too). */
+export const RULES_VERSION = 12;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
@@ -875,6 +911,36 @@ export function pendingTopics(state, rules = RULES_VERSION) {
 export function feedState(state, tag) {
   state.feeds[tag] ||= { backfillPage: 0, exhausted: false };
   return state.feeds[tag];
+}
+
+/** Every feed `--feeds` takes: the tag feeds (FEED_TAGS), then the search feeds (SEARCH_FEEDS). */
+export const ALL_FEEDS = [...FEED_TAGS, ...Object.keys(SEARCH_FEEDS)];
+
+/**
+ * listFeed's `listPage` for the forum: a tag feed reads its Free Scripts tag
+ * (`api.listFreeTagTopics`), a search feed (SEARCH_FEEDS) a search of Free
+ * Scripts first posts for its words (`api.listFreeSearchTopics`). Every
+ * request waits for `pacer` (the run's forum pacer); searches also for
+ * `searchPacer` (≥ SEARCH_INTERVAL_MS apart: Discourse limits searches per
+ * minute). A rate limit or expired session becomes RateLimitedError /
+ * SessionExpiredError, any other failure an Error.
+ */
+export function feedPage(api, { pacer, searchPacer = createPacer({ intervalMs: SEARCH_INTERVAL_MS }) }) {
+  return async (feed, page) => {
+    const words = Object.hasOwn(SEARCH_FEEDS, feed) ? SEARCH_FEEDS[feed] : null;
+    if (words !== null) await searchPacer.wait();
+    await pacer.wait();
+    const r = words !== null ? await api.listFreeSearchTopics(words, page) : await api.listFreeTagTopics(feed, page);
+    if (r.rateLimited) throw new RateLimitedError();
+    if (r.authExpired) throw new SessionExpiredError();
+    if (r.error) throw new Error(r.error);
+    return r;
+  };
+}
+
+/** True when a candidate has a scene whose video comes from vrbangers.com (`npm run vrbangers:scout` shows and fetches only those). */
+export function isVrbangersCandidate(c) {
+  return (c.scenes || []).some((sc) => sc.video?.host === VRBANGERS_HOST);
 }
 
 /**

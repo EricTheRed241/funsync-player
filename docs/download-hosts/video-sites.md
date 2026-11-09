@@ -3,6 +3,8 @@ Verdict: auto-with-limits (rule34video, hmvmania: plain Node `fetch`; iwara, han
 
 Status (2026-11-09): **rule34video is implemented** in `npm run eroscripts:scout` (`scripts/stream-hosts.mjs`, `planWithStreams` in `scripts/eroscripts-scout-lib.mjs`; see the README's scout section). The other sites aren't.
 
+Status (2026-11-09): **vrbangers.com (paid member downloads) is implemented** too: `npm run vrbangers:scout` / `scripts/vrbangers-host.mjs` (public scene page at scan time, signed links through headless Chrome at download time; see the README's scout section).
+
 Seen on EroScripts:
 A random sample of 50 of the 1,038 `no-video` posts (seed 7, 49 readable, 1 deleted → 404), fetched 2026-11-03. Every one of the 49 had forum script attachments. They had passed content screening (animated, sex, exclusions) and then failed `planScenes`, because their video sits on a site the scout can't read.
 
