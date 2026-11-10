@@ -100,7 +100,8 @@ By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-dir <dir>     where files downloaded by hand are saved (default ~/Downloads/for-fs)
 Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
-                         and the paths config.json keeps for them (app must be closed)
+                         and the paths config.json keeps for them (app must be closed);
+                         with --ids, only those posts' scenes
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
@@ -886,7 +887,9 @@ function retitle(opts, { userData, incoming }) {
     if (e.name !== 'eroscripts.json') return;
     const dir = path.dirname(full);
     try {
-      scenes.push({ dir, rec: JSON.parse(fs.readFileSync(full, 'utf8')), files: fs.readdirSync(dir).filter((n) => !n.startsWith('._')) });
+      const rec = JSON.parse(fs.readFileSync(full, 'utf8'));
+      if (opts.ids && !opts.ids.has(Number(rec.topicId))) return;
+      scenes.push({ dir, rec, files: fs.readdirSync(dir).filter((n) => !n.startsWith('._')) });
     } catch { process.stderr.write(`! unreadable ${full}\n`); }
   });
   const moves = lib.retitlePlan(scenes, incoming, (p) => fs.existsSync(p));

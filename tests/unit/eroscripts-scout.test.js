@@ -448,6 +448,15 @@ describe('folders', () => {
     expect(creatorFolder('(Meliodaswrath) Oral Bliss 2', 'bekscript')).toBe('Meliodaswrath');
     expect(creatorFolder('Cock Hero: Girls of Overwatch 1 and 2 by Duodimension', 'FiniteJest')).toBe('Duodimension');
   });
+
+  it('takes a leading (Name) glued to the title as the artist and skips resolution tags', () => {
+    expect(creatorFolder('(AlenAbyss)Midnight Ride with Tifa[Multi-Axis]', 'codeScripter')).toBe('AlenAbyss');
+    expect(creatorFolder('(Bouquetman)Misaki X Tamaki Halloween[multi-axis]', 'codeScripter')).toBe('Bouquetman');
+    expect(creatorFolder('[4K][Pantsushi]Tifa Maid Service(multi-axis)', 'kd99')).toBe('Pantsushi');
+    expect(creatorFolder('[1080p 60fps] [Bastati] Yuria', 'shuny404')).toBe('Bastati');
+    expect(creatorFolder('[4K60] Tifa ride', 'kd99')).toBe('kd99');
+    expect(creatorFolder('(G)I-DLE - Queencard PMV', 'loldorf')).toBe('loldorf');
+  });
 });
 
 describe('sceneTitle', () => {
