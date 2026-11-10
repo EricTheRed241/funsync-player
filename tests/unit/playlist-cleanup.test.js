@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { planPlaylistCleanup } from '../../renderer/js/playlist-cleanup.js';
 import { planArtistPlaylists } from '../../renderer/js/artist-playlists.js';
-import { FAVOURITES_PLAYLIST, MIN_ARTIST_VIDEOS } from '../../renderer/js/content-preferences.js';
+import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN } from '../../renderer/js/content-preferences.js';
 
 const vids = (artist, n, from = 1) => Array.from({ length: n }, (_, i) => `/GVP/EroScripts/${artist}/S${i + from}/S${i + from}.mp4`);
 
@@ -27,30 +27,30 @@ describe('planPlaylistCleanup', () => {
   });
 
   it('removes an app-made artist playlist below the threshold and forgets it, a favourite\'s too; Favourite artists only when empty', () => {
-    const lib = [...vids('Misiv', MIN_ARTIST_VIDEOS - 1), ...vids('Agapilord', 1)];
+    const lib = [...vids('Misiv', ARTIST_PLAYLIST_MIN - 1), ...vids('Agapilord', 1)];
     const state = { created: ['misiv', 'agapilord', ':favourites'], added: { [vids('Misiv', 1)[0]]: ['misiv'], [vids('Agapilord', 1)[0]]: ['agapilord', ':favourites'] } };
     const r = planPlaylistCleanup({
       playlists: [
-        { id: 'mi', name: 'Misiv', videoPaths: vids('Misiv', MIN_ARTIST_VIDEOS) },
+        { id: 'mi', name: 'Misiv', videoPaths: vids('Misiv', ARTIST_PLAYLIST_MIN) },
         { id: 'ag', name: 'Agapilord', videoPaths: vids('Agapilord', 1) },
         { id: 'fa', name: FAVOURITES_PLAYLIST, videoPaths: vids('Agapilord', 1) },
       ],
       videoPaths: lib,
       state,
     });
-    expect(r.remove).toEqual([{ id: 'mi', name: 'Misiv', videos: MIN_ARTIST_VIDEOS - 1 }, { id: 'ag', name: 'Agapilord', videos: 1 }]);
+    expect(r.remove).toEqual([{ id: 'mi', name: 'Misiv', videos: ARTIST_PLAYLIST_MIN - 1 }, { id: 'ag', name: 'Agapilord', videos: 1 }]);
     expect(r.state.created).toEqual([':favourites']);
     expect(r.state.added).toEqual({ [vids('Agapilord', 1)[0]]: [':favourites'] });
   });
 
   it('lets a removed artist playlist come back, with every video, once the artist reaches the threshold', () => {
     const removed = planPlaylistCleanup({
-      playlists: [{ id: 'mi', name: 'Misiv', videoPaths: vids('Misiv', MIN_ARTIST_VIDEOS) }],
+      playlists: [{ id: 'mi', name: 'Misiv', videoPaths: vids('Misiv', ARTIST_PLAYLIST_MIN) }],
       videoPaths: vids('Misiv', 2),
-      state: { created: ['misiv'], added: Object.fromEntries(vids('Misiv', MIN_ARTIST_VIDEOS).map((p) => [p, ['misiv']])) },
+      state: { created: ['misiv'], added: Object.fromEntries(vids('Misiv', ARTIST_PLAYLIST_MIN).map((p) => [p, ['misiv']])) },
     });
-    const later = planArtistPlaylists({ videoPaths: vids('Misiv', MIN_ARTIST_VIDEOS), sourcePaths: ['/GVP/EroScripts'], playlists: [], state: removed.state });
-    expect(later.create).toEqual([{ name: 'Misiv', videoPaths: vids('Misiv', MIN_ARTIST_VIDEOS) }]);
+    const later = planArtistPlaylists({ videoPaths: vids('Misiv', ARTIST_PLAYLIST_MIN), sourcePaths: ['/GVP/EroScripts'], playlists: [], state: removed.state });
+    expect(later.create).toEqual([{ name: 'Misiv', videoPaths: vids('Misiv', ARTIST_PLAYLIST_MIN) }]);
   });
 
   it("keeps the user's own small playlists, even one named like an artist the app never made", () => {

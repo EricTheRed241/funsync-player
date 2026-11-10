@@ -33,7 +33,7 @@ ALL_SECTIONS = [
     "Short (<5m)", "Medium (5-15m)", "Long (15m+)",
     "Hand-made", "Recently Added",
 ]
-SCORE_SECTIONS = ["Score 20+", "Score 15+", "Score 10-14.5"]
+SCORE_SECTIONS = ["Score 20+", "Score 15-19.5", "Score 10-14.5"]
 
 
 @pytest.fixture
@@ -357,10 +357,10 @@ class TestScoreOrder:
         )
 
     def test_score_section_boundaries(self):
-        assert vr_sections.score_sections(20) == ["Score 20+", "Score 15+"]
-        assert vr_sections.score_sections(24) == ["Score 20+", "Score 15+"]
-        assert vr_sections.score_sections(19.5) == ["Score 15+"]
-        assert vr_sections.score_sections(15) == ["Score 15+"]
+        assert vr_sections.score_sections(20) == ["Score 20+"]
+        assert vr_sections.score_sections(24) == ["Score 20+"]
+        assert vr_sections.score_sections(19.5) == ["Score 15-19.5"]
+        assert vr_sections.score_sections(15) == ["Score 15-19.5"]
         assert vr_sections.score_sections(14.5) == ["Score 10-14.5"]
         assert vr_sections.score_sections(10) == ["Score 10-14.5"]
         assert vr_sections.score_sections(9.5) == []
@@ -374,12 +374,12 @@ class TestScoreOrder:
     def test_sections_by_score_watched_last(self):
         sections = self._sections(True)
         assert [name for name, _ in sections] == [
-            "Queue", "Score 15+", "Score 10-14.5", "VR", "Flat", "Slow", "Recently Added",
+            "Queue", "Score 15-19.5", "Score 10-14.5", "VR", "Flat", "Slow", "Recently Added",
             "Favorites", "Top Rated", "Unrated", "Watched", "Playlist: Discovery", "Playlist: Mine",
         ]
         s = dict(sections)
         # Score desc within each group, the watched group (g 16; d 14.5, a 9.5) last.
-        assert s["Score 15+"] == ["e", "b", "g"]
+        assert s["Score 15-19.5"] == ["e", "b", "g"]
         assert s["Score 10-14.5"] == ["f", "d"]
         assert s["Flat"] == ["e", "b", "f", "c", "d", "a"]   # unscored c after the scored ones
         assert s["Slow"] == ["e", "b", "f", "c", "g", "d", "a"]
@@ -398,14 +398,14 @@ class TestScoreOrder:
 
     def test_sink_off_still_by_score(self):
         s = dict(self._sections(False))
-        assert s["Score 15+"] == ["e", "g", "b"]
+        assert s["Score 15-19.5"] == ["e", "g", "b"]
         assert s["Flat"] == ["e", "b", "d", "f", "a", "c"]
         assert s["Recently Added"] == ["f", "a", "c", "b"]
         assert s["Playlist: Discovery"] == ["e", "f", "a", "c"]
 
     def test_no_scores_keeps_title_order_and_no_score_lists(self):
         s = dict(vr_sections.build_sections(self.ENTRIES, now_ms=self.NOW))
-        assert "Score 15+" not in s and "Score 10-14.5" not in s
+        assert "Score 15-19.5" not in s and "Score 10-14.5" not in s
         assert s["Flat"] == ["a", "b", "c", "d", "e", "f"]
 
 
@@ -856,12 +856,12 @@ async def test_listings_by_score_with_score_lists(client, tmp_path):
     # No video scores 20+, so that (empty) section is dropped.
     assert [s["name"] for s in data["library"]] == SCORE_SECTIONS[1:] + ALL_SECTIONS + ["Top Rated", "Unrated", "Watched"]
     sections = {s["name"]: _ids(s["list"]) for s in data["library"]}
-    assert sections["Score 15+"] == [a, g, m]          # 15, 15 (title), then watched Multi 17
+    assert sections["Score 15-19.5"] == [a, g, m]          # 15, 15 (title), then watched Multi 17
     assert sections["Score 10-14.5"] == [c, b]         # B 14.5 is watched
     assert sections["Flat"] == [g, c, d, e, m, b]      # 15, 10, 9.5, unscored; watched 17, 14.5
     assert sections["Recently Added"] == [a]
     assert sections["Unrated"] == [a, c, d, e, g]      # title order
 
     deo = {s["name"]: [i["title"] for i in s["list"]] for s in (await client.get("/deovr")).json()["scenes"]}
-    assert deo["Score 15+"] == ["A_180_sbs", "Gen", "Multi"]
+    assert deo["Score 15-19.5"] == ["A_180_sbs", "Gen", "Multi"]
     assert deo["Flat"] == ["Gen", "C", "D", "Emb", "Multi", "B"]

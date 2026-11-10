@@ -1,6 +1,6 @@
 // Score lists (user, 2026-11-10): one automatic collection per preference
 // score list (SCORE_BANDS in content-preferences.js: "Score 20+",
-// "Score 15+", "Score 10–14.5", "Score below 10"; 20+ is also in 15+), so
+// "Score 15–19.5", "Score 10–14.5", "Score below 10"; disjoint), so
 // the best-scored scenes are one tap away on the desktop and in the web
 // remote's Collections tab.
 //
@@ -21,8 +21,8 @@ import { PREFERENCE_SCORES_KEY } from './library-scores.js';
 const nameKey = (s) => String(s || '').trim().toLocaleLowerCase();
 
 /**
- * The SCORE_BANDS entries a score falls in (lists may overlap: 20+ is also
- * in 15+); none for unscored or not a number.
+ * The SCORE_BANDS entries a score falls in (the lists are disjoint, so at
+ * most one); none for unscored or not a number.
  *
  * @param {unknown} score
  * @returns {{key: string, name: string, min?: number, below?: number}[]}
@@ -85,7 +85,7 @@ export function planScoreBandCollections({ collections = [], videoPaths = [], sc
   const update = [];
   for (const band of SCORE_BANDS) {
     const want = members.get(band.key);
-    const existing = byName.get(nameKey(band.name));
+    const existing = [band.name, ...(band.formerNames || [])].map((n) => byName.get(nameKey(n))).find(Boolean);
     if (!existing) {
       if (created.has(band.key) || !want.length) continue;
       created.add(band.key);
@@ -94,7 +94,10 @@ export function planScoreBandCollections({ collections = [], videoPaths = [], sc
     }
     created.add(band.key);
     const have = existing.videoPaths || [];
-    if (have.length !== want.length || have.some((p, i) => p !== want[i])) update.push({ id: existing.id, videoPaths: want });
+    const renamed = nameKey(existing.name) !== nameKey(band.name);
+    if (renamed || have.length !== want.length || have.some((p, i) => p !== want[i])) {
+      update.push({ id: existing.id, videoPaths: want, ...(renamed ? { name: band.name } : {}) });
+    }
   }
   return { create, update, state: { ...state, created: [...created] } };
 }
@@ -115,8 +118,11 @@ export function applyScoreBandCollections(data, videoPaths, newId = () => crypto
     collections, videoPaths, scores: data.get(PREFERENCE_SCORES_KEY) || {}, state: previous,
   });
   if (plan.create.length || plan.update.length) {
-    const replace = new Map(plan.update.map((u) => [u.id, u.videoPaths]));
-    const next = collections.map((c) => (replace.has(c.id) ? { ...c, videoPaths: replace.get(c.id) } : c));
+    const replace = new Map(plan.update.map((u) => [u.id, u]));
+    const next = collections.map((c) => {
+      const u = replace.get(c.id);
+      return u ? { ...c, videoPaths: u.videoPaths, ...(u.name ? { name: u.name } : {}) } : c;
+    });
     for (const c of plan.create) next.push({ id: newId(), name: c.name, videoPaths: c.videoPaths });
     data.set(COLLECTIONS_KEY, next);
   }

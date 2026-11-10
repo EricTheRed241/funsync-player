@@ -1,15 +1,15 @@
-// One playlist per artist with at least MIN_ARTIST_VIDEOS videos, favourites
+// One playlist per artist with at least ARTIST_PLAYLIST_MIN videos, favourites
 // included (user, 2026-11-04), plus one FAVOURITES_PLAYLIST with every
 // favourite's videos from the first one (the values are in content-preferences.js).
 //
 // The library is laid out `<source>/<artist>/<scene>/<video>` (the scout
 // names Discovery's artist folders the same way), so a video's artist is the
 // first folder under its source. After each library scan every artist folder
-// holding at least MIN_ARTIST_VIDEOS videos, across all sources, gets a
+// holding at least ARTIST_PLAYLIST_MIN videos, across all sources, gets a
 // playlist named after it, and new videos of that artist join it. A
 // favourite (favourite-artists.js: FAVOURITES with the user's changes),
 // matched to the folder name whatever its case or Unicode form, needs the
-// same MIN_ARTIST_VIDEOS for its own playlist, and every favourite's videos
+// same ARTIST_PLAYLIST_MIN for its own playlist, and every favourite's videos
 // go into FAVOURITES_PLAYLIST, grouped by artist, from the first one.
 //
 // The user stays in charge, as with the EroScripts categories: an existing
@@ -24,7 +24,7 @@
 // FAVOURITES_PLAYLIST taken out again (and forgotten, so favouriting them
 // again puts them back); their own playlist stays until the cleanup.
 
-import { FAVOURITES_PLAYLIST, MIN_ARTIST_VIDEOS, NOT_AN_ARTIST } from './content-preferences.js';
+import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN, NOT_AN_ARTIST } from './content-preferences.js';
 
 export const ARTIST_PLAYLISTS_KEY = 'library.artistPlaylists';
 export const FAVOURITES_STATE_KEY = ':favourites';
@@ -105,7 +105,7 @@ export function planArtistPlaylists({ videoPaths = [], sourcePaths = [], playlis
   const favouritePaths = artists.filter((a) => a.favourite).flatMap((a) => a.paths);
   if (favouritePaths.length) plan(FAVOURITES_STATE_KEY, FAVOURITES_PLAYLIST, favouritePaths);
   for (const a of artists) {
-    if (a.paths.length >= MIN_ARTIST_VIDEOS) plan(a.key, a.name, a.paths);
+    if (a.paths.length >= ARTIST_PLAYLIST_MIN) plan(a.key, a.name, a.paths);
   }
 
   const withdrawn = artists

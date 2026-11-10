@@ -262,19 +262,19 @@ export const TOP_RATED_MIN = 4;
 export const DEFAULT_SORT = 'score:desc';
 
 /**
- * Score lists (user, 2026-11-10): preference score lists kept as automatic collections on
- * the desktop (renderer/js/score-bands.js; the phone's Collections tab shows them). A list
- * holds every video with `min <= score < below` (either end open); unscored videos are in
- * none. Lists may overlap: "Score 20+" (the very best, added at the user's request) is also
- * part of "Score 15+". Cut at the library's spread (2026-11-10: median 11, top 20 % from 14,
- * top 10 % from 16.5, 9 videos at 20+): 15+ is the best ~15 %, 10 the picking threshold for
- * new downloads. The headsets list the first three as sections "Score 20+", "Score 15+" and
- * "Score 10-14.5"; those thresholds are mirrored in backend/services/vr_sections.py
- * (SCORE_ELITE_MIN, SCORE_TOP_MIN, SCORE_MID_MIN).
+ * Score lists (user, 2026-11-10): preference score bands kept as automatic collections on
+ * the desktop (renderer/js/score-bands.js; the phone's Collections tab shows them), each
+ * video in the band of its current score: `min <= score < below` (either end open);
+ * unscored videos are in none. Cut at the library's spread (2026-11-10: median 11, top 20 %
+ * from 14, top 10 % from 16.5, 9 videos at 20+): 20+ the very best, 15–19.5 the next ~15 %,
+ * 10 the picking threshold for new downloads. `formerNames`: a collection made under an
+ * older name is renamed (not duplicated). The headsets list the first three as sections
+ * "Score 20+", "Score 15-19.5" and "Score 10-14.5"; those thresholds are mirrored in
+ * backend/services/vr_sections.py (SCORE_ELITE_MIN, SCORE_TOP_MIN, SCORE_MID_MIN).
  */
 export const SCORE_BANDS = [
   { key: 'score-20', name: 'Score 20+', min: 20 },
-  { key: 'score-15', name: 'Score 15+', min: 15 },
+  { key: 'score-15', name: 'Score 15–19.5', min: 15, below: 20, formerNames: ['Score 15+'] },
   { key: 'score-10', name: 'Score 10–14.5', min: 10, below: 15 },
   { key: 'score-low', name: 'Score below 10', below: 10 },
 ];
@@ -291,8 +291,14 @@ export const DISCOVERY_PLAYLIST = 'Discovery';
 
 // ── Artist playlists ────────────────────────────────────────────────────
 
-/** An artist folder with at least this many videos gets a playlist, favourites too (they join "Favourite artists" from one). */
+/** An artist folder with at least this many videos counts as a known creator for the preference score (library-scores.js). */
 export const MIN_ARTIST_VIDEOS = 5;
+/**
+ * An artist folder with at least this many videos gets a playlist (user, 2026-11-10: keeps the
+ * artist playlists to ~8; was MIN_ARTIST_VIDEOS). A favourite needs it too for its own playlist;
+ * "Favourite artists" still takes a favourite's videos from one.
+ */
+export const ARTIST_PLAYLIST_MIN = 30;
 export const FAVOURITES_PLAYLIST = 'Favourite artists';
 /** Folder names that hold videos of many artists (lower case). */
 export const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'others', 'new folder', 'cock hero', 'fap hero', 'pmv', 'hmv', 'compilation', 'compilations']);

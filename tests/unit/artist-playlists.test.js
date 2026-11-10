@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// One playlist per artist with at least MIN_ARTIST_VIDEOS videos, per favourite from one
+// One playlist per artist with at least ARTIST_PLAYLIST_MIN videos, per favourite from one
 // video, and the combined Favourite artists playlist
 // (renderer/js/artist-playlists.js): who counts, when a playlist is made,
 // and that the user's own edits stick.
@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   artistOf, planArtistPlaylists, applyArtistPlaylists, ARTIST_PLAYLISTS_KEY, FAVOURITES_STATE_KEY,
 } from '../../renderer/js/artist-playlists.js';
-import { MIN_ARTIST_VIDEOS, FAVOURITES_PLAYLIST } from '../../renderer/js/content-preferences.js';
+import { ARTIST_PLAYLIST_MIN, FAVOURITES_PLAYLIST } from '../../renderer/js/content-preferences.js';
 
 const SOURCES = ['/GVP/Multi-Axis', '/GVP/Multi Generated/', '/GVP/_incoming'];
 const vids = (root, artist, n, from = 1) => Array.from({ length: n }, (_, i) => `${root}/${artist}/Scene ${i + from}/Scene ${i + from}.mp4`);
@@ -26,47 +26,48 @@ describe('artistOf', () => {
 });
 
 describe('planArtistPlaylists', () => {
-  it('makes a playlist only past six videos, counting every source and spelling', () => {
+  it('makes a playlist only from ARTIST_PLAYLIST_MIN videos, counting every source and spelling', () => {
     const videoPaths = [
-      ...vids('/GVP/Multi-Axis', 'Misiv', 4), ...vids('/GVP/_incoming', 'misiv', 3, 5),
-      ...vids('/GVP/Multi Generated', 'Eternal Enigma', MIN_ARTIST_VIDEOS - 1),
+      ...vids('/GVP/Multi-Axis', 'Misiv', ARTIST_PLAYLIST_MIN - 3), ...vids('/GVP/_incoming', 'misiv', 3, ARTIST_PLAYLIST_MIN - 2),
+      ...vids('/GVP/Multi Generated', 'Eternal Enigma', ARTIST_PLAYLIST_MIN - 1),
     ];
     const r = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES });
-    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([['Misiv', 7]]);
-    expect(r.create[0].videoPaths.map((p) => p.split('/').pop())).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `Scene ${n}.mp4`));
+    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([['Misiv', ARTIST_PLAYLIST_MIN]]);
+    expect(r.create[0].videoPaths.map((p) => p.split('/').pop())).toEqual(Array.from({ length: ARTIST_PLAYLIST_MIN }, (_, i) => `Scene ${i + 1}.mp4`));
   });
 
   it('adds new videos to an existing playlist of that name, not ones taken out by hand', () => {
-    const videoPaths = vids('/GVP/Multi Generated', 'ScyllaHMV', 9);
-    const first = planArtistPlaylists({ videoPaths: videoPaths.slice(0, 8), sourcePaths: SOURCES, playlists: [{ id: 'p', name: 'scyllahmv', videoPaths: [] }] });
-    expect(first.extend).toEqual([{ id: 'p', videoPaths: videoPaths.slice(0, 8) }]);
+    const n = ARTIST_PLAYLIST_MIN + 1;
+    const videoPaths = vids('/GVP/Multi Generated', 'ScyllaHMV', n);
+    const first = planArtistPlaylists({ videoPaths: videoPaths.slice(0, n - 1), sourcePaths: SOURCES, playlists: [{ id: 'p', name: 'scyllahmv', videoPaths: [] }] });
+    expect(first.extend).toEqual([{ id: 'p', videoPaths: videoPaths.slice(0, n - 1) }]);
 
-    // The user took Scene 1 out; Scene 9 is new.
-    const kept = videoPaths.slice(1, 8);
+    // The user took Scene 1 out; the last scene is new.
+    const kept = videoPaths.slice(1, n - 1);
     const next = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, playlists: [{ id: 'p', name: 'ScyllaHMV', videoPaths: kept }], state: first.state });
-    expect(next.extend).toEqual([{ id: 'p', videoPaths: [videoPaths[8]] }]);
+    expect(next.extend).toEqual([{ id: 'p', videoPaths: [videoPaths[n - 1]] }]);
   });
 
   it('never makes a deleted playlist again', () => {
-    const videoPaths = vids('/GVP/Multi Generated', 'Agapilord', 8);
+    const videoPaths = vids('/GVP/Multi Generated', 'Agapilord', ARTIST_PLAYLIST_MIN);
     const first = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES });
     const again = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, playlists: [], state: first.state });
     expect(again).toMatchObject({ create: [], extend: [] });
   });
 
-  it('gives a favourite its own playlist only from MIN_ARTIST_VIDEOS, but Favourite artists from one video, matched whatever the case or Unicode form', () => {
+  it('gives a favourite its own playlist only from ARTIST_PLAYLIST_MIN, but Favourite artists from one video, matched whatever the case or Unicode form', () => {
     const videoPaths = [
-      ...vids('/GVP/Multi Generated', 'Eternal Enigma', MIN_ARTIST_VIDEOS - 1),
-      ...vids('/GVP/_incoming', 'Cafe\u0301 Girl', MIN_ARTIST_VIDEOS),
+      ...vids('/GVP/Multi Generated', 'Eternal Enigma', ARTIST_PLAYLIST_MIN - 1),
+      ...vids('/GVP/_incoming', 'Cafe\u0301 Girl', ARTIST_PLAYLIST_MIN),
     ];
     const r = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES, favourites: ['eternal enigma', 'Café girl', 'Not Here'] });
-    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([[FAVOURITES_PLAYLIST, 2 * MIN_ARTIST_VIDEOS - 1], ['Cafe\u0301 Girl', MIN_ARTIST_VIDEOS]]);
+    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([[FAVOURITES_PLAYLIST, 2 * ARTIST_PLAYLIST_MIN - 1], ['Cafe\u0301 Girl', ARTIST_PLAYLIST_MIN]]);
   });
 
   it('puts every favourite\'s videos in Favourite artists, grouped by artist, and adds new ones once', () => {
     const agapi = vids('/GVP/Multi Generated', 'Agapilord', 3);
     const scylla = vids('/GVP/Multi-Axis', 'ScyllaHMV', 2);
-    const other = vids('/GVP/Multi-Axis', 'Misiv', 8);
+    const other = vids('/GVP/Multi-Axis', 'Misiv', ARTIST_PLAYLIST_MIN);
     const favourites = ['ScyllaHMV', 'Agapilord'];
     const first = planArtistPlaylists({ videoPaths: [...scylla, ...other, ...agapi.slice(0, 2)], sourcePaths: SOURCES, favourites });
     expect(first.create[0]).toEqual({ name: FAVOURITES_PLAYLIST, videoPaths: [...agapi.slice(0, 2), ...scylla] });
@@ -112,15 +113,15 @@ describe('applyArtistPlaylists', () => {
       addVideosToPlaylist: (id, paths) => { playlists.find((p) => p.id === id).videoPaths.push(...paths); },
       removeVideoFromPlaylist: (id, path) => { const pl = playlists.find((p) => p.id === id); pl.videoPaths = pl.videoPaths.filter((p) => p !== path); },
     };
-    const videoPaths = [...vids('/GVP/Multi Generated', 'Cuddle Mocap', 12), ...vids('/GVP/Multi-Axis', 'Shayuki', 4)];
+    const videoPaths = [...vids('/GVP/Multi Generated', 'Cuddle Mocap', ARTIST_PLAYLIST_MIN + 2), ...vids('/GVP/Multi-Axis', 'Shayuki', 4)];
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: ['Cuddle Mocap'], extended: 0, withdrawn: 0 });
-    expect(playlists[0].videoPaths).toHaveLength(12);
+    expect(playlists[0].videoPaths).toHaveLength(ARTIST_PLAYLIST_MIN + 2);
     expect(store[ARTIST_PLAYLISTS_KEY].created).toEqual(['cuddle mocap']);
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 0 });
     expect(await applyArtistPlaylists(data, videoPaths, ['Shayuki'])).toEqual({ created: [FAVOURITES_PLAYLIST], extended: 0, withdrawn: 0 });
-    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 4]]);
+    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', ARTIST_PLAYLIST_MIN + 2], [FAVOURITES_PLAYLIST, 4]]);
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 4 });
-    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', 12], [FAVOURITES_PLAYLIST, 0]]);
+    expect(playlists.map((p) => [p.name, p.videoPaths.length])).toEqual([['Cuddle Mocap', ARTIST_PLAYLIST_MIN + 2], [FAVOURITES_PLAYLIST, 0]]);
     expect(await applyArtistPlaylists(data, videoPaths)).toEqual({ created: [], extended: 0, withdrawn: 0 });
   });
 });

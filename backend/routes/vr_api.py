@@ -696,7 +696,7 @@ async def deovr_library(request: Request):
     """DeoVR library listing — groups of scenes.
 
     Groups are the shared headset sections (`services.vr_sections`): Queue,
-    the score lists (Score 15+, Score 10-14.5), VR / Flat, speed, length,
+    the score lists (Score 20+, Score 15-19.5, Score 10-14.5), VR / Flat, speed, length,
     hand-made multi-axis, recently added, the triage sections (Favorites,
     Top Rated, Unrated, Watched) and one per playlist. Empty ones are left
     out. The browsing sections and Discovery list by preference score,
