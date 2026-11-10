@@ -262,15 +262,18 @@ export const TOP_RATED_MIN = 4;
 export const DEFAULT_SORT = 'score:desc';
 
 /**
- * Score lists (user, 2026-11-10): the preference score bands kept as automatic collections
- * on the desktop (renderer/js/score-bands.js; the phone's Collections tab shows them), each
- * video in the band of its current score. A band holds `min <= score < below` (either end
- * open); unscored videos are in none. Cut at the library's spread (2026-11-10: median 11,
- * top 20 % from 14, top 10 % from 16.5): 15+ is the best ~15 %, 10 the picking threshold for
- * new downloads. The headsets list the first two as sections "Score 15+" and "Score 10-14.5";
- * those thresholds are mirrored in backend/services/vr_sections.py (SCORE_TOP_MIN, SCORE_MID_MIN).
+ * Score lists (user, 2026-11-10): preference score lists kept as automatic collections on
+ * the desktop (renderer/js/score-bands.js; the phone's Collections tab shows them). A list
+ * holds every video with `min <= score < below` (either end open); unscored videos are in
+ * none. Lists may overlap: "Score 20+" (the very best, added at the user's request) is also
+ * part of "Score 15+". Cut at the library's spread (2026-11-10: median 11, top 20 % from 14,
+ * top 10 % from 16.5, 9 videos at 20+): 15+ is the best ~15 %, 10 the picking threshold for
+ * new downloads. The headsets list the first three as sections "Score 20+", "Score 15+" and
+ * "Score 10-14.5"; those thresholds are mirrored in backend/services/vr_sections.py
+ * (SCORE_ELITE_MIN, SCORE_TOP_MIN, SCORE_MID_MIN).
  */
 export const SCORE_BANDS = [
+  { key: 'score-20', name: 'Score 20+', min: 20 },
   { key: 'score-15', name: 'Score 15+', min: 15 },
   { key: 'score-10', name: 'Score 10–14.5', min: 10, below: 15 },
   { key: 'score-low', name: 'Score below 10', below: 10 },

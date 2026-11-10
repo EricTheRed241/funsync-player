@@ -7,13 +7,12 @@
 // (renderer/js/score-bands.js, SCORE_BANDS in content-preferences.js).
 import { describe, it, expect } from 'vitest';
 import {
-  applyScoreBandCollections, byScore, planScoreBandCollections, scoreBandOf,
+  applyScoreBandCollections, byScore, planScoreBandCollections, scoreBandsOf,
 } from '../../renderer/js/score-bands.js';
-import { SCORE_BANDS } from '../../renderer/js/content-preferences.js';
 import { AUTO_COLLECTIONS_KEY, COLLECTIONS_KEY, planAutoCollections } from '../../renderer/js/auto-collections.js';
 import { PREFERENCE_SCORES_KEY } from '../../renderer/js/library-scores.js';
 
-const keyOf = (score) => scoreBandOf(score)?.key ?? null;
+const keysOf = (score) => scoreBandsOf(score).map((b) => b.key);
 
 function store(init = {}) {
   const data = { ...init };
@@ -26,27 +25,22 @@ function store(init = {}) {
   };
 }
 
-describe('SCORE_BANDS', () => {
-  it('are the three lists the user asked for, 10 being the picking threshold', () => {
-    expect(SCORE_BANDS.map((b) => b.name)).toEqual(['Score 15+', 'Score 10–14.5', 'Score below 10']);
-    expect(SCORE_BANDS.map((b) => [b.min, b.below])).toEqual([[15, undefined], [10, 15], [undefined, 10]]);
-  });
-});
-
-describe('scoreBandOf', () => {
-  it('puts the boundaries in the right band', () => {
-    expect(keyOf(15)).toBe('score-15');
-    expect(keyOf(24)).toBe('score-15');
-    expect(keyOf(14.5)).toBe('score-10');
-    expect(keyOf(14.99)).toBe('score-10');
-    expect(keyOf(10)).toBe('score-10');
-    expect(keyOf(9.5)).toBe('score-low');
-    expect(keyOf(0)).toBe('score-low');
-    expect(keyOf(-3.5)).toBe('score-low');
+describe('scoreBandsOf', () => {
+  it('puts the boundaries in the right lists; 20+ is also in 15+', () => {
+    expect(keysOf(20)).toEqual(['score-20', 'score-15']);
+    expect(keysOf(24)).toEqual(['score-20', 'score-15']);
+    expect(keysOf(19.5)).toEqual(['score-15']);
+    expect(keysOf(15)).toEqual(['score-15']);
+    expect(keysOf(14.5)).toEqual(['score-10']);
+    expect(keysOf(14.99)).toEqual(['score-10']);
+    expect(keysOf(10)).toEqual(['score-10']);
+    expect(keysOf(9.5)).toEqual(['score-low']);
+    expect(keysOf(0)).toEqual(['score-low']);
+    expect(keysOf(-3.5)).toEqual(['score-low']);
   });
 
-  it('leaves unscored videos out of every band', () => {
-    for (const s of [undefined, null, NaN, Infinity, '10', true]) expect(keyOf(s)).toBeNull();
+  it('leaves unscored videos out of every list', () => {
+    for (const s of [undefined, null, NaN, Infinity, '10', true]) expect(keysOf(s)).toEqual([]);
   });
 });
 
@@ -63,6 +57,14 @@ describe('planScoreBandCollections', () => {
     ]);
     expect(r.update).toEqual([]);
     expect(r.state.created).toEqual(['score-15', 'score-10', 'score-low']);
+  });
+
+  it('puts a 20+ video in both Score 20+ and Score 15+', () => {
+    const r = planScoreBandCollections({ videoPaths: ['/v/top.mp4', '/v/b.mp4'], scores: { '/v/top.mp4': 21, '/v/b.mp4': 16 } });
+    expect(r.create.map((c) => [c.name, c.videoPaths])).toEqual([
+      ['Score 20+', ['/v/top.mp4']],
+      ['Score 15+', ['/v/top.mp4', '/v/b.mp4']],
+    ]);
   });
 
   it('makes no empty band', () => {

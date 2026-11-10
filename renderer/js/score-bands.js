@@ -1,7 +1,8 @@
 // Score lists (user, 2026-11-10): one automatic collection per preference
-// score band (SCORE_BANDS in content-preferences.js: "Score 15+",
-// "Score 10–14.5", "Score below 10"), so the best-scored scenes are one tap
-// away on the desktop and in the web remote's Collections tab.
+// score list (SCORE_BANDS in content-preferences.js: "Score 20+",
+// "Score 15+", "Score 10–14.5", "Score below 10"; 20+ is also in 15+), so
+// the best-scored scenes are one tap away on the desktop and in the web
+// remote's Collections tab.
 //
 // Unlike the other auto collections (auto-collections.js), a band follows
 // the scores: it holds exactly the scanned videos whose current score
@@ -20,14 +21,15 @@ import { PREFERENCE_SCORES_KEY } from './library-scores.js';
 const nameKey = (s) => String(s || '').trim().toLocaleLowerCase();
 
 /**
- * The SCORE_BANDS entry a score falls in, or null (unscored or not a number).
+ * The SCORE_BANDS entries a score falls in (lists may overlap: 20+ is also
+ * in 15+); none for unscored or not a number.
  *
  * @param {unknown} score
- * @returns {{key: string, name: string, min?: number, below?: number}|null}
+ * @returns {{key: string, name: string, min?: number, below?: number}[]}
  */
-export function scoreBandOf(score) {
-  if (typeof score !== 'number' || !Number.isFinite(score)) return null;
-  return SCORE_BANDS.find((b) => (b.min === undefined || score >= b.min) && (b.below === undefined || score < b.below)) || null;
+export function scoreBandsOf(score) {
+  if (typeof score !== 'number' || !Number.isFinite(score)) return [];
+  return SCORE_BANDS.filter((b) => (b.min === undefined || score >= b.min) && (b.below === undefined || score < b.below));
 }
 
 /**
@@ -66,8 +68,7 @@ export function byScore(items, pathOf, scores) {
 export function planScoreBandCollections({ collections = [], videoPaths = [], scores = {}, state = {} }) {
   const members = new Map(SCORE_BANDS.map((b) => [b.key, []]));
   for (const path of videoPaths) {
-    const band = scoreBandOf(scores[path]);
-    if (band) members.get(band.key).push(path);
+    for (const band of scoreBandsOf(scores[path])) members.get(band.key).push(path);
   }
   const titles = new Map();
   const title = (p) => {

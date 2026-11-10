@@ -33,7 +33,7 @@ ALL_SECTIONS = [
     "Short (<5m)", "Medium (5-15m)", "Long (15m+)",
     "Hand-made", "Recently Added",
 ]
-SCORE_SECTIONS = ["Score 15+", "Score 10-14.5"]
+SCORE_SECTIONS = ["Score 20+", "Score 15+", "Score 10-14.5"]
 
 
 @pytest.fixture
@@ -357,17 +357,19 @@ class TestScoreOrder:
         )
 
     def test_score_section_boundaries(self):
-        assert vr_sections.score_section(15) == "Score 15+"
-        assert vr_sections.score_section(24) == "Score 15+"
-        assert vr_sections.score_section(14.5) == "Score 10-14.5"
-        assert vr_sections.score_section(10) == "Score 10-14.5"
-        assert vr_sections.score_section(9.5) is None
-        assert vr_sections.score_section(-3) is None
+        assert vr_sections.score_sections(20) == ["Score 20+", "Score 15+"]
+        assert vr_sections.score_sections(24) == ["Score 20+", "Score 15+"]
+        assert vr_sections.score_sections(19.5) == ["Score 15+"]
+        assert vr_sections.score_sections(15) == ["Score 15+"]
+        assert vr_sections.score_sections(14.5) == ["Score 10-14.5"]
+        assert vr_sections.score_sections(10) == ["Score 10-14.5"]
+        assert vr_sections.score_sections(9.5) == []
+        assert vr_sections.score_sections(-3) == []
         for unscored in (None, float("nan"), float("inf"), "15", True):
-            assert vr_sections.score_section(unscored) is None
+            assert vr_sections.score_sections(unscored) == []
 
     def test_thresholds_mirror_the_desktop(self):
-        assert (vr_sections.SCORE_TOP_MIN, vr_sections.SCORE_MID_MIN) == (15, 10)
+        assert (vr_sections.SCORE_ELITE_MIN, vr_sections.SCORE_TOP_MIN, vr_sections.SCORE_MID_MIN) == (20, 15, 10)
 
     def test_sections_by_score_watched_last(self):
         sections = self._sections(True)
@@ -851,7 +853,8 @@ async def test_listings_by_score_with_score_lists(client, tmp_path):
     g, m = _path_to_id(gen), _path_to_id(multi)
 
     data = (await client.post("/heresphere", json={})).json()
-    assert [s["name"] for s in data["library"]] == SCORE_SECTIONS + ALL_SECTIONS + ["Top Rated", "Unrated", "Watched"]
+    # No video scores 20+, so that (empty) section is dropped.
+    assert [s["name"] for s in data["library"]] == SCORE_SECTIONS[1:] + ALL_SECTIONS + ["Top Rated", "Unrated", "Watched"]
     sections = {s["name"]: _ids(s["list"]) for s in data["library"]}
     assert sections["Score 15+"] == [a, g, m]          # 15, 15 (title), then watched Multi 17
     assert sections["Score 10-14.5"] == [c, b]         # B 14.5 is watched
