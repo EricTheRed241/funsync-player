@@ -542,7 +542,6 @@
     "ratings": {
       "title": "Ratings and favourites",
       "keep": "Keep (4★+)",
-      "review": "Review (2½–3½★)",
       "showInLibrary": "Show in the library",
       "listTitle": "Rated and favourite videos ({count})",
       "none": "No video is rated or a favourite yet. Rate with the stars on a card, in the player, on the phone or in HereSphere.",
@@ -1052,7 +1051,7 @@
       "hideDupesLabel": "Hide duplicate names",
       "hideDupesHint": "Show only one entry when several videos share an identical filename, such as the same file in two source folders. The copy with a script is kept.",
       "watchedLastLabel": "Watched videos last",
-      "watchedLastHint": "A video counts as watched once you rate it. Watched videos move to the end of the library, categories, collections and Discovery, dimmed with a \"Watched\" badge, so you don't play them again by accident. Artist playlists, your own playlists and the rating lists keep their order. The web remote and the headset follow this setting."
+      "watchedLastHint": "A video counts as watched once you rate it. Watched videos move to the end of the library, categories and collections, dimmed with a \"Watched\" badge, so you don't play them again by accident. Playlists and the rating lists keep their order. The web remote and the headset follow this setting."
     },
     "data": {
       "backupHeader": "Backup & Recovery",

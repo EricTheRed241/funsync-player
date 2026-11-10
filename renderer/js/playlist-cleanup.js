@@ -1,8 +1,9 @@
 // Playlist cleanup after each library scan (after the artist playlists are
 // brought up to date):
 //
-// • A playlist with no video left in the library goes, whoever made it. The
-//   Discovery and Review playlists are made again when a video needs them.
+// • A playlist with no video left in the library goes, whoever made it,
+//   except the smart playlists (smart-playlists.js): they stay empty until
+//   a video qualifies again.
 // • An artist playlist the app made (artist-playlists.js) that holds fewer
 //   than ARTIST_PLAYLIST_MIN videos still in the library goes too, a
 //   favourite's included (FAVOURITES_PLAYLIST only when empty). Its artist is forgotten in
@@ -14,6 +15,7 @@
 
 import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN } from './content-preferences.js';
 import { ARTIST_PLAYLISTS_KEY, FAVOURITES_STATE_KEY } from './artist-playlists.js';
+import { isSmartPlaylistName } from './smart-playlists.js';
 
 const fold = (s) => String(s || '').normalize('NFC').trim().toLocaleLowerCase();
 
@@ -32,6 +34,7 @@ export function planPlaylistCleanup({ playlists = [], videoPaths = [], state = {
   const forget = new Set();
   const remove = [];
   for (const pl of playlists) {
+    if (isSmartPlaylistName(pl.name)) continue;
     const videos = (pl.videoPaths || []).filter((p) => inLibrary.has(p)).length;
     const key = fold(pl.name) === fold(FAVOURITES_PLAYLIST) ? FAVOURITES_STATE_KEY : fold(pl.name);
     const artistMade = created.has(key);

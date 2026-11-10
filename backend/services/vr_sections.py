@@ -19,8 +19,7 @@ the filesystem. A video missing a field is simply left out of the sections
 that depend on it.
 
 Order (user, 2026-11-10): the sections with no order of their own (the
-score lists, VR, Flat, speed, length, Hand-made, and the app-made
-playlists in `watched.playlistIds`, today Discovery) list by preference
+score lists, VR, Flat, speed, length, Hand-made) list by preference
 score, highest first, unscored last, title breaking ties. Recently Added
 lists the newest first. The score lists `Score 20+`, `Score 15-19.5` and `Score 10-14.5` come
 first after Queue: the videos whose score falls in that band (the desktop's
@@ -38,11 +37,10 @@ the desktop's resume tracking, so the rating is the one signal every player
 shares, and a rating saved in the headset counts on the next listing. The
 `Watched` section lists the rated videos newest rating first (`updatedAt`).
 So that they aren't played again by accident, the browsing sections
-(SECTION_ORDER) and the playlists the desktop names (`watched.playlistIds`,
-today only Discovery) list the unwatched videos first, then the watched
-ones, each group in its usual order, while the desktop setting is on
-(`watched.sink`). Queue, the rating sections and the user's own playlists
-keep their order. Watched last applies after the section's own order, so
+(SECTION_ORDER) list the unwatched videos first, then the watched ones,
+each group in its usual order, while the desktop setting is on
+(`watched.sink`). Queue, the rating sections and every playlist keep
+their order. Watched last applies after the section's own order, so
 each group stays by score (or date). Every watched scene carries the
 read-only `Status:Watched` tag.
 """
@@ -331,17 +329,15 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
     sections are omitted.
 
     `scores` is the desktop's preference score per video path (absent =
-    not scored). The SCORE_ORDERED_SECTIONS and the playlists in
-    `watched.playlistIds` (the app-made ones) list by score, highest first,
+    not scored). The SCORE_ORDERED_SECTIONS list by score, highest first,
     unscored last; Recently Added lists the newest first (`dateAdded`); the
-    queue, Watched and the other playlists follow their own order; the
-    rating sections keep the order the entries came in.
+    queue, Watched and the playlists follow their own order; the rating
+    sections keep the order the entries came in.
 
-    `watched` is the desktop's `{sink, playlistIds}` (`routes.media.
-    get_watched`): with `sink` on, the SECTION_ORDER sections and the
-    sections of the playlists in `playlistIds` list the unwatched items
-    first, then the watched ones (`watched_last`), each group in the order
-    above. None sinks nothing and orders no playlist by score.
+    `watched` is the desktop's `{sink}` (`routes.media.get_watched`): with
+    `sink` on, the SECTION_ORDER sections list the unwatched items first,
+    then the watched ones (`watched_last`), each group in the order above.
+    Playlists never sink. None sinks nothing.
     """
     if now_ms is None:
         now_ms = time.time() * 1000
@@ -349,7 +345,6 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
     scores = scores or {}
     watched = watched or {}
     sink = watched.get('sink') is True
-    app_playlists = set(watched.get('playlistIds') or [])
     # Items travel as (item, watched, score, dateAdded) until the end, so
     # ordering and sinking never have to look an item up again.
     grouped = {name: [] for name in SECTION_ORDER + TRIAGE_SECTION_ORDER}
@@ -385,10 +380,7 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
         group = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
         if not group:
             continue
-        app_made = playlist.get('id') in app_playlists
-        if app_made:
-            group = by_score(group, lambda e: e[2])
-        out.append((playlist_section_name(playlist.get('name')), finish(group, sink and app_made)))
+        out.append((playlist_section_name(playlist.get('name')), finish(group, False)))
     return out
 
 

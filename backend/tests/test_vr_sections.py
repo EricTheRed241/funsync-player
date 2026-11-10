@@ -239,7 +239,7 @@ class TestWatched:
         "/v/d.mp4": {"rating": 4.5, "favorite": True, "updatedAt": 20},
     }
     PLAYLISTS = [
-        {"id": "pl-disc", "name": "Discovery", "videoPaths": ["/v/d.mp4", "/v/b.mp4", "/v/a.mp4"]},
+        {"id": "pl-eve", "name": "Evening", "videoPaths": ["/v/d.mp4", "/v/b.mp4", "/v/a.mp4"]},
         {"id": "pl-mine", "name": "Mine", "videoPaths": ["/v/d.mp4", "/v/a.mp4"]},
     ]
 
@@ -276,18 +276,18 @@ class TestWatched:
         assert vr_sections.watched_paths(None) == []
 
     def test_sink_on(self):
-        sections = self._sections({"sink": True, "playlistIds": ["pl-disc"]})
+        sections = self._sections({"sink": True})
         assert list(sections) == [
             "Queue", "VR", "Flat", "Slow",
             "Favorites", "Top Rated", "Unrated", "Watched",
-            "Playlist: Discovery", "Playlist: Mine",
+            "Playlist: Evening", "Playlist: Mine",
         ]
         # The browsing sections sink; the favourite-only c stays put.
         assert sections["Flat"] == ["a", "c", "b"]
         assert sections["Slow"] == ["a", "c", "b", "d"]
         assert sections["VR"] == ["d"]
-        # The app's playlist sinks; the user's own keeps its order.
-        assert sections["Playlist: Discovery"] == ["a", "d", "b"]
+        # Playlists keep their order: watched d and b stay put.
+        assert sections["Playlist: Evening"] == ["d", "b", "a"]
         assert sections["Playlist: Mine"] == ["d", "a"]
         # Queue and the rating sections keep theirs.
         assert sections["Queue"] == ["b", "a"]
@@ -296,12 +296,12 @@ class TestWatched:
         assert sections["Unrated"] == ["a", "c"]
         assert sections["Watched"] == ["d", "b"]   # newest rating first
 
-    @pytest.mark.parametrize("watched", [None, {"sink": False, "playlistIds": ["pl-disc"]}])
+    @pytest.mark.parametrize("watched", [None, {"sink": False}])
     def test_sink_off_keeps_the_order(self, watched):
         sections = self._sections(watched)
         assert sections["Flat"] == ["a", "b", "c"]
         assert sections["Slow"] == ["a", "b", "c", "d"]
-        assert sections["Playlist: Discovery"] == ["d", "b", "a"]
+        assert sections["Playlist: Evening"] == ["d", "b", "a"]
         assert sections["Watched"] == ["d", "b"]   # listed regardless
 
     def test_no_watched_section_without_ratings(self):
@@ -345,14 +345,14 @@ class TestScoreOrder:
         "/v/g.mp4": {"rating": 2.0, "favorite": False, "updatedAt": 20},
     }
     PLAYLISTS = [
-        {"id": "pl-disc", "name": "Discovery", "videoPaths": ["/v/c.mp4", "/v/a.mp4", "/v/e.mp4", "/v/f.mp4"]},
+        {"id": "pl-eve", "name": "Evening", "videoPaths": ["/v/c.mp4", "/v/a.mp4", "/v/e.mp4", "/v/f.mp4"]},
         {"id": "pl-mine", "name": "Mine", "videoPaths": ["/v/c.mp4", "/v/a.mp4", "/v/e.mp4"]},
     ]
 
     def _sections(self, sink):
         return vr_sections.build_sections(
             self.ENTRIES, now_ms=self.NOW, ratings=self.RATINGS, playlists=self.PLAYLISTS,
-            queue_paths=["/v/f.mp4", "/v/b.mp4"], watched={"sink": sink, "playlistIds": ["pl-disc"]},
+            queue_paths=["/v/f.mp4", "/v/b.mp4"], watched={"sink": sink},
             scores=self.SCORES,
         )
 
@@ -375,7 +375,7 @@ class TestScoreOrder:
         sections = self._sections(True)
         assert [name for name, _ in sections] == [
             "Queue", "Score 15-19.5", "Score 10-14.5", "VR", "Flat", "Slow", "Recently Added",
-            "Favorites", "Top Rated", "Unrated", "Watched", "Playlist: Discovery", "Playlist: Mine",
+            "Favorites", "Top Rated", "Unrated", "Watched", "Playlist: Evening", "Playlist: Mine",
         ]
         s = dict(sections)
         # Score desc within each group, the watched group (g 16; d 14.5, a 9.5) last.
@@ -386,8 +386,8 @@ class TestScoreOrder:
         assert s["VR"] == ["g"]
         # Recently Added stays by date (newest first), watched last.
         assert s["Recently Added"] == ["f", "c", "b", "a"]
-        # Discovery (app-made) by score; the user's own playlist keeps its order.
-        assert s["Playlist: Discovery"] == ["e", "f", "c", "a"]
+        # Playlists keep their own order: no score order, no sinking.
+        assert s["Playlist: Evening"] == ["c", "a", "e", "f"]
         assert s["Playlist: Mine"] == ["c", "a", "e"]
         # Queue and the rating sections keep theirs.
         assert s["Queue"] == ["f", "b"]
@@ -401,7 +401,7 @@ class TestScoreOrder:
         assert s["Score 15-19.5"] == ["e", "g", "b"]
         assert s["Flat"] == ["e", "b", "d", "f", "a", "c"]
         assert s["Recently Added"] == ["f", "a", "c", "b"]
-        assert s["Playlist: Discovery"] == ["e", "f", "a", "c"]
+        assert s["Playlist: Evening"] == ["c", "a", "e", "f"]
 
     def test_no_scores_keeps_title_order_and_no_score_lists(self):
         s = dict(vr_sections.build_sections(self.ENTRIES, now_ms=self.NOW))
@@ -846,7 +846,7 @@ async def test_listings_by_score_with_score_lists(client, tmp_path):
             "/Lib/B.mp4": {"rating": 3.0, "favorite": False, "updatedAt": 5},
             multi: {"rating": 4.0, "favorite": False, "updatedAt": 9},
         },
-        "watched": {"sink": True, "playlistIds": []},
+        "watched": {"sink": True},
     })
     a, b, c, d = (_path_to_id(p) for p in ["/Lib/A_180_sbs.mp4", "/Lib/B.mp4", "/Lib/C.mp4", "/Lib/D.mp4"])
     e = _path_to_id(str(tmp_path / "Emb" / "Emb.mp4"))

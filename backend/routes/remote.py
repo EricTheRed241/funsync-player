@@ -339,11 +339,9 @@ async def list_collections():
 
 @router.get("/playlists")
 async def list_playlists():
-    """Return every playlist with its video IDs (view-only). `sinkWatched`
-    is true for the playlists the desktop sinks watched videos in (today
-    Discovery) while its setting is on."""
-    watched = get_watched()
-    sinking = set(watched["playlistIds"]) if watched["sink"] else set()
+    """Return every playlist with its video IDs (view-only). Playlists
+    keep their own order: `sinkWatched` is always false (kept so every
+    grouping has the same shape)."""
     out = []
     for p in get_playlists():
         video_ids = _video_ids_from_paths(p.get("videoPaths") or [])
@@ -356,7 +354,7 @@ async def list_playlists():
             "createdAt": p.get("createdAt") or 0,
             # Created on the phone / headset, not yet applied by the desktop.
             "pending": bool(p.get("pending")),
-            "sinkWatched": p.get("id") in sinking,
+            "sinkWatched": False,
         })
     out.sort(key=lambda p: (p["name"] or "").lower())
     return {"playlists": out}

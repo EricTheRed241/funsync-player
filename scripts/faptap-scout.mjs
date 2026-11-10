@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // npm run faptap:scout — find faptap.net videos worth adding, then download
-// them into the review folder and the app's "Discovery" playlist.
+// them into the library's FapTap folder.
 //
 //   npm run faptap:scout                 scan new videos (+ some backfill) → <userData>/faptap-scout.json
 //   npm run faptap:scout -- --fetch      download the saved list
@@ -11,8 +11,8 @@
 // with a `faptap.json` sidecar. FapTap
 // scripts are single-axis, so every scene gets generated twist / roll /
 // pitch companions (scripts/upgrade-multi-axis.mjs). Videos come from
-// FapTap's HLS streams through ffmpeg. Finished videos join Discovery like
-// the EroScripts scout's (scripts/discovery-io.mjs).
+// FapTap's HLS streams through ffmpeg. The FapTap folder is a library source
+// like the EroScripts scout's (scripts/discovery-io.mjs).
 //
 // No account is needed. faptap.net serves a script only with the
 // `track_token` cookie its pages set (valid an hour); without it the script
@@ -40,7 +40,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 
 const lib = await import('./faptap-scout-lib.mjs');
 const scout = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, libraryVideoCount, readConfig, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, ensureLibrarySource, librarySources, libraryState, libraryVideoCount, readConfig, walk } = await import('./discovery-io.mjs');
 const dedupe = await import('./scene-dedupe-lib.mjs');
 const { libraryVideos, readProbeCache, readStereoCache, writeProbeCache } = await import('./scene-probe.mjs');
 const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
@@ -61,7 +61,7 @@ Pick:
   --add a,b,c            add these FapTap video ids to the list, skipping the live-not-POV and focus rules
                          (exclusions, sex, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
-  --fetch                download the saved list, best first, add each scene to Discovery;
+  --fetch                download the saved list, best first, into the FapTap library folder;
                          skips scripts under ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting videos now off focus or breaking the content rules
   --ids a,b,c            only these FapTap video ids
@@ -442,9 +442,8 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       }, null, 1));
       const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
       const note = up.status === 0 ? ' + generated axes' : ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
-      const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
       const kind = c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
-      console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${kind}${note}${listed ? '' : ' (playlist pending: app is open)'}`);
+      console.log(`${now()} ✓ ${creator}/${stem} (${plan.source.height}p)${kind}${note}`);
       ok++;
     } catch (err) {
       if (err instanceof RateLimitedError) throw err;
@@ -477,6 +476,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
   for (const tool of ['ffmpeg', 'ffprobe']) {
     if (spawnSync(tool, ['-version']).status !== 0) throw new Error(`${tool} not found on PATH; install it (brew install ffmpeg) and re-run.`);
   }
+  ensureLibrarySource(userData, { name: FOLDER, path: incoming });
   const staging = path.join(path.dirname(incoming), '_staging');
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     const held = libraryVideoCount(readConfig(userData));
@@ -495,7 +495,6 @@ async function fetchAll(opts, { userData, config, incoming }) {
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));
     }
   }
-  flushPlaylist(userData, { name: FOLDER, path: incoming }, []);
   return 2;
 }
 

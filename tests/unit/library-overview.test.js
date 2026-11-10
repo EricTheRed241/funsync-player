@@ -63,7 +63,8 @@ describe('ratingSummary', () => {
 
   it('counts only library videos and sorts them into the triage buckets', () => {
     const r = ratingSummary(ratings, paths);
-    expect(r).toMatchObject({ total: 7, rated: 5, unrated: 2, favourites: 3, keep: 2, review: 1, toDelete: 1 });
+    expect(r).toMatchObject({ total: 7, rated: 5, unrated: 2, favourites: 3, keep: 2, toDelete: 1 });
+    expect(r).not.toHaveProperty('review');
   });
 
   it('lists every half-star step and the rated videos, favourites first', () => {

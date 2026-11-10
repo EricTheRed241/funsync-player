@@ -3,10 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import { isWatched, watchedByRecency, watchedLast } from '../../renderer/js/ratings.js';
 import {
-  LIST_APP_PLAYLIST, LIST_ARTIST_PLAYLIST, LIST_CATEGORY, LIST_COLLECTION, LIST_HAND_PLAYLIST, LIST_LIBRARY, LIST_RATING, LIST_WATCHED,
+  LIST_ARTIST_PLAYLIST, LIST_CATEGORY, LIST_COLLECTION, LIST_HAND_PLAYLIST, LIST_LIBRARY, LIST_RATING, LIST_SMART_PLAYLIST, LIST_WATCHED,
   playlistKind, sinksWatched, WATCHED_LAST_KEY, watchedLastOn, watchedRegistration,
 } from '../../renderer/js/watched-lists.js';
-import { AGE_SCREEN, DISCOVERY_PLAYLIST, FAVOURITES_PLAYLIST, REVIEW_PLAYLIST } from '../../renderer/js/content-preferences.js';
+import { AGE_SCREEN, FAVOURITES_PLAYLIST, SMART_PLAYLISTS } from '../../renderer/js/content-preferences.js';
 
 const ratings = {
   '/v/rated.mp4': { rating: 3, favorite: false, updatedAt: 10 },
@@ -64,11 +64,13 @@ describe('watchedByRecency', () => {
 });
 
 describe('where watched videos sink', () => {
-  it('sinks in the library, categories, collections and app-made playlists', () => {
-    for (const kind of [LIST_LIBRARY, LIST_CATEGORY, LIST_COLLECTION, LIST_APP_PLAYLIST]) expect(sinksWatched(kind)).toBe(true);
+  it('sinks in the library, categories and collections', () => {
+    for (const kind of [LIST_LIBRARY, LIST_CATEGORY, LIST_COLLECTION]) expect(sinksWatched(kind)).toBe(true);
   });
-  it('keeps the order of artist, rating, Watched and hand-made lists', () => {
-    for (const kind of [LIST_ARTIST_PLAYLIST, LIST_RATING, LIST_WATCHED, LIST_HAND_PLAYLIST, undefined]) expect(sinksWatched(kind)).toBe(false);
+  it('keeps the order of every playlist (artist, smart, rating, hand-made) and the Watched list', () => {
+    for (const kind of [LIST_ARTIST_PLAYLIST, LIST_SMART_PLAYLIST, LIST_RATING, LIST_WATCHED, LIST_HAND_PLAYLIST, undefined]) {
+      expect(sinksWatched(kind)).toBe(false);
+    }
   });
   it('is on unless set to false', () => {
     expect(watchedLastOn(undefined)).toBe(true);
@@ -84,16 +86,15 @@ describe('playlistKind', () => {
     expect(playlistKind({ name: ' scyllahmv ' }, state)).toBe(LIST_ARTIST_PLAYLIST);
     expect(playlistKind({ name: FAVOURITES_PLAYLIST }, {})).toBe(LIST_ARTIST_PLAYLIST);
   });
-  it('knows the rating lists', () => {
-    expect(playlistKind({ name: REVIEW_PLAYLIST }, state)).toBe(LIST_RATING);
+  it('knows the age screener review list as a rating list', () => {
     expect(playlistKind({ name: AGE_SCREEN.playlist }, state)).toBe(LIST_RATING);
   });
-  it('knows Discovery as app-made', () => {
-    expect(playlistKind({ name: DISCOVERY_PLAYLIST }, state)).toBe(LIST_APP_PLAYLIST);
-    expect(playlistKind({ name: 'discovery' })).toBe(LIST_APP_PLAYLIST);
+  it('knows the smart playlists, whatever the case', () => {
+    for (const def of SMART_PLAYLISTS) expect(playlistKind({ name: def.name }, state)).toBe(LIST_SMART_PLAYLIST);
+    expect(playlistKind({ name: ' vr PICKS ' })).toBe(LIST_SMART_PLAYLIST);
   });
-  it('takes everything else as hand-made', () => {
-    for (const name of ['Keep Forever', 'Maybe later?', '12 Days of Scriptsmas', 'Agapilord', '']) {
+  it('takes everything else as hand-made, a leftover Discovery or Review too', () => {
+    for (const name of ['Keep Forever', 'Maybe later?', '12 Days of Scriptsmas', 'Agapilord', 'Discovery', 'Review', '']) {
       expect(playlistKind({ name }, state)).toBe(LIST_HAND_PLAYLIST);
     }
     expect(playlistKind(null)).toBe(LIST_HAND_PLAYLIST);
@@ -101,13 +102,9 @@ describe('playlistKind', () => {
 });
 
 describe('watchedRegistration', () => {
-  const playlists = [
-    { id: 'p1', name: 'Discovery' }, { id: 'p2', name: 'Keep Forever' }, { id: 'p3', name: 'ScyllaHMV' }, { id: 'p4', name: 'Review' },
-  ];
-  const settings = (values) => ({ get: (key) => values[key], getPlaylists: () => playlists });
-  it('sends the setting and the playlists that sink', () => {
-    const state = { 'library.artistPlaylists': { created: ['scyllahmv'] } };
-    expect(watchedRegistration(settings(state))).toEqual({ watched: { sink: true, playlistIds: ['p1'] } });
-    expect(watchedRegistration(settings({ ...state, [WATCHED_LAST_KEY]: false }))).toEqual({ watched: { sink: false, playlistIds: ['p1'] } });
+  const settings = (values) => ({ get: (key) => values[key] });
+  it('sends the setting only (no playlist sinks)', () => {
+    expect(watchedRegistration(settings({}))).toEqual({ watched: { sink: true } });
+    expect(watchedRegistration(settings({ [WATCHED_LAST_KEY]: false }))).toEqual({ watched: { sink: false } });
   });
 });

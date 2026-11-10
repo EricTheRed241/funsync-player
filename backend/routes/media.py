@@ -85,11 +85,10 @@ _favourite_artist_score: dict = {"score": None, "default": None}
 # (`services.library_edits.apply_to_queue`). The desktop owns it; phone and
 # headset changes are queue edits.
 _queue: dict = {"manual": [], "auto": [], "autoFill": True}
-# Watched-video sinking — {sink: bool, playlistIds: [id]}: whether lists put
-# watched (rated) videos last (the desktop's `library.watchedLast`), and the
-# playlists whose videos sink too (renderer/js/watched-lists.js, today only
-# Discovery). The headset sections and the web remote follow it.
-_watched: dict = {"sink": True, "playlistIds": []}
+# Watched-video sinking — {sink: bool}: whether lists put watched (rated)
+# videos last (the desktop's `library.watchedLast`). The headset sections and
+# the web remote follow it; playlists always keep their own order.
+_watched: dict = {"sink": True}
 
 # Thumbnails live in `services.ffmpeg`'s cache directory (shared with the
 # desktop's library cards); `set_thumb_cache_dir` points it somewhere.
@@ -461,15 +460,12 @@ def register_queue(play_queue: dict):
 
 
 def register_watched(data: dict):
-    """Register the watched-sink settings ({sink, playlistIds}). `sink` is
-    True unless False; `playlistIds` keeps the non-empty strings, each
-    once. A missing key or junk falls back to the defaults (sink on, no
-    playlists)."""
+    """Register the watched-sink setting ({sink}). `sink` is True unless
+    False; a missing key or junk falls back to sink on. Other keys are
+    ignored."""
     global _watched
     data = data if isinstance(data, dict) else {}
-    ids = data.get("playlistIds")
-    ids = list(dict.fromkeys(i for i in ids if isinstance(i, str) and i)) if isinstance(ids, list) else []
-    _watched = {"sink": data.get("sink") is not False, "playlistIds": ids}
+    _watched = {"sink": data.get("sink") is not False}
 
 
 def apply_acked_edit(edit: dict):
@@ -681,9 +677,9 @@ def get_queue() -> dict:
 
 
 def get_watched() -> dict:
-    """The watched-sink settings ({sink, playlistIds}); sink on and no
-    playlists until the desktop registers them."""
-    return {"sink": _watched["sink"], "playlistIds": list(_watched["playlistIds"])}
+    """The watched-sink setting ({sink}); sink on until the desktop
+    registers it."""
+    return {"sink": _watched["sink"]}
 
 
 def get_categories() -> list[dict]:
@@ -1035,9 +1031,9 @@ async def register_library(request: Request):
     videoPaths}], one per artist folder), `favouriteArtists` ([name], the
     effective favourites), `favouriteArtistScore` ({score, default}, the
     favourite-artist bonus), `queue` ({manual: [path], auto: [path],
-    autoFill: bool}, the shared play queue), `watched` ({sink: bool,
-    playlistIds: [id]}: whether lists put rated videos last, and the
-    playlists whose videos sink too) and `thumbPrune` (true with the
+    autoFill: bool}, the shared play queue), `watched` ({sink: bool}:
+    whether lists put rated videos last; playlists keep their order) and
+    `thumbPrune` (true with the
     `videos` of a scan that read every source: drop cached thumbnails no
     registered video uses). Every field is independent: omit
     a key to leave that slice untouched on the backend.

@@ -61,6 +61,7 @@ import { applyPreferenceScores, PREFERENCE_SCORES_KEY, tagScoreRegistration } fr
 import { artistRegistration, favouritesOf } from '../js/favourite-artists.js';
 import { applyAutoCollections } from '../js/auto-collections.js';
 import { applyScoreBandCollections } from '../js/score-bands.js';
+import { applySmartPlaylists } from '../js/smart-playlists.js';
 import { DEFAULT_SORT } from '../js/content-preferences.js';
 import { capacitySummary, formatBytes } from '../js/library-overview.js';
 
@@ -84,6 +85,9 @@ const MAX_CONCURRENT_THUMBNAILS = 4;
 // this many times per scan (10 minutes); the next scan starts over.
 const VR_FLAGS_RETRY_MS = 30_000;
 const VR_FLAGS_RETRIES = 20;
+// Smart playlists are rewritten this long after the last trigger (scores,
+// ratings, durations), so a burst of changes writes them once.
+const SMART_PLAYLISTS_DELAY_MS = 500;
 
 /**
  * Resolve the seek percentage for a video's thumbnail from its optional
@@ -370,9 +374,11 @@ export class Library {
 
     // A rating / favourite changed — from a card, the player, the phone or
     // the headset. Repaint just that video's controls; re-filter only when
-    // a rating filter or the rating sort could move it.
+    // a rating filter or the rating sort could move it. A rated video leaves
+    // the smart playlists.
     if (!this._ratingListenerAttached) {
       eventBus.on('rating:changed', ({ path, entry } = {}) => {
+        if (path) this._scheduleSmartPlaylists();
         if (!path || !this._container) return;
         const value = { rating: entry?.rating || 0, favorite: !!entry?.favorite };
         for (const el of this._container.querySelectorAll(`[data-video-path="${CSS.escape(path)}"] .rating-control`)) {
@@ -3916,6 +3922,7 @@ export class Library {
 
     if (cacheDirty) {
       this._settings.set('library.durationCache', cache);
+      this._scheduleSmartPlaylists();
     }
     if (pending.size > 0) {
       console.log(`[Library] ${pending.size} videos still without duration after ${MAX_WAIT_MS}ms — thumbnail capture will catch up`);
@@ -7041,7 +7048,8 @@ export class Library {
    * Score every video (library-scores.js) with the backend's latest VR and
    * axis decisions; on a change, store the scores, repaint the badges,
    * re-sort when sorted by score. Brings the score-band collections in line
-   * (score-bands.js). On either change (unless `register` is false) sends
+   * (score-bands.js) and schedules the smart playlists (smart-playlists.js,
+   * which register themselves). On either change (unless `register` is false) sends
    * the library to the backend. Waits for the first axis decisions of the
    * session: until then the stored scores stand.
    *
@@ -7057,6 +7065,7 @@ export class Library {
     // Every time, not only on a change: the first run after an update makes
     // the band collections from the stored scores.
     const bands = this._applyScoreBands();
+    this._scheduleSmartPlaylists();
     if (!changed && !bands) return false;
     if (changed) this._repaintScoreBadges();
     if (!this._scanning && ((changed && this._sortParts()[0] === 'score') || (bands && this._activeCollectionId))) this._applyFilters();
@@ -7082,6 +7091,28 @@ export class Library {
       console.warn('[Library] Score collections failed:', err?.message || err);
       return false;
     }
+  }
+
+  /**
+   * The smart playlists (smart-playlists.js) from the stored scores,
+   * ratings and durations and the backend's VR decisions, soon (several
+   * triggers often come together: a scan's scores, a burst of ratings).
+   * Runs one at a time; sends the library to the backend when a playlist
+   * was made or rewritten.
+   */
+  _scheduleSmartPlaylists() {
+    clearTimeout(this._smartPlaylistsTimer);
+    this._smartPlaylistsTimer = setTimeout(() => {
+      this._smartPlaylists = (this._smartPlaylists || Promise.resolve())
+        .then(async () => {
+          if (!this._videos?.length) return;
+          const r = await applySmartPlaylists(this._settings, this._videos, { vrOf: (path) => isVRVideo({ path }) });
+          if (!r.created.length && !r.updated) return;
+          console.log('[Library] Smart playlists:', r);
+          this._registerWithBackend();
+        })
+        .catch((err) => console.warn('[Library] Smart playlists failed:', err?.message || err));
+    }, SMART_PLAYLISTS_DELAY_MS);
   }
 
   /**

@@ -246,9 +246,6 @@ export const GENRE_WORDS = new Set(['vam', 'sfm', 'mmd', 'compilation', 'compila
 
 /** Rated this or lower (and not a favourite): deleted from disk, scripts and axes too, and the scouts skip the post. Shared (content-preferences.json): the age screener skips these videos. */
 export const DELETE_AT_OR_BELOW = data.ratings.deleteAtOrBelow;
-/** Rated this or higher: kept (out of Review). In between: the REVIEW_PLAYLIST. */
-export const KEEP_FROM = 4;
-export const REVIEW_PLAYLIST = 'Review';
 /** "Top rated" filter and the headset's Top Rated section (mirrored in backend/services/vr_sections.py). */
 export const TOP_RATED_MIN = 4;
 
@@ -279,15 +276,25 @@ export const SCORE_BANDS = [
   { key: 'score-low', name: 'Score below 10', below: 10 },
 ];
 
-// ── Watched videos ──────────────────────────────────────────────────────
+// ── Smart playlists ─────────────────────────────────────────────────────
 
 /**
- * The scouts' playlist of downloads (scripts/eroscripts-scout-lib.mjs). App-made, so watched
- * (rated) videos sink to its end like in the library (renderer/js/watched-lists.js); the other
- * playlists keep their order: artist playlists, the rating lists (REVIEW_PLAYLIST, the age
- * screener's) and the user's own.
+ * Smart playlists (user, 2026-11-10; renderer/js/smart-playlists.js): app-made playlists that
+ * refill themselves after each scan and whenever ratings, scores or durations change. Each
+ * holds exactly its current members, only unwatched (unrated) videos, in its own order, so the
+ * phone and the headsets (`Playlist: <name>`) show them like any playlist.
+ * • `vr: true` — the backend's VR decision (as in the scores and the VR category).
+ * • `minScore` — preference score at least this (`library.preferenceScores`).
+ * • `maxSeconds` — known duration (`library.durationCache`) below this.
+ * • `addedWithinDays` — added (the scan's `dateAdded`, the Date added sort and the headsets'
+ *   Recently Added) at most this many days ago.
+ * `order`: 'score' (highest first, title breaking ties) or 'added' (newest first).
  */
-export const DISCOVERY_PLAYLIST = 'Discovery';
+export const SMART_PLAYLISTS = [
+  { key: 'vr-picks', name: 'VR picks', vr: true, minScore: 15, order: 'score' },
+  { key: 'quick-ones', name: 'Quick ones', maxSeconds: 5 * 60, minScore: 15, order: 'score' },
+  { key: 'fresh-downloads', name: 'Fresh downloads', addedWithinDays: 14, order: 'added' },
+];
 
 // ── Artist playlists ────────────────────────────────────────────────────
 

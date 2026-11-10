@@ -542,7 +542,6 @@
     "ratings": {
       "title": "Notes et favoris",
       "keep": "Garder (4★+)",
-      "review": "À revoir (2½–3½★)",
       "showInLibrary": "Afficher dans la bibliothèque",
       "listTitle": "Vidéos notées et favorites ({count})",
       "none": "Aucune vidéo n’est encore notée ni favorite. Notez avec les étoiles d’une carte, dans le lecteur, sur le téléphone ou dans HereSphere.",
@@ -1228,7 +1227,7 @@
       "hideDupesLabel": "Masquer les doublons",
       "hideDupesHint": "Affiche une seule entrée lorsque plusieurs vidéos portent le même nom de fichier, par exemple le même fichier dans deux dossiers source. La copie avec script est conservée.",
       "watchedLastLabel": "Vidéos vues en dernier",
-      "watchedLastHint": "Une vidéo compte comme vue dès que vous la notez. Les vidéos vues passent à la fin de la bibliothèque, des catégories, des collections et de Discovery, atténuées et marquées « Vu », pour ne pas les relancer par erreur. Les playlists d'artistes, vos propres playlists et les listes de notes gardent leur ordre. La télécommande web et le casque suivent ce réglage."
+      "watchedLastHint": "Une vidéo compte comme vue dès que vous la notez. Les vidéos vues passent à la fin de la bibliothèque, des catégories et des collections, atténuées et marquées « Vu », pour ne pas les relancer par erreur. Les playlists et les listes de notes gardent leur ordre. La télécommande web et le casque suivent ce réglage."
     },
     "data": {
       "backupHeader": "Sauvegarde et restauration",

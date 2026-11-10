@@ -30,7 +30,7 @@ import { autoFillQueue, applyQueueChange, reviewPlaylistPaths } from './play-que
 import { PREFERENCE_SCORES_KEY, tagScoreRegistration } from './library-scores.js';
 import { artistRegistration } from './favourite-artists.js';
 import { WATCHED_COLLECTION_ID, WATCHED_LAST_KEY, watchedRegistration } from './watched-lists.js';
-import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
+import { ratingVerdict, sweepRejected } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
@@ -2058,11 +2058,10 @@ class App {
   }
 
   /**
-   * Triage rules (reject-rule.js): ratings of 2 or lower delete from disk,
-   * 2½–3½ stars go to Review, 4+ leave it. Runs now and on every rating
-   * change. Deletion sweeps run one after another; a finished one rescans
-   * the library so the deleted scenes leave the grid, the phone and the
-   * headset.
+   * Triage rule (reject-rule.js): ratings of 2 or lower delete from disk.
+   * Runs now and on every rating change. Deletion sweeps run one after
+   * another; a finished one rescans the library so the deleted scenes leave
+   * the grid, the phone and the headset.
    */
   _wireRejectRule() {
     let chain = Promise.resolve();
@@ -2080,15 +2079,10 @@ class App {
       }).catch((err) => console.warn('[Rejected] sweep failed:', err));
       return chain;
     };
-    const review = (path) => syncReview(this.settings, path)
-      .then((r) => { if (r.added || r.removed) console.log('[Review]', path || 'startup', r); })
-      .catch((err) => console.warn('[Review] failed:', err));
-    eventBus.on('rating:changed', ({ path, entry } = {}) => {
-      const verdict = ratingVerdict(entry);
-      if (verdict === 'delete') sweep();
-      else if (path && verdict) review(path);
+    eventBus.on('rating:changed', ({ entry } = {}) => {
+      if (ratingVerdict(entry) === 'delete') sweep();
     });
-    sweep().then(() => review());
+    sweep();
   }
 
   /**

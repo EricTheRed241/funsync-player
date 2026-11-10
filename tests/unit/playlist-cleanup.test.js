@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { planPlaylistCleanup } from '../../renderer/js/playlist-cleanup.js';
 import { planArtistPlaylists } from '../../renderer/js/artist-playlists.js';
-import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN } from '../../renderer/js/content-preferences.js';
+import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN, SMART_PLAYLISTS } from '../../renderer/js/content-preferences.js';
 
 const vids = (artist, n, from = 1) => Array.from({ length: n }, (_, i) => `/GVP/EroScripts/${artist}/S${i + from}/S${i + from}.mp4`);
 
@@ -61,5 +61,17 @@ describe('planPlaylistCleanup', () => {
     });
     expect(r.remove).toEqual([]);
     expect(r.state).toEqual({ created: [] });
+  });
+
+  it('keeps an empty smart playlist (any case) but removes an empty leftover Discovery or Review', () => {
+    const r = planPlaylistCleanup({
+      playlists: [
+        ...SMART_PLAYLISTS.map((def, i) => ({ id: `s${i}`, name: i ? def.name : def.name.toUpperCase(), videoPaths: [] })),
+        { id: 'd', name: 'Discovery', videoPaths: ['/deleted.mp4'] },
+        { id: 'r', name: 'Review', videoPaths: [] },
+      ],
+      videoPaths: ['/a.mp4'],
+    });
+    expect(r.remove.map((x) => x.id)).toEqual(['d', 'r']);
   });
 });

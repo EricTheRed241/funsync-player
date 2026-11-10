@@ -542,7 +542,6 @@
     "ratings": {
       "title": "Bewertungen und Favoriten",
       "keep": "Behalten (4★+)",
-      "review": "Prüfen (2½–3½★)",
       "showInLibrary": "In der Bibliothek zeigen",
       "listTitle": "Bewertete und favorisierte Videos ({count})",
       "none": "Noch kein Video ist bewertet oder ein Favorit. Bewerte mit den Sternen auf einer Karte, im Player, auf dem Handy oder in HereSphere.",
@@ -1228,7 +1227,7 @@
       "hideDupesLabel": "Doppelte Namen ausblenden",
       "hideDupesHint": "Zeigt nur einen Eintrag, wenn mehrere Videos denselben Dateinamen haben, etwa dieselbe Datei in zwei Quellordnern. Die Kopie mit Skript bleibt erhalten.",
       "watchedLastLabel": "Gesehene Videos zuletzt",
-      "watchedLastHint": "Ein Video gilt als gesehen, sobald du es bewertest. Gesehene Videos rücken in der Bibliothek, in Kategorien, Sammlungen und Discovery ans Ende, abgedunkelt und mit dem Hinweis „Gesehen“, damit du sie nicht versehentlich noch einmal abspielst. Künstler-Playlists, deine eigenen Playlists und die Bewertungslisten behalten ihre Reihenfolge. Fernbedienung im Browser und Headset folgen dieser Einstellung."
+      "watchedLastHint": "Ein Video gilt als gesehen, sobald du es bewertest. Gesehene Videos rücken in der Bibliothek, in Kategorien und Sammlungen ans Ende, abgedunkelt und mit dem Hinweis „Gesehen“, damit du sie nicht versehentlich noch einmal abspielst. Playlists und die Bewertungslisten behalten ihre Reihenfolge. Fernbedienung im Browser und Headset folgen dieser Einstellung."
     },
     "data": {
       "backupHeader": "Backup & Wiederherstellung",

@@ -999,9 +999,9 @@ export class Playlists {
   }
 
   /**
-   * True when watched (rated) videos go last in `pl`: only in the app-made
-   * playlists (Discovery), not artist, rating or the user's own playlists
-   * (watched-lists.js).
+   * True when watched (rated) videos go last in `pl`. No playlist kind sinks
+   * today (watched-lists.js: artist, smart, rating and the user's own keep
+   * their order); the rule lives there.
    */
   _sinksWatched(pl) {
     return watchedLastOn(this._settings.get(WATCHED_LAST_KEY))

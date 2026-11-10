@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Favourites in Discovery (scripts/scout-live.mjs).
+// Favourites in the Discovery scouts (scripts/scout-live.mjs).
 import { describe, it, expect } from 'vitest';
 import { favouriteIn } from '../../scripts/scout-live.mjs';
 

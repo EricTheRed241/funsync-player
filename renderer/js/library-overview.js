@@ -9,7 +9,7 @@
 // or moved-away videos stay in config.json but aren't the library's any more.
 // Pure and renderer-safe: no DOM, no Node imports.
 
-import { DELETE_AT_OR_BELOW, KEEP_FROM, LIBRARY_MAX_VIDEOS } from './content-preferences.js';
+import { DELETE_AT_OR_BELOW, LIBRARY_MAX_VIDEOS, TOP_RATED_MIN } from './content-preferences.js';
 import { getRatingEntry, RATING_MAX, RATING_STEP } from './ratings.js';
 import { effectiveTagScores, normalizeTagScore, tagKey, TAG_SCORE_STEP } from './preference-score.js';
 import { artistRegistration, favouritesOf } from './favourite-artists.js';
@@ -81,9 +81,8 @@ export function formatBytes(bytes, locale) {
  * Ratings and favourites of the library's videos.
  *
  * `stars`: how many videos have each rating, RATING_MAX down to RATING_STEP
- * (every step listed, zeros included). `keep` = rated KEEP_FROM or more,
- * `review` = rated above DELETE_AT_OR_BELOW and below KEEP_FROM (the Review
- * playlist), `toDelete` = rated DELETE_AT_OR_BELOW or less and not a
+ * (every step listed, zeros included). `keep` = rated TOP_RATED_MIN or more
+ * (the Top rated filter), `toDelete` = rated DELETE_AT_OR_BELOW or less and not a
  * favourite (the triage deletes those; normally 0). `entries`: every rated or
  * favourite video, favourites first, then highest rating, then latest change.
  *
@@ -96,7 +95,6 @@ export function ratingSummary(ratings, videoPaths) {
   const entries = [];
   let favourites = 0;
   let keep = 0;
-  let review = 0;
   let toDelete = 0;
   for (const path of paths) {
     const entry = getRatingEntry(ratings || {}, path);
@@ -108,15 +106,14 @@ export function ratingSummary(ratings, videoPaths) {
     if (favorite) favourites += 1;
     if (!rating) continue;
     counts.set(rating, (counts.get(rating) || 0) + 1);
-    if (rating >= KEEP_FROM) keep += 1;
-    else if (rating > DELETE_AT_OR_BELOW) review += 1;
-    else if (!favorite) toDelete += 1;
+    if (rating >= TOP_RATED_MIN) keep += 1;
+    else if (rating <= DELETE_AT_OR_BELOW && !favorite) toDelete += 1;
   }
   const stars = [];
   for (let r = RATING_MAX; r >= RATING_STEP; r -= RATING_STEP) stars.push({ rating: r, count: counts.get(r) || 0 });
   const rated = stars.reduce((n, s) => n + s.count, 0);
   entries.sort((a, b) => (b.favorite - a.favorite) || (b.rating - a.rating) || (b.updatedAt - a.updatedAt) || a.path.localeCompare(b.path));
-  return { total: paths.length, rated, unrated: paths.length - rated, favourites, keep, review, toDelete, stars, entries };
+  return { total: paths.length, rated, unrated: paths.length - rated, favourites, keep, toDelete, stars, entries };
 }
 
 /**
