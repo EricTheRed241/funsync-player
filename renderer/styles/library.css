@@ -877,6 +877,40 @@
   color: #fff;
 }
 
+/* Watched (rated) videos where they sink to the end (renderer/js/watched-lists.js):
+ * dimmed, back to full strength on hover, with a small muted pill. Shared by
+ * the library, categories and playlists views (renderer/js/watched-badge.js). */
+.is-watched {
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.is-watched:hover,
+.is-watched:focus-within {
+  opacity: 1;
+}
+
+.watched-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* In a card's title area (categories, playlists): a little air before it. */
+.categories__video-info .watched-badge,
+.playlists__video-info .watched-badge {
+  margin-top: 4px;
+}
+
 /* Playback-mode badges (multi-axis / custom routing).
    Same icon shape as funscript/subtitle so they sit cleanly inside the
    shared .library__card-badges flex row. Skip-when-single keeps the grid

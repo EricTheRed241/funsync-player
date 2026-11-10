@@ -541,21 +541,24 @@ export class NavBar {
         const actions = document.createElement('div');
         actions.className = 'nav-bar__library-actions';
 
-        if (!isUnavailable) {
-          const renameBtn = document.createElement('button');
-          renameBtn.className = 'nav-bar__library-action';
-          renameBtn.textContent = '✎';
-          renameBtn.title = t('nav.edit');
-          renameBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onRenameCollection) this._onRenameCollection(col.id); });
-          actions.appendChild(renameBtn);
-        }
+        // Built-in collections (Watched, made from the ratings) can't be edited or deleted.
+        if (!col.builtIn) {
+          if (!isUnavailable) {
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'nav-bar__library-action';
+            renameBtn.textContent = '✎';
+            renameBtn.title = t('nav.edit');
+            renameBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onRenameCollection) this._onRenameCollection(col.id); });
+            actions.appendChild(renameBtn);
+          }
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'nav-bar__library-action nav-bar__library-action--danger';
-        deleteBtn.textContent = '✕';
-        deleteBtn.title = t('common.delete');
-        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onDeleteCollection) this._onDeleteCollection(col.id); });
-        actions.appendChild(deleteBtn);
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'nav-bar__library-action nav-bar__library-action--danger';
+          deleteBtn.textContent = '✕';
+          deleteBtn.title = t('common.delete');
+          deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onDeleteCollection) this._onDeleteCollection(col.id); });
+          actions.appendChild(deleteBtn);
+        }
         row.appendChild(btn);
         row.appendChild(actions);
         dd.appendChild(row);

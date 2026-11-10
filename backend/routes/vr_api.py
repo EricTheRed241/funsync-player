@@ -52,7 +52,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, _path_to_id, record_vr_activity, thumb_url
+from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, get_watched, _path_to_id, record_vr_activity, thumb_url
 from routes.remote_sync import submit_library_edit
 from services import library_edits, stereo_detect, video_info, vr_sections
 from services.network import get_local_ip
@@ -528,15 +528,15 @@ def _filtered_videos(registry, vr_filter):
         yield vid_id, video, is_3d
 
 
-def _scene_tag_names(video, is_3d, playlists, queued=()):
+def _scene_tag_names(video, is_3d, playlists, ratings, queued=()):
     """Scene-detail tags, the same for HereSphere and DeoVR:
     `Studio:<source>`, `Feature:Is scripted`, the filter tags (`Format:`,
     `Speed:`, `Length:`, hand-made multi-axis), `Queue:Up next` when the
     video's path is in `queued` (two-way in HereSphere), then
     `Playlist:<name>` per playlist holding the video (two-way in
     HereSphere), `Category:<name>` per desktop category, `Tag:<tag>` per
-    chip tag and `Score:<n>` for the preference score (all three
-    read-only)."""
+    chip tag, `Score:<n>` for the preference score and `Status:Watched`
+    when `ratings` give it a rating (all four read-only)."""
     tags = []
     path = video.get('path', '')
     source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
@@ -550,6 +550,7 @@ def _scene_tag_names(video, is_3d, playlists, queued=()):
     tags.extend(vr_sections.category_tags(path, get_categories(), get_video_categories()))
     tags.extend(vr_sections.chip_tag_names(get_chip_tags(path)))
     tags.extend(vr_sections.score_tags(get_preference_score(path)))
+    tags.extend(vr_sections.watched_tags(path, ratings))
     return tags
 
 
@@ -609,7 +610,8 @@ def parse_heresphere_update(body, path, ratings, playlists, served_queue=None, s
         `served_queue`, whether the scene detail last served for `path`
         carried it (None: never served): present now but not then →
         `queue-add` at the end, absent now but present then →
-        `queue-remove`. Any other tag is ignored.
+        `queue-remove`. Any other tag (`Status:Watched`, `Category:`,
+        `Score:` …) is ignored: those are read-only.
     """
     if not isinstance(body, dict) or not path:
         return []
@@ -693,9 +695,12 @@ async def _apply_heresphere_update(request: Request, path):
 async def deovr_library(request: Request):
     """DeoVR library listing — groups of scenes.
 
-    Groups are the shared headset sections (`services.vr_sections`): VR /
-    Flat, speed, length, hand-made multi-axis, recently added. Empty ones
-    are left out.
+    Groups are the shared headset sections (`services.vr_sections`): Queue,
+    VR / Flat, speed, length, hand-made multi-axis, recently added, the
+    triage sections (Favorites, Top Rated, Unrated, Watched) and one per
+    playlist. Empty ones are left out. Watched (rated) videos sink to the
+    end of the browsing sections and the desktop's chosen playlists while
+    the desktop's `watched.sink` is on.
 
     DeoVR sends both GET and POST to this endpoint.
     Query params:
@@ -718,7 +723,7 @@ async def deovr_library(request: Request):
 
     sections = vr_sections.build_sections(
         entries, ratings=get_ratings(), playlists=get_playlists(),
-        queue_paths=vr_sections.queued_paths(get_queue()),
+        queue_paths=vr_sections.queued_paths(get_queue()), watched=get_watched(),
     )
     scenes = [{'name': name, 'list': items} for name, items in sections]
 
@@ -752,6 +757,7 @@ async def deovr_scene(video_id: str, request: Request):
     title = os.path.splitext(name)[0]
     duration = _get_duration(video)
     path = video.get('path', '')
+    ratings = get_ratings()
 
     width, height, codec = await _scene_video_info(video_id, path)
 
@@ -815,10 +821,10 @@ async def deovr_scene(video_id: str, request: Request):
         'categories': [
             {'tag': {'id': i, 'name': name}}
             for i, name in enumerate(_scene_tag_names(
-                video, is_3d, get_playlists(), set(vr_sections.queued_paths(get_queue())),
+                video, is_3d, get_playlists(), ratings, set(vr_sections.queued_paths(get_queue())),
             ), start=1)
         ],
-        'isFavorite': library_edits.rating_entry(get_ratings(), path)[1],
+        'isFavorite': library_edits.rating_entry(ratings, path)[1],
         'fullVideoReady': True,
         'fullAccess': True,
     }
@@ -842,6 +848,8 @@ async def heresphere_library(request: Request):
 
     Sections are the shared headset sections (`services.vr_sections`), in
     plain text — HereSphere can't render emoji. Empty ones are left out.
+    Watched (rated) videos sink to the end of the browsing sections and the
+    desktop's chosen playlists while the desktop's `watched.sink` is on.
 
     Query params:
       ?filter=vr    — only VR videos
@@ -860,7 +868,7 @@ async def heresphere_library(request: Request):
         {'name': name, 'list': urls}
         for name, urls in vr_sections.build_sections(
             entries, ratings=get_ratings(), playlists=get_playlists(),
-            queue_paths=vr_sections.queued_paths(get_queue()),
+            queue_paths=vr_sections.queued_paths(get_queue()), watched=get_watched(),
         )
     ]
 
@@ -895,7 +903,8 @@ async def heresphere_scene(video_id: str, request: Request):
     # Ratings, favourites and playlist tags edited in the headset.
     if request.method == 'POST':
         await _apply_heresphere_update(request, path)
-    rating, favorite = library_edits.rating_entry(get_ratings(), path)
+    ratings = get_ratings()
+    rating, favorite = library_edits.rating_entry(ratings, path)
     playlists = get_playlists()
 
     width, height, codec = await _scene_video_info(video_id, path)
@@ -955,10 +964,10 @@ async def heresphere_scene(video_id: str, request: Request):
     # Tags: studio, scripted, filter tags, then Queue:Up next (adding /
     # removing it in the headset queues / unqueues the video), Playlist:
     # (removing one in the headset takes the video out of that playlist,
-    # adding `Playlist:<name>` puts it in, creating it), Category:, Tag: and
-    # Score: (all read-only); chapters follow.
+    # adding `Playlist:<name>` puts it in, creating it), Category:, Tag:,
+    # Score: and Status:Watched (all read-only); chapters follow.
     queued = set(vr_sections.queued_paths(get_queue()))
-    tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists, queued)]
+    tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists, ratings, queued)]
     _served_queue_tag[path] = path in queued
     _served_playlists[path] = frozenset(n.casefold() for n in vr_sections.playlist_names_from_tags(tags))
 

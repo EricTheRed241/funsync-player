@@ -13,6 +13,9 @@ import { thumbRequestOpts, customThumbImagePath } from './library.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
 import { captureVideoThumb } from '../js/thumb-request.js';
+import { isWatched, ratingOf, watchedLast } from '../js/ratings.js';
+import { LIST_CATEGORY, sinksWatched, WATCHED_LAST_KEY, watchedLastOn } from '../js/watched-lists.js';
+import { markWatched } from '../js/watched-badge.js';
 
 export class Categories {
   constructor({ settings, onPlayVideo, library }) {
@@ -280,11 +283,16 @@ export class Categories {
       return;
     }
 
+    // Watched (rated) videos go last, dimmed and badged (watched-lists.js).
+    const ratings = this._settings.getRatings ? this._settings.getRatings() : {};
+    const sink = watchedLastOn(this._settings.get(WATCHED_LAST_KEY)) && sinksWatched(LIST_CATEGORY);
+    const ordered = sink ? watchedLast(validPaths, (p) => p, (p) => isWatched(ratings, p)) : validPaths;
+
     const grid = document.createElement('div');
     grid.className = 'categories__grid';
     grid.classList.toggle('categories__grid--list', this._viewMode === 'list');
 
-    for (const videoPath of validPaths) {
+    for (const videoPath of ordered) {
       // Capture this category's full path list as the play context so Up
       // Next can advance through the category. Snapshot is per-card so
       // each click captures its index correctly.
@@ -292,12 +300,16 @@ export class Categories {
         source: 'category',
         sourceLabel: `category "${cat.name}"`,
         sourceContext: { categoryId: cat.id },
-        list: validPaths.slice(),
-        index: validPaths.indexOf(videoPath),
+        list: ordered.slice(),
+        index: ordered.indexOf(videoPath),
       };
       const el = this._viewMode === 'list'
         ? this._createVideoListItem(videoPath, cat, playContext)
         : this._createVideoCard(videoPath, cat, playContext);
+      if (sink && isWatched(ratings, videoPath)) {
+        const parent = el.querySelector('.categories__list-badges') || el.querySelector('.categories__video-info') || el;
+        markWatched(el, ratingOf(ratings, videoPath), parent);
+      }
       grid.appendChild(el);
     }
 

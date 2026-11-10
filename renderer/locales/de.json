@@ -788,7 +788,10 @@
         "favorites": "Favoriten",
         "top": "Top bewertet (4+)",
         "unrated": "Nicht bewertet"
-      }
+      },
+      "watched": "Gesehen",
+      "watchedTitle": "Gesehen: mit {n} Sternen bewertet",
+      "watchedCollection": "Gesehen"
     },
     "queue": {
       "add": "Zur Warteschlange",
@@ -1223,7 +1226,9 @@
       "resumeProgressLabel": "Fortschritt in Playlists",
       "resumeProgressHint": "Zeigt als Balken auf Playlist-Karten und -Zeilen, wie weit du gekommen bist. Nur bei Playlist-Wiedergabe — die Hauptbibliothek bleibt unmarkiert.",
       "hideDupesLabel": "Doppelte Namen ausblenden",
-      "hideDupesHint": "Zeigt nur einen Eintrag, wenn mehrere Videos denselben Dateinamen haben, etwa dieselbe Datei in zwei Quellordnern. Die Kopie mit Skript bleibt erhalten."
+      "hideDupesHint": "Zeigt nur einen Eintrag, wenn mehrere Videos denselben Dateinamen haben, etwa dieselbe Datei in zwei Quellordnern. Die Kopie mit Skript bleibt erhalten.",
+      "watchedLastLabel": "Gesehene Videos zuletzt",
+      "watchedLastHint": "Ein Video gilt als gesehen, sobald du es bewertest. Gesehene Videos rücken in der Bibliothek, in Kategorien, Sammlungen und Discovery ans Ende, abgedunkelt und mit dem Hinweis „Gesehen“, damit du sie nicht versehentlich noch einmal abspielst. Künstler-Playlists, deine eigenen Playlists und die Bewertungslisten behalten ihre Reihenfolge. Fernbedienung im Browser und Headset folgen dieser Einstellung."
     },
     "data": {
       "backupHeader": "Backup & Wiederherstellung",
@@ -1775,6 +1780,9 @@
     "filterTopRated": "Top bewertet (4+)",
     "filterUnrated": "Nicht bewertet",
     "sortDesc": "Bewertung hoch-niedrig",
-    "sortAsc": "Bewertung niedrig-hoch"
+    "sortAsc": "Bewertung niedrig-hoch",
+    "watched": "Gesehen",
+    "watchedTitle": "Gesehen: mit {n} Sternen bewertet",
+    "watchedCollection": "Gesehen"
   }
 }

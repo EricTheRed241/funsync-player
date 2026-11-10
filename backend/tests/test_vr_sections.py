@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from httpx import AsyncClient, ASGITransport
 from main import app
 from routes import remote_sync
-from routes.media import register_videos, register_playlists, register_ratings, register_categories, get_video_registry, _path_to_id
+from routes.media import register_videos, register_playlists, register_ratings, register_categories, register_watched, get_video_registry, _path_to_id
+from routes.vr_api import parse_heresphere_update
 from services import vr_sections
 from services.funscript import companion_axes, embedded_axes, has_handmade_companions, may_have_embedded_axes
 
@@ -46,15 +47,18 @@ async def client():
 
 @pytest.fixture(autouse=True)
 def _no_triage_state():
-    """No ratings, playlists, categories or queued edits leak between tests."""
+    """No ratings, playlists, categories, watched settings or queued edits
+    leak between tests."""
     register_ratings({})
     register_playlists([])
     register_categories([], {})
+    register_watched({})
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
     register_playlists([])
     register_categories([], {})
+    register_watched({})
     remote_sync._reset_state_for_tests()
 
 
@@ -211,6 +215,107 @@ class TestBuildSections:
         for name in vr_sections.SECTION_ORDER:
             assert name.isascii(), name
         assert len(set(vr_sections.SECTION_ORDER)) == len(vr_sections.SECTION_ORDER)
+
+
+# --- Watched (rated) videos ------------------------------------------------
+
+class TestWatched:
+    # Title order a, b, c, d. b and d are rated (watched); c is a favourite
+    # without a rating, which doesn't count.
+    ENTRIES = [
+        ("a", {"path": "/v/a.mp4", "avgSpeed": 100}, False),
+        ("b", {"path": "/v/b.mp4", "avgSpeed": 100}, False),
+        ("c", {"path": "/v/c.mp4", "avgSpeed": 100}, False),
+        ("d", {"path": "/v/d.mp4", "avgSpeed": 100}, True),
+    ]
+    RATINGS = {
+        "/v/b.mp4": {"rating": 3.0, "favorite": False, "updatedAt": 10},
+        "/v/c.mp4": {"rating": 0, "favorite": True, "updatedAt": 30},
+        "/v/d.mp4": {"rating": 4.5, "favorite": True, "updatedAt": 20},
+    }
+    PLAYLISTS = [
+        {"id": "pl-disc", "name": "Discovery", "videoPaths": ["/v/d.mp4", "/v/b.mp4", "/v/a.mp4"]},
+        {"id": "pl-mine", "name": "Mine", "videoPaths": ["/v/d.mp4", "/v/a.mp4"]},
+    ]
+
+    def _sections(self, watched):
+        return dict(vr_sections.build_sections(
+            self.ENTRIES, now_ms=0, ratings=self.RATINGS, playlists=self.PLAYLISTS,
+            queue_paths=["/v/b.mp4", "/v/a.mp4"], watched=watched,
+        ))
+
+    def test_rated_means_watched_favourite_alone_does_not(self):
+        assert vr_sections.is_watched(self.RATINGS, "/v/b.mp4")
+        assert vr_sections.is_watched({"/x": {"rating": 0.5}}, "/x")
+        assert not vr_sections.is_watched(self.RATINGS, "/v/c.mp4")
+        assert not vr_sections.is_watched(self.RATINGS, "/v/a.mp4")
+        assert not vr_sections.is_watched({"/x": "junk"}, "/x")
+        assert not vr_sections.is_watched(None, "/x")
+
+    def test_watched_last_is_a_stable_partition(self):
+        items = [("a", 1), ("b", 0), ("c", 1), ("d", 0), ("e", 0)]
+        assert vr_sections.watched_last(items, lambda i: i[1]) == [
+            ("b", 0), ("d", 0), ("e", 0), ("a", 1), ("c", 1)]
+        assert vr_sections.watched_last([], lambda i: True) == []
+
+    def test_watched_paths_newest_rating_first(self):
+        ratings = {
+            "/z": {"rating": 1, "updatedAt": 5},
+            "/a": {"rating": 2, "updatedAt": 5},     # tie: path order
+            "/new": {"rating": 3, "updatedAt": 50},
+            "/old": {"rating": 4},                   # no stamp = oldest
+            "/bad": {"rating": 4, "updatedAt": "x"},
+            "/fav": {"rating": 0, "favorite": True, "updatedAt": 99},
+        }
+        assert vr_sections.watched_paths(ratings) == ["/new", "/a", "/z", "/bad", "/old"]
+        assert vr_sections.watched_paths(None) == []
+
+    def test_sink_on(self):
+        sections = self._sections({"sink": True, "playlistIds": ["pl-disc"]})
+        assert list(sections) == [
+            "Queue", "VR", "Flat", "Slow",
+            "Favorites", "Top Rated", "Unrated", "Watched",
+            "Playlist: Discovery", "Playlist: Mine",
+        ]
+        # The browsing sections sink; the favourite-only c stays put.
+        assert sections["Flat"] == ["a", "c", "b"]
+        assert sections["Slow"] == ["a", "c", "b", "d"]
+        assert sections["VR"] == ["d"]
+        # The app's playlist sinks; the user's own keeps its order.
+        assert sections["Playlist: Discovery"] == ["a", "d", "b"]
+        assert sections["Playlist: Mine"] == ["d", "a"]
+        # Queue and the rating sections keep theirs.
+        assert sections["Queue"] == ["b", "a"]
+        assert sections["Favorites"] == ["c", "d"]
+        assert sections["Top Rated"] == ["d"]
+        assert sections["Unrated"] == ["a", "c"]
+        assert sections["Watched"] == ["d", "b"]   # newest rating first
+
+    @pytest.mark.parametrize("watched", [None, {"sink": False, "playlistIds": ["pl-disc"]}])
+    def test_sink_off_keeps_the_order(self, watched):
+        sections = self._sections(watched)
+        assert sections["Flat"] == ["a", "b", "c"]
+        assert sections["Slow"] == ["a", "b", "c", "d"]
+        assert sections["Playlist: Discovery"] == ["d", "b", "a"]
+        assert sections["Watched"] == ["d", "b"]   # listed regardless
+
+    def test_no_watched_section_without_ratings(self):
+        sections = vr_sections.build_sections(self.ENTRIES, now_ms=0, watched={"sink": True})
+        assert "Watched" not in [name for name, _ in sections]
+
+    def test_watched_section_after_unrated(self):
+        assert vr_sections.TRIAGE_SECTION_ORDER == ("Favorites", "Top Rated", "Unrated", "Watched")
+
+    def test_watched_tag(self):
+        assert vr_sections.watched_tags("/v/b.mp4", self.RATINGS) == ["Status:Watched"]
+        assert vr_sections.watched_tags("/v/c.mp4", self.RATINGS) == []
+        assert vr_sections.watched_tags("", self.RATINGS) == []
+
+    def test_status_tags_never_make_edits(self):
+        body = {"tags": [{"name": "Status:Watched"}, {"name": "status:watched"}]}
+        assert parse_heresphere_update(body, "/v/a.mp4", {}, [], False, frozenset()) == []
+        # Dropping it from a watched scene changes nothing either.
+        assert parse_heresphere_update({"tags": []}, "/v/b.mp4", self.RATINGS, [], False, frozenset()) == []
 
 
 # --- Hand-made companion files --------------------------------------------
@@ -585,3 +690,53 @@ async def test_deovr_scene_categories(client, tmp_path):
         "Studio:Lib", "Feature:Is scripted", "Format:Flat", "Speed:Medium", "Length:Medium (5-15m)",
     ]
     assert [c["tag"]["id"] for c in cats] == [1, 2, 3, 4, 5]
+
+
+# --- Watched videos in the listings ---------------------------------------
+
+@pytest.mark.anyio
+async def test_listings_sink_watched_and_add_the_watched_section(client, tmp_path):
+    _register_library(tmp_path)
+    register_ratings({
+        "/Lib/B.mp4": {"rating": 3.0, "favorite": False, "updatedAt": 5},
+        "/Lib/D.mp4": {"rating": 1.5, "favorite": False, "updatedAt": 9},
+    })
+    b, c, d = (_path_to_id(p) for p in ["/Lib/B.mp4", "/Lib/C.mp4", "/Lib/D.mp4"])
+    e = _path_to_id(str(tmp_path / "Emb" / "Emb.mp4"))
+    g = _path_to_id(str(tmp_path / "Gen" / "Gen.mp4"))
+    m = _path_to_id(str(tmp_path / "Multi" / "Multi.mp4"))
+
+    data = (await client.get("/heresphere")).json()
+    assert [s["name"] for s in data["library"]] == ALL_SECTIONS + ["Unrated", "Watched"]
+    sections = {s["name"]: _ids(s["list"]) for s in data["library"]}
+    assert sections["Flat"] == [c, e, g, m, b, d]   # title order, watched last
+    assert sections["Medium"] == [c, b]
+    assert sections["Watched"] == [d, b]
+
+    deo = {s["name"]: [i["title"] for i in s["list"]] for s in (await client.get("/deovr")).json()["scenes"]}
+    assert deo["Flat"] == ["C", "Emb", "Gen", "Multi", "B", "D"]
+    assert deo["Watched"] == ["D", "B"]
+
+    # The desktop turns it off: title order again, Watched stays.
+    await client.post("/api/media/register", json={"watched": {"sink": False}})
+    sections = {s["name"]: _ids(s["list"]) for s in (await client.get("/heresphere")).json()["library"]}
+    assert sections["Flat"] == [b, c, d, e, g, m]
+    assert sections["Watched"] == [d, b]
+
+
+@pytest.mark.anyio
+async def test_watched_scene_tag_is_read_only(client, tmp_path):
+    _register_library(tmp_path)
+    register_ratings({"/Lib/D.mp4": {"rating": 2.0, "favorite": False, "updatedAt": 1}})
+    d = _path_to_id("/Lib/D.mp4")
+    tags = [t["name"] for t in (await client.get(f"/heresphere/{d}")).json()["tags"]]
+    assert tags == ["Studio:Lib", "Format:Flat", "Status:Watched"]
+    cats = (await client.get(f"/deovr/{d}")).json()["categories"]
+    assert [c["tag"]["name"] for c in cats] == tags
+
+    # A save without it, or adding it to an unwatched scene, changes nothing.
+    await client.post(f"/heresphere/{d}", json={"tags": [{"name": "Studio:Lib"}]})
+    b = _path_to_id("/Lib/B.mp4")
+    await client.get(f"/heresphere/{b}")
+    await client.post(f"/heresphere/{b}", json={"tags": [{"name": "Status:Watched"}]})
+    assert remote_sync.library_edits.queue.pending() == []

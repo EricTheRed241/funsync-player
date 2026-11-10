@@ -13,6 +13,12 @@ observer socket, queued while the desktop isn't connected. Responses carry
 `delivered` so the phone can say "saved, applies when the desktop app
 reconnects"; the GET endpoints reflect queued edits straight away.
 
+Watched (rated) videos sink to the end of the lists the desktop sinks them
+in (`routes.media.get_watched`, `services.vr_sections`): `/videos` says
+whether the library does (`watchedLast`) and which videos are watched, each
+grouping says it with `sinkWatched`, and `/collections` adds the virtual
+Watched collection (`:watched`, newest rating first).
+
 The heavy lifting (video streaming with Range support, funscript and
 subtitle serving, ffmpeg thumbnails) is already handled by the existing
 `media.py` routes. The remote SPA points at those same URLs — no
@@ -39,6 +45,7 @@ from routes.media import (
     get_favourite_artists,
     get_favourite_artist_score,
     get_queue,
+    get_watched,
     get_sources,
     bump_rescan_request,
     _path_to_id,
@@ -46,7 +53,12 @@ from routes.media import (
 )
 from routes.remote_sync import desktop_connected, submit_library_edit
 from routes.vr_api import vr_decision
-from services import library_edits
+from services import library_edits, vr_sections
+
+# Id of the virtual Watched collection: every rated video, newest rating
+# first. The desktop uses the same id (renderer/js/watched-lists.js); it is
+# never stored in `library.collections`.
+WATCHED_COLLECTION_ID = ":watched"
 
 router = APIRouter()
 
@@ -132,7 +144,9 @@ async def request_rescan():
 
 @router.get("/videos")
 async def list_videos():
-    """Return every registered video in a phone-friendly JSON shape.
+    """Return every registered video in a phone-friendly JSON shape, plus
+    `watchedLast`: whether the library lists put watched videos last (the
+    desktop's setting).
 
     URLs are returned as relative paths so the phone resolves them against
     whatever origin it reached the backend on (LAN IP, mDNS, reverse proxy).
@@ -207,12 +221,15 @@ async def list_videos():
             # Triage state (0 = unrated), queued phone/headset edits included.
             "rating": library_edits.rating_entry(ratings, v.get("path"))[0],
             "favorite": library_edits.rating_entry(ratings, v.get("path"))[1],
+            # Watched = rated (`vr_sections.is_watched`); sinks in the lists
+            # that sink.
+            "watched": vr_sections.is_watched(ratings, v.get("path")),
             # The desktop's preference score (renderer/js/library-scores.js:
             # the scouts' ranking applied to the scene); null = not scored yet.
             "score": get_preference_score(v.get("path")),
         })
     out.sort(key=lambda v: v["name"].lower())
-    return {"videos": out}
+    return {"videos": out, "watchedLast": get_watched()["sink"]}
 
 
 def _category_names(path: str, categories: list[dict], video_categories: dict) -> list[str]:
@@ -287,8 +304,13 @@ async def list_collections():
 
     The desktop shape stores `videoPaths` as absolute file paths; we
     convert to the registry IDs the phone already uses so the client
-    doesn't need to know about file paths at all.
+    doesn't need to know about file paths at all. `sinkWatched` says
+    whether watched videos go last in it (the desktop setting). After the
+    real ones, sorted by name, comes the virtual Watched collection
+    (`kind: "watched"`, its videos newest rating first, never sunk) when
+    any registered video is rated.
     """
+    sink = get_watched()["sink"]
     out = []
     for c in get_collections():
         video_ids = _video_ids_from_paths(c.get("videoPaths") or [])
@@ -298,14 +320,30 @@ async def list_collections():
             "videoCount": len(video_ids),
             "totalDuration": _total_duration(video_ids),
             "videoIds": video_ids,
+            "sinkWatched": sink,
         })
     out.sort(key=lambda c: (c["name"] or "").lower())
+    watched_ids = _video_ids_from_paths(vr_sections.watched_paths(get_ratings()))
+    if watched_ids:
+        out.append({
+            "id": WATCHED_COLLECTION_ID,
+            "name": "Watched",
+            "kind": "watched",
+            "videoCount": len(watched_ids),
+            "totalDuration": _total_duration(watched_ids),
+            "videoIds": watched_ids,
+            "sinkWatched": False,
+        })
     return {"collections": out}
 
 
 @router.get("/playlists")
 async def list_playlists():
-    """Return every playlist with its video IDs (view-only)."""
+    """Return every playlist with its video IDs (view-only). `sinkWatched`
+    is true for the playlists the desktop sinks watched videos in (today
+    Discovery) while its setting is on."""
+    watched = get_watched()
+    sinking = set(watched["playlistIds"]) if watched["sink"] else set()
     out = []
     for p in get_playlists():
         video_ids = _video_ids_from_paths(p.get("videoPaths") or [])
@@ -318,6 +356,7 @@ async def list_playlists():
             "createdAt": p.get("createdAt") or 0,
             # Created on the phone / headset, not yet applied by the desktop.
             "pending": bool(p.get("pending")),
+            "sinkWatched": p.get("id") in sinking,
         })
     out.sort(key=lambda p: (p["name"] or "").lower())
     return {"playlists": out}
@@ -584,7 +623,9 @@ async def list_categories():
     Categories are stored as `{id, name, color}` in settings, and the
     videoPath→[categoryId] mapping lives in a separate table. We invert
     it server-side so the phone gets a single hop: category → videoIds.
+    `sinkWatched` says whether watched videos go last (the desktop setting).
     """
+    sink = get_watched()["sink"]
     # Build categoryId → set(videoPath) from the flat video-categories map
     inverted: dict[str, list[str]] = {}
     for video_path, cat_ids in get_video_categories().items():
@@ -602,6 +643,7 @@ async def list_categories():
             "videoCount": len(video_ids),
             "totalDuration": _total_duration(video_ids),
             "videoIds": video_ids,
+            "sinkWatched": sink,
         })
     out.sort(key=lambda c: (c["name"] or "").lower())
     return {"categories": out}

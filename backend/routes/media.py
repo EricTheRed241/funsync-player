@@ -85,6 +85,11 @@ _favourite_artist_score: dict = {"score": None, "default": None}
 # (`services.library_edits.apply_to_queue`). The desktop owns it; phone and
 # headset changes are queue edits.
 _queue: dict = {"manual": [], "auto": [], "autoFill": True}
+# Watched-video sinking — {sink: bool, playlistIds: [id]}: whether lists put
+# watched (rated) videos last (the desktop's `library.watchedLast`), and the
+# playlists whose videos sink too (renderer/js/watched-lists.js, today only
+# Discovery). The headset sections and the web remote follow it.
+_watched: dict = {"sink": True, "playlistIds": []}
 
 # Thumbnails live in `services.ffmpeg`'s cache directory (shared with the
 # desktop's library cards); `set_thumb_cache_dir` points it somewhere.
@@ -455,6 +460,18 @@ def register_queue(play_queue: dict):
     _queue = library_edits.clean_queue(play_queue)
 
 
+def register_watched(data: dict):
+    """Register the watched-sink settings ({sink, playlistIds}). `sink` is
+    True unless False; `playlistIds` keeps the non-empty strings, each
+    once. A missing key or junk falls back to the defaults (sink on, no
+    playlists)."""
+    global _watched
+    data = data if isinstance(data, dict) else {}
+    ids = data.get("playlistIds")
+    ids = list(dict.fromkeys(i for i in ids if isinstance(i, str) and i)) if isinstance(ids, list) else []
+    _watched = {"sink": data.get("sink") is not False, "playlistIds": ids}
+
+
 def apply_acked_edit(edit: dict):
     """The desktop applied `edit`: fold it into the registered state so it
     stays visible after it leaves the pending queue, even if the desktop's
@@ -661,6 +678,12 @@ def get_queue() -> dict:
     """The play queue ({manual, auto, autoFill}) with queue edits still
     waiting for the desktop applied."""
     return library_edits.effective_queue(_queue, library_edits.queue.pending())
+
+
+def get_watched() -> dict:
+    """The watched-sink settings ({sink, playlistIds}); sink on and no
+    playlists until the desktop registers them."""
+    return {"sink": _watched["sink"], "playlistIds": list(_watched["playlistIds"])}
 
 
 def get_categories() -> list[dict]:
@@ -1005,7 +1028,9 @@ async def register_library(request: Request):
     videoPaths}], one per artist folder), `favouriteArtists` ([name], the
     effective favourites), `favouriteArtistScore` ({score, default}, the
     favourite-artist bonus), `queue` ({manual: [path], auto: [path],
-    autoFill: bool}, the shared play queue) and `thumbPrune` (true with the
+    autoFill: bool}, the shared play queue), `watched` ({sink: bool,
+    playlistIds: [id]}: whether lists put rated videos last, and the
+    playlists whose videos sink too) and `thumbPrune` (true with the
     `videos` of a scan that read every source: drop cached thumbnails no
     registered video uses). Every field is independent: omit
     a key to leave that slice untouched on the backend.
@@ -1069,6 +1094,8 @@ def _apply_registration(data: dict):
         register_favourite_artist_score(data.get("favouriteArtistScore") or {})
     if "queue" in data:
         register_queue(data.get("queue") or {})
+    if "watched" in data:
+        register_watched(data.get("watched") or {})
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:

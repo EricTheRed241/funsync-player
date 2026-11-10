@@ -2454,6 +2454,14 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
 .list__badge--rating { color: #f5b301; }
 .list__badge--score { font-variant-numeric: tabular-nums; }
 
+/* Watched (rated) videos where they sink: dimmed, with a quiet badge. */
+.card__badge--watched,
+.list__badge--watched { background: rgba(255,255,255,0.08); color: var(--text-secondary, #bbb); }
+.card--watched .card__thumb,
+.list__row--watched .list__thumb { opacity: 0.45; }
+.card--watched .card__title,
+.list__row--watched .list__title { color: var(--text-dim); }
+
 .triage-removable {
   position: relative;
 }

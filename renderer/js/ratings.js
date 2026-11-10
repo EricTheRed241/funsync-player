@@ -68,6 +68,40 @@ export function isFavorite(map, path) {
   return getRatingEntry(map, path)?.favorite === true;
 }
 
+/**
+ * Watched (user, 2026-11-10): a video counts as watched once it has a
+ * rating (> 0). A favourite flag alone doesn't count.
+ */
+export function isWatched(map, path) {
+  return ratingOf(map, path) > 0;
+}
+
+/**
+ * `items` with the watched ones moved to the end. Stable: each group keeps
+ * the order it came in (the current sort). Returns a new array.
+ *
+ * @template T
+ * @param {T[]} items
+ * @param {(item: T) => string} pathOf
+ * @param {(path: string) => boolean} watched
+ * @returns {T[]}
+ */
+export function watchedLast(items, pathOf, watched) {
+  const fresh = [];
+  const seen = [];
+  for (const item of items || []) (watched(pathOf(item)) ? seen : fresh).push(item);
+  return seen.length ? fresh.concat(seen) : fresh;
+}
+
+/** Paths of every watched video, newest rating first (`updatedAt`; path breaks ties). */
+export function watchedByRecency(map) {
+  return Object.keys(map || {})
+    .map((path) => ({ path, entry: getRatingEntry(map, path) }))
+    .filter(({ entry }) => entry && entry.rating > 0)
+    .sort((a, b) => b.entry.updatedAt - a.entry.updatedAt || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .map(({ path }) => path);
+}
+
 /** Library rating-filter values; 'all' = no filter. */
 export const RATING_FILTERS = ['all', 'favorites', 'top', 'unrated'];
 

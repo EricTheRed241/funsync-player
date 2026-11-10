@@ -251,6 +251,16 @@ export const REVIEW_PLAYLIST = 'Review';
 /** "Top rated" filter and the headset's Top Rated section (mirrored in backend/services/vr_sections.py). */
 export const TOP_RATED_MIN = 4;
 
+// ── Watched videos ──────────────────────────────────────────────────────
+
+/**
+ * The scouts' playlist of downloads (scripts/eroscripts-scout-lib.mjs). App-made, so watched
+ * (rated) videos sink to its end like in the library (renderer/js/watched-lists.js); the other
+ * playlists keep their order: artist playlists, the rating lists (REVIEW_PLAYLIST, the age
+ * screener's) and the user's own.
+ */
+export const DISCOVERY_PLAYLIST = 'Discovery';
+
 // ── Artist playlists ────────────────────────────────────────────────────
 
 /** An artist folder with at least this many videos gets a playlist, favourites too (they join "Favourite artists" from one). */

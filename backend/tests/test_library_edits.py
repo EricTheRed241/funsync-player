@@ -38,6 +38,7 @@ def fresh_state():
     media.register_favourite_artists([])
     media.register_favourite_artist_score({})
     media.register_queue({})
+    media.register_watched({})
     vr_api._reset_queue_state_for_tests()
     remote_sync._reset_state_for_tests()
     yield
@@ -50,6 +51,7 @@ def fresh_state():
     media.register_favourite_artists([])
     media.register_favourite_artist_score({})
     media.register_queue({})
+    media.register_watched({})
     vr_api._reset_queue_state_for_tests()
     remote_sync._reset_state_for_tests()
 
@@ -399,10 +401,11 @@ class TestTriageSections:
         sections = vr_sections.build_sections(entries, now_ms=0, ratings=ratings, playlists=playlists)
         names = [name for name, _ in sections]
         assert names[:2] == ["VR", "Flat"]
-        assert sections[-5:] == [
+        assert sections[-6:] == [
             ("Favorites", ["b"]),
             ("Top Rated", ["a"]),
             ("Unrated", ["c"]),
+            ("Watched", ["a", "b"]),           # rated; no updatedAt, so by path
             ("Playlist: Zed", ["c", "a"]),     # playlist order, not title order
             ("Playlist: Alpha", ["b"]),        # desktop's playlist order; empty one dropped
         ]
@@ -426,6 +429,30 @@ class TestTriageSections:
         assert [i["title"] for i in sections["Top Rated"]] == ["B"]
         assert [i["title"] for i in sections["Playlist: Evening"]] == ["C", "A_180_sbs"]
         assert "Playlist: Empty" not in names
+
+    def test_headset_rating_makes_a_video_watched_on_the_next_listing(self, client, library):
+        # Evening (pl-1: C, A) is a playlist whose videos sink, like Discovery.
+        register_ratings({B: {"rating": 3.0, "favorite": False, "updatedAt": 100}})
+        media.register_watched({"sink": True, "playlistIds": ["pl-1"]})
+        sections, _ = _sections(client)
+        assert _ids(sections["Flat"]) == [library["C"], library["B"]]
+        assert _ids(sections["Playlist: Evening"]) == [library["C"], library["A"]]
+        assert _ids(sections["Watched"]) == [library["B"]]
+
+        # Rated in the headset (still pending for the desktop); A only
+        # becomes a favourite, which doesn't make it watched.
+        scene = client.post(f"/heresphere/{library['C']}", json={"rating": 4}).json()
+        assert "Status:Watched" in [t["name"] for t in scene["tags"]]
+        client.post(f"/heresphere/{library['A']}", json={"isFavorite": True})
+        assert len(library_edits.queue.pending()) == 2
+
+        sections, _ = _sections(client)
+        assert _ids(sections["Playlist: Evening"]) == [library["A"], library["C"]]
+        assert _ids(sections["Flat"]) == [library["B"], library["C"]]
+        assert _ids(sections["Watched"]) == [library["C"], library["B"]]   # newest rating first
+        assert _ids(sections["Favorites"]) == [library["A"]]
+        tags = [t["name"] for t in client.get(f"/heresphere/{library['A']}").json()["tags"]]
+        assert "Status:Watched" not in tags
 
 
 # --- Web remote endpoints ---------------------------------------------------------

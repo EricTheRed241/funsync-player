@@ -13,6 +13,7 @@ import { isUserEnabled, isToggleLocked, setUserEnabled } from '../js/source-stat
 import { eventBus } from '../js/event-bus.js';
 import { openFeedbackModal } from './feedback-modal.js';
 import { QUEUE_AUTOFILL } from '../js/content-preferences.js';
+import { WATCHED_LAST_KEY, watchedLastOn } from '../js/watched-lists.js';
 
 // Canonical default values for each tunable Playback field. Used by the
 // per-field reset-to-default `↻` button (Shneiderman #6 reversibility)
@@ -1761,6 +1762,11 @@ export class SettingsPanel {
         <input type="checkbox" id="sp-hide-dupes" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('library.hideDuplicateNames') === true ? 'checked' : ''} aria-describedby="sp-hide-dupes-hint">
       </div>
       <div class="settings-panel__hint" id="sp-hide-dupes-hint">${t('settingsPanel.appearance.hideDupesHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-watched-last">${t('settingsPanel.appearance.watchedLastLabel')}</label>
+        <input type="checkbox" id="sp-watched-last" class="settings-panel__input settings-panel__input--checkbox" ${watchedLastOn(this._settings.get(WATCHED_LAST_KEY)) ? 'checked' : ''} aria-describedby="sp-watched-last-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-watched-last-hint">${t('settingsPanel.appearance.watchedLastHint')}</div>
     `;
     librarySection.querySelector('#sp-moving-previews')
       .addEventListener('change', (e) => {
@@ -1787,6 +1793,13 @@ export class SettingsPanel {
         this._settings.set('library.hideDuplicateNames', !!e.target.checked);
         // Changes which videos are in the list, not just how they look —
         // the grid has to re-filter, not merely re-render.
+        if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
+      });
+    librarySection.querySelector('#sp-watched-last')
+      .addEventListener('change', (e) => {
+        // On while unset. The app re-registers with the backend on this
+        // change, so the web remote and the headsets follow.
+        this._settings.set(WATCHED_LAST_KEY, !!e.target.checked);
         if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
       });
     panel.appendChild(librarySection);
