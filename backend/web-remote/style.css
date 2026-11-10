@@ -1041,6 +1041,30 @@ body::-webkit-scrollbar {
   font-size: 12px;
   color: var(--text-dim);
 }
+.artists-bar__sort {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.artists-bar__sort .artists-bar__label { margin-right: 4px; }
+.artists-bar__sort-option {
+  min-height: 32px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.artists-bar__sort-option[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .artists-bar__add {
   display: flex;
   gap: 8px;

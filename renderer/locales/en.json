@@ -1286,7 +1286,12 @@
       "unfavourite": "Remove {artist} from favourites",
       "added": "{artist} is a favourite now",
       "removed": "{artist} is no longer a favourite",
-      "alreadyFavourite": "{artist} is already a favourite"
+      "alreadyFavourite": "{artist} is already a favourite",
+      "sortBy": "Sort by",
+      "sort": {
+        "name": "Name",
+        "videos": "Videos"
+      }
     },
     "breadcrumb": {
       "allSources": "All sources",

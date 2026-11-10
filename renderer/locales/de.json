@@ -691,7 +691,12 @@
       "unfavourite": "{artist} aus den Lieblingskünstlern entfernen",
       "added": "{artist} ist jetzt ein Lieblingskünstler",
       "removed": "{artist} ist kein Lieblingskünstler mehr",
-      "alreadyFavourite": "{artist} ist schon ein Lieblingskünstler"
+      "alreadyFavourite": "{artist} ist schon ein Lieblingskünstler",
+      "sortBy": "Sortieren nach",
+      "sort": {
+        "name": "Name",
+        "videos": "Videos"
+      }
     },
     "breadcrumb": {
       "allSources": "Alle Quellen",

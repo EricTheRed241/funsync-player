@@ -82,6 +82,16 @@ describe('order and stars on their way', () => {
     expect(sorted.map((a) => a.name)).toEqual(['Amy', 'Bob', 'alice', 'zed']);
   });
 
+  it('sorts by video count, most first, ties by name, favourites not lifted', () => {
+    const sorted = sortArtists([
+      artist('zed', { videoCount: 3 }),
+      artist('Bob', { favourite: true, videoCount: 1 }),
+      artist('alice', { videoCount: 3 }),
+      artist('Cara', { videoCount: 12 }),
+    ], 'videos');
+    expect(sorted.map((a) => a.name)).toEqual(['Cara', 'alice', 'zed', 'Bob']);
+  });
+
   it('applies unanswered stars as pending and adds a new favourite without videos', () => {
     const artists = [artist('Alpha', { favourite: true }), artist('Beta')];
     const unsent = new Map([
