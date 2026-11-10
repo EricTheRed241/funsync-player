@@ -711,6 +711,13 @@ def get_preference_score(path) -> float | None:
     return _preference_scores.get(path) if path else None
 
 
+def get_preference_scores() -> dict:
+    """Every registered preference score (videoPath → number). The live
+    map: registration rebinds it rather than changing it, so it's safe to
+    read through a listing; never modify it."""
+    return _preference_scores
+
+
 def get_sources() -> list[dict]:
     return list(_sources)
 

@@ -5,6 +5,7 @@
 // the parts that did.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Library } from '../../renderer/components/library.js';
+import { DEFAULT_SORT } from '../../renderer/js/content-preferences.js';
 
 function makeLib(sortKey = 'name:asc') {
   const lib = Object.create(Library.prototype);
@@ -50,9 +51,15 @@ describe('_sortParts', () => {
     expect(makeLib('duration:desc')._sortParts()).toEqual(['duration', 'desc']);
   });
 
-  it('defaults to name ascending', () => {
-    expect(makeLib(undefined)._sortParts()).toEqual(['name', 'asc']);
-    expect(makeLib('')._sortParts()).toEqual(['name', 'asc']);
+  it('defaults to the preference score, highest first (DEFAULT_SORT)', () => {
+    expect(DEFAULT_SORT).toBe('score:desc');
+    expect(makeLib(null)._sortParts()).toEqual(['score', 'desc']);
+    expect(makeLib('')._sortParts()).toEqual(['score', 'desc']);
+  });
+
+  it('starts every session on the score sort', () => {
+    const lib = new Library({ settings: { get: () => undefined, set: () => {} } });
+    expect(lib._sortParts()).toEqual(['score', 'desc']);
   });
 
   it('treats anything that is not "desc" as ascending', () => {

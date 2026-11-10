@@ -15,6 +15,7 @@ import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
 import { t, initWebRemoteI18n, translatePage } from './i18n.js';
 import { shuffle as shuffleList, balancedShuffle } from './shuffle.js';
+import { DEFAULT_SORT, SORT_DEFAULT_VERSION, migrateSortState } from './sort-default.js';
 import {
   createRatingControl, updateRatingControl, filterByRating,
   setRating, addToPlaylist, removeFromPlaylist, reportResult, showToast,
@@ -240,8 +241,9 @@ let currentView = 'list'; // 'list' | 'player' | 'groupings' | 'grouping-detail'
 let currentMode = 'library'; // 'library' | 'queue' | 'collections' | 'playlists' | 'categories' | 'tags' | 'artists'
 let activeSyncClient = null;  // torn down on view change / unload
 
-// Persisted filter/sort state
-const storedState = loadFilterState();
+// Persisted filter/sort state, with the one-time switch to the score sort
+// (sort-default.js) applied and saved straight away.
+const { state: storedState, changed: sortMigrated } = migrateSortState(loadFilterState());
 // Sort: five FIELDS with direction held separately, mirroring the desktop
 // picker. `uiState.sort` stays `field:dir` so the list-building code below
 // (which splits on ':') is untouched.
@@ -279,7 +281,7 @@ const DEFAULT_SORT_DIRS = Object.fromEntries(SORT_FIELDS.map((o) => [o.field, o.
 let uiState = {
   search: '',
   tab: storedState.tab || 'all',          // matched | unmatched | all
-  sort: storedState.sort || 'name:asc',
+  sort: storedState.sort || DEFAULT_SORT,
   // Remembered per field: set Name to Z-A, go to Duration and back, and
   // Name is still Z-A.
   sortDirs: { ...DEFAULT_SORT_DIRS, ...(storedState.sortDirs || {}) },
@@ -288,10 +290,11 @@ let uiState = {
   tag: storedState.tag || '',              // '' = any, else one chip tag
   view: storedState.view || 'grid',        // grid | list
 };
+if (sortMigrated) saveFilterState();
 
 /** Current sort as `[field, dir]`, tolerant of an old or malformed value. */
 function sortParts() {
-  const [field, dir] = String(uiState.sort || 'name:asc').split(':');
+  const [field, dir] = String(uiState.sort || DEFAULT_SORT).split(':');
   return [field || 'name', dir === 'desc' ? 'desc' : 'asc'];
 }
 
@@ -754,7 +757,7 @@ function applyFilters(videos) {
     // partial matches sink the exact-title match. Mirrors the desktop
     // gate at renderer/components/library.js:4252.
   } else {
-    const [field, dir] = (uiState.sort || 'name:asc').split(':');
+    const [field, dir] = (uiState.sort || DEFAULT_SORT).split(':');
     out = sortVideos(out, field, dir || 'asc');
   }
   return out;
@@ -2959,6 +2962,7 @@ function saveFilterState() {
     localStorage.setItem('funsync.remote.ui', JSON.stringify({
       tab: uiState.tab,
       sort: uiState.sort,
+      sortDefault: SORT_DEFAULT_VERSION,
       sortDirs: uiState.sortDirs,
       vr: uiState.vr,
       rating: uiState.rating,
