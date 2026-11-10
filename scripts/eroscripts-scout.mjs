@@ -664,14 +664,8 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           continue;
         }
         const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs });
-        const v = sc.video;
-        fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
-          topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
-          video: v.name, file: path.basename(video), scenes: c.scenes.length,
-          // A vrbangers.com scene keeps its site name (--retitle reads it): lib.vrbangersSceneName.
-          ...(v.host === vrbHost.VRBANGERS_HOST ? { vrbangers: { slug: v.slug, url: v.url, title: v.title, performers: v.performers, projection: v.projection } } : {}),
-          at: new Date().toISOString(),
-        }, null, 1));
+        fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify(
+          lib.sceneSidecar(c, sc.video, path.basename(video), new Date().toISOString()), null, 1));
         let note = '';
         if (!sc.axes.length) {
           const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });

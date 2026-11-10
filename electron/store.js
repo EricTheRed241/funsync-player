@@ -90,14 +90,19 @@ const DEFAULTS = {
       //   `{ seekPct: 0..1 }` — pinned frame (no `type` key)
       //   `{ type: 'image', imagePath }` — user-uploaded poster, imported
       //     into userData/custom-thumbs by main.js (community #217)
-      // EroScripts previews and FapTap thumbnails add `source`
-      // ('eroscripts' | 'faptap'), see renderer/js/eroscripts-preview.js.
+      // EroScripts previews, FapTap thumbnails and rule34video covers add
+      // `source` ('eroscripts' | 'faptap' | 'rule34video'), see
+      // renderer/js/eroscripts-preview.js.
       // Absent means auto (10%-mark frame).
       customThumbnails: {},
       // Settled FapTap thumbnail imports per video path, so a thumbnail
       // that doesn't match isn't fetched again on every scan:
       //   `{ url, status: 'imported'|'no-match', distance? }`
       faptapThumbnails: {},
+      // rule34video cover imports per video path, so a cover that can't be
+      // used (or one the user reset) isn't fetched again on every scan:
+      //   `{ url, status: 'imported'|'unusable'|'failed', at? }`
+      rule34videoThumbnails: {},
       // Per-path resume position — "continue where you left off"
       // (community request 2026-08-05). Shape:
       //   `{ position: seconds, duration: seconds, updatedAt: epochMs }`

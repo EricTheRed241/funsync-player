@@ -1,8 +1,9 @@
 // Thumbnail config of videos that are gone.
 //
-// `library.customThumbnails` (posters, pinned frames), `library.faptapThumbnails`
-// (FapTap import attempts) and `library.durationCache` are keyed by video
-// path, and nothing removed an entry when its video was deleted or moved:
+// `library.customThumbnails` (posters, pinned frames), `library.faptapThumbnails`,
+// `library.rule34videoThumbnails` (FapTap / rule34video import attempts)
+// and `library.durationCache` are keyed by video path, and nothing removed
+// an entry when its video was deleted or moved:
 // on 2026-11-09 a quarter of the posters and FapTap attempts, and more than
 // half of the cached durations, pointed into a folder that no longer existed.
 //
@@ -13,10 +14,10 @@
 // entries are dropped and their custom-thumbs files deleted (main process).
 
 import { isVideoLocationGone } from './association-dead.js';
-import { CUSTOM_THUMBS_KEY, FAPTAP_ATTEMPTS_KEY } from './eroscripts-preview.js';
+import { CUSTOM_THUMBS_KEY, FAPTAP_ATTEMPTS_KEY, RULE34VIDEO_ATTEMPTS_KEY } from './eroscripts-preview.js';
 
 const DURATION_CACHE_KEY = 'library.durationCache';
-const KEYS = [CUSTOM_THUMBS_KEY, FAPTAP_ATTEMPTS_KEY, DURATION_CACHE_KEY];
+const KEYS = [CUSTOM_THUMBS_KEY, FAPTAP_ATTEMPTS_KEY, RULE34VIDEO_ATTEMPTS_KEY, DURATION_CACHE_KEY];
 
 /**
  * @param {{get: Function, set: Function}} settings
@@ -27,7 +28,7 @@ const KEYS = [CUSTOM_THUMBS_KEY, FAPTAP_ATTEMPTS_KEY, DURATION_CACHE_KEY];
  * @param {(videoPaths: string[], imagePaths: string[], keep: string[]) => Promise<number>} [opts.deleteFiles]
  * @param {number} [opts.concurrency]
  * @returns {Promise<{gone: number, customThumbnails: number, faptapThumbnails: number,
- *   durationCache: number, files: number}>}
+ *   rule34videoThumbnails: number, durationCache: number, files: number}>}
  */
 export async function pruneThumbConfig(settings, { scannedPaths, pathState, skip = () => false, deleteFiles, concurrency = 8 }) {
   const live = new Set(scannedPaths);
@@ -46,7 +47,9 @@ export async function pruneThumbConfig(settings, { scannedPaths, pathState, skip
     }));
   }
 
-  const summary = { gone: gone.size, customThumbnails: 0, faptapThumbnails: 0, durationCache: 0, files: 0 };
+  const summary = {
+    gone: gone.size, customThumbnails: 0, faptapThumbnails: 0, rule34videoThumbnails: 0, durationCache: 0, files: 0,
+  };
   if (gone.size === 0) return summary;
 
   // Fresh reads: an import may have written these maps during the checks.

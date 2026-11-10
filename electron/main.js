@@ -13,6 +13,7 @@ const { importThumbnail, thumbStem, deleteVideoThumbs, decodeWithChromium, decod
 const { createPreviewValidator } = require('./preview-validator');
 const { MATCH_THRESHOLD } = require('./preview-match');
 const { matchFaptapThumbnail } = require('./faptap-thumbnail');
+const { importRule34videoPoster } = require('./rule34video-thumbnail');
 const playerPopout = require('./player-popout-window');
 const { scanLibrary, isAppleDoubleSidecar } = require('./library-scan');
 const { readLinksFile } = require('./eroscripts-links');
@@ -1316,6 +1317,23 @@ ipcMain.handle('faptap-import-thumbnail', async (_event, videoPath, url) => {
     return res;
   } catch (err) {
     log.warn('[FapTap] Thumbnail import failed:', err.message);
+    return { status: 'failed', error: err.message };
+  }
+});
+
+// rule34video's cover of a Discovery scene whose video came from there
+// (electron/rule34video-thumbnail.js): the exact cover link only, imported
+// as `<hash>-rule34video.jpg` without a frame check (it is that video's).
+ipcMain.handle('rule34video-import-poster', async (_event, videoPath, url) => {
+  try {
+    const res = await importRule34videoPoster(String(videoPath), String(url), {
+      importBytes: (bytes) => importCustomThumbBytes(bytes, String(videoPath), 'rule34video'),
+    });
+    if (res.status === 'failed') log.warn('[rule34video] Cover import failed:', res.error);
+    else if (res.status === 'unusable') log.info('[rule34video] Cover unusable, not tried again:', res.error);
+    return res;
+  } catch (err) {
+    log.warn('[rule34video] Cover import failed:', err.message);
     return { status: 'failed', error: err.message };
   }
 });

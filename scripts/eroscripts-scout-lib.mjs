@@ -52,7 +52,7 @@ import {
   VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
-import { durationMatches, RULE34VIDEO_HOST } from './stream-hosts.mjs';
+import { durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
 
@@ -743,6 +743,31 @@ export function sceneNameOf(c, sc) {
 /** File name for a scene's script in the scan's spelling. */
 export function scriptFileName(stem, axis) {
   return `${stem}${axis ? `.${axis}` : ''}.funscript`;
+}
+
+/**
+ * The `eroscripts.json` sidecar of a fetched scene (read by the library
+ * scan and by --retitle): the post, the post's video file name and the
+ * file on disk. A vrbangers.com scene keeps its site name (`vrbangers`,
+ * read by vrbangersSceneName); a rule34video one gets the page's cover as
+ * `posterUrl`, which the app makes the scene's thumbnail.
+ *
+ * @param {object} c candidate (post)
+ * @param {object} video the scene's video file (`sc.video`)
+ * @param {string} file the video's name on disk
+ * @param {string} at ISO time
+ */
+export function sceneSidecar(c, video, file, at) {
+  const posterUrl = video.host === RULE34VIDEO_HOST ? rule34videoPosterUrl(video.url) : null;
+  return {
+    topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
+    video: video.name, file, scenes: c.scenes.length,
+    ...(video.host === VRBANGERS_HOST ? {
+      vrbangers: { slug: video.slug, url: video.url, title: video.title, performers: video.performers, projection: video.projection },
+    } : {}),
+    ...(posterUrl ? { posterUrl } : {}),
+    at,
+  };
 }
 
 // ── Retitle ─────────────────────────────────────────────────────────────

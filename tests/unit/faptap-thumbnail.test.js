@@ -10,8 +10,9 @@
 import { describe, it, expect, vi } from 'vitest';
 
 const {
-  isFaptapThumbnailUrl, downloadFaptapThumbnail, matchFaptapThumbnail, MAX_BYTES,
+  isFaptapThumbnailUrl, downloadFaptapThumbnail, matchFaptapThumbnail,
 } = await import('../../electron/faptap-thumbnail.js');
+const { MAX_BYTES } = await import('../../electron/thumbnail-download.js');
 
 const WEBP = 'https://faptap.net/api/assets/thumbnails/2114528228239478785.webp';
 const BUNNY = 'https://vz-5d2e7f1a-b3c.b-cdn.net/0a1b2c3d-4e5f/thumbnail.jpg';

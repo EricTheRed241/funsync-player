@@ -105,6 +105,35 @@ describe('scanLibrary', () => {
     }
   });
 
+  it("attaches a rule34video cover from eroscripts.json only when it is exactly a cover link", async () => {
+    const urls = {
+      Cover: 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      Small: 'https://rule34video.com/contents/videos_screenshots/0/42/preview.jpg',
+      Http: 'http://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      Www: 'https://www.rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      LookAlike: 'https://rule34video.com.evil.example/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      Port: 'https://rule34video.com:8443/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      Creds: 'https://u@rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      Query: 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg?x=1',
+      WrongFolder: 'https://rule34video.com/contents/videos_screenshots/3064000/3065491/preview.jpg',
+      OtherFile: 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/1.jpg',
+      Traversal: 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/../preview.jpg',
+      Zero: 'https://rule34video.com/contents/videos_screenshots/0/0/preview.jpg',
+      Padded: 'https://rule34video.com/contents/videos_screenshots/3065000/03065491/preview.jpg',
+      NotString: 42,
+    };
+    for (const [name, posterUrl] of Object.entries(urls)) {
+      touch(`In/A/${name}/${name}.mp4`);
+      fs.writeFileSync(path.join(tmp, `In/A/${name}/eroscripts.json`), JSON.stringify({ topicId: 9, tags: [], posterUrl }));
+    }
+    const byName = Object.fromEntries((await scanLibrary(path.join(tmp, 'In'))).videos.map((v) => [v.name, v]));
+    expect(byName['Cover.mp4'].eroscripts).toEqual({ topicId: 9, url: null, tags: [], posterUrl: urls.Cover });
+    expect(byName['Small.mp4'].eroscripts.posterUrl).toBe(urls.Small);
+    for (const name of Object.keys(urls).filter((n) => n !== 'Cover' && n !== 'Small')) {
+      expect(byName[`${name}.mp4`].eroscripts).toEqual({ topicId: 9, url: null, tags: [] });
+    }
+  });
+
   it("reports each video's size on disk (the Overview's capacity total)", async () => {
     fs.writeFileSync(touch('In/Artist/Scene/Big.mp4'), Buffer.alloc(4096));
     touch('In/Artist/Scene/Empty.mp4');

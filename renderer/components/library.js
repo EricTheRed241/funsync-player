@@ -21,7 +21,7 @@ import { getCurrentLocale, t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import {
   importPostPreview, fetchPreviewsBatch, planPreviewBatch, usePreviewCandidate, isRevalidatable,
-  fetchFaptapThumbnails, PREVIEW_EVENT, CUSTOM_THUMBS_KEY,
+  fetchFaptapThumbnails, fetchRule34videoPosters, PREVIEW_EVENT, CUSTOM_THUMBS_KEY,
 } from '../js/eroscripts-preview.js';
 import { getScriptTags, recordScriptTags, SCRIPT_TAGS_KEY } from '../js/script-tags.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
@@ -903,7 +903,7 @@ export class Library {
       this._settings.set(SCRIPT_TAGS_KEY, scout.map);
       console.log('[Library] Discovery sources recorded:', { added: scout.added, updated: scout.updated });
     }
-    this._startFaptapThumbnails();
+    this._startScoutThumbnails();
     let tagsChanged = false;
     applyEroscriptsLinks(this._settings, window.funsync)
       .then((merged) => {
@@ -3455,27 +3455,36 @@ export class Library {
   }
 
   /**
-   * After each scan, FapTap's thumbnail becomes the thumbnail of every
-   * FapTap Discovery scene that has none yet and whose thumbnail matches
-   * the video (eroscripts-preview.js `fetchFaptapThumbnails`). One video at
-   * a time in the background; a new scan stops the running batch after its
-   * current video and starts over once it has stopped, so two never run.
+   * After each scan, Discovery scenes get their source's own image as
+   * thumbnail (eroscripts-preview.js): FapTap's thumbnail for a FapTap
+   * scene that has none yet and whose thumbnail matches the video
+   * (`fetchFaptapThumbnails`), then rule34video's cover for a scene whose
+   * video came from there (`fetchRule34videoPosters`). One video at a time
+   * in the background; a new scan stops the running batch after its current
+   * video and starts over once it has stopped, so two never run.
    */
-  _startFaptapThumbnails() {
-    if (!window.funsync?.faptapImportThumbnail) return;
-    this._faptapThumbAbort?.abort();
+  _startScoutThumbnails() {
+    const api = window.funsync;
+    if (!api?.faptapImportThumbnail && !api?.rule34videoImportPoster) return;
+    this._scoutThumbAbort?.abort();
     const ctrl = new AbortController();
-    this._faptapThumbAbort = ctrl;
+    this._scoutThumbAbort = ctrl;
     const videos = this._videos || [];
-    const previous = this._faptapThumbRun || Promise.resolve();
-    this._faptapThumbRun = previous
-      .then(() => (ctrl.signal.aborted ? null : fetchFaptapThumbnails({
-        settings: this._settings, api: window.funsync, videos, signal: ctrl.signal,
-      })))
+    const settings = this._settings;
+    const previous = this._scoutThumbRun || Promise.resolve();
+    this._scoutThumbRun = previous
+      .then(() => (ctrl.signal.aborted || !api.faptapImportThumbnail ? null
+        : fetchFaptapThumbnails({ settings, api, videos, signal: ctrl.signal })))
       .then((r) => {
         if (r && (r.imported || r.noMatch || r.gone || r.failed)) console.log('[Library] FapTap thumbnails:', r);
       })
-      .catch((err) => console.warn('[Library] FapTap thumbnails failed:', err?.message || err));
+      .catch((err) => console.warn('[Library] FapTap thumbnails failed:', err?.message || err))
+      .then(() => (ctrl.signal.aborted || !api.rule34videoImportPoster ? null
+        : fetchRule34videoPosters({ settings, api, videos, signal: ctrl.signal })))
+      .then((r) => {
+        if (r && (r.imported || r.unusable || r.failed)) console.log('[Library] rule34video covers:', r);
+      })
+      .catch((err) => console.warn('[Library] rule34video covers failed:', err?.message || err));
   }
 
   async _resetCustomThumbnail(video, cardEl) {
