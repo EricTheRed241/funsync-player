@@ -16,7 +16,9 @@
 //
 // Values the Rust CLIs read too live in content-preferences.json next to this
 // file (the shared part of the preferences: Rust embeds it at compile time,
-// crates/age-screen). They're exported here like the rest; change them there.
+// crates/age-screen, crates/pornstar-tags). The ones the app uses are
+// exported here like the rest (`pornstarTags` is read by Rust only); change
+// them there.
 // Values with a copy outside JavaScript: TOP_RATED_MIN and the SCORE_BANDS
 // thresholds are mirrored in backend/services/vr_sections.py, DEFAULT_SORT in
 // backend/web-remote/sort-default.js (the phone can't import this file).

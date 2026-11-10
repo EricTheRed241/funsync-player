@@ -89,16 +89,29 @@ pub fn read(path: &Path) -> Result<Option<TagFile>, String> {
 /// over the target, so the app never reads half a file. An existing file is
 /// copied to `video-tags.json.bak` first. Returns whether a backup was made.
 pub fn write_atomic(user_data: &Path, file: &TagFile) -> Result<bool, String> {
-    let target = file_path(user_data);
-    let tmp = user_data.join(format!("{FILE_NAME}.{}.tmp", std::process::id()));
+    write_json_atomic(user_data, FILE_NAME, BACKUP_NAME, file)
+}
+
+/// Write `value` as pretty JSON to `<dir>/<name>` atomically (temp file +
+/// rename), copying an existing file to `<dir>/<backup>` first. Returns
+/// whether a backup was made. Shared with the other CLIs that own a userData
+/// side file (crates/pornstar-tags).
+pub fn write_json_atomic<T: Serialize>(
+    dir: &Path,
+    name: &str,
+    backup: &str,
+    value: &T,
+) -> Result<bool, String> {
+    let target = dir.join(name);
+    let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
     let result = (|| -> io::Result<bool> {
-        let mut json = serde_json::to_string_pretty(file).map_err(io::Error::other)?;
+        let mut json = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
         json.push('\n');
         let mut out = fs::File::create(&tmp)?;
         out.write_all(json.as_bytes())?;
         out.sync_all()?;
         drop(out);
-        let backed_up = match fs::copy(&target, user_data.join(BACKUP_NAME)) {
+        let backed_up = match fs::copy(&target, dir.join(backup)) {
             Ok(_) => true,
             Err(e) if e.kind() == io::ErrorKind::NotFound => false,
             Err(e) => return Err(e),

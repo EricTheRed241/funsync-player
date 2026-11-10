@@ -11,12 +11,20 @@
 // (renderer/js/video-tags.js). The CLIs that rename scenes move its keys
 // with them (`rewriteVideoTagsFile`; `library:reorganize` rewrites every
 // JSON file in userData).
+//
+// The pornstar tags file (`pornstar-tags.json`, crates/pornstar-tags) is
+// merged the same way, together with this one: video → the performers'
+// tags, plus each performer's scene count and whether her tag is applied.
+// Its CLI recomputes it from the library on every run, so renames heal
+// there.
 
 const fs = require('fs');
 const path = require('path');
 
 const VIDEO_TAGS_FILE = 'video-tags.json';
 const VIDEO_TAGS_VERSION = 1;
+const PORNSTAR_TAGS_FILE = 'pornstar-tags.json';
+const PORNSTAR_TAGS_VERSION = 1;
 
 /** Problems already logged, so a missing file isn't reported on every scan. */
 const logged = new Set();
@@ -31,6 +39,37 @@ function videoTagsFilePath(userDataDir) {
   return path.join(userDataDir, VIDEO_TAGS_FILE);
 }
 
+function pornstarTagsFilePath(userDataDir) {
+  return path.join(userDataDir, PORNSTAR_TAGS_FILE);
+}
+
+const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Read a userData side file: its parsed content when it's a JSON object of
+ * `version` whose `keys` are all objects, else null (logged once).
+ */
+function readSideFile(file, version, keys, what) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    logOnce(err.code === 'ENOENT' ? `${file} not found; no ${what} applied` : `${file} unreadable: ${err.message}`);
+    return null;
+  }
+  try {
+    const data = JSON.parse(raw);
+    if (!isMap(data) || data.version !== version || !keys.every((k) => isMap(data[k]))) {
+      logOnce(`${file} is not a version ${version} ${what} file; ignored`);
+      return null;
+    }
+    return data;
+  } catch (err) {
+    logOnce(`${file} is not valid JSON (${err.message}); ignored`);
+    return null;
+  }
+}
+
 /**
  * Read the video tags file. A missing, unreadable or foreign file returns
  * null, which the merge treats as "change nothing": only a valid file can
@@ -40,26 +79,25 @@ function videoTagsFilePath(userDataDir) {
  * @returns {{version: number, updatedAt: string|null, videos: Object<string, {tags: string[]}>}|null}
  */
 function readVideoTagsFile(userDataDir) {
-  const file = videoTagsFilePath(userDataDir);
-  let raw;
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch (err) {
-    logOnce(err.code === 'ENOENT' ? `${file} not found; no video tags applied` : `${file} unreadable: ${err.message}`);
-    return null;
-  }
-  try {
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object' || data.version !== VIDEO_TAGS_VERSION
-      || !data.videos || typeof data.videos !== 'object' || Array.isArray(data.videos)) {
-      logOnce(`${file} is not a version ${VIDEO_TAGS_VERSION} video tags file; ignored`);
-      return null;
-    }
-    return { version: data.version, updatedAt: data.updatedAt ?? null, videos: data.videos };
-  } catch (err) {
-    logOnce(`${file} is not valid JSON (${err.message}); ignored`);
-    return null;
-  }
+  const data = readSideFile(videoTagsFilePath(userDataDir), VIDEO_TAGS_VERSION, ['videos'], 'video tags');
+  return data && { version: data.version, updatedAt: data.updatedAt ?? null, videos: data.videos };
+}
+
+/**
+ * Read the pornstar tags file. A missing, unreadable or foreign file returns
+ * null: the merge then applies no pornstar tags (and withdraws those it
+ * added), video tags unaffected.
+ *
+ * @param {string} userDataDir
+ * @returns {{version: number, updatedAt: string|null,
+ *   pornstars: Object<string, {name: string, scenes: number, applied: boolean}>,
+ *   videos: Object<string, string[]>}|null}
+ */
+function readPornstarTagsFile(userDataDir) {
+  const data = readSideFile(pornstarTagsFilePath(userDataDir), PORNSTAR_TAGS_VERSION, ['pornstars', 'videos'], 'pornstar tags');
+  return data && {
+    version: data.version, updatedAt: data.updatedAt ?? null, pornstars: data.pornstars, videos: data.videos,
+  };
 }
 
 /**
@@ -89,4 +127,7 @@ function rewriteVideoTagsFile(userDataDir, update) {
   return changed;
 }
 
-module.exports = { VIDEO_TAGS_FILE, VIDEO_TAGS_VERSION, videoTagsFilePath, readVideoTagsFile, rewriteVideoTagsFile };
+module.exports = {
+  VIDEO_TAGS_FILE, VIDEO_TAGS_VERSION, videoTagsFilePath, readVideoTagsFile, rewriteVideoTagsFile,
+  pornstarTagsFilePath, readPornstarTagsFile,
+};

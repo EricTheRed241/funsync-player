@@ -908,7 +908,8 @@ export class Library {
     // `faptap.json` scene, attached by the scan), then links found by
     // `npm run eroscripts:sync` (written to a file in userData; the CLI
     // never touches config.json; a link replaces a FapTap record), then the
-    // tags of the video tags file (`video-tags` CLI, on top of the post's),
+    // tags of the video tags and pornstar tags files (`video-tags` and
+    // `pornstar-tags` CLIs, on top of the post's),
     // then the categories made from those tags, then VR as the backend
     // decides it (after the registration below; the preference scores are
     // recomputed there). Off the scan's critical path: nothing below needs

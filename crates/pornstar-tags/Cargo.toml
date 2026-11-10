@@ -1,0 +1,23 @@
+[package]
+name = "pornstar-tags"
+version = "0.1.0"
+description = "Tag library videos with the pornstars they show: <userData>/pornstar-tags.json, merged by FunSync on every scan"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "pornstar_tags"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pornstar-tags"
+path = "src/main.rs"
+
+[dependencies]
+# Shared with the video tags CLI: config.json reading, userData default,
+# atomic write, timestamps and the rescan request.
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-normalization = "0.1"

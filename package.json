@@ -21,7 +21,8 @@
     "dedupe:scenes": "node scripts/dedupe-scenes.mjs",
     "library:reorganize": "node scripts/library-reorganize.mjs",
     "video:tags": "cargo run -q --release -p video-tags --",
-    "age:screen": "cargo run -q --release -p age-screen --"
+    "age:screen": "cargo run -q --release -p age-screen --",
+    "pornstar:tags": "cargo run -q --release -p pornstar-tags --"
   },
   "keywords": [
     "video-player",
