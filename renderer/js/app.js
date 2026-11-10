@@ -2123,7 +2123,8 @@ class App {
   }
 
   /**
-   * Push ratings, playlists, categories, the scores (preference score per
+   * Push ratings, playlists, categories, collections (the score-band ones
+   * follow the scores, score-bands.js), the scores (preference score per
    * video, score per tag) and the favourite artists with their bonus to the
    * backend (`/api/media/register` treats each key independently, so the
    * video registry is left alone). Keeps the headset sections, the
@@ -2141,6 +2142,7 @@ class App {
         ratings: this.settings.get('library.ratings') || {},
         playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
         categories: this.settings.getCategories ? this.settings.getCategories() : [],
+        collections: this.settings.get('library.collections') || [],
         videoCategories: this.settings._cache?.videoCategories || {},
         preferenceScores: this.settings.get(PREFERENCE_SCORES_KEY) || {},
         ...tagScoreRegistration(this.settings),

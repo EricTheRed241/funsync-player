@@ -20,17 +20,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from httpx import AsyncClient, ASGITransport
 from main import app
 from routes import remote_sync
-from routes.media import register_videos, register_playlists, register_ratings, register_categories, register_watched, get_video_registry, _path_to_id
+from routes.media import register_videos, register_playlists, register_ratings, register_categories, register_watched, register_preference_scores, get_video_registry, _path_to_id
 from routes.vr_api import parse_heresphere_update
 from services import vr_sections
 from services.funscript import companion_axes, embedded_axes, has_handmade_companions, may_have_embedded_axes
 
 DAY_MS = 24 * 60 * 60 * 1000
+# The browsing sections a scoreless library shows; the score lists come
+# before them (SCORE_SECTIONS) once the desktop has registered scores.
 ALL_SECTIONS = [
     "VR", "Flat", "Slow", "Medium", "Fast",
     "Short (<5m)", "Medium (5-15m)", "Long (15m+)",
     "Hand-made", "Recently Added",
 ]
+SCORE_SECTIONS = ["Score 15+", "Score 10-14.5"]
 
 
 @pytest.fixture
@@ -47,18 +50,20 @@ async def client():
 
 @pytest.fixture(autouse=True)
 def _no_triage_state():
-    """No ratings, playlists, categories, watched settings or queued edits
-    leak between tests."""
+    """No ratings, playlists, categories, watched settings, scores or
+    queued edits leak between tests."""
     register_ratings({})
     register_playlists([])
     register_categories([], {})
     register_watched({})
+    register_preference_scores({})
     remote_sync._reset_state_for_tests()
     yield
     register_ratings({})
     register_playlists([])
     register_categories([], {})
     register_watched({})
+    register_preference_scores({})
     remote_sync._reset_state_for_tests()
 
 
@@ -209,7 +214,7 @@ class TestBuildSections:
         assert not vr_sections.has_queue_tag(None)
 
     def test_section_order_is_the_approved_list(self):
-        assert list(vr_sections.SECTION_ORDER) == ALL_SECTIONS
+        assert list(vr_sections.SECTION_ORDER) == SCORE_SECTIONS + ALL_SECTIONS
 
     def test_names_are_plain_text_and_unique(self):
         for name in vr_sections.SECTION_ORDER:
@@ -316,6 +321,90 @@ class TestWatched:
         assert parse_heresphere_update(body, "/v/a.mp4", {}, [], False, frozenset()) == []
         # Dropping it from a watched scene changes nothing either.
         assert parse_heresphere_update({"tags": []}, "/v/b.mp4", self.RATINGS, [], False, frozenset()) == []
+
+
+# --- Score order and score lists ------------------------------------------
+
+class TestScoreOrder:
+    NOW = 1_800_000_000_000
+    # Title order a … g, all flat and Slow but g (VR). Scores: a 9.5, b 15,
+    # c none, d 14.5, e 17, f 10, g 16. Watched (rated): a, d, g.
+    ENTRIES = [
+        ("a", {"path": "/v/a.mp4", "avgSpeed": 100, "dateAdded": NOW - 1 * DAY_MS}, False),
+        ("b", {"path": "/v/b.mp4", "avgSpeed": 100, "dateAdded": NOW - 3 * DAY_MS}, False),
+        ("c", {"path": "/v/c.mp4", "avgSpeed": 100, "dateAdded": NOW - 2 * DAY_MS}, False),
+        ("d", {"path": "/v/d.mp4", "avgSpeed": 100}, False),
+        ("e", {"path": "/v/e.mp4", "avgSpeed": 100}, False),
+        ("f", {"path": "/v/f.mp4", "avgSpeed": 100, "dateAdded": NOW}, False),
+        ("g", {"path": "/v/g.mp4", "avgSpeed": 100}, True),
+    ]
+    SCORES = {"/v/a.mp4": 9.5, "/v/b.mp4": 15.0, "/v/d.mp4": 14.5, "/v/e.mp4": 17.0, "/v/f.mp4": 10.0, "/v/g.mp4": 16.0}
+    RATINGS = {
+        "/v/a.mp4": {"rating": 3.0, "favorite": False, "updatedAt": 10},
+        "/v/d.mp4": {"rating": 4.5, "favorite": True, "updatedAt": 30},
+        "/v/g.mp4": {"rating": 2.0, "favorite": False, "updatedAt": 20},
+    }
+    PLAYLISTS = [
+        {"id": "pl-disc", "name": "Discovery", "videoPaths": ["/v/c.mp4", "/v/a.mp4", "/v/e.mp4", "/v/f.mp4"]},
+        {"id": "pl-mine", "name": "Mine", "videoPaths": ["/v/c.mp4", "/v/a.mp4", "/v/e.mp4"]},
+    ]
+
+    def _sections(self, sink):
+        return vr_sections.build_sections(
+            self.ENTRIES, now_ms=self.NOW, ratings=self.RATINGS, playlists=self.PLAYLISTS,
+            queue_paths=["/v/f.mp4", "/v/b.mp4"], watched={"sink": sink, "playlistIds": ["pl-disc"]},
+            scores=self.SCORES,
+        )
+
+    def test_score_section_boundaries(self):
+        assert vr_sections.score_section(15) == "Score 15+"
+        assert vr_sections.score_section(24) == "Score 15+"
+        assert vr_sections.score_section(14.5) == "Score 10-14.5"
+        assert vr_sections.score_section(10) == "Score 10-14.5"
+        assert vr_sections.score_section(9.5) is None
+        assert vr_sections.score_section(-3) is None
+        for unscored in (None, float("nan"), float("inf"), "15", True):
+            assert vr_sections.score_section(unscored) is None
+
+    def test_thresholds_mirror_the_desktop(self):
+        assert (vr_sections.SCORE_TOP_MIN, vr_sections.SCORE_MID_MIN) == (15, 10)
+
+    def test_sections_by_score_watched_last(self):
+        sections = self._sections(True)
+        assert [name for name, _ in sections] == [
+            "Queue", "Score 15+", "Score 10-14.5", "VR", "Flat", "Slow", "Recently Added",
+            "Favorites", "Top Rated", "Unrated", "Watched", "Playlist: Discovery", "Playlist: Mine",
+        ]
+        s = dict(sections)
+        # Score desc within each group, the watched group (g 16; d 14.5, a 9.5) last.
+        assert s["Score 15+"] == ["e", "b", "g"]
+        assert s["Score 10-14.5"] == ["f", "d"]
+        assert s["Flat"] == ["e", "b", "f", "c", "d", "a"]   # unscored c after the scored ones
+        assert s["Slow"] == ["e", "b", "f", "c", "g", "d", "a"]
+        assert s["VR"] == ["g"]
+        # Recently Added stays by date (newest first), watched last.
+        assert s["Recently Added"] == ["f", "c", "b", "a"]
+        # Discovery (app-made) by score; the user's own playlist keeps its order.
+        assert s["Playlist: Discovery"] == ["e", "f", "c", "a"]
+        assert s["Playlist: Mine"] == ["c", "a", "e"]
+        # Queue and the rating sections keep theirs.
+        assert s["Queue"] == ["f", "b"]
+        assert s["Unrated"] == ["b", "c", "e", "f"]
+        assert s["Favorites"] == ["d"]
+        assert s["Top Rated"] == ["d"]
+        assert s["Watched"] == ["d", "g", "a"]
+
+    def test_sink_off_still_by_score(self):
+        s = dict(self._sections(False))
+        assert s["Score 15+"] == ["e", "g", "b"]
+        assert s["Flat"] == ["e", "b", "d", "f", "a", "c"]
+        assert s["Recently Added"] == ["f", "a", "c", "b"]
+        assert s["Playlist: Discovery"] == ["e", "f", "a", "c"]
+
+    def test_no_scores_keeps_title_order_and_no_score_lists(self):
+        s = dict(vr_sections.build_sections(self.ENTRIES, now_ms=self.NOW))
+        assert "Score 15+" not in s and "Score 10-14.5" not in s
+        assert s["Flat"] == ["a", "b", "c", "d", "e", "f"]
 
 
 # --- Hand-made companion files --------------------------------------------
@@ -740,3 +829,36 @@ async def test_watched_scene_tag_is_read_only(client, tmp_path):
     await client.get(f"/heresphere/{b}")
     await client.post(f"/heresphere/{b}", json={"tags": [{"name": "Status:Watched"}]})
     assert remote_sync.library_edits.queue.pending() == []
+
+
+# --- Score order in the listings ------------------------------------------
+
+@pytest.mark.anyio
+async def test_listings_by_score_with_score_lists(client, tmp_path):
+    _register_library(tmp_path)
+    multi = str(tmp_path / "Multi" / "Multi.mp4")
+    gen = str(tmp_path / "Gen" / "Gen.mp4")
+    await client.post("/api/media/register", json={
+        "preferenceScores": {"/Lib/A_180_sbs.mp4": 15, "/Lib/B.mp4": 14.5, "/Lib/C.mp4": 10, "/Lib/D.mp4": 9.5, multi: 17, gen: 15},
+        "ratings": {
+            "/Lib/B.mp4": {"rating": 3.0, "favorite": False, "updatedAt": 5},
+            multi: {"rating": 4.0, "favorite": False, "updatedAt": 9},
+        },
+        "watched": {"sink": True, "playlistIds": []},
+    })
+    a, b, c, d = (_path_to_id(p) for p in ["/Lib/A_180_sbs.mp4", "/Lib/B.mp4", "/Lib/C.mp4", "/Lib/D.mp4"])
+    e = _path_to_id(str(tmp_path / "Emb" / "Emb.mp4"))
+    g, m = _path_to_id(gen), _path_to_id(multi)
+
+    data = (await client.post("/heresphere", json={})).json()
+    assert [s["name"] for s in data["library"]] == SCORE_SECTIONS + ALL_SECTIONS + ["Top Rated", "Unrated", "Watched"]
+    sections = {s["name"]: _ids(s["list"]) for s in data["library"]}
+    assert sections["Score 15+"] == [a, g, m]          # 15, 15 (title), then watched Multi 17
+    assert sections["Score 10-14.5"] == [c, b]         # B 14.5 is watched
+    assert sections["Flat"] == [g, c, d, e, m, b]      # 15, 10, 9.5, unscored; watched 17, 14.5
+    assert sections["Recently Added"] == [a]
+    assert sections["Unrated"] == [a, c, d, e, g]      # title order
+
+    deo = {s["name"]: [i["title"] for i in s["list"]] for s in (await client.get("/deovr")).json()["scenes"]}
+    assert deo["Score 15+"] == ["A_180_sbs", "Gen", "Multi"]
+    assert deo["Flat"] == ["Gen", "C", "D", "Emb", "Multi", "B"]

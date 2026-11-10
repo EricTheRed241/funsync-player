@@ -16,6 +16,8 @@ import { captureVideoThumb } from '../js/thumb-request.js';
 import { isWatched, ratingOf, watchedLast } from '../js/ratings.js';
 import { LIST_CATEGORY, sinksWatched, WATCHED_LAST_KEY, watchedLastOn } from '../js/watched-lists.js';
 import { markWatched } from '../js/watched-badge.js';
+import { PREFERENCE_SCORES_KEY } from '../js/library-scores.js';
+import { byScore } from '../js/score-bands.js';
 
 export class Categories {
   constructor({ settings, onPlayVideo, library }) {
@@ -283,10 +285,13 @@ export class Categories {
       return;
     }
 
-    // Watched (rated) videos go last, dimmed and badged (watched-lists.js).
+    // By preference score, highest first (a category has no order of its
+    // own), then watched (rated) videos last, dimmed and badged
+    // (watched-lists.js).
+    const byPref = byScore(validPaths, (p) => p, this._settings.get(PREFERENCE_SCORES_KEY) || {});
     const ratings = this._settings.getRatings ? this._settings.getRatings() : {};
     const sink = watchedLastOn(this._settings.get(WATCHED_LAST_KEY)) && sinksWatched(LIST_CATEGORY);
-    const ordered = sink ? watchedLast(validPaths, (p) => p, (p) => isWatched(ratings, p)) : validPaths;
+    const ordered = sink ? watchedLast(byPref, (p) => p, (p) => isWatched(ratings, p)) : byPref;
 
     const grid = document.createElement('div');
     grid.className = 'categories__grid';

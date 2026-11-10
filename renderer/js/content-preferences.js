@@ -5,7 +5,7 @@
 // scripts/faptap-scout-lib.mjs, scripts/scout-live.mjs), the duplicate
 // cleanup (scripts/scene-dedupe-lib.mjs) and the app (renderer/js/
 // reject-rule.js, ratings.js, artist-playlists.js, auto-categories.js,
-// auto-collections.js, play-queue.js). Those modules hold the logic; the
+// auto-collections.js, score-bands.js, play-queue.js). Those modules hold the logic; the
 // values live here.
 // Changing a screening rule here means bumping RULES_VERSION in
 // scripts/eroscripts-scout-lib.mjs (and FAPTAP_RULES_VERSION in
@@ -17,8 +17,9 @@
 // Values the Rust CLIs read too live in content-preferences.json next to this
 // file (the shared part of the preferences: Rust embeds it at compile time,
 // crates/age-screen). They're exported here like the rest; change them there.
-// One value has a copy outside JavaScript: TOP_RATED_MIN is mirrored in
-// backend/services/vr_sections.py.
+// Values with a copy outside JavaScript: TOP_RATED_MIN and the SCORE_BANDS
+// thresholds are mirrored in backend/services/vr_sections.py, DEFAULT_SORT in
+// backend/web-remote/sort-default.js (the phone can't import this file).
 
 import data from './content-preferences.json' with { type: 'json' };
 
@@ -250,6 +251,30 @@ export const KEEP_FROM = 4;
 export const REVIEW_PLAYLIST = 'Review';
 /** "Top rated" filter and the headset's Top Rated section (mirrored in backend/services/vr_sections.py). */
 export const TOP_RATED_MIN = 4;
+
+// ── Sorting and score lists ─────────────────────────────────────────────
+
+/**
+ * The library's sort when nothing else was chosen (desktop library and its collections,
+ * web remote): preference score, highest first, unscored last (user, 2026-11-10). Watched
+ * videos still go last, each group by score. Mirrored in backend/web-remote/sort-default.js.
+ */
+export const DEFAULT_SORT = 'score:desc';
+
+/**
+ * Score lists (user, 2026-11-10): the preference score bands kept as automatic collections
+ * on the desktop (renderer/js/score-bands.js; the phone's Collections tab shows them), each
+ * video in the band of its current score. A band holds `min <= score < below` (either end
+ * open); unscored videos are in none. Cut at the library's spread (2026-11-10: median 11,
+ * top 20 % from 14, top 10 % from 16.5): 15+ is the best ~15 %, 10 the picking threshold for
+ * new downloads. The headsets list the first two as sections "Score 15+" and "Score 10-14.5";
+ * those thresholds are mirrored in backend/services/vr_sections.py (SCORE_TOP_MIN, SCORE_MID_MIN).
+ */
+export const SCORE_BANDS = [
+  { key: 'score-15', name: 'Score 15+', min: 15 },
+  { key: 'score-10', name: 'Score 10–14.5', min: 10, below: 15 },
+  { key: 'score-low', name: 'Score below 10', below: 10 },
+];
 
 // ── Watched videos ──────────────────────────────────────────────────────
 

@@ -52,7 +52,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, get_watched, _path_to_id, record_vr_activity, thumb_url
+from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_preference_scores, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, get_watched, _path_to_id, record_vr_activity, thumb_url
 from routes.remote_sync import submit_library_edit
 from services import library_edits, stereo_detect, video_info, vr_sections
 from services.network import get_local_ip
@@ -696,11 +696,12 @@ async def deovr_library(request: Request):
     """DeoVR library listing — groups of scenes.
 
     Groups are the shared headset sections (`services.vr_sections`): Queue,
-    VR / Flat, speed, length, hand-made multi-axis, recently added, the
-    triage sections (Favorites, Top Rated, Unrated, Watched) and one per
-    playlist. Empty ones are left out. Watched (rated) videos sink to the
-    end of the browsing sections and the desktop's chosen playlists while
-    the desktop's `watched.sink` is on.
+    the score lists (Score 15+, Score 10-14.5), VR / Flat, speed, length,
+    hand-made multi-axis, recently added, the triage sections (Favorites,
+    Top Rated, Unrated, Watched) and one per playlist. Empty ones are left
+    out. The browsing sections and Discovery list by preference score,
+    highest first (Recently Added newest first); watched (rated) videos
+    sink to the end of them while the desktop's `watched.sink` is on.
 
     DeoVR sends both GET and POST to this endpoint.
     Query params:
@@ -724,6 +725,7 @@ async def deovr_library(request: Request):
     sections = vr_sections.build_sections(
         entries, ratings=get_ratings(), playlists=get_playlists(),
         queue_paths=vr_sections.queued_paths(get_queue()), watched=get_watched(),
+        scores=get_preference_scores(),
     )
     scenes = [{'name': name, 'list': items} for name, items in sections]
 
@@ -848,8 +850,9 @@ async def heresphere_library(request: Request):
 
     Sections are the shared headset sections (`services.vr_sections`), in
     plain text — HereSphere can't render emoji. Empty ones are left out.
-    Watched (rated) videos sink to the end of the browsing sections and the
-    desktop's chosen playlists while the desktop's `watched.sink` is on.
+    The browsing sections and Discovery list by preference score, highest
+    first (Recently Added newest first); watched (rated) videos sink to the
+    end of them while the desktop's `watched.sink` is on.
 
     Query params:
       ?filter=vr    — only VR videos
@@ -869,6 +872,7 @@ async def heresphere_library(request: Request):
         for name, urls in vr_sections.build_sections(
             entries, ratings=get_ratings(), playlists=get_playlists(),
             queue_paths=vr_sections.queued_paths(get_queue()), watched=get_watched(),
+            scores=get_preference_scores(),
         )
     ]
 

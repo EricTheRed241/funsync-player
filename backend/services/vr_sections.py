@@ -13,9 +13,18 @@ Queue plays through it. Every queued scene carries the `Queue:Up next` tag.
 Section names are plain text: HereSphere renders emoji as empty boxes.
 
 Everything here works on fields already on the registry entry
-(`avgSpeed`, `duration`, `dateAdded`, `handmadeCompanions`, `embeddedAxes`), so
-a listing never touches the filesystem. A video missing a field is simply
-left out of the sections that depend on it.
+(`avgSpeed`, `duration`, `dateAdded`, `handmadeCompanions`, `embeddedAxes`)
+and the desktop's registered preference scores, so a listing never touches
+the filesystem. A video missing a field is simply left out of the sections
+that depend on it.
+
+Order (user, 2026-11-10): the sections with no order of their own (the
+score lists, VR, Flat, speed, length, Hand-made, and the app-made
+playlists in `watched.playlistIds`, today Discovery) list by preference
+score, highest first, unscored last, title breaking ties. Recently Added
+lists the newest first. The score lists `Score 15+` and `Score 10-14.5` come
+first after Queue: the videos whose score falls in that band (the desktop's
+SCORE_BANDS, whose "Score below 10" collection has no section).
 
 After those come the triage sections, from the desktop's ratings and
 playlists (registered with the backend, pending headset/phone edits
@@ -33,8 +42,9 @@ So that they aren't played again by accident, the browsing sections
 today only Discovery) list the unwatched videos first, then the watched
 ones, each group in its usual order, while the desktop setting is on
 (`watched.sink`). Queue, the rating sections and the user's own playlists
-keep their order. Every watched scene carries the read-only
-`Status:Watched` tag.
+keep their order. Watched last applies after the section's own order, so
+each group stays by score (or date). Every watched scene carries the
+read-only `Status:Watched` tag.
 """
 
 import math
@@ -63,6 +73,8 @@ SECTION_VR = 'VR'
 SECTION_FLAT = 'Flat'
 SECTION_HANDMADE_AXES = 'Hand-made'
 SECTION_RECENT = 'Recently Added'
+SECTION_SCORE_TOP = 'Score 15+'
+SECTION_SCORE_MID = 'Score 10-14.5'
 SECTION_FAVORITES = 'Favorites'
 SECTION_TOP_RATED = 'Top Rated'
 SECTION_UNRATED = 'Unrated'
@@ -73,8 +85,16 @@ PLAYLIST_SECTION_PREFIX = 'Playlist: '
 # Same threshold as the desktop (TOP_RATED_MIN in renderer/js/content-preferences.js).
 TOP_RATED_MIN = 4
 
+# Score lists: the desktop's SCORE_BANDS (renderer/js/content-preferences.js).
+# score >= SCORE_TOP_MIN → Score 15+, SCORE_MID_MIN <= score < SCORE_TOP_MIN
+# → Score 10-14.5; lower or unscored → neither.
+SCORE_TOP_MIN = 15
+SCORE_MID_MIN = 10
+
 # Display order; empty sections are dropped.
 SECTION_ORDER = (
+    SECTION_SCORE_TOP,
+    SECTION_SCORE_MID,
     SECTION_VR,
     SECTION_FLAT,
     SPEED_SLOW,
@@ -86,6 +106,10 @@ SECTION_ORDER = (
     SECTION_HANDMADE_AXES,
     SECTION_RECENT,
 )
+
+# The SECTION_ORDER sections listed by score, highest first (the rest of
+# them: Recently Added, newest first).
+SCORE_ORDERED_SECTIONS = frozenset(SECTION_ORDER) - {SECTION_RECENT}
 
 # After SECTION_ORDER, before the per-playlist sections. None of them sink.
 TRIAGE_SECTION_ORDER = (SECTION_FAVORITES, SECTION_TOP_RATED, SECTION_UNRATED, SECTION_WATCHED)
@@ -197,9 +221,33 @@ def axis_flags(registry):
     return {'flags': flags, 'pending': pending}
 
 
-def video_sections(video, is_3d, now_ms):
-    """Every section this video belongs to, in SECTION_ORDER."""
-    names = [SECTION_VR if is_3d else SECTION_FLAT]
+def score_section(score):
+    """SECTION_SCORE_TOP / SECTION_SCORE_MID for a preference score, or None
+    (below SCORE_MID_MIN, or no score)."""
+    if _score_value(score) is None:
+        return None
+    if score >= SCORE_TOP_MIN:
+        return SECTION_SCORE_TOP
+    if score >= SCORE_MID_MIN:
+        return SECTION_SCORE_MID
+    return None
+
+
+def _score_value(value):
+    """`value` as a float when it is a real finite number, else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def video_sections(video, is_3d, now_ms, score=None):
+    """Every section this video belongs to, in SECTION_ORDER. `score` is its
+    preference score (None = not scored)."""
+    names = []
+    band = score_section(score)
+    if band:
+        names.append(band)
+    names.append(SECTION_VR if is_3d else SECTION_FLAT)
     speed = speed_bucket(video)
     if speed:
         names.append(speed)
@@ -262,46 +310,65 @@ def watched_tags(path, ratings):
     return [WATCHED_TAG] if path and is_watched(ratings, path) else []
 
 
-def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_paths=None, watched=None):
+def by_score(entries, score_of):
+    """`entries` by preference score, highest first, unscored last; stable,
+    so ties keep the order they came in (title). Returns a new list."""
+    return sorted(entries, key=lambda e: (score_of(e) is None, -(score_of(e) or 0)))
+
+
+def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_paths=None, watched=None, scores=None):
     """Group listing items into sections.
 
-    `entries` yields `(item, video, is_3d)`. Returns `[(name, [item, ...])]`:
-    `Queue` first (the entries named by `queue_paths`, in that order), then
-    SECTION_ORDER, then Favorites / Top Rated / Unrated from `ratings`
-    (videoPath → {rating, favorite, updatedAt}), Watched (the rated
-    entries, newest rating first), then one `Playlist: <name>` per entry of
-    `playlists` in the given order. Empty sections are omitted. Items keep
-    the order they came in, except the queue, Watched and playlist
-    sections, which follow their own order.
+    `entries` yields `(item, video, is_3d)`, in title order. Returns
+    `[(name, [item, ...])]`: `Queue` first (the entries named by
+    `queue_paths`, in that order), then SECTION_ORDER, then Favorites / Top
+    Rated / Unrated from `ratings` (videoPath → {rating, favorite,
+    updatedAt}), Watched (the rated entries, newest rating first), then one
+    `Playlist: <name>` per entry of `playlists` in the given order. Empty
+    sections are omitted.
+
+    `scores` is the desktop's preference score per video path (absent =
+    not scored). The SCORE_ORDERED_SECTIONS and the playlists in
+    `watched.playlistIds` (the app-made ones) list by score, highest first,
+    unscored last; Recently Added lists the newest first (`dateAdded`); the
+    queue, Watched and the other playlists follow their own order; the
+    rating sections keep the order the entries came in.
 
     `watched` is the desktop's `{sink, playlistIds}` (`routes.media.
     get_watched`): with `sink` on, the SECTION_ORDER sections and the
     sections of the playlists in `playlistIds` list the unwatched items
-    first, then the watched ones (`watched_last`). None sinks nothing.
+    first, then the watched ones (`watched_last`), each group in the order
+    above. None sinks nothing and orders no playlist by score.
     """
     if now_ms is None:
         now_ms = time.time() * 1000
     ratings = ratings or {}
+    scores = scores or {}
     watched = watched or {}
     sink = watched.get('sink') is True
-    sink_playlists = set(watched.get('playlistIds') or []) if sink else set()
-    # Items travel as (item, watched) pairs until the end, so sinking never
-    # has to look an item up again.
+    app_playlists = set(watched.get('playlistIds') or [])
+    # Items travel as (item, watched, score, dateAdded) until the end, so
+    # ordering and sinking never have to look an item up again.
     grouped = {name: [] for name in SECTION_ORDER + TRIAGE_SECTION_ORDER}
     by_path = {}
     for item, video, is_3d in entries:
-        path = (video or {}).get('path')
-        pair = (item, is_watched(ratings, path))
-        for name in video_sections(video, is_3d, now_ms) + rating_sections(video, ratings):
-            grouped[name].append(pair)
+        video = video or {}
+        path = video.get('path')
+        score = _score_value(scores.get(path)) if path else None
+        entry = (item, is_watched(ratings, path), score, _positive_number(video.get('dateAdded')) or 0)
+        for name in video_sections(video, is_3d, now_ms, score) + rating_sections(video, ratings):
+            grouped[name].append(entry)
         if path:
-            by_path[path] = pair
+            by_path[path] = entry
     grouped[SECTION_WATCHED] = [by_path[p] for p in watched_paths(ratings) if p in by_path]
+    for name in SCORE_ORDERED_SECTIONS:
+        grouped[name] = by_score(grouped[name], lambda e: e[2])
+    grouped[SECTION_RECENT].sort(key=lambda e: -e[3])
 
-    def finish(pairs, sinks):
+    def finish(group, sinks):
         if sinks:
-            pairs = watched_last(pairs, lambda pair: pair[1])
-        return [item for item, _ in pairs]
+            group = watched_last(group, lambda e: e[1])
+        return [e[0] for e in group]
 
     out = []
     queued = [by_path[p] for p in queue_paths or [] if p in by_path]
@@ -312,9 +379,13 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
         for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name]
     )
     for playlist in playlists or []:
-        pairs = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
-        if pairs:
-            out.append((playlist_section_name(playlist.get('name')), finish(pairs, playlist.get('id') in sink_playlists)))
+        group = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
+        if not group:
+            continue
+        app_made = playlist.get('id') in app_playlists
+        if app_made:
+            group = by_score(group, lambda e: e[2])
+        out.append((playlist_section_name(playlist.get('name')), finish(group, sink and app_made)))
     return out
 
 
