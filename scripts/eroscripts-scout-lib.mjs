@@ -552,8 +552,9 @@ export function megaKeyOk(url) {
 // ── Folders ─────────────────────────────────────────────────────────────
 
 const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
-// Leading title groups that label the post rather than name its artist.
-const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|suggest|vam|mmd|sfm|fap ?hero|cock ?hero|[hp]mv|r-?18|hentai|^[23]d$|^ai$|^iwara$/i;
+// Leading title groups that label the post rather than name its artist,
+// resolution and frame-rate tags (`[4K]`, `(1080p)`, `[4K60]`, `[60fps]`) included.
+const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|suggest|vam|mmd|sfm|fap ?hero|cock ?hero|[hp]mv|r-?18|hentai|^[23]d$|^ai$|^iwara$|^(?:[1-9]k|\d{3,4}p|u?hd|fhd)(?:\s*\d{2,3}(?:\s*fps)?)?$|^\d{2,3}\s*fps$/i;
 
 /** True for a name that labels a script or genre (`Cock Hero`, `PMV`, `Multi-axis`) rather than naming an artist. */
 export const isCreatorLabel = (name) => NOT_A_CREATOR.test(String(name || ''));
@@ -620,7 +621,10 @@ function splitGroups(text) {
  * SR6, …) are dropped; other bracket parts and ` | ` segments become metadata.
  */
 function parseName(text, fallback) {
-  const { groups, rest } = splitGroups(String(text).replace(/^\s*(?:axis master|public release\s*:)\s*/i, ''));
+  // A leading `(Name)` glued to the title (`(AlenAbyss)Midnight Ride`) is still the artist;
+  // short ones stay glued so names like `(G)I-DLE` keep their brackets.
+  const spaced = String(text).replace(/^(\s*\((?:[^()]*?\p{L}){3}[^()]*\))(?=[\p{L}\p{N}])/u, '$1 ');
+  const { groups, rest } = splitGroups(spaced.replace(/^\s*(?:axis master|public release\s*:)\s*/i, ''));
   let artist = groups.find((g) => g.lead && g.text && !NOT_A_CREATOR.test(g.text))?.text || '';
   const [first, ...segments] = rest.split(/\s+\|\s+/);
   let core = first.replace(/^\s*iwara\s*-\s*/i, '').replace(AXIS_WORDS, ' ').replace(/\s+updated\s*$/i, '');
