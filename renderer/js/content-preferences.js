@@ -119,9 +119,9 @@ export const LIBRARY_MAX_VIDEOS = 1000;
 /**
  * `eroscripts:scout --fetch --auto` (the daily run, `--daily`) downloads only posts with hand-made multi-axis scripts
  * (archives count: they're multi-axis packs) that score at least this (candidateScore); the rest wait for the user's pick
- * (user, 2026-11-10).
+ * (user, 2026-11-10; 10 → 15 the same day).
  */
-export const AUTO_FETCH_MIN_SCORE = 10;
+export const AUTO_FETCH_MIN_SCORE = 15;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
 export const FAPTAP_FOCUS = [
   { name: 'PMV / HMV', tags: [...PMV_TAGS], title: PMV_TITLE },
@@ -259,7 +259,7 @@ export const TOP_RATED_MIN = 4;
 
 /**
  * The library's sort when nothing else was chosen (desktop library and its collections,
- * web remote): preference score, highest first, unscored last (user, 2026-11-10). Watched
+ * web remote): preference score, highest first, unscored last (user, 2026-11-10; 10 → 15 the same day). Watched
  * videos still go last, each group by score. Mirrored in backend/web-remote/sort-default.js.
  */
 export const DEFAULT_SORT = 'score:desc';
