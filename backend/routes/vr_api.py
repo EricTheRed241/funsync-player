@@ -699,7 +699,7 @@ async def deovr_library(request: Request):
     the score lists (Score 20+, Score 15-19.5, Score 10-14.5), VR / Flat, speed, length,
     hand-made multi-axis, recently added, the triage sections (Favorites,
     Top Rated, Unrated, Watched) and one per playlist. Empty ones are left
-    out. The browsing sections and Discovery list by preference score,
+    out. The browsing sections list by preference score,
     highest first (Recently Added newest first); watched (rated) videos
     sink to the end of them while the desktop's `watched.sink` is on.
 
@@ -850,7 +850,7 @@ async def heresphere_library(request: Request):
 
     Sections are the shared headset sections (`services.vr_sections`), in
     plain text — HereSphere can't render emoji. Empty ones are left out.
-    The browsing sections and Discovery list by preference score, highest
+    The browsing sections list by preference score, highest
     first (Recently Added newest first); watched (rated) videos sink to the
     end of them while the desktop's `watched.sink` is on.
 

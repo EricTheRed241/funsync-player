@@ -485,35 +485,36 @@ async def test_no_watched_collection_without_rated_videos(client):
 @pytest.mark.anyio
 async def test_playlists_and_categories_say_whether_they_sink(client):
     register_playlists([
-        {"id": "disc", "name": "Discovery", "videoPaths": [ALPHA]},
+        {"id": "eve", "name": "Evening", "videoPaths": [ALPHA]},
         {"id": "mine", "name": "Mine", "videoPaths": [BETA]},
     ])
     register_categories([{"id": "cat1", "name": "Cat"}], {ALPHA: ["cat1"]})
-    register_watched({"sink": True, "playlistIds": ["disc"]})
+    register_watched({"sink": True})
     pls = {p["id"]: p["sinkWatched"] for p in (await client.get("/api/remote/playlists")).json()["playlists"]}
-    assert pls == {"disc": True, "mine": False}
+    assert pls == {"eve": False, "mine": False}   # playlists keep their order
     [cat] = (await client.get("/api/remote/categories")).json()["categories"]
     assert cat["sinkWatched"] is True
 
-    register_watched({"sink": False, "playlistIds": ["disc"]})
+    register_watched({"sink": False})
     pls = {p["id"]: p["sinkWatched"] for p in (await client.get("/api/remote/playlists")).json()["playlists"]}
-    assert pls == {"disc": False, "mine": False}
+    assert pls == {"eve": False, "mine": False}
     [cat] = (await client.get("/api/remote/categories")).json()["categories"]
     assert cat["sinkWatched"] is False
 
 
 @pytest.mark.anyio
 async def test_register_watched_is_independent_and_cleaned(client):
-    assert get_watched() == {"sink": True, "playlistIds": []}
+    assert get_watched() == {"sink": True}
+    # An old desktop's `playlistIds` is ignored.
     await client.post("/api/media/register", json={
-        "watched": {"sink": False, "playlistIds": ["disc", "disc", 3, "", None, "other"]},
+        "watched": {"sink": False, "playlistIds": ["eve"]},
     })
-    assert get_watched() == {"sink": False, "playlistIds": ["disc", "other"]}
+    assert get_watched() == {"sink": False}
     # Other keys leave it alone.
     await client.post("/api/media/register", json={"ratings": {}})
-    assert get_watched() == {"sink": False, "playlistIds": ["disc", "other"]}
-    # Junk is the defaults; only an explicit false turns sinking off.
+    assert get_watched() == {"sink": False}
+    # Junk is the default; only an explicit false turns sinking off.
     await client.post("/api/media/register", json={"watched": "junk"})
-    assert get_watched() == {"sink": True, "playlistIds": []}
-    await client.post("/api/media/register", json={"watched": {"sink": 0, "playlistIds": "disc"}})
-    assert get_watched() == {"sink": True, "playlistIds": []}
+    assert get_watched() == {"sink": True}
+    await client.post("/api/media/register", json={"watched": {"sink": 0}})
+    assert get_watched() == {"sink": True}

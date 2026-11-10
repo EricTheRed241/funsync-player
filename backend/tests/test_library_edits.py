@@ -431,9 +431,9 @@ class TestTriageSections:
         assert "Playlist: Empty" not in names
 
     def test_headset_rating_makes_a_video_watched_on_the_next_listing(self, client, library):
-        # Evening (pl-1: C, A) is a playlist whose videos sink, like Discovery.
+        # Evening (pl-1: C, A) is a playlist: it keeps its order, never sinks.
         register_ratings({B: {"rating": 3.0, "favorite": False, "updatedAt": 100}})
-        media.register_watched({"sink": True, "playlistIds": ["pl-1"]})
+        media.register_watched({"sink": True})
         sections, _ = _sections(client)
         assert _ids(sections["Flat"]) == [library["C"], library["B"]]
         assert _ids(sections["Playlist: Evening"]) == [library["C"], library["A"]]
@@ -447,7 +447,7 @@ class TestTriageSections:
         assert len(library_edits.queue.pending()) == 2
 
         sections, _ = _sections(client)
-        assert _ids(sections["Playlist: Evening"]) == [library["A"], library["C"]]
+        assert _ids(sections["Playlist: Evening"]) == [library["C"], library["A"]]   # unchanged
         assert _ids(sections["Flat"]) == [library["B"], library["C"]]
         assert _ids(sections["Watched"]) == [library["C"], library["B"]]   # newest rating first
         assert _ids(sections["Favorites"]) == [library["A"]]

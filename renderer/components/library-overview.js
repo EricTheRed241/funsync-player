@@ -3,7 +3,7 @@
 // Four cards over the scanned library (renderer/js/library-overview.js):
 //   • Capacity: videos against LIBRARY_MAX_VIDEOS (the cap the scouts stop
 //     downloading at), size on disk, per source
-//   • Ratings and favourites: counts, the triage buckets (Keep / Review), a
+//   • Ratings and favourites: counts (Keep = Top rated), a
 //     star histogram and every rated or favourite video with its stars
 //   • Favourite artists: star per artist folder, add a name, the favourite
 //     artist bonus
@@ -224,7 +224,6 @@ export class LibraryOverview {
     };
     tile(t('rating.filterFavorites'), r.favourites, 'favorites', 'overview__tile--favourite');
     tile(t('overview.ratings.keep'), r.keep, 'top');
-    tile(t('overview.ratings.review'), r.review, null);
     tile(t('rating.filterUnrated'), r.unrated, 'unrated');
 
     const histo = el('div', 'overview__histogram');

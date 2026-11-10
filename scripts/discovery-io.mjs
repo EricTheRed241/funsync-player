@@ -1,9 +1,8 @@
 // File-system side of the Discovery scouts (scripts/eroscripts-scout.mjs,
-// scripts/faptap-scout.mjs): the app's config.json and lock, the library's
+// scripts/faptap-scout.mjs): the app's config.json and lock, and the library's
 // folders (each scout downloads into its own source folder, EroScripts or
-// FapTap), and the Discovery playlist. config.json is written only while the
-// app is closed; otherwise finished videos wait in
-// `<userData>/eroscripts-scout-pending.json` for the next run of either scout.
+// FapTap, added as a library source). config.json is written only while the
+// app is closed.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -11,8 +10,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { DISCOVERY_PLAYLIST } from '../renderer/js/content-preferences.js';
-import { addToDiscovery, coreName, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
+import { addLibrarySource, coreName, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
 
 const { rewriteVideoTagsFile } = createRequire(import.meta.url)('../electron/video-tags.js');
 
@@ -107,8 +105,8 @@ export function renameWithSidecar(from, to) {
 /**
  * Carry out `retitlePlan` moves: rename each scene's files and folder (a
  * scene that fails is put back), point its sidecar's `file` at the new video
- * name, and rewrite every path config.json, the pending playlist adds and
- * the video tags file (`video-tags.json`) keep for it. The app must be
+ * name, and rewrite every path config.json and the video tags file
+ * (`video-tags.json`) keep for it. The app must be
  * closed (config.json).
  *
  * @param {object[]} moves retitlePlan's result
@@ -147,10 +145,6 @@ export function applyMoves(moves, { userData, incoming, sidecar }) {
   if (done.length) {
     const { value, changed } = remapPaths(readConfig(userData), done);
     writeConfig(userData, value);
-    const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
-    if (fs.existsSync(pendingFile)) {
-      fs.writeFileSync(pendingFile, JSON.stringify(remapPaths(JSON.parse(fs.readFileSync(pendingFile, 'utf8')), done).value, null, 1));
-    }
     const tagged = rewriteVideoTagsFile(userData, (data) => remapPaths(data, done));
     console.log(`Renamed ${done.length} scenes; ${changed} paths updated in config.json${tagged ? `, ${tagged} in video-tags.json` : ''}`);
   }
@@ -178,23 +172,19 @@ export function onDiskPath(p) {
 }
 
 /**
- * Add finished videos (and any left from earlier runs) to Discovery, with the
- * scout's download folder (`{name, path}`) as a library source; false when the app is open.
+ * Make sure the scout's download folder (`{name, path}`) is a library source
+ * in config.json. Writes only while the app is closed; with the app open and
+ * the source missing, notes that the next run with the app closed adds it.
  */
-export function flushPlaylist(userData, folder, videoPaths) {
-  const pendingFile = path.join(userData, 'eroscripts-scout-pending.json');
-  let pending = [];
-  try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf8')); } catch { /* none */ }
-  const all = [...new Set([...pending, ...videoPaths].filter((p) => fs.existsSync(p)).map(onDiskPath))];
-  if (!all.length) return true;
-  if (appRunning(userData)) { fs.writeFileSync(pendingFile, JSON.stringify(all, null, 1)); return false; }
+export function ensureLibrarySource(userData, folder) {
   const config = readConfig(userData);
-  const changes = addToDiscovery(config, all, { folder, newId: randomUUID });
-  if (changes.sourceAdded || changes.playlistCreated || changes.added.length) writeConfig(userData, config);
-  fs.rmSync(pendingFile, { force: true });
-  if (changes.sourceAdded) console.log(`  added library source "${folder.name}" → ${folder.path}`);
-  if (changes.playlistCreated) console.log(`  created playlist "${DISCOVERY_PLAYLIST}"`);
-  return true;
+  if (!addLibrarySource(config, folder, { newId: randomUUID })) return;
+  if (appRunning(userData)) {
+    console.log(`  library source "${folder.name}" missing; the next run with the app closed adds it`);
+    return;
+  }
+  writeConfig(userData, config);
+  console.log(`  added library source "${folder.name}" → ${folder.path}`);
 }
 
 /**

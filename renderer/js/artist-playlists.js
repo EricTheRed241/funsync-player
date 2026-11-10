@@ -2,8 +2,8 @@
 // included (user, 2026-11-04), plus one FAVOURITES_PLAYLIST with every
 // favourite's videos from the first one (the values are in content-preferences.js).
 //
-// The library is laid out `<source>/<artist>/<scene>/<video>` (the scout
-// names Discovery's artist folders the same way), so a video's artist is the
+// The library is laid out `<source>/<artist>/<scene>/<video>` (the scouts
+// name their artist folders the same way), so a video's artist is the
 // first folder under its source. After each library scan every artist folder
 // holding at least ARTIST_PLAYLIST_MIN videos, across all sources, gets a
 // playlist named after it, and new videos of that artist join it. A

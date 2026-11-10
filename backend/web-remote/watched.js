@@ -3,8 +3,8 @@
 // doesn't count. So they aren't played again by accident, the lists the
 // desktop sinks put them last, dimmed and badged: the library and folder
 // views while the desktop setting is on (`watchedLast`), and every grouping
-// whose `sinkWatched` is true (categories, collections, the Discovery
-// playlist). The rating views keep their order: the favourites / top rating
+// whose `sinkWatched` is true (categories, collections; playlists keep
+// their order). The rating views keep their order: the favourites / top rating
 // filters and the rating sort. The virtual Watched collection (`:watched`)
 // lists the rated videos newest rating first.
 

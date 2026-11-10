@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // npm run eroscripts:scout — find free EroScripts posts worth adding, then
-// download them into a review folder and the app's "Discovery" playlist.
+// download them into the library's EroScripts folder.
 //
 //   npm run eroscripts:scout                 scan new posts (+ a little backfill) → <userData>/eroscripts-scout.json
 //   npm run eroscripts:scout -- --fetch      download the saved list
@@ -14,11 +14,9 @@
 // rank lower). Scenes land in the library's EroScripts folder,
 // `<library parent>/EroScripts/<creator>/<Artist - Title (metadata)>/`, with an
 // `eroscripts.json` sidecar. Single-axis scenes get generated twist / roll / pitch companions
-// (scripts/upgrade-multi-axis.mjs). Each finished video joins the Discovery
-// playlist, and the EroScripts folder is a library source, so the
-// scenes show in the library, the web remote and HereSphere. config.json is
-// written only while the app is closed; otherwise the paths wait in
-// `<userData>/eroscripts-scout-pending.json` for the next run.
+// (scripts/upgrade-multi-axis.mjs). The EroScripts folder is a library
+// source, so the scenes show in the library, the web remote and HereSphere;
+// config.json is written (to add the source) only while the app is closed.
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
 // last pass / app running (--retitle), 3 not logged in / session expired.
@@ -43,7 +41,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, flushPlaylist, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, ensureLibrarySource, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
 const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
 const live = await import('./scout-live.mjs');
 const streams = await import('./stream-hosts.mjs');
@@ -80,7 +78,7 @@ Pick:
                          posts the library has or the user turned down, and library duplicates count (the
                          live-not-POV rule doesn't); single-axis scenes get generated axes
 Download:
-  --fetch                download the saved list (multi-axis first), add each scene to Discovery;
+  --fetch                download the saved list (multi-axis first) into the EroScripts library folder;
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids
@@ -648,7 +646,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       // Another post already brought this scene (same folder and video file): leave the
       // folder alone. Its scripts, sidecar and length were judged when it came, so this
       // post's files and the current length rule don't apply to it.
-      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in Discovery from another post; left as is`); continue; }
+      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in the library from another post; left as is`); continue; }
       try {
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging, local);
         let lengthMs = null;
@@ -672,9 +670,8 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
           if (up.status === 0) { generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
         }
-        const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
         const kind = c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
-        console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}${listed ? '' : ' (playlist pending: app is open)'}`);
+        console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}`);
         ok++;
       } catch (err) {
         // Not logged in to vrbangers.com: every later VRBangers scene would fail the same way.
@@ -722,7 +719,7 @@ function filesUnder(dir) {
  * take the copy saved by hand), unpack it, and file every scene inside
  * (lib.unpackedScenes) like a downloaded one: named, scripts under the
  * library's axis names, sidecar (`video` = the archive, so it counts as
- * fetched), Discovery, the length rule. An archive with no scene inside is
+ * fetched), the length rule. An archive with no scene inside is
  * recorded as rejected so it isn't fetched again. The archive and its
  * unpacked files are removed once filed; a failed unpack keeps the archive
  * in staging for the next pass.
@@ -752,7 +749,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       const stem = lib.sceneTitle({ title: c.title, author: c.author, video: s.video.name, shared });
       const dir = path.join(incoming, creator, stem);
       const video = path.join(dir, stem + path.extname(s.video.name).toLowerCase());
-      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in Discovery; left as is`); continue; }
+      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in the library; left as is`); continue; }
       const main = s.scripts.find((f) => f.axis === '');
       let lengthMs = null;
       try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(main.path, 'utf8'))); } catch { /* unreadable script: file it anyway */ }
@@ -773,8 +770,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
         const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
         if (up.status === 0) { r.generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
       }
-      const listed = flushPlaylist(userData, { name: FOLDER, path: incoming }, [video]);
-      console.log(`${now()} ✓ ${creator}/${stem}${note} (unpacked from ${sc.video.name}${got === 'local' ? ', saved by hand' : ''})${listed ? '' : ' (playlist pending: app is open)'}`);
+      console.log(`${now()} ✓ ${creator}/${stem}${note} (unpacked from ${sc.video.name}${got === 'local' ? ', saved by hand' : ''})`);
       r.ok++;
     }
     fs.rmSync(archive, { force: true });
@@ -820,6 +816,7 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
     for (const c of queue) console.log(`  ${c.axisType.padEnd(6)} ${c.id} ${c.title}`);
     return probeVrbangers(queue, { userData, incoming });
   }
+  ensureLibrarySource(userData, { name: FOLDER, path: incoming });
   const staging = path.join(path.dirname(incoming), '_staging');
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     const held = libraryVideoCount(readConfig(userData));
@@ -839,7 +836,6 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));
     }
   }
-  flushPlaylist(userData, { name: FOLDER, path: incoming }, []);
   return 2;
 }
 

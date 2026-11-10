@@ -4,17 +4,17 @@
  * "Test environments" before changing this or adding DOM here.
  */
 // npm run eroscripts:scout — which free posts qualify, how a post's scripts
-// pair with its video files, and the Discovery playlist update
+// pair with its video files, and the library source update
 // (scripts/eroscripts-scout-lib.mjs). No forum, MEGA or pixeldrain.
 import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
-  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, normName, sameVideo,
+  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addLibrarySource, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk,
 } from '../../scripts/eroscripts-scout-lib.mjs';
-import { DISCOVERY_PLAYLIST, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
+import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
@@ -792,24 +792,26 @@ describe('scan state', () => {
   });
 });
 
-describe('addToDiscovery', () => {
-  it("adds the scout's folder as a source and the playlist once, then only new videos", () => {
+describe('addLibrarySource', () => {
+  it("adds the scout's folder as a source once, a trailing slash counting as the same path", () => {
     let n = 0;
     const newId = () => `id${++n}`;
-    const config = { settings: { library: { sources: [{ id: 's', name: 'Other', path: '/GVP/Other' }] } }, playlists: [] };
+    const playlists = [{ id: 'p', name: 'Mine', videoPaths: ['/x.mp4'] }];
+    const config = { settings: { library: { sources: [{ id: 's', name: 'Other', path: '/GVP/Other' }] } }, playlists: structuredClone(playlists) };
     const folder = { name: 'EroScripts', path: '/GVP/EroScripts' };
-    const first = addToDiscovery(config, ['/GVP/EroScripts/a/a.mp4'], { folder, newId, now: 1 });
-    expect(first).toEqual({ sourceAdded: true, playlistCreated: true, added: ['/GVP/EroScripts/a/a.mp4'] });
-    const again = addToDiscovery(config, ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'], { folder: { ...folder, path: '/GVP/EroScripts/' }, newId });
-    expect(again).toEqual({ sourceAdded: false, playlistCreated: false, added: ['/GVP/EroScripts/b/b.mp4'] });
-    expect(config.settings.library.sources.map((s) => [s.name, s.path])).toEqual([['Other', '/GVP/Other'], ['EroScripts', '/GVP/EroScripts']]);
-    expect(config.playlists).toEqual([{ id: 'id2', name: DISCOVERY_PLAYLIST, createdAt: 1, videoPaths: ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'] }]);
+    expect(addLibrarySource(config, folder, { newId })).toBe(true);
+    expect(addLibrarySource(config, { ...folder, path: '/GVP/EroScripts/' }, { newId })).toBe(false);
+    expect(config.settings.library.sources).toEqual([
+      { id: 's', name: 'Other', path: '/GVP/Other' },
+      { id: 'id1', name: 'EroScripts', path: '/GVP/EroScripts', enabled: true },
+    ]);
+    expect(config.playlists).toEqual(playlists);
   });
 
-  it('uses an existing Discovery playlist whatever its case', () => {
-    const config = { settings: { library: { sources: [{ path: '/in' }] } }, playlists: [{ id: 'p', name: ' discovery ', videoPaths: [] }] };
-    expect(addToDiscovery(config, ['/in/x.mp4'], { folder: { name: 'FapTap', path: '/in' }, newId: () => 'new' }).playlistCreated).toBe(false);
-    expect(config.playlists[0].videoPaths).toEqual(['/in/x.mp4']);
+  it('creates the library settings it needs and never adds playlists', () => {
+    const config = {};
+    expect(addLibrarySource(config, { name: 'FapTap', path: '/in' }, { newId: () => 'new' })).toBe(true);
+    expect(config).toEqual({ settings: { library: { sources: [{ id: 'new', name: 'FapTap', path: '/in', enabled: true }] } } });
   });
 });
 

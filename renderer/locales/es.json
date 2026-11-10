@@ -542,7 +542,6 @@
     "ratings": {
       "title": "Valoraciones y favoritos",
       "keep": "Conservar (4★+)",
-      "review": "Revisar (2½–3½★)",
       "showInLibrary": "Mostrar en la biblioteca",
       "listTitle": "Vídeos valorados y favoritos ({count})",
       "none": "Aún no hay vídeos valorados ni favoritos. Valora con las estrellas de una tarjeta, en el reproductor, en el móvil o en HereSphere.",
@@ -1228,7 +1227,7 @@
       "hideDupesLabel": "Ocultar nombres duplicados",
       "hideDupesHint": "Muestra una sola entrada cuando varios vídeos comparten el mismo nombre de archivo, por ejemplo el mismo archivo en dos carpetas de origen. Se conserva la copia con script.",
       "watchedLastLabel": "Vídeos vistos al final",
-      "watchedLastHint": "Un vídeo cuenta como visto en cuanto lo valoras. Los vídeos vistos pasan al final de la biblioteca, las categorías, las colecciones y Discovery, atenuados y con la etiqueta «Visto», para que no los vuelvas a reproducir por error. Las listas de artistas, tus propias listas y las listas de valoración mantienen su orden. El mando web y el visor siguen este ajuste."
+      "watchedLastHint": "Un vídeo cuenta como visto en cuanto lo valoras. Los vídeos vistos pasan al final de la biblioteca, las categorías y las colecciones, atenuados y con la etiqueta «Visto», para que no los vuelvas a reproducir por error. Las listas de reproducción y las listas de valoración mantienen su orden. El mando web y el visor siguen este ajuste."
     },
     "data": {
       "backupHeader": "Copia de seguridad y recuperación",

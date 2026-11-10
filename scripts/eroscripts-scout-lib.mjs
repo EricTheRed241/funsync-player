@@ -1,6 +1,5 @@
 // Discovery scout: find free EroScripts posts worth adding to the library,
-// plan which scripts and which video file to download, and queue the
-// finished scenes into the app's "Discovery" playlist.
+// and plan which scripts and which video file to download.
 //
 // Logic for `npm run eroscripts:scout` (scripts/eroscripts-scout.mjs), kept
 // apart from the CLI so it can be tested without a forum, MEGA or pixeldrain.
@@ -47,7 +46,7 @@ import path from 'node:path';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, DISCOVERY_PLAYLIST, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
+  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
   MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SEX_TAGS, SEX_WORDS,
   SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
@@ -787,7 +786,7 @@ const pathKey = (p) => fold(path.resolve(p));
  *
  * @param {{dir: string, files: string[], rec: object}[]} scenes scene folder,
  *   its file names (no `._*`), and its sidecar record
- * @param {string} incoming the Discovery folder
+ * @param {string} incoming the scout's download folder
  * @param {(dir: string) => boolean} [exists] whether a folder is already on disk
  * @param {(scene: object, video: string, shared: boolean) => {creator: string, stem: string}} [nameOf]
  *   the scene's name; default: the EroScripts post's (`eroscripts.json`)
@@ -1091,30 +1090,17 @@ export function downloadQueue(candidates, scoring = {}, favourites = undefined) 
 }
 
 /**
- * Add videos to the Discovery playlist and make sure the scout's download
- * folder (`{name: 'EroScripts'|'FapTap', path}`) is a library source, in a
- * parsed config.json (mutated). Returns what changed.
+ * Make sure the scout's download folder (`{name: 'EroScripts'|'FapTap', path}`)
+ * is a library source in a parsed config.json (mutated). True when added.
  */
-export function addToDiscovery(config, videoPaths, { folder, newId, now = Date.now() }) {
-  const changes = { sourceAdded: false, playlistCreated: false, added: [] };
+export function addLibrarySource(config, folder, { newId }) {
   config.settings ||= {};
   config.settings.library ||= {};
   const lib = config.settings.library;
   lib.sources ||= [];
-  if (!lib.sources.some((s) => path.resolve(s.path) === path.resolve(folder.path))) {
-    lib.sources.push({ id: newId(), name: folder.name, path: folder.path, enabled: true });
-    changes.sourceAdded = true;
-  }
-  config.playlists ||= [];
-  let pl = config.playlists.find((p) => String(p.name).trim().toLowerCase() === DISCOVERY_PLAYLIST.toLowerCase());
-  if (!pl) {
-    pl = { id: newId(), name: DISCOVERY_PLAYLIST, createdAt: now, videoPaths: [] };
-    config.playlists.push(pl);
-    changes.playlistCreated = true;
-  }
-  pl.videoPaths ||= [];
-  for (const p of videoPaths) if (!pl.videoPaths.includes(p)) { pl.videoPaths.push(p); changes.added.push(p); }
-  return changes;
+  if (lib.sources.some((s) => path.resolve(s.path) === path.resolve(folder.path))) return false;
+  lib.sources.push({ id: newId(), name: folder.name, path: folder.path, enabled: true });
+  return true;
 }
 
 /** Key of one fetched scene in the `eroscripts.json` sidecars: post id + chosen video file. */
@@ -1191,8 +1177,8 @@ export function manualListText(posts, { folder, generatedAt = new Date().toISOSt
     '  4. pixeldrain lets a free user download about 6 GB a day.',
     '  5. Then tell omp "downloaded", or run:',
     `       npm run eroscripts:scout -- --fetch --ids ${posts.map((p) => p.id).join(',') || '<ids>'}`,
-    '     Each file is moved into the library (EroScripts folder), the scene is named and',
-    '     added to Discovery as usual, and the file is taken out of Downloads.',
+    '     Each file is moved into the library (EroScripts folder), the scene is named as',
+    '     usual, and the file is taken out of Downloads.',
     '',
     `${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files${total ? `, about ${(total / 1e9).toFixed(1)} GB` : ''}`,
   ];
