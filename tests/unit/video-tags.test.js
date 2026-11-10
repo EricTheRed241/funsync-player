@@ -10,13 +10,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { mergeVideoTags, applyVideoTags, VIDEO_TAGS_SOURCE } from '../../renderer/js/video-tags.js';
+import { mergeVideoTags, applyVideoTags, combineTagFiles, VIDEO_TAGS_SOURCE } from '../../renderer/js/video-tags.js';
 import { mergeLinksIntoScriptTags, mergeScoutPosts, SCOUT_SOURCE, SYNC_SOURCE, FAPTAP_SOURCE } from '../../renderer/js/eroscripts-links.js';
 import { SCRIPT_TAGS_KEY, baseTags } from '../../renderer/js/script-tags.js';
 import { VIDEO_TAGGER_TAGS } from '../../renderer/js/content-preferences.js';
 import { remapPaths } from '../../scripts/eroscripts-scout-lib.mjs';
 
-const { readVideoTagsFile, rewriteVideoTagsFile, videoTagsFilePath } = await import('../../electron/video-tags.js');
+const {
+  readVideoTagsFile, rewriteVideoTagsFile, videoTagsFilePath, readPornstarTagsFile, pornstarTagsFilePath,
+} = await import('../../electron/video-tags.js');
 
 const NOW = Date.parse('2026-11-04T12:00:00Z');
 const LATER = NOW + 60_000;
@@ -214,5 +216,97 @@ describe('readVideoTagsFile', () => {
     expect(rewriteVideoTagsFile(tmp, update)).toBe(0);
     expect(fs.readFileSync(videoTagsFilePath(tmp), 'utf8')).toBe(after);
     expect(fs.readdirSync(tmp).sort()).toEqual(['video-tags.json', 'video-tags.json.bak']);
+  });
+});
+
+// The pornstar tags file (`pornstar-tags.json`, written by the
+// `pornstar-tags` Rust CLI), merged together with the video tags file.
+describe('pornstar tags', () => {
+  const pornstarFile = (pornstars, videos) => ({ version: 1, updatedAt: 'T', minScenes: 2, pornstars, videos });
+  const star = (name, scenes) => ({ name, scenes, applied: scenes >= 2 });
+  const STARS = { 'candy-love': star('Candy Love', 3), 'riley-reid': star('Riley Reid', 1) };
+  /** One scan's merge, as applyVideoTags does it. */
+  const scan = (map, videoFile, psFile, now) => {
+    const combined = combineTagFiles(map, videoFile, psFile, ALLOWED);
+    return combined && mergeVideoTags(map, combined.file, combined.allowed, now);
+  };
+
+  it('unions both files per video and allows only applied pornstars on top of the tagger tags', () => {
+    const combined = combineTagFiles({}, file({ '/a.mp4': { tags: ['pov'] } }), pornstarFile(STARS, {
+      '/a.mp4': ['candy-love'], '/b.mp4': ['candy-love', 'riley-reid'],
+    }), ALLOWED);
+    expect(combined.allowed).toEqual([...ALLOWED, 'candy-love']);
+    expect(combined.file.videos).toEqual({ '/a.mp4': { tags: ['pov', 'candy-love'] }, '/b.mp4': { tags: ['candy-love', 'riley-reid'] } });
+
+    const r = mergeVideoTags({ '/a.mp4': scoutRecord(1, ['osr2']) }, combined.file, combined.allowed, NOW);
+    expect(r.map['/a.mp4']).toMatchObject({ tags: ['osr2', 'pov', 'candy-love'], addedTags: ['pov', 'candy-love'], source: SCOUT_SOURCE });
+    expect(r.map['/b.mp4']).toMatchObject({ tags: ['candy-love'], addedTags: ['candy-love'], source: VIDEO_TAGS_SOURCE });
+  });
+
+  it('removes a pornstar tag dropped from the file on the next scan, never a post tag', () => {
+    const videoFile = file({ '/a.mp4': { tags: ['pov'] } });
+    const first = scan({
+      '/a.mp4': scoutRecord(1, ['osr2']),
+      '/p.mp4': scoutRecord(2, ['candy-love']),
+    }, videoFile, pornstarFile(STARS, { '/a.mp4': ['candy-love'], '/b.mp4': ['candy-love'], '/p.mp4': ['candy-love'] }), NOW);
+    expect(scan(first.map, videoFile, pornstarFile(STARS, { '/a.mp4': ['candy-love'], '/b.mp4': ['candy-love'], '/p.mp4': ['candy-love'] }), LATER)).toBe(null);
+
+    const second = scan(first.map, videoFile, pornstarFile(STARS, { '/p.mp4': ['candy-love'] }), LATER);
+    expect(second).toMatchObject({ updated: 1, removed: 1 });
+    expect(second.map['/a.mp4']).toMatchObject({ tags: ['osr2', 'pov'], addedTags: ['pov'] });
+    expect(second.map['/b.mp4']).toBeUndefined();
+    expect(second.map['/p.mp4'].tags).toEqual(['candy-love']);
+    expect(second.map['/p.mp4']).not.toHaveProperty('addedTags');
+
+    // A performer no longer applied: her tag goes even where the file still lists it.
+    const third = scan(first.map, videoFile, pornstarFile({ 'candy-love': star('Candy Love', 1) }, { '/a.mp4': ['candy-love'] }), LATER);
+    expect(third.map['/a.mp4'].tags).toEqual(['osr2', 'pov']);
+    expect(third.map['/b.mp4']).toBeUndefined();
+  });
+
+  it('a missing pornstar file withdraws only the pornstar tags; a missing video tags file keeps the video tags', () => {
+    const videoFile = file({ '/a.mp4': { tags: ['pov'] } });
+    const psFile = pornstarFile(STARS, { '/a.mp4': ['candy-love'], '/b.mp4': ['candy-love'] });
+    const first = scan({}, videoFile, psFile, NOW);
+    expect(first.map['/a.mp4'].tags).toEqual(['pov', 'candy-love']);
+
+    const noStars = scan(first.map, videoFile, null, LATER);
+    expect(noStars.map['/a.mp4']).toMatchObject({ tags: ['pov'], addedTags: ['pov'] });
+    expect(noStars.map['/b.mp4']).toBeUndefined();
+
+    expect(scan(first.map, null, psFile, LATER)).toBe(null);
+    const noVideoFile = scan(first.map, null, pornstarFile(STARS, {}), LATER);
+    expect(noVideoFile.map['/a.mp4']).toMatchObject({ tags: ['pov'], addedTags: ['pov'] });
+    expect(noVideoFile.map['/b.mp4']).toBeUndefined();
+    expect(combineTagFiles(first.map, null, null, ALLOWED)).toBe(null);
+  });
+
+  it('applyVideoTags reads both files', async () => {
+    const data = {};
+    const s = { get: (k) => data[k], set: (k, v) => { data[k] = v; } };
+    const api = {
+      readVideoTags: async () => null,
+      readPornstarTags: async () => pornstarFile(STARS, { '/a.mp4': ['candy-love'] }),
+    };
+    expect(await applyVideoTags(s, api, NOW)).toEqual({ added: 1, updated: 0, removed: 0 });
+    expect(data[SCRIPT_TAGS_KEY]['/a.mp4'].tags).toEqual(['candy-love']);
+    expect(await applyVideoTags(s, api, LATER)).toBe(null);
+  });
+
+  describe('readPornstarTagsFile', () => {
+    let tmp;
+    beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pornstar-tags-')); });
+    afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+    it('reads a version 1 file, and returns null for a missing, corrupt or foreign one', () => {
+      expect(readPornstarTagsFile(tmp)).toBe(null);
+      const good = pornstarFile(STARS, { '/a.mp4': ['candy-love'] });
+      fs.writeFileSync(pornstarTagsFilePath(tmp), JSON.stringify(good));
+      expect(readPornstarTagsFile(tmp)).toEqual({ version: 1, updatedAt: 'T', pornstars: STARS, videos: good.videos });
+      for (const bad of ['{nope', JSON.stringify({ ...good, version: 2 }), JSON.stringify({ ...good, pornstars: [] }), JSON.stringify({ version: 1, pornstars: {} })]) {
+        fs.writeFileSync(pornstarTagsFilePath(tmp), bad);
+        expect(readPornstarTagsFile(tmp)).toBe(null);
+      }
+    });
   });
 });

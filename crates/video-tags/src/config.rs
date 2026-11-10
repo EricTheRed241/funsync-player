@@ -15,20 +15,30 @@ pub struct AppConfig {
 }
 
 pub fn read(user_data: &Path) -> Result<AppConfig, String> {
+    from_json(user_data, &read_json(user_data)?)
+}
+
+/// `config.json` as JSON, for callers that need more of it than
+/// [`AppConfig`] (pass it to [`from_json`] for the sources and port).
+pub fn read_json(user_data: &Path) -> Result<Value, String> {
     let path = user_data.join("config.json");
     let raw = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let v: Value = serde_json::from_str(&raw).map_err(|e| {
+    serde_json::from_str(&raw).map_err(|e| {
         format!(
             "{} is not valid JSON (line {}, column {})",
             path.display(),
             e.line(),
             e.column()
         )
-    })?;
-    parse(&v).ok_or_else(|| {
+    })
+}
+
+/// The sources and port of a `config.json` read with [`read_json`].
+pub fn from_json(user_data: &Path, v: &Value) -> Result<AppConfig, String> {
+    parse(v).ok_or_else(|| {
         format!(
             "{} lists no library sources (settings.library.sources)",
-            path.display()
+            user_data.join("config.json").display()
         )
     })
 }
