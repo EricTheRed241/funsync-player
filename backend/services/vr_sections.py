@@ -22,7 +22,7 @@ Order (user, 2026-11-10): the sections with no order of their own (the
 score lists, VR, Flat, speed, length, Hand-made, and the app-made
 playlists in `watched.playlistIds`, today Discovery) list by preference
 score, highest first, unscored last, title breaking ties. Recently Added
-lists the newest first. The score lists `Score 15+` and `Score 10-14.5` come
+lists the newest first. The score lists `Score 20+`, `Score 15-19.5` and `Score 10-14.5` come
 first after Queue: the videos whose score falls in that band (the desktop's
 SCORE_BANDS, whose "Score below 10" collection has no section).
 
@@ -74,7 +74,7 @@ SECTION_FLAT = 'Flat'
 SECTION_HANDMADE_AXES = 'Hand-made'
 SECTION_RECENT = 'Recently Added'
 SECTION_SCORE_ELITE = 'Score 20+'
-SECTION_SCORE_TOP = 'Score 15+'
+SECTION_SCORE_TOP = 'Score 15-19.5'
 SECTION_SCORE_MID = 'Score 10-14.5'
 SECTION_FAVORITES = 'Favorites'
 SECTION_TOP_RATED = 'Top Rated'
@@ -87,9 +87,9 @@ PLAYLIST_SECTION_PREFIX = 'Playlist: '
 TOP_RATED_MIN = 4
 
 # Score lists: the desktop's SCORE_BANDS (renderer/js/content-preferences.js).
-# score >= SCORE_ELITE_MIN → Score 20+ (and Score 15+ too: the lists overlap),
-# score >= SCORE_TOP_MIN → Score 15+, SCORE_MID_MIN <= score < SCORE_TOP_MIN
-# → Score 10-14.5; lower or unscored → none.
+# score >= SCORE_ELITE_MIN → Score 20+, SCORE_TOP_MIN <= score < SCORE_ELITE_MIN
+# → Score 15-19.5, SCORE_MID_MIN <= score < SCORE_TOP_MIN → Score 10-14.5;
+# lower or unscored → none.
 SCORE_ELITE_MIN = 20
 SCORE_TOP_MIN = 15
 SCORE_MID_MIN = 10
@@ -226,12 +226,12 @@ def axis_flags(registry):
 
 
 def score_sections(score):
-    """The score sections a preference score is in: [Score 20+, Score 15+],
-    [Score 15+], [Score 10-14.5], or none (below SCORE_MID_MIN, or no score)."""
+    """The score section a preference score is in ([Score 20+], [Score 15-19.5]
+    or [Score 10-14.5]), or none (below SCORE_MID_MIN, or no score)."""
     if _score_value(score) is None:
         return []
     if score >= SCORE_ELITE_MIN:
-        return [SECTION_SCORE_ELITE, SECTION_SCORE_TOP]
+        return [SECTION_SCORE_ELITE]
     if score >= SCORE_TOP_MIN:
         return [SECTION_SCORE_TOP]
     if score >= SCORE_MID_MIN:

@@ -26,9 +26,9 @@ function store(init = {}) {
 }
 
 describe('scoreBandsOf', () => {
-  it('puts the boundaries in the right lists; 20+ is also in 15+', () => {
-    expect(keysOf(20)).toEqual(['score-20', 'score-15']);
-    expect(keysOf(24)).toEqual(['score-20', 'score-15']);
+  it('puts the boundaries in the right lists; the lists are disjoint', () => {
+    expect(keysOf(20)).toEqual(['score-20']);
+    expect(keysOf(24)).toEqual(['score-20']);
     expect(keysOf(19.5)).toEqual(['score-15']);
     expect(keysOf(15)).toEqual(['score-15']);
     expect(keysOf(14.5)).toEqual(['score-10']);
@@ -51,7 +51,7 @@ describe('planScoreBandCollections', () => {
   it('makes each band with its videos, highest score first, name breaking ties', () => {
     const r = planScoreBandCollections({ videoPaths, scores });
     expect(r.create).toEqual([
-      { key: 'score-15', name: 'Score 15+', videoPaths: ['/v/e.mp4', '/v/b.mp4', '/v/f.mp4'] },
+      { key: 'score-15', name: 'Score 15–19.5', videoPaths: ['/v/e.mp4', '/v/b.mp4', '/v/f.mp4'] },
       { key: 'score-10', name: 'Score 10–14.5', videoPaths: ['/v/c.mp4', '/v/d.mp4'] },
       { key: 'score-low', name: 'Score below 10', videoPaths: ['/v/a.mp4'] },
     ]);
@@ -59,23 +59,30 @@ describe('planScoreBandCollections', () => {
     expect(r.state.created).toEqual(['score-15', 'score-10', 'score-low']);
   });
 
-  it('puts a 20+ video in both Score 20+ and Score 15+', () => {
+  it('puts a 20+ video only in Score 20+', () => {
     const r = planScoreBandCollections({ videoPaths: ['/v/top.mp4', '/v/b.mp4'], scores: { '/v/top.mp4': 21, '/v/b.mp4': 16 } });
     expect(r.create.map((c) => [c.name, c.videoPaths])).toEqual([
       ['Score 20+', ['/v/top.mp4']],
-      ['Score 15+', ['/v/top.mp4', '/v/b.mp4']],
+      ['Score 15–19.5', ['/v/b.mp4']],
     ]);
+  });
+
+  it("renames an existing 'Score 15+' collection to 'Score 15–19.5', keeping its id", () => {
+    const collections = [{ id: 'old', name: 'Score 15+', videoPaths: ['/v/b.mp4', '/v/e.mp4', '/v/f.mp4'] }];
+    const r = planScoreBandCollections({ collections, videoPaths: ['/v/b.mp4', '/v/e.mp4', '/v/f.mp4'], scores, state: { created: ['score-15'] } });
+    expect(r.create).toEqual([]);
+    expect(r.update).toEqual([{ id: 'old', name: 'Score 15–19.5', videoPaths: ['/v/e.mp4', '/v/b.mp4', '/v/f.mp4'] }]);
   });
 
   it('makes no empty band', () => {
     const r = planScoreBandCollections({ videoPaths: ['/v/b.mp4'], scores });
-    expect(r.create.map((c) => c.name)).toEqual(['Score 15+']);
+    expect(r.create.map((c) => c.name)).toEqual(['Score 15–19.5']);
     expect(r.state.created).toEqual(['score-15']);
   });
 
   it('follows the scores: a video that moved band moves collection, removed by hand comes back', () => {
     const collections = [
-      { id: 'top', name: 'Score 15+', videoPaths: ['/v/e.mp4', '/v/b.mp4', '/v/f.mp4', '/v/c.mp4'] },
+      { id: 'top', name: 'Score 15–19.5', videoPaths: ['/v/e.mp4', '/v/b.mp4', '/v/f.mp4', '/v/c.mp4'] },
       { id: 'mid', name: 'score 10–14.5', videoPaths: ['/v/d.mp4'] },
       { id: 'low', name: 'Score below 10', videoPaths: ['/v/a.mp4'] },
     ];
@@ -96,7 +103,7 @@ describe('planScoreBandCollections', () => {
   });
 
   it('reorders when only the order changed', () => {
-    const collections = [{ id: 'top', name: 'Score 15+', videoPaths: ['/v/b.mp4', '/v/e.mp4', '/v/f.mp4'] }];
+    const collections = [{ id: 'top', name: 'Score 15–19.5', videoPaths: ['/v/b.mp4', '/v/e.mp4', '/v/f.mp4'] }];
     const r = planScoreBandCollections({ collections, videoPaths, scores, state: { created: ['score-15', 'score-10', 'score-low'] } });
     expect(r.update).toEqual([{ id: 'top', videoPaths: ['/v/e.mp4', '/v/b.mp4', '/v/f.mp4'] }]);
   });
@@ -124,10 +131,10 @@ describe('applyScoreBandCollections', () => {
     });
     let n = 0;
     const paths = ['/v/a.mp4', '/v/b.mp4', '/v/c.mp4'];
-    expect(applyScoreBandCollections(s, paths, () => `id${++n}`)).toEqual({ created: ['Score 15+', 'Score 10–14.5', 'Score below 10'], updated: 0 });
+    expect(applyScoreBandCollections(s, paths, () => `id${++n}`)).toEqual({ created: ['Score 15–19.5', 'Score 10–14.5', 'Score below 10'], updated: 0 });
     expect(s.data[COLLECTIONS_KEY]).toEqual([
       { id: 'mine', name: 'Mine', videoPaths: ['/v/c.mp4'] },
-      { id: 'id1', name: 'Score 15+', videoPaths: ['/v/a.mp4'] },
+      { id: 'id1', name: 'Score 15–19.5', videoPaths: ['/v/a.mp4'] },
       { id: 'id2', name: 'Score 10–14.5', videoPaths: ['/v/b.mp4'] },
       { id: 'id3', name: 'Score below 10', videoPaths: ['/v/c.mp4'] },
     ]);
@@ -137,20 +144,30 @@ describe('applyScoreBandCollections', () => {
     expect(applyScoreBandCollections(s, paths)).toEqual({ created: [], updated: 0 });
     expect(s.writes).toEqual([]);
 
-    // A tag score raised b to 15: it moves to Score 15+.
+    // A tag score raised b to 15: it moves to Score 15–19.5.
     s.data[PREFERENCE_SCORES_KEY] = { '/v/a.mp4': 16, '/v/b.mp4': 15, '/v/c.mp4': 2 };
     expect(applyScoreBandCollections(s, paths)).toEqual({ created: [], updated: 2 });
     const byName = Object.fromEntries(s.data[COLLECTIONS_KEY].map((c) => [c.name, c.videoPaths]));
-    expect(byName['Score 15+']).toEqual(['/v/a.mp4', '/v/b.mp4']);
+    expect(byName['Score 15–19.5']).toEqual(['/v/a.mp4', '/v/b.mp4']);
     expect(byName['Score 10–14.5']).toEqual([]);
     expect(byName.Mine).toEqual(['/v/c.mp4']);
     expect(s.writes).toEqual([COLLECTIONS_KEY]);
   });
 
+  it("renames an existing 'Score 15+' collection, keeping its id", () => {
+    const s = store({
+      [PREFERENCE_SCORES_KEY]: { '/v/a.mp4': 16 },
+      [COLLECTIONS_KEY]: [{ id: 'old', name: 'Score 15+', videoPaths: ['/v/a.mp4'] }],
+      [AUTO_COLLECTIONS_KEY]: { created: ['score-15'] },
+    });
+    expect(applyScoreBandCollections(s, ['/v/a.mp4'], () => 'new')).toEqual({ created: [], updated: 1 });
+    expect(s.data[COLLECTIONS_KEY]).toEqual([{ id: 'old', name: 'Score 15–19.5', videoPaths: ['/v/a.mp4'] }]);
+  });
+
   it('leaves out videos that are no longer in the library', () => {
     const s = store({ [PREFERENCE_SCORES_KEY]: { '/v/gone.mp4': 17, '/v/a.mp4': 17 } });
     applyScoreBandCollections(s, ['/v/a.mp4'], () => 'x');
-    expect(s.data[COLLECTIONS_KEY]).toEqual([{ id: 'x', name: 'Score 15+', videoPaths: ['/v/a.mp4'] }]);
+    expect(s.data[COLLECTIONS_KEY]).toEqual([{ id: 'x', name: 'Score 15–19.5', videoPaths: ['/v/a.mp4'] }]);
   });
 });
 
