@@ -818,7 +818,12 @@
       "unfavourite": "Убрать {artist} из любимых",
       "added": "{artist} теперь в любимых",
       "removed": "{artist} больше не в любимых",
-      "alreadyFavourite": "{artist} уже в любимых"
+      "alreadyFavourite": "{artist} уже в любимых",
+      "sortBy": "Сортировка",
+      "sort": {
+        "name": "По имени",
+        "videos": "По числу видео"
+      }
     },
     "breadcrumb": {
       "allSources": "Все источники",

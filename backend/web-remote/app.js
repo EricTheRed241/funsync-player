@@ -33,7 +33,7 @@ import {
 } from './tag-scores.js';
 import {
   fetchArtists, setFavouriteArtist, setFavouriteScore, pollArtists, mergeArtistEdits, appliedArtistEdits,
-  artistsPending, foldArtist, createFavouriteStar, updateFavouriteStar,
+  artistsPending, foldArtist, createFavouriteStar, updateFavouriteStar, sortArtists, ARTIST_SORTS,
 } from './artists.js';
 
 /* ============================================================
@@ -289,6 +289,8 @@ let uiState = {
   rating: storedState.rating || 'all',     // all | favorites | top | unrated
   tag: storedState.tag || '',              // '' = any, else one chip tag
   view: storedState.view || 'grid',        // grid | list
+  // Artists view order: name (favourites first) | videos (most first)
+  artistSort: ARTIST_SORTS.includes(storedState.artistSort) ? storedState.artistSort : ARTIST_SORTS[0],
 };
 if (sortMigrated) saveFilterState();
 
@@ -1112,7 +1114,18 @@ let favouriteScoreTimer = null;
 let artistWatching = false;
 
 function displayedArtists() {
-  return mergeArtistEdits(artistState.artists, artistUnsent);
+  return sortArtists(mergeArtistEdits(artistState.artists, artistUnsent), uiState.artistSort);
+}
+
+/** The artist rows built again, in the current order (and search). */
+function rebuildArtistList(artists = filterGroupings(displayedArtists())) {
+  const list = document.createElement('div');
+  list.className = 'grouping-list';
+  for (const item of artists) list.appendChild(createGroupingRow('artists', item));
+  const old = mainEl.querySelector('.grouping-list') || mainEl.querySelector('.empty');
+  if (old) old.replaceWith(list);
+  else mainEl.appendChild(list);
+  countEl.textContent = `${artists.length}`;
 }
 
 function displayedFavouriteScore() {
@@ -1164,13 +1177,7 @@ function repaintArtists(applied = { artists: [], score: false }) {
   const artists = filterGroupings(displayedArtists());
   const rows = new Map([...mainEl.querySelectorAll('.grouping-row[data-artist]')].map((r) => [r.dataset.artist, r]));
   if (artists.some((a) => !rows.has(foldArtist(a.name)))) {
-    const list = document.createElement('div');
-    list.className = 'grouping-list';
-    for (const item of artists) list.appendChild(createGroupingRow('artists', item));
-    const old = mainEl.querySelector('.grouping-list') || mainEl.querySelector('.empty');
-    if (old) old.replaceWith(list);
-    else mainEl.appendChild(list);
-    countEl.textContent = `${artists.length}`;
+    rebuildArtistList(artists);
     return;
   }
   const byKey = new Map(artists.map((a) => [foldArtist(a.name), a]));
@@ -1306,9 +1313,39 @@ function createArtistsBar() {
     addFavouriteFromInput(input);
   });
 
-  bar.append(hint, bonus, form);
+  bar.append(hint, bonus, createArtistSortToggle(), form);
   updateBonusDefault(byDefault);
   return bar;
+}
+
+/** Name / Videos: the order of the artist list, remembered on the phone. */
+function createArtistSortToggle() {
+  const row = document.createElement('div');
+  row.className = 'artists-bar__sort';
+  row.setAttribute('role', 'group');
+  row.setAttribute('aria-label', t('webRemote.artists.sortBy'));
+  const label = document.createElement('span');
+  label.className = 'artists-bar__label';
+  label.textContent = t('webRemote.artists.sortBy');
+  row.appendChild(label);
+  const buttons = ARTIST_SORTS.map((by) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'artists-bar__sort-option';
+    button.dataset.sort = by;
+    button.textContent = t(`webRemote.artists.sort.${by}`);
+    button.setAttribute('aria-pressed', String(uiState.artistSort === by));
+    button.addEventListener('click', () => {
+      if (uiState.artistSort === by) return;
+      uiState.artistSort = by;
+      saveFilterState();
+      for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.sort === by));
+      rebuildArtistList();
+    });
+    return button;
+  });
+  row.append(...buttons);
+  return row;
 }
 
 // --- Folder browse (real subfolder tree) --------------------------------
@@ -2968,6 +3005,7 @@ function saveFilterState() {
       rating: uiState.rating,
       tag: uiState.tag,
       view: uiState.view,
+      artistSort: uiState.artistSort,
     }));
   } catch { /* ignore quota */ }
 }

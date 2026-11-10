@@ -818,7 +818,12 @@
       "unfavourite": "{artist}을(를) 즐겨찾기에서 제거",
       "added": "{artist}을(를) 즐겨찾기에 추가했습니다",
       "removed": "{artist}을(를) 즐겨찾기에서 제거했습니다",
-      "alreadyFavourite": "{artist}은(는) 이미 즐겨찾기에 있습니다"
+      "alreadyFavourite": "{artist}은(는) 이미 즐겨찾기에 있습니다",
+      "sortBy": "정렬",
+      "sort": {
+        "name": "이름",
+        "videos": "동영상 수"
+      }
     },
     "breadcrumb": {
       "allSources": "모든 소스",

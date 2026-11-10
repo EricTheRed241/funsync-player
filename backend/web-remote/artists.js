@@ -46,11 +46,22 @@ export function parseArtists(data) {
   };
 }
 
-/** Favourites first, then by name (case-insensitive). A new array. */
-export function sortArtists(artists) {
-  return [...artists].sort((a, b) => (b.favourite - a.favourite)
-    || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-    || a.name.localeCompare(b.name));
+/** How the Artists view can be ordered; the first is the default. */
+export const ARTIST_SORTS = Object.freeze(['name', 'videos']);
+
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  || a.name.localeCompare(b.name);
+
+/**
+ * A new array. `name`: favourites first, then by name (case-insensitive).
+ * `videos`: most videos first, then by name; favourites aren't lifted, so
+ * the list reads as a ranking.
+ */
+export function sortArtists(artists, by = 'name') {
+  const order = by === 'videos'
+    ? (a, b) => (b.videoCount - a.videoCount) || byName(a, b)
+    : (a, b) => (b.favourite - a.favourite) || byName(a, b);
+  return [...artists].sort(order);
 }
 
 /**

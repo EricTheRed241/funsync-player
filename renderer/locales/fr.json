@@ -818,7 +818,12 @@
       "unfavourite": "Retirer {artist} des favoris",
       "added": "{artist} est maintenant un favori",
       "removed": "{artist} n'est plus un favori",
-      "alreadyFavourite": "{artist} est déjà un favori"
+      "alreadyFavourite": "{artist} est déjà un favori",
+      "sortBy": "Trier par",
+      "sort": {
+        "name": "Nom",
+        "videos": "Vidéos"
+      }
     },
     "breadcrumb": {
       "allSources": "Toutes les sources",

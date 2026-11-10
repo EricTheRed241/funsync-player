@@ -818,7 +818,12 @@
       "unfavourite": "取消收藏 {artist}",
       "added": "已收藏 {artist}",
       "removed": "已取消收藏 {artist}",
-      "alreadyFavourite": "{artist} 已在收藏中"
+      "alreadyFavourite": "{artist} 已在收藏中",
+      "sortBy": "排序",
+      "sort": {
+        "name": "名称",
+        "videos": "视频数"
+      }
     },
     "breadcrumb": {
       "allSources": "所有来源",

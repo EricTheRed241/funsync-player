@@ -818,7 +818,12 @@
       "unfavourite": "{artist} をお気に入りから外す",
       "added": "{artist} をお気に入りにしました",
       "removed": "{artist} をお気に入りから外しました",
-      "alreadyFavourite": "{artist} はすでにお気に入りです"
+      "alreadyFavourite": "{artist} はすでにお気に入りです",
+      "sortBy": "並べ替え",
+      "sort": {
+        "name": "名前",
+        "videos": "動画数"
+      }
     },
     "breadcrumb": {
       "allSources": "すべてのソース",
