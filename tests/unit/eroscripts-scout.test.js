@@ -790,8 +790,9 @@ describe('scan state', () => {
   });
 
   it('auto-fetches only multi-axis posts scoring at least AUTO_FETCH_MIN_SCORE, tag scores included', () => {
-    const c = (axisType) => ({ id: 1, axisType, title: 'X', tags: ['vaginal', 'x-tag'], likes: 0, scenes: [{ video: { name: 'a.mp4' } }] });
-    const at = (axisType, score) => ({ tagScores: { 'x-tag': score - candidateScore(c(axisType)) } });
+    const c = (axisType) => ({ id: 1, axisType, title: 'X', tags: ['vaginal', 'x-tag', 'y-tag'], likes: 0, scenes: [{ video: { name: 'a.mp4' } }] });
+    // Tag scores are capped at ±10 each, so the gap is split over two tags.
+    const at = (axisType, score) => { const d = (score - candidateScore(c(axisType))) / 2; return { tagScores: { 'x-tag': d, 'y-tag': d } }; };
     expect(autoFetchPick(c('multi'), at('multi', AUTO_FETCH_MIN_SCORE))).toBe(true);
     expect(autoFetchPick(c('multi'), at('multi', AUTO_FETCH_MIN_SCORE - 0.5))).toBe(false);
     expect(autoFetchPick(c('single'), at('single', AUTO_FETCH_MIN_SCORE + 5))).toBe(false);
