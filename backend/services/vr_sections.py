@@ -73,6 +73,7 @@ SECTION_VR = 'VR'
 SECTION_FLAT = 'Flat'
 SECTION_HANDMADE_AXES = 'Hand-made'
 SECTION_RECENT = 'Recently Added'
+SECTION_SCORE_ELITE = 'Score 20+'
 SECTION_SCORE_TOP = 'Score 15+'
 SECTION_SCORE_MID = 'Score 10-14.5'
 SECTION_FAVORITES = 'Favorites'
@@ -86,13 +87,16 @@ PLAYLIST_SECTION_PREFIX = 'Playlist: '
 TOP_RATED_MIN = 4
 
 # Score lists: the desktop's SCORE_BANDS (renderer/js/content-preferences.js).
+# score >= SCORE_ELITE_MIN → Score 20+ (and Score 15+ too: the lists overlap),
 # score >= SCORE_TOP_MIN → Score 15+, SCORE_MID_MIN <= score < SCORE_TOP_MIN
-# → Score 10-14.5; lower or unscored → neither.
+# → Score 10-14.5; lower or unscored → none.
+SCORE_ELITE_MIN = 20
 SCORE_TOP_MIN = 15
 SCORE_MID_MIN = 10
 
 # Display order; empty sections are dropped.
 SECTION_ORDER = (
+    SECTION_SCORE_ELITE,
     SECTION_SCORE_TOP,
     SECTION_SCORE_MID,
     SECTION_VR,
@@ -221,16 +225,18 @@ def axis_flags(registry):
     return {'flags': flags, 'pending': pending}
 
 
-def score_section(score):
-    """SECTION_SCORE_TOP / SECTION_SCORE_MID for a preference score, or None
-    (below SCORE_MID_MIN, or no score)."""
+def score_sections(score):
+    """The score sections a preference score is in: [Score 20+, Score 15+],
+    [Score 15+], [Score 10-14.5], or none (below SCORE_MID_MIN, or no score)."""
     if _score_value(score) is None:
-        return None
+        return []
+    if score >= SCORE_ELITE_MIN:
+        return [SECTION_SCORE_ELITE, SECTION_SCORE_TOP]
     if score >= SCORE_TOP_MIN:
-        return SECTION_SCORE_TOP
+        return [SECTION_SCORE_TOP]
     if score >= SCORE_MID_MIN:
-        return SECTION_SCORE_MID
-    return None
+        return [SECTION_SCORE_MID]
+    return []
 
 
 def _score_value(value):
@@ -243,10 +249,7 @@ def _score_value(value):
 def video_sections(video, is_3d, now_ms, score=None):
     """Every section this video belongs to, in SECTION_ORDER. `score` is its
     preference score (None = not scored)."""
-    names = []
-    band = score_section(score)
-    if band:
-        names.append(band)
+    names = list(score_sections(score))
     names.append(SECTION_VR if is_3d else SECTION_FLAT)
     speed = speed_bucket(video)
     if speed:
