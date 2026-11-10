@@ -10,9 +10,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   rule34videoLinks, parseRule34videoPage, rule34videoFiles, streamTitle, labelHeight, isoDurationSec, durationMatches,
-  pacedFetch, createRule34video, RULE34VIDEO_INTERVAL_MS, RATE_LIMIT_BACKOFF_MS,
+  pacedFetch, createRule34video, rule34videoPosterUrl, RULE34VIDEO_INTERVAL_MS, RATE_LIMIT_BACKOFF_MS,
 } from '../../scripts/stream-hosts.mjs';
-import { planWithStreams, planScenes } from '../../scripts/eroscripts-scout-lib.mjs';
+import { planWithStreams, planScenes, sceneSidecar } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const GET = (id, q) => `https://rule34video.com/get_file/58/abc${q}/3122000/${id}/${id}_${q}.mp4/?v-acctoken=TOKEN${q}`;
 
@@ -118,6 +118,47 @@ describe('rule34videoFiles', () => {
     });
     const plan = planScenes({ scripts: [{ name: 'Yorha 2B Experience.funscript', host: 'forum', url: 'u' }], videos });
     expect(plan.scenes[0].video.height).toBe(1080);
+  });
+});
+
+describe('rule34videoPosterUrl', () => {
+  it("builds the page's cover link: <id rounded down to 1000>/<id>/preview.jpg", () => {
+    expect(rule34videoPosterUrl('https://rule34video.com/video/3065491/scene/'))
+      .toBe('https://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg');
+    expect(rule34videoPosterUrl('https://rule34video.com/video/999/x/')).toBe('https://rule34video.com/contents/videos_screenshots/0/999/preview.jpg');
+    expect(rule34videoPosterUrl('https://rule34video.com/video/3000/x/')).toBe('https://rule34video.com/contents/videos_screenshots/3000/3000/preview.jpg');
+  });
+
+  it('is null for anything but a video page', () => {
+    for (const u of ['https://rule34video.com/members/1/', 'https://rule34video.com/video/0/x/', 'https://example.com/video/5/x/', '', null, undefined]) {
+      expect(rule34videoPosterUrl(u)).toBeNull();
+    }
+  });
+});
+
+describe('sceneSidecar', () => {
+  const post = { id: 291491, url: 'https://discuss.eroscripts.com/t/x/291491', title: 'Yorha 2B Experience', author: 'Agapilord', tags: ['pmv'], scenes: [{}] };
+
+  it("writes a rule34video scene's cover as posterUrl", () => {
+    const [video] = rule34videoFiles('https://rule34video.com/video/3065491/yorha/', {
+      title: 'YORHA 2B EXPERIENCE', durationSec: 319, variants: [{ height: 1080 }],
+    });
+    expect(sceneSidecar(post, video, 'Agapilord - Yorha 2B Experience.mp4', 'T')).toEqual({
+      topicId: 291491, url: post.url, title: post.title, author: 'Agapilord', tags: ['pmv'],
+      video: 'YORHA 2B EXPERIENCE 1080p.mp4', file: 'Agapilord - Yorha 2B Experience.mp4', scenes: 1,
+      posterUrl: 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg',
+      at: 'T',
+    });
+  });
+
+  it('writes no posterUrl for other hosts, and keeps a VRBangers scene its site name', () => {
+    const forum = sceneSidecar(post, { name: 'a.mp4', host: 'forum', url: 'https://discuss.eroscripts.com/uploads/a.mp4' }, 'a.mp4', 'T');
+    expect(forum).not.toHaveProperty('posterUrl');
+    const vrb = sceneSidecar(post, {
+      name: 'b.mp4', host: 'vrbangers', url: 'https://vrbangers.com/video/b/', slug: 'b', title: 'B', performers: ['P'], projection: '180x180_3dh',
+    }, 'b.mp4', 'T');
+    expect(vrb.vrbangers).toEqual({ slug: 'b', url: 'https://vrbangers.com/video/b/', title: 'B', performers: ['P'], projection: '180x180_3dh' });
+    expect(vrb).not.toHaveProperty('posterUrl');
   });
 });
 

@@ -1,6 +1,7 @@
 // Custom thumbnail images (user-uploaded posters, community #217,
-// EroScripts post previews and FapTap thumbnails). Image I/O stays in the
-// main process (the renderer is sandboxed). Every import goes through
+// EroScripts post previews, FapTap thumbnails and rule34video covers).
+// Image I/O stays in the main process (the renderer is sandboxed). Every
+// import goes through
 // `importThumbnail`: the image is decoded, downscaled to tile width,
 // re-encoded as JPEG and stored under userData/custom-thumbs keyed by a
 // hash of the video path. The renderer displays thumbnails as data URLs
@@ -13,6 +14,8 @@ const { toGray } = require('./preview-match');
 
 const MAX_WIDTH = 640;
 const JPEG_QUALITY = 82;
+// Automatic thumbnail sources, each with its own file next to the user's.
+const AUTO_SOURCES = ['eroscripts', 'faptap', 'rule34video'];
 
 // Formats nativeImage can't decode (webp on every platform, animated
 // images, avif) go through Chromium instead. Bounded so a hostile or broken
@@ -78,16 +81,17 @@ function runInDecoder(script) {
 runInDecoder.TIMEOUT = Symbol('timeout');
 
 /**
- * Cache file stem for a video. User uploads, EroScripts previews and FapTap
- * thumbnails use separate files, so an automatic download that finishes
- * late can never overwrite a poster the user picked in the meantime.
+ * Cache file stem for a video. User uploads, EroScripts previews, FapTap
+ * thumbnails and rule34video covers use separate files, so an automatic
+ * download that finishes late can never overwrite a poster the user picked
+ * in the meantime.
  *
  * @param {string} videoPath
- * @param {'user'|'eroscripts'|'faptap'} [source]
+ * @param {'user'|'eroscripts'|'faptap'|'rule34video'} [source]
  */
 function thumbStem(videoPath, source = 'user') {
   const hash = crypto.createHash('md5').update(String(videoPath)).digest('hex');
-  return source === 'eroscripts' || source === 'faptap' ? `${hash}-${source}` : hash;
+  return AUTO_SOURCES.includes(source) ? `${hash}-${source}` : hash;
 }
 
 /**
@@ -130,8 +134,8 @@ async function importThumbnail(bytes, { dir, stem, nativeImage, decodeFallback }
 
 /**
  * Delete the custom-thumbs files of videos that are gone: every file named
- * after one of the videos (`thumbStem` for uploads, EroScripts previews and
- * FapTap thumbnails, any extension) plus `imagePaths` (the pruned config
+ * after one of the videos (`thumbStem` for uploads and every automatic
+ * source, any extension) plus `imagePaths` (the pruned config
  * entries' images, which a reorganised library may have kept under the old
  * path's hash). Only files directly inside `dir`; `keep` (images still used
  * by other entries) is never removed.
@@ -151,7 +155,7 @@ async function deleteVideoThumbs(dir, videoPaths, { imagePaths = [], keep = [] }
   }
   const stems = new Set();
   for (const p of videoPaths) {
-    for (const source of ['user', 'eroscripts', 'faptap']) stems.add(thumbStem(p, source));
+    for (const source of ['user', ...AUTO_SOURCES]) stems.add(thumbStem(p, source));
   }
   const targets = new Set();
   for (const name of names) {

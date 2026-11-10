@@ -43,6 +43,9 @@ function library() {
       [MOVED]: { url: 'https://faptap.net/x.webp', status: 'no-match' },
       [UNPLUGGED]: { url: 'https://faptap.net/y.webp', status: 'imported' },
     },
+    'library.rule34videoThumbnails': {
+      [MOVED]: { url: 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg', status: 'imported' },
+    },
     'library.durationCache': { [LIVE]: 60, [MOVED]: 90, [UNPLUGGED]: 120, [SHARE]: 30 },
   });
 }
@@ -54,8 +57,8 @@ describe('pruneThumbConfig', () => {
 
     const r = await pruneThumbConfig(settings, { scannedPaths: [LIVE], pathState, deleteFiles });
 
-    expect(r).toEqual({ gone: 1, customThumbnails: 1, faptapThumbnails: 1, durationCache: 1, files: 2 });
-    for (const key of ['library.customThumbnails', 'library.faptapThumbnails', 'library.durationCache']) {
+    expect(r).toEqual({ gone: 1, customThumbnails: 1, faptapThumbnails: 1, rule34videoThumbnails: 1, durationCache: 1, files: 2 });
+    for (const key of ['library.customThumbnails', 'library.faptapThumbnails', 'library.rule34videoThumbnails', 'library.durationCache']) {
       expect(settings.store[key]).not.toHaveProperty([MOVED]);
     }
     expect(Object.keys(settings.store['library.customThumbnails'])).toEqual([LIVE, UNPLUGGED, SHARE]);
@@ -115,6 +118,7 @@ describe('deleteVideoThumbs', () => {
     const goneOld = touch(`${thumbStem(MOVED)}.webp`);
     const goneEs = touch(`${thumbStem(MOVED, 'eroscripts')}.jpg`);
     const goneFt = touch(`${thumbStem(MOVED, 'faptap')}.jpg`);
+    const goneR34 = touch(`${thumbStem(MOVED, 'rule34video')}.jpg`);
     const remapped = touch('old-hash.jpg');        // a reorganised entry's image
     const shared = touch('shared.jpg');            // also used by a live entry
     const live = touch(`${thumbStem(LIVE)}.jpg`);
@@ -126,11 +130,11 @@ describe('deleteVideoThumbs', () => {
       keep: [path.join(dir, shared)],
     });
 
-    expect(n).toBe(5);
+    expect(n).toBe(6);
     expect(fs.readdirSync(dir).sort()).toEqual([live, shared].sort());
     expect(fs.existsSync(outside)).toBe(true);
     fs.rmSync(outside);
-    for (const f of [gone, goneOld, goneEs, goneFt, remapped]) expect(fs.existsSync(path.join(dir, f))).toBe(false);
+    for (const f of [gone, goneOld, goneEs, goneFt, goneR34, remapped]) expect(fs.existsSync(path.join(dir, f))).toBe(false);
   });
 
   it('a missing directory deletes nothing', async () => {

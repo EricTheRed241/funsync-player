@@ -1,5 +1,7 @@
-// An EroScripts post's preview image as a video's library thumbnail, and
-// FapTap's thumbnail of a FapTap Discovery scene (see "FapTap thumbnails").
+// An EroScripts post's preview image as a video's library thumbnail,
+// FapTap's thumbnail of a FapTap Discovery scene (see "FapTap thumbnails")
+// and rule34video's cover of a scene downloaded from there (see
+// "rule34video covers").
 //
 // Stored like a user-uploaded poster (`library.customThumbnails[path]`,
 // `{ type: 'image', imagePath }`) so every thumbnail surface (library,
@@ -17,9 +19,10 @@
 //
 // Automatic imports never replace an existing custom thumbnail: a poster
 // the user uploaded or a frame they pinned always wins, and Reset brings
-// back the generated frame. Revalidation removes automatic EroScripts and
-// FapTap posters that don't match their video; one the user picked by hand
-// (`forced`) is theirs and is never touched.
+// back the generated frame. (Only a rule34video cover may replace an
+// automatic EroScripts preview or FapTap thumbnail.) Revalidation removes
+// automatic EroScripts and FapTap posters that don't match their video; one
+// the user picked by hand (`forced`) is theirs and is never touched.
 
 import * as thumbCache from './thumbnail-cache.js';
 import { eventBus } from './event-bus.js';
@@ -387,6 +390,167 @@ export async function fetchFaptapThumbnails({
     if (status === 'imported') summary.imported++;
     else if (status === 'no-match') summary.noMatch++;
     else if (status === 'gone') summary.gone++;
+    else if (status === 'skipped') summary.skipped++;
+    else summary.failed++;
+  }
+  return summary;
+}
+
+// ---- rule34video covers ----
+// When `eroscripts:scout --fetch` downloads a scene's video from a
+// rule34video page, its `eroscripts.json` carries the page's cover
+// (`posterUrl`), which the library scan passes on as
+// `video.eroscripts.posterUrl` (rule34video cover links only). After each
+// scan the main process downloads it and imports it as is
+// (`rule34video-import-poster`): no frame check, since the cover belongs to
+// the very video that was downloaded and creators' titled posters are
+// wanted. The entry is a poster tagged `source: 'rule34video'` and the
+// post's `topicId`; revalidation leaves it alone.
+//
+// It fills an empty slot, and replaces an automatic EroScripts preview or
+// FapTap thumbnail (the video came from that exact page, the preview was a
+// frame guess). Uploads, pinned frames and anything picked by hand stay.
+// Each attempt is remembered per video and URL in RULE34VIDEO_ATTEMPTS_KEY:
+// an imported cover the user reset stays reset, an unusable link (gone, not
+// an image, undecodable) isn't fetched again, and one that failed for a
+// reason that may pass (network, rate limit) waits RULE34VIDEO_RETRY_MS.
+
+/** `source` of customThumbnails entries holding a rule34video cover. */
+export const RULE34VIDEO_THUMB_SOURCE = 'rule34video';
+/** rule34video cover attempts: `{ [videoPath]: {url, status: 'imported'|'unusable'|'failed', at?} }`. */
+export const RULE34VIDEO_ATTEMPTS_KEY = 'library.rule34videoThumbnails';
+/** Wait before each cover, so rule34video sees ≤ 1 request/s (it rate-limits above ~3/s). */
+export const RULE34VIDEO_DELAY_MS = 1000;
+/** A cover whose download failed for a passing reason is tried again after this long. */
+export const RULE34VIDEO_RETRY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * @param {string} imagePath file in the custom-thumbs dir
+ * @param {number} topicId the post the scene came from
+ * @param {string} imageUrl the cover link
+ */
+export function makeRule34videoEntry(imagePath, topicId, imageUrl) {
+  return { type: 'image', imagePath, source: RULE34VIDEO_THUMB_SOURCE, topicId, imageUrl };
+}
+
+/** Is this customThumbnails entry a rule34video cover? */
+export function isRule34videoEntry(entry) {
+  return entry?.type === 'image' && entry.source === RULE34VIDEO_THUMB_SOURCE;
+}
+
+/**
+ * May the rule34video import set this thumbnail to `url`? When none is
+ * set, over an automatic EroScripts preview or FapTap thumbnail, or to
+ * replace an earlier cover from another URL. Uploads, pinned frames and
+ * anything picked by hand stay.
+ */
+export function canRule34videoImport(entry, url) {
+  if (!entry) return true;
+  if (isRule34videoEntry(entry)) return !entry.forced && entry.imageUrl !== url;
+  return isRevalidatable(entry);
+}
+
+function rememberRule34videoAttempt(settings, videoPath, attempt) {
+  const map = { ...(settings.get(RULE34VIDEO_ATTEMPTS_KEY) || {}) };
+  map[videoPath] = attempt;
+  settings.set(RULE34VIDEO_ATTEMPTS_KEY, map);
+}
+
+/** Was `url` already tried for this video and shouldn't be fetched again yet? */
+function triedRecently(attempt, url, now) {
+  if (attempt?.url !== url) return false;
+  if (attempt.status !== 'failed') return true;
+  return typeof attempt.at === 'number' && now - attempt.at < RULE34VIDEO_RETRY_MS;
+}
+
+/**
+ * Videos the rule34video batch would cover: a scanned cover link not tried
+ * yet, and a thumbnail slot the import may fill.
+ *
+ * @param {{get: Function}} settings
+ * @param {Array<{path: string, eroscripts?: {topicId: number, posterUrl?: string}}>} videos scan results
+ * @param {number} [now] epoch ms
+ * @returns {Array<{videoPath: string, topicId: number, url: string}>}
+ */
+export function planRule34videoPosters(settings, videos, now = Date.now()) {
+  const custom = settings.get(CUSTOM_THUMBS_KEY) || {};
+  const tried = settings.get(RULE34VIDEO_ATTEMPTS_KEY) || {};
+  const pending = [];
+  for (const video of videos || []) {
+    const url = video?.eroscripts?.posterUrl;
+    if (typeof url !== 'string' || !url) continue;
+    if (triedRecently(tried[video.path], url, now)) continue;
+    if (!canRule34videoImport(custom[video.path], url)) continue;
+    pending.push({ videoPath: video.path, topicId: video.eroscripts.topicId, url });
+  }
+  return pending;
+}
+
+/**
+ * Import the rule34video cover of one video.
+ *
+ * @returns {Promise<{status: 'imported'|'skipped'|'unusable'|'failed', dataUrl?: string}>}
+ */
+export async function importRule34videoPoster({ settings, api, videoPath, topicId, url, now = Date.now }) {
+  const current = () => (settings.get(CUSTOM_THUMBS_KEY) || {})[videoPath];
+  if (!videoPath || !url || !api?.rule34videoImportPoster) return { status: 'failed' };
+  if (!canRule34videoImport(current(), url)) return { status: 'skipped' };
+
+  const res = await api.rule34videoImportPoster(videoPath, url);
+  if (res?.status === 'unusable') {
+    rememberRule34videoAttempt(settings, videoPath, { url, status: 'unusable' });
+    return { status: 'unusable' };
+  }
+  if (res?.status !== 'imported' || !res.path) {
+    rememberRule34videoAttempt(settings, videoPath, { url, status: 'failed', at: now() });
+    return { status: 'failed' };
+  }
+
+  // The download took a while: the user may have picked a thumbnail since.
+  const before = current();
+  if (!canRule34videoImport(before, url)) return { status: 'skipped' };
+
+  writeEntry(settings, videoPath, makeRule34videoEntry(res.path, topicId, url), res.dataUrl);
+  rememberRule34videoAttempt(settings, videoPath, { url, status: 'imported' });
+  // The automatic poster it replaced has its own file; drop it.
+  if ((isPreviewEntry(before) || isFaptapEntry(before)) && before.imagePath !== res.path) {
+    await api.deleteEroScriptsThumbnail?.(before.imagePath);
+  }
+  return { status: 'imported', dataUrl: res.dataUrl };
+}
+
+/**
+ * Import rule34video covers for every planned video, one at a time. Stops
+ * before the next video once `signal` is aborted (a new scan started).
+ *
+ * @param {object} args
+ * @param {{get: Function, set: Function}} args.settings
+ * @param {object} args.api `window.funsync`
+ * @param {Array<object>} args.videos scan results
+ * @param {AbortSignal} [args.signal]
+ * @param {(ms: number) => Promise<void>} [args.sleep]
+ * @param {number} [args.delayMs]
+ * @param {() => number} [args.now]
+ * @returns {Promise<{total: number, imported: number, unusable: number, skipped: number,
+ *   failed: number, stopped: boolean}>}
+ */
+export async function fetchRule34videoPosters({
+  settings, api, videos, signal,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  delayMs = RULE34VIDEO_DELAY_MS,
+  now = Date.now,
+}) {
+  const pending = planRule34videoPosters(settings, videos, now());
+  const summary = { total: pending.length, imported: 0, unusable: 0, skipped: 0, failed: 0, stopped: false };
+  for (const item of pending) {
+    if (!signal?.aborted) await sleep(delayMs);
+    if (signal?.aborted) {
+      summary.stopped = true;
+      break;
+    }
+    const { status } = await importRule34videoPoster({ settings, api, ...item, now });
+    if (status === 'imported') summary.imported++;
+    else if (status === 'unusable') summary.unusable++;
     else if (status === 'skipped') summary.skipped++;
     else summary.failed++;
   }

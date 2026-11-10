@@ -43,6 +43,21 @@ export function rule34videoLinks(hrefs) {
   return [...byId.values()];
 }
 
+/**
+ * The cover of a rule34video video page, the image the site shows for it:
+ * `https://rule34video.com/contents/videos_screenshots/<id rounded down to
+ * 1000>/<id>/preview.jpg` (public, no token). The scout writes it into the
+ * scene's `eroscripts.json` (`posterUrl`) and the app makes it the
+ * library thumbnail (electron/rule34video-thumbnail.js). null when
+ * `pageUrl` isn't a video page.
+ */
+export function rule34videoPosterUrl(pageUrl) {
+  const m = RULE34VIDEO_PAGE.exec(String(pageUrl || ''));
+  const id = m ? Number(m[1]) : 0;
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  return `https://rule34video.com/contents/videos_screenshots/${Math.floor(id / 1000) * 1000}/${id}/preview.jpg`;
+}
+
 // ── Page ────────────────────────────────────────────────────────────────
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };

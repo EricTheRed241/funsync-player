@@ -202,6 +202,7 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsValidatePoster: (videoPath, imagePath) => ipcRenderer.invoke('eroscripts-validate-poster', videoPath, imagePath),
   deleteEroScriptsThumbnail: (imagePath) => ipcRenderer.invoke('delete-eroscripts-thumbnail', imagePath),
   faptapImportThumbnail: (videoPath, url) => ipcRenderer.invoke('faptap-import-thumbnail', videoPath, url),
+  rule34videoImportPoster: (videoPath, url) => ipcRenderer.invoke('rule34video-import-poster', videoPath, url),
 
   // Player pop-out window (SCOPE-separate-player-window.md — detached player)
   playerPopoutOpen: () => ipcRenderer.invoke('player-popout:open'),
