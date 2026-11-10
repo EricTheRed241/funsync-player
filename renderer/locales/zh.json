@@ -915,7 +915,10 @@
         "favorites": "收藏",
         "top": "高分（4 星以上）",
         "unrated": "未评分"
-      }
+      },
+      "watched": "已看过",
+      "watchedTitle": "已看过：评分 {n} 星",
+      "watchedCollection": "已看过"
     },
     "queue": {
       "add": "加入队列",
@@ -1223,7 +1226,9 @@
       "resumeProgressLabel": "在播放列表中显示进度",
       "resumeProgressHint": "在播放列表的卡片和列表行上以进度条显示观看位置。仅适用于播放列表，主媒体库不会显示。",
       "hideDupesLabel": "隐藏重复名称",
-      "hideDupesHint": "当多个视频文件名完全相同时只显示一个条目，例如同一文件位于两个来源文件夹中。会保留带脚本的那一份。"
+      "hideDupesHint": "当多个视频文件名完全相同时只显示一个条目，例如同一文件位于两个来源文件夹中。会保留带脚本的那一份。",
+      "watchedLastLabel": "已看过的视频排在最后",
+      "watchedLastHint": "视频一经评分即视为已看过。已看过的视频会移到资料库、分类、合集和 Discovery 的末尾，变暗并带有“已看过”标记，避免误播重看。艺术家播放列表、你自己的播放列表和评分列表保持原有顺序。网页遥控和头显也遵循此设置。"
     },
     "data": {
       "backupHeader": "备份与恢复",
@@ -1775,6 +1780,9 @@
     "filterTopRated": "高分（4 星以上）",
     "filterUnrated": "未评分",
     "sortDesc": "评分 从高到低",
-    "sortAsc": "评分 从低到高"
+    "sortAsc": "评分 从低到高",
+    "watched": "已看过",
+    "watchedTitle": "已看过：评分 {n} 星",
+    "watchedCollection": "已看过"
   }
 }

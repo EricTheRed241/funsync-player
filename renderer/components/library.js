@@ -44,8 +44,13 @@ import {
 } from '../js/association-shape.js';
 import { planAssociationRehome } from '../js/association-rehome.js';
 import { isVideoLocationGone } from '../js/association-dead.js';
-import { matchesRatingFilter, ratingOf, rehomeRatings, RATING_FILTERS } from '../js/ratings.js';
+import { isWatched, matchesRatingFilter, ratingOf, rehomeRatings, RATING_FILTERS, watchedByRecency, watchedLast } from '../js/ratings.js';
+import {
+  LIST_COLLECTION, LIST_LIBRARY, LIST_RATING, LIST_WATCHED, sinksWatched, WATCHED_COLLECTION_ID, WATCHED_LAST_KEY, watchedLastOn,
+  watchedRegistration,
+} from '../js/watched-lists.js';
 import { createRatingControl, updateRatingControl } from '../js/rating-stars.js';
+import { markWatched } from '../js/watched-badge.js';
 import { record, mark } from '../js/startup-timer.js';
 import { applyEroscriptsLinks, mergeScoutPosts } from '../js/eroscripts-links.js';
 import { applyVideoTags } from '../js/video-tags.js';
@@ -370,7 +375,10 @@ export class Library {
           updateRatingControl(el, value);
         }
         const [sortField] = this._sortParts();
-        if ((this._ratingFilter && this._ratingFilter !== 'all') || sortField === 'rating') {
+        // A rating also makes a video watched: it moves to the end of the
+        // list (or into / out of the Watched collection).
+        if ((this._ratingFilter && this._ratingFilter !== 'all') || sortField === 'rating'
+            || this._watchedSinkOn() || this._activeCollectionId === WATCHED_COLLECTION_ID) {
           if (!this._scanning) this._applyFilters();
         }
       });
@@ -392,8 +400,7 @@ export class Library {
     // Determine header title and subtitle based on active view
     const availableSources = sources.filter(s => s.enabled !== false && !unavailable.has(s.path));
     if (this._activeCollectionId) {
-      const collections = this._settings.get('library.collections') || [];
-      const col = collections.find(c => c.id === this._activeCollectionId);
+      const col = this._activeCollection();
       this._headerTitle = col ? col.name : t('nav.library');
       // Prefer the sync folder for synced collections (more informative
       // than the common ancestor of a possibly-empty additive list).
@@ -2218,6 +2225,57 @@ export class Library {
     return { ratingOf: (p) => ratingOf(ratings, p), scoreOf: (p) => scores[p] };
   }
 
+  _ratings() {
+    return this._settings.getRatings ? this._settings.getRatings() : {};
+  }
+
+  /**
+   * The active collection or null. The Watched collection (every rated
+   * video, newest rating first) isn't stored: it is made from the ratings.
+   */
+  _activeCollection() {
+    if (this._activeCollectionId === WATCHED_COLLECTION_ID) {
+      return { id: WATCHED_COLLECTION_ID, name: t('rating.watchedCollection'), videoPaths: watchedByRecency(this._ratings()) };
+    }
+    return (this._settings.get('library.collections') || []).find((c) => c.id === this._activeCollectionId) || null;
+  }
+
+  /** The kind of list on screen (watched-lists.js): the rating filters and sort make a rating list. */
+  _listKind() {
+    if (this._activeCollectionId === WATCHED_COLLECTION_ID) return LIST_WATCHED;
+    if (this._ratingFilter === 'favorites' || this._ratingFilter === 'top' || this._sortParts()[0] === 'rating') return LIST_RATING;
+    return this._activeCollectionId ? LIST_COLLECTION : LIST_LIBRARY;
+  }
+
+  /** True when watched videos go last (dimmed, badged) in the list on screen. */
+  _watchedSinkOn() {
+    return watchedLastOn(this._settings.get(WATCHED_LAST_KEY)) && sinksWatched(this._listKind());
+  }
+
+  /**
+   * Sort `videos` (search results keep their relevance ranking), then put
+   * the watched ones last where they sink. The Watched collection lists the
+   * newest rating first.
+   */
+  _orderVideos(videos, sortField, sortDir) {
+    const searching = !!this._searchQuery;
+    if (this._activeCollectionId === WATCHED_COLLECTION_ID) {
+      if (searching) return videos;
+      const rank = new Map(watchedByRecency(this._ratings()).map((p, i) => [p, i]));
+      return [...videos].sort((a, b) => (rank.get(a.path) ?? Infinity) - (rank.get(b.path) ?? Infinity));
+    }
+    const sorted = searching ? videos : sortVideos(videos, sortField, sortDir || 'asc', this._sortOpts());
+    if (!this._watchedSinkOn()) return sorted;
+    const ratings = this._ratings();
+    return watchedLast(sorted, (v) => v.path, (p) => isWatched(ratings, p));
+  }
+
+  /** Dim a watched video's card or row and badge it (in `getParent()`), where watched videos sink. */
+  _markWatched(el, videoPath, getParent) {
+    const ratings = this._ratings();
+    if (this._watchedSinkOn() && isWatched(ratings, videoPath)) markWatched(el, ratingOf(ratings, videoPath), getParent());
+  }
+
   /**
    * Build a labelled radio group for a filter dimension. Used by
    * `_buildFiltersPicker` for both Tab and VR. Returns a section
@@ -2468,8 +2526,7 @@ export class Library {
     if (this._folderBrowse && this._currentFolderPath) {
       path = this._currentFolderPath;
     } else if (this._activeCollectionId) {
-      const collections = this._settings.get('library.collections') || [];
-      const col = collections.find(c => c.id === this._activeCollectionId);
+      const col = this._activeCollection();
       const sources = this._settings.get('library.sources') || [];
       const syncFolder = col?.syncSource?.folderPath
         || (col?.syncSource?.sourceId
@@ -2579,6 +2636,7 @@ export class Library {
 
     const listScore = this._createScoreBadge(video.path);
     if (listScore) badges.appendChild(listScore);
+    this._markWatched(row, video.path, () => badges);
 
     if (video.avgSpeed > 0 || video.maxSpeed > 0) {
       this._addSpeedBadge(badges, { avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
@@ -2957,6 +3015,7 @@ export class Library {
 
     const cardScore = this._createScoreBadge(video.path);
     if (cardScore) this._getOrCreateBadgesContainer(thumbnail).appendChild(cardScore);
+    this._markWatched(card, video.path, () => this._getOrCreateBadgesContainer(thumbnail));
 
     // Category dot badges
     const catIds = this._settings.getVideoCategories(video.path);
@@ -6066,8 +6125,7 @@ export class Library {
     if (this._folderBrowse && this._activeCollectionId !== this._folderCollectionId) {
       this._folderCollectionId = this._activeCollectionId;
       if (this._activeCollectionId && this._folderIndex) {
-        const collections = this._settings.get('library.collections') || [];
-        const col = collections.find(c => c.id === this._activeCollectionId);
+        const col = this._activeCollection();
         const sources = this._settings.get('library.sources') || [];
         // Prefer the sync folder directly for synced collections.
         const syncFolder = col?.syncSource?.folderPath
@@ -6098,8 +6156,7 @@ export class Library {
     const runFilters = (inputVideos) => {
       let out = inputVideos;
       if (this._activeCollectionId) {
-        const collections = this._settings.get('library.collections') || [];
-        const col = collections.find(c => c.id === this._activeCollectionId);
+        const col = this._activeCollection();
         if (col) {
           // Synced collections (syncSource set) expand membership live
           // from the folder index — new videos in the sync folder
@@ -6174,9 +6231,7 @@ export class Library {
       // relevance — re-running sortVideos (name/duration/etc.) would throw
       // that ranking away and the exact-title match could sink below
       // alphabetically-earlier partial matches.
-      if (!this._searchQuery) {
-        filtered = sortVideos(filtered, sortField, sortDir || 'asc', this._sortOpts());
-      }
+      filtered = this._orderVideos(filtered, sortField, sortDir);
       // Denominator for the search-count display reflects the scoped pool,
       // not the global library — otherwise "5 / 800" is misleading when the
       // user only intended to search within sub2.
@@ -6231,9 +6286,7 @@ export class Library {
         // Then videos directly in this folder, filtered + sorted (but keep
         // fuzzy ranking intact when searching — see flat-view branch).
         const filteredDirect = runFilters(node.videos);
-        const directVideos = this._searchQuery
-          ? filteredDirect
-          : sortVideos(filteredDirect, sortField, sortDir || 'asc', this._sortOpts());
+        const directVideos = this._orderVideos(filteredDirect, sortField, sortDir);
 
         items.push(...folderEntries);
         items.push(...directVideos);
@@ -6853,6 +6906,8 @@ export class Library {
       // Every artist folder with its videos, the favourite artists and the
       // favourite artist bonus for the web remote's Artists view.
       ...artistRegistration(this._settings, this._videos.map((v) => v.path)),
+      // Whether watched videos sink, and in which playlists (watched-lists.js).
+      ...watchedRegistration(this._settings),
     };
     // Fire-and-forget with a bounded retry: the backend now boots in
     // PARALLEL with the window, so the first post-scan registration can

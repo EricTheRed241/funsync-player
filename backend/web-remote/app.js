@@ -20,6 +20,9 @@ import {
   setRating, addToPlaylist, removeFromPlaylist, reportResult, showToast,
 } from './triage.js';
 import {
+  watchedLast, shouldSink, isWatchedCollection, localizeWatchedCollection, videosInOrder, createWatchedBadge,
+} from './watched.js';
+import {
   fetchQueue, queueAdd, queueRemove, queuePlayed, queueClear, queueSetAutoFill, queueFromResult,
   manualIds, autoIds, nextUp, getAutoplay, setAutoplay,
 } from './queue.js';
@@ -206,6 +209,9 @@ document.getElementById('navArtistsIcon').appendChild(svgIcon('user', 22));
 document.getElementById('navQueueIcon').appendChild(svgIcon('listVideo', 22));
 
 let library = null;       // cached list of video objects
+// Whether the library views put watched (rated) videos last: the desktop's
+// setting, `watchedLast` from /api/remote/videos. On until told otherwise.
+let libraryWatchedLast = true;
 
 // Wire the manual VR override store so `isVRVideo({path})` checks
 // `manualVRType` on the live library entry before falling through to the
@@ -418,7 +424,7 @@ async function loadLibrary() {
     const resp = await fetch('/api/remote/videos');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    library = data.videos || [];
+    library = adoptVideoList(data);
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
@@ -437,6 +443,12 @@ async function loadLibrary() {
     if (uiState.search) render();
   }).catch(() => { /* fall through — search degrades to no-context */ });
   return library;
+}
+
+/** The videos of a /api/remote/videos response; remembers its `watchedLast`. */
+function adoptVideoList(data) {
+  if (typeof data?.watchedLast === 'boolean') libraryWatchedLast = data.watchedLast;
+  return data?.videos || [];
 }
 
 // Silent re-fetches while the backend is still probing durations. Stops
@@ -570,9 +582,11 @@ async function loadGrouping(kind) {
   const resp = await fetch(`/api/remote/${kind}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
-  const out = data[kind] || [];
-  if (kind === 'collections') collections = out;
-  else if (kind === 'playlists') playlists = out;
+  let out = data[kind] || [];
+  if (kind === 'collections') {
+    // The virtual Watched collection comes with an English name.
+    collections = out = localizeWatchedCollection(out, t('webRemote.triage.watchedCollection'));
+  } else if (kind === 'playlists') playlists = out;
   else if (kind === 'categories') categories = out;
   return out;
 }
@@ -712,13 +726,13 @@ async function renderList() {
     return;
   }
 
-  if (uiState.view === 'grid') {
-    mainEl.innerHTML = '';
-    mainEl.appendChild(renderGrid(filtered));
-  } else {
-    mainEl.innerHTML = '';
-    mainEl.appendChild(renderRows(filtered));
-  }
+  // Watched videos go last (after the sort or the search ranking).
+  const sinks = shouldSink({ sink: libraryWatchedLast, rating: uiState.rating, sort: uiState.sort });
+  const shown = sinks ? watchedLast(filtered) : filtered;
+  mainEl.innerHTML = '';
+  mainEl.appendChild(uiState.view === 'grid'
+    ? renderGrid(shown, { markWatched: sinks })
+    : renderRows(shown, { markWatched: sinks }));
 }
 
 function applyFilters(videos) {
@@ -972,7 +986,7 @@ async function refreshLibraryScores() {
   try {
     const resp = await fetch('/api/remote/videos');
     if (!resp.ok) return;
-    library = (await resp.json()).videos || [];
+    library = adoptVideoList(await resp.json());
     folderIndex = null;
     searchContextMap = null;
     if (currentView === 'list') rerenderCurrent();
@@ -1515,8 +1529,11 @@ async function renderFolderAt(canonicalFolderPath) {
   }
 
   if (filtered.length > 0) {
-    if (uiState.view === 'grid') mainEl.appendChild(renderGrid(filtered));
-    else mainEl.appendChild(renderRows(filtered));
+    const sinks = shouldSink({ sink: libraryWatchedLast, rating: uiState.rating, sort: uiState.sort });
+    const shown = sinks ? watchedLast(filtered) : filtered;
+    mainEl.appendChild(uiState.view === 'grid'
+      ? renderGrid(shown, { markWatched: sinks })
+      : renderRows(shown, { markWatched: sinks }));
   }
 }
 
@@ -1602,10 +1619,18 @@ async function renderGroupingDetail(kind, id) {
     { label: item.name || t('webRemote.breadcrumb.unnamed') },
   ]);
 
-  // Filter the library down to this grouping's video IDs
+  // Filter the library down to this grouping's video IDs. The Watched
+  // collection lists them newest rating first, and keeps that order over
+  // the sort unless a search is ranking them.
   const videoSet = new Set(item.videoIds || []);
-  const videos = allVideos.filter(v => videoSet.has(v.id));
-  const filtered = applyFilters(videos);
+  const watchedList = kind === 'collections' && isWatchedCollection(item);
+  const videos = watchedList
+    ? videosInOrder(allVideos, item.videoIds)
+    : allVideos.filter(v => videoSet.has(v.id));
+  let filtered = watchedList && !uiState.search ? applyMatchedVrFilters(videos) : applyFilters(videos);
+  // Watched videos go last where the desktop sinks them (`sinkWatched`).
+  const sinks = shouldSink({ sink: item.sinkWatched === true, rating: uiState.rating, sort: uiState.sort });
+  if (sinks) filtered = watchedLast(filtered);
   countEl.textContent = filtered.length ? `${filtered.length}` : '';
 
   if (videos.length === 0) {
@@ -1664,7 +1689,9 @@ async function renderGroupingDetail(kind, id) {
     mainEl.appendChild(bar);
   }
 
-  const listEl = uiState.view === 'grid' ? renderGrid(filtered) : renderRows(filtered);
+  const listEl = uiState.view === 'grid'
+    ? renderGrid(filtered, { markWatched: sinks })
+    : renderRows(filtered, { markWatched: sinks });
   if (kind === 'playlists') addPlaylistRemoveButtons(listEl, filtered, item);
   mainEl.appendChild(listEl);
 }
@@ -1708,6 +1735,7 @@ function buildTriageRow(video) {
   const apply = (rating, favorite) => {
     video.rating = rating;
     video.favorite = favorite;
+    video.watched = rating > 0;
     updateRatingControl(control, { rating, favorite });
   };
   const send = async (change) => {
@@ -1716,7 +1744,10 @@ function buildTriageRow(video) {
     const result = await setRating(video.id, change);
     reportResult(result);
     if (!result.ok) apply(before.rating, before.favorite);
-    else apply(result.data.rating, result.data.favorite);
+    else {
+      apply(result.data.rating, result.data.favorite);
+      collections = null; // the Watched collection changed (membership, order)
+    }
   };
   const control = createRatingControl({
     rating: video.rating || 0,
@@ -2060,23 +2091,26 @@ function _buildFolderJumpLink(videos) {
   return link;
 }
 
-function renderGrid(videos) {
+/** `markWatched`: dim and badge the watched videos (lists where they sink). */
+function renderGrid(videos, { markWatched = false } = {}) {
   const grid = document.createElement('div');
   grid.className = 'grid';
-  for (const v of videos) grid.appendChild(createCard(v));
+  for (const v of videos) grid.appendChild(createCard(v, { markWatched }));
   return grid;
 }
 
-function renderRows(videos) {
+function renderRows(videos, { markWatched = false } = {}) {
   const list = document.createElement('div');
   list.className = 'list';
-  for (const v of videos) list.appendChild(createRow(v));
+  for (const v of videos) list.appendChild(createRow(v, { markWatched }));
   return list;
 }
 
-function createCard(v) {
+function createCard(v, { markWatched = false } = {}) {
   const card = document.createElement('div');
   card.className = 'card';
+  const watchedBadge = markWatched ? createWatchedBadge(v, 'card__badge card__badge--watched') : null;
+  if (watchedBadge) card.classList.add('card--watched');
   card.addEventListener('click', () => { location.hash = `play/${v.id}`; });
 
   const thumb = document.createElement('img');
@@ -2132,6 +2166,7 @@ function createCard(v) {
   if (speedBadge) meta.appendChild(speedBadge);
   const scoreBadge = createScoreBadge(v, 'card__badge card__badge--score');
   if (scoreBadge) meta.appendChild(scoreBadge);
+  if (watchedBadge) meta.appendChild(watchedBadge);
 
   body.appendChild(meta);
   const labels = createLabelsLine(v, 'card__tags');
@@ -2243,9 +2278,11 @@ function createSpeedBadge(v, { withText = false } = {}) {
   return b;
 }
 
-function createRow(v, { queueToggle = true } = {}) {
+function createRow(v, { queueToggle = true, markWatched = false } = {}) {
   const row = document.createElement('div');
   row.className = 'list__row';
+  const watchedBadge = markWatched ? createWatchedBadge(v, 'list__badge list__badge--watched') : null;
+  if (watchedBadge) row.classList.add('list__row--watched');
   row.addEventListener('click', () => { location.hash = `play/${v.id}`; });
 
   const thumb = document.createElement('img');
@@ -2302,6 +2339,7 @@ function createRow(v, { queueToggle = true } = {}) {
   }
   const scoreBadge = createScoreBadge(v, 'list__badge list__badge--score');
   if (scoreBadge) sub.appendChild(scoreBadge);
+  if (watchedBadge) sub.appendChild(watchedBadge);
   info.appendChild(sub);
   const labels = createLabelsLine(v, 'list__tags');
   if (labels) info.appendChild(labels);
@@ -2573,7 +2611,7 @@ async function _pollForRescanResult(prevIds) {
       const resp = await fetch('/api/remote/videos');
       if (!resp.ok) continue;
       const data = await resp.json();
-      fresh = data.videos || [];
+      fresh = adoptVideoList(data);
     } catch { continue; }
     const freshIds = new Set(fresh.map(v => v.id));
     const changed = freshIds.size !== prevIds.size

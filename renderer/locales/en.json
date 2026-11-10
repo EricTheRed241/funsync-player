@@ -1050,7 +1050,9 @@
       "resumeProgressLabel": "Resume progress in playlists",
       "resumeProgressHint": "Show how far through each video you got, as a bar on playlist cards and rows. Playlist playback only — the main library is left unmarked.",
       "hideDupesLabel": "Hide duplicate names",
-      "hideDupesHint": "Show only one entry when several videos share an identical filename, such as the same file in two source folders. The copy with a script is kept."
+      "hideDupesHint": "Show only one entry when several videos share an identical filename, such as the same file in two source folders. The copy with a script is kept.",
+      "watchedLastLabel": "Watched videos last",
+      "watchedLastHint": "A video counts as watched once you rate it. Watched videos move to the end of the library, categories, collections and Discovery, dimmed with a \"Watched\" badge, so you don't play them again by accident. Artist playlists, your own playlists and the rating lists keep their order. The web remote and the headset follow this setting."
     },
     "data": {
       "backupHeader": "Backup & Recovery",
@@ -1381,7 +1383,10 @@
         "favorites": "Favorites",
         "top": "Top rated (4+)",
         "unrated": "Unrated"
-      }
+      },
+      "watched": "Watched",
+      "watchedTitle": "Watched: rated {n, plural, one {# star} other {# stars}}",
+      "watchedCollection": "Watched"
     },
     "queue": {
       "add": "Add to queue",
@@ -1775,6 +1780,9 @@
     "filterTopRated": "Top rated (4+)",
     "filterUnrated": "Unrated",
     "sortDesc": "Rating High-Low",
-    "sortAsc": "Rating Low-High"
+    "sortAsc": "Rating Low-High",
+    "watched": "Watched",
+    "watchedTitle": "Watched: rated {n, plural, one {# star} other {# stars}}",
+    "watchedCollection": "Watched"
   }
 }

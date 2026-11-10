@@ -133,6 +133,10 @@ const DEFAULTS = {
       // Never hides a video outright — one copy always survives; see
       // dedupeByName in renderer/js/library-search.js.
       hideDuplicateNames: false,
+      // Watched (rated) videos go to the end of the library, categories,
+      // collections and Discovery, dimmed and badged (renderer/js/watched-lists.js);
+      // the web remote and the headsets follow. On by default.
+      watchedLast: true,
       // EroScripts tags of the post each video's script came from, keyed by
       // VIDEO PATH. Recorded on download from any route (standalone panel or
       // the Associate-modal search), from `eroscripts:sync` links and from

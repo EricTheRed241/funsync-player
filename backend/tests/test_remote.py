@@ -5,12 +5,19 @@ from httpx import AsyncClient, ASGITransport
 
 from main import app
 from routes.media import (
+    _path_to_id,
+    get_watched,
     register_videos,
     register_collections,
     register_playlists,
     register_categories,
+    register_ratings,
     register_sources,
+    register_watched,
 )
+
+ALPHA = "C:\\Videos\\Alpha.mp4"
+BETA = "C:\\Videos\\Beta.mp4"
 
 
 @pytest.fixture
@@ -50,6 +57,11 @@ def setup_registry():
     register_playlists([])
     register_categories([], {})
     register_sources([])
+    register_ratings({})
+    register_watched({})
+    yield
+    register_ratings({})
+    register_watched({})
 
 
 @pytest.mark.anyio
@@ -422,3 +434,86 @@ async def test_seek_timing_survives_junk(client):
     for payload in ({}, {"to": "banana", "from": None}, {"buffered": "yes"}):
         response = await client.post("/api/remote/seek-timing", json=payload)
         assert response.status_code == 200
+
+
+# --- Watched (rated) videos ------------------------------------------------
+
+@pytest.mark.anyio
+async def test_videos_carry_watched_and_the_sink_setting(client):
+    register_ratings({
+        ALPHA: {"rating": 3.5, "favorite": False, "updatedAt": 1},
+        BETA: {"rating": 0, "favorite": True, "updatedAt": 2},   # favourite only: not watched
+    })
+    data = (await client.get("/api/remote/videos")).json()
+    assert {v["name"]: v["watched"] for v in data["videos"]} == {"Alpha": True, "Beta": False}
+    assert data["watchedLast"] is True   # never registered: on
+    register_watched({"sink": False})
+    assert (await client.get("/api/remote/videos")).json()["watchedLast"] is False
+
+
+@pytest.mark.anyio
+async def test_virtual_watched_collection_newest_rating_first(client):
+    register_collections([{"id": "c1", "name": "Zeta", "videoPaths": [ALPHA, BETA]}])
+    register_ratings({
+        ALPHA: {"rating": 2, "favorite": False, "updatedAt": 5},
+        BETA: {"rating": 4.5, "favorite": False, "updatedAt": 9},
+        "C:\\Videos\\Gone.mp4": {"rating": 5, "favorite": False, "updatedAt": 99},  # not registered
+    })
+    cols = (await client.get("/api/remote/collections")).json()["collections"]
+    assert [c["id"] for c in cols] == ["c1", ":watched"]   # after the sorted real ones
+    assert cols[0]["sinkWatched"] is True and "kind" not in cols[0]
+    assert cols[1] == {
+        "id": ":watched", "name": "Watched", "kind": "watched",
+        "videoCount": 2, "totalDuration": 900.0,
+        "videoIds": [_path_to_id(BETA), _path_to_id(ALPHA)],
+        "sinkWatched": False,
+    }
+
+    register_watched({"sink": False})
+    cols = (await client.get("/api/remote/collections")).json()["collections"]
+    assert cols[0]["sinkWatched"] is False
+    assert cols[1]["videoIds"] == [_path_to_id(BETA), _path_to_id(ALPHA)]   # still listed
+
+
+@pytest.mark.anyio
+async def test_no_watched_collection_without_rated_videos(client):
+    register_ratings({ALPHA: {"rating": 0, "favorite": True, "updatedAt": 5}})
+    cols = (await client.get("/api/remote/collections")).json()["collections"]
+    assert [c["id"] for c in cols] == []
+
+
+@pytest.mark.anyio
+async def test_playlists_and_categories_say_whether_they_sink(client):
+    register_playlists([
+        {"id": "disc", "name": "Discovery", "videoPaths": [ALPHA]},
+        {"id": "mine", "name": "Mine", "videoPaths": [BETA]},
+    ])
+    register_categories([{"id": "cat1", "name": "Cat"}], {ALPHA: ["cat1"]})
+    register_watched({"sink": True, "playlistIds": ["disc"]})
+    pls = {p["id"]: p["sinkWatched"] for p in (await client.get("/api/remote/playlists")).json()["playlists"]}
+    assert pls == {"disc": True, "mine": False}
+    [cat] = (await client.get("/api/remote/categories")).json()["categories"]
+    assert cat["sinkWatched"] is True
+
+    register_watched({"sink": False, "playlistIds": ["disc"]})
+    pls = {p["id"]: p["sinkWatched"] for p in (await client.get("/api/remote/playlists")).json()["playlists"]}
+    assert pls == {"disc": False, "mine": False}
+    [cat] = (await client.get("/api/remote/categories")).json()["categories"]
+    assert cat["sinkWatched"] is False
+
+
+@pytest.mark.anyio
+async def test_register_watched_is_independent_and_cleaned(client):
+    assert get_watched() == {"sink": True, "playlistIds": []}
+    await client.post("/api/media/register", json={
+        "watched": {"sink": False, "playlistIds": ["disc", "disc", 3, "", None, "other"]},
+    })
+    assert get_watched() == {"sink": False, "playlistIds": ["disc", "other"]}
+    # Other keys leave it alone.
+    await client.post("/api/media/register", json={"ratings": {}})
+    assert get_watched() == {"sink": False, "playlistIds": ["disc", "other"]}
+    # Junk is the defaults; only an explicit false turns sinking off.
+    await client.post("/api/media/register", json={"watched": "junk"})
+    assert get_watched() == {"sink": True, "playlistIds": []}
+    await client.post("/api/media/register", json={"watched": {"sink": 0, "playlistIds": "disc"}})
+    assert get_watched() == {"sink": True, "playlistIds": []}

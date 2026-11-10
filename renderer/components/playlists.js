@@ -24,6 +24,10 @@ import {
   partitionByAvailability,
   groupByVolume,
 } from '../js/playlist-availability.js';
+import { isWatched, ratingOf, watchedLast } from '../js/ratings.js';
+import { playlistKind, sinksWatched, WATCHED_LAST_KEY, watchedLastOn } from '../js/watched-lists.js';
+import { ARTIST_PLAYLISTS_KEY } from '../js/artist-playlists.js';
+import { markWatched } from '../js/watched-badge.js';
 
 export class Playlists {
   constructor({ settings, onPlayVideo, onPlayAll, library }) {
@@ -452,7 +456,7 @@ export class Playlists {
     const availableSet = await probeAvailability(pl.videoPaths);
     const isAvailable = availabilityPredicate(availableSet);
     this._availablePaths = availableSet;
-    const validPaths = pl.videoPaths.slice();
+    const validPaths = this._displayOrder(pl);
     const { unavailable } = partitionByAvailability(pl.videoPaths, isAvailable);
 
     if (validPaths.length === 0) {
@@ -493,6 +497,10 @@ export class Playlists {
         ? this._createVideoListItem(videoPath, pl, playContext)
         : this._createVideoCard(videoPath, pl, playContext);
       if (!isAvailable(videoPath)) this._markUnavailable(el, videoPath);
+      if (this._sinksWatched(pl) && isWatched(this._ratings(), videoPath)) {
+        const parent = el.querySelector('.playlists__list-badges') || el.querySelector('.playlists__video-info') || el;
+        markWatched(el, ratingOf(this._ratings(), videoPath), parent);
+      }
       grid.appendChild(el);
     }
 
@@ -986,13 +994,36 @@ export class Playlists {
     return false;
   }
 
+  _ratings() {
+    return this._settings.getRatings ? this._settings.getRatings() : {};
+  }
+
+  /**
+   * True when watched (rated) videos go last in `pl`: only in the app-made
+   * playlists (Discovery), not artist, rating or the user's own playlists
+   * (watched-lists.js).
+   */
+  _sinksWatched(pl) {
+    return watchedLastOn(this._settings.get(WATCHED_LAST_KEY))
+      && sinksWatched(playlistKind(pl, this._settings.get(ARTIST_PLAYLISTS_KEY) || {}));
+  }
+
+  /** The playlist's videos in the order shown and played. */
+  _displayOrder(pl) {
+    const paths = (pl.videoPaths || []).slice();
+    if (!this._sinksWatched(pl)) return paths;
+    const ratings = this._ratings();
+    return watchedLast(paths, (p) => p, (p) => isWatched(ratings, p));
+  }
+
   async _playAll(pl) {
     // Unreachable files are excluded from the QUEUE but never removed from the
     // playlist — see playlist-availability.js for why that distinction is the
     // whole point. One batch probe instead of one invoke per video.
-    const isAvailable = availabilityPredicate(await probeAvailability(pl.videoPaths));
+    const ordered = this._displayOrder(pl);
+    const isAvailable = availabilityPredicate(await probeAvailability(ordered));
     const { available: validPaths, unavailable } =
-      partitionByAvailability(pl.videoPaths, isAvailable);
+      partitionByAvailability(ordered, isAvailable);
 
     if (validPaths.length === 0) {
       const { showToast } = await import('../js/toast.js');

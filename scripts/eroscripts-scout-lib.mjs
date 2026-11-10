@@ -47,9 +47,9 @@ import path from 'node:path';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS,
-  NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SEX_TAGS, SEX_WORDS, SEX_WORDS_CJK, SFW_TAGS,
-  VR_MAX_FPS, VR_MAX_HEIGHT,
+  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, DISCOVERY_PLAYLIST, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
+  MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SEX_TAGS, SEX_WORDS,
+  SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
 import { durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl } from './stream-hosts.mjs';
@@ -62,8 +62,6 @@ export { candidateScore, effectiveTagScores, hasFeet, hasMonster, isHentaiOnly, 
 
 /** The minimum as words for messages: `1:50`. */
 export const MIN_VIDEO_LABEL = `${Math.floor(MIN_VIDEO_MS / 60_000)}:${String(Math.round(MIN_VIDEO_MS / 1000) % 60).padStart(2, '0')}`;
-
-export const DISCOVERY_NAME = 'Discovery';
 
 const VIDEO_EXT_RE = /\.(mp4|m4v|mkv|webm|mov)$/i;
 const SCRIPT_AXES = new Set(['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve']);
@@ -1104,9 +1102,9 @@ export function addToDiscovery(config, videoPaths, { folder, newId, now = Date.n
     changes.sourceAdded = true;
   }
   config.playlists ||= [];
-  let pl = config.playlists.find((p) => String(p.name).trim().toLowerCase() === DISCOVERY_NAME.toLowerCase());
+  let pl = config.playlists.find((p) => String(p.name).trim().toLowerCase() === DISCOVERY_PLAYLIST.toLowerCase());
   if (!pl) {
-    pl = { id: newId(), name: DISCOVERY_NAME, createdAt: now, videoPaths: [] };
+    pl = { id: newId(), name: DISCOVERY_PLAYLIST, createdAt: now, videoPaths: [] };
     config.playlists.push(pl);
     changes.playlistCreated = true;
   }

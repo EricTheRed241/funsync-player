@@ -29,6 +29,7 @@ import { LibraryEditApplier } from './library-edits.js';
 import { autoFillQueue, applyQueueChange, reviewPlaylistPaths } from './play-queue.js';
 import { PREFERENCE_SCORES_KEY, tagScoreRegistration } from './library-scores.js';
 import { artistRegistration } from './favourite-artists.js';
+import { WATCHED_COLLECTION_ID, WATCHED_LAST_KEY, watchedRegistration } from './watched-lists.js';
 import { ratingVerdict, sweepRejected, syncReview } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
@@ -2048,6 +2049,7 @@ class App {
     eventBus.on('rating:changed', schedule);
     eventBus.on('playlist:changed', schedule);
     eventBus.on('category:changed', schedule);
+    eventBus.on('settings:changed', ({ path } = {}) => { if (path === WATCHED_LAST_KEY) schedule(); });
 
     // The player's stars follow edits made anywhere (card, phone, headset).
     eventBus.on('rating:changed', ({ path } = {}) => {
@@ -2143,6 +2145,7 @@ class App {
         preferenceScores: this.settings.get(PREFERENCE_SCORES_KEY) || {},
         ...tagScoreRegistration(this.settings),
         ...artistRegistration(this.settings),
+        ...watchedRegistration(this.settings),
         queue,
       }),
     });
@@ -3320,6 +3323,7 @@ class App {
       categories: this.settings.getCategories ? this.settings.getCategories() : [],
       videoCategories: (this.settings._cache && this.settings._cache.videoCategories) || {},
       ratings: this.settings.get('library.ratings') || {},
+      ...watchedRegistration(this.settings),
     };
     try {
       fetch(`http://127.0.0.1:${this.backendPort}/api/media/register`, {
@@ -7177,7 +7181,10 @@ class App {
       this.settings.set('library.activeCollectionId', null);
     }
 
-    this.navBar.setCollections(collections, activeCollectionId, sources, unavailablePaths, unavailableCollectionIds);
+    // The Watched collection (every rated video, newest rating first) is
+    // made from the ratings, not stored: listed first, no edit or delete.
+    const listed = [{ id: WATCHED_COLLECTION_ID, name: t('rating.watchedCollection'), builtIn: true }, ...collections];
+    this.navBar.setCollections(listed, activeCollectionId, sources, unavailablePaths, unavailableCollectionIds);
     if (this.library) {
       // Invalidate scan cache if availability changed
       const prevUnavail = this.library._unavailablePaths || new Set();

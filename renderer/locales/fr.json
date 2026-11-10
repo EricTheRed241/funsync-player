@@ -915,7 +915,10 @@
         "favorites": "Favoris",
         "top": "Les mieux notés (4+)",
         "unrated": "Non notés"
-      }
+      },
+      "watched": "Vu",
+      "watchedTitle": "Vu : noté {n} étoiles",
+      "watchedCollection": "Vus"
     },
     "queue": {
       "add": "Ajouter à la file",
@@ -1223,7 +1226,9 @@
       "resumeProgressLabel": "Progression dans les listes",
       "resumeProgressHint": "Affiche votre progression sous forme de barre sur les vignettes et lignes des listes. Listes de lecture uniquement — la bibliothèque principale reste vierge.",
       "hideDupesLabel": "Masquer les doublons",
-      "hideDupesHint": "Affiche une seule entrée lorsque plusieurs vidéos portent le même nom de fichier, par exemple le même fichier dans deux dossiers source. La copie avec script est conservée."
+      "hideDupesHint": "Affiche une seule entrée lorsque plusieurs vidéos portent le même nom de fichier, par exemple le même fichier dans deux dossiers source. La copie avec script est conservée.",
+      "watchedLastLabel": "Vidéos vues en dernier",
+      "watchedLastHint": "Une vidéo compte comme vue dès que vous la notez. Les vidéos vues passent à la fin de la bibliothèque, des catégories, des collections et de Discovery, atténuées et marquées « Vu », pour ne pas les relancer par erreur. Les playlists d'artistes, vos propres playlists et les listes de notes gardent leur ordre. La télécommande web et le casque suivent ce réglage."
     },
     "data": {
       "backupHeader": "Sauvegarde et restauration",
@@ -1775,6 +1780,9 @@
     "filterTopRated": "Les mieux notés (4+)",
     "filterUnrated": "Non notés",
     "sortDesc": "Note décroissante",
-    "sortAsc": "Note croissante"
+    "sortAsc": "Note croissante",
+    "watched": "Vu",
+    "watchedTitle": "Vu : noté {n} étoiles",
+    "watchedCollection": "Vus"
   }
 }

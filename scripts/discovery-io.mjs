@@ -11,7 +11,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { addToDiscovery, coreName, DISCOVERY_NAME, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
+import { DISCOVERY_PLAYLIST } from '../renderer/js/content-preferences.js';
+import { addToDiscovery, coreName, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
 
 const { rewriteVideoTagsFile } = createRequire(import.meta.url)('../electron/video-tags.js');
 
@@ -192,7 +193,7 @@ export function flushPlaylist(userData, folder, videoPaths) {
   if (changes.sourceAdded || changes.playlistCreated || changes.added.length) writeConfig(userData, config);
   fs.rmSync(pendingFile, { force: true });
   if (changes.sourceAdded) console.log(`  added library source "${folder.name}" → ${folder.path}`);
-  if (changes.playlistCreated) console.log(`  created playlist "${DISCOVERY_NAME}"`);
+  if (changes.playlistCreated) console.log(`  created playlist "${DISCOVERY_PLAYLIST}"`);
   return true;
 }
 

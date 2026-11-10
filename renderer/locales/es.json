@@ -915,7 +915,10 @@
         "favorites": "Favoritos",
         "top": "Mejor valorados (4+)",
         "unrated": "Sin valorar"
-      }
+      },
+      "watched": "Visto",
+      "watchedTitle": "Visto: valorado con {n} estrellas",
+      "watchedCollection": "Vistos"
     },
     "queue": {
       "add": "Añadir a la cola",
@@ -1223,7 +1226,9 @@
       "resumeProgressLabel": "Progreso en las listas",
       "resumeProgressHint": "Muestra hasta dónde llegaste, como una barra en las tarjetas y filas de la lista. Solo en listas de reproducción — la biblioteca principal queda sin marcar.",
       "hideDupesLabel": "Ocultar nombres duplicados",
-      "hideDupesHint": "Muestra una sola entrada cuando varios vídeos comparten el mismo nombre de archivo, por ejemplo el mismo archivo en dos carpetas de origen. Se conserva la copia con script."
+      "hideDupesHint": "Muestra una sola entrada cuando varios vídeos comparten el mismo nombre de archivo, por ejemplo el mismo archivo en dos carpetas de origen. Se conserva la copia con script.",
+      "watchedLastLabel": "Vídeos vistos al final",
+      "watchedLastHint": "Un vídeo cuenta como visto en cuanto lo valoras. Los vídeos vistos pasan al final de la biblioteca, las categorías, las colecciones y Discovery, atenuados y con la etiqueta «Visto», para que no los vuelvas a reproducir por error. Las listas de artistas, tus propias listas y las listas de valoración mantienen su orden. El mando web y el visor siguen este ajuste."
     },
     "data": {
       "backupHeader": "Copia de seguridad y recuperación",
@@ -1775,6 +1780,9 @@
     "filterTopRated": "Mejor valorados (4+)",
     "filterUnrated": "Sin valorar",
     "sortDesc": "Valoración mayor-menor",
-    "sortAsc": "Valoración menor-mayor"
+    "sortAsc": "Valoración menor-mayor",
+    "watched": "Visto",
+    "watchedTitle": "Visto: valorado con {n} estrellas",
+    "watchedCollection": "Vistos"
   }
 }

@@ -19,14 +19,22 @@ left out of the sections that depend on it.
 
 After those come the triage sections, from the desktop's ratings and
 playlists (registered with the backend, pending headset/phone edits
-included): Favorites, Top Rated (rating >= 4), Unrated, then one
+included): Favorites, Top Rated (rating >= 4), Unrated, Watched, then one
 `Playlist: <name>` per playlist in the desktop's playlist order, its videos
 in playlist order.
 
-"Unrated" is every video without a rating. The issue asked for watched-but-
-unrated, but there is no reliable "watched" signal here: headset playback
-never reaches the desktop's resume tracking, so watching a scene in
-HereSphere — the case this queue exists for — would leave it out.
+Watched (user, 2026-11-10): a video counts as watched once it has a rating
+(> 0); a favourite flag alone doesn't count. Headset playback never reaches
+the desktop's resume tracking, so the rating is the one signal every player
+shares, and a rating saved in the headset counts on the next listing. The
+`Watched` section lists the rated videos newest rating first (`updatedAt`).
+So that they aren't played again by accident, the browsing sections
+(SECTION_ORDER) and the playlists the desktop names (`watched.playlistIds`,
+today only Discovery) list the unwatched videos first, then the watched
+ones, each group in its usual order, while the desktop setting is on
+(`watched.sink`). Queue, the rating sections and the user's own playlists
+keep their order. Every watched scene carries the read-only
+`Status:Watched` tag.
 """
 
 import math
@@ -58,6 +66,7 @@ SECTION_RECENT = 'Recently Added'
 SECTION_FAVORITES = 'Favorites'
 SECTION_TOP_RATED = 'Top Rated'
 SECTION_UNRATED = 'Unrated'
+SECTION_WATCHED = 'Watched'
 SECTION_QUEUE = 'Queue'
 PLAYLIST_SECTION_PREFIX = 'Playlist: '
 
@@ -78,8 +87,8 @@ SECTION_ORDER = (
     SECTION_RECENT,
 )
 
-# After SECTION_ORDER, before the per-playlist sections.
-TRIAGE_SECTION_ORDER = (SECTION_FAVORITES, SECTION_TOP_RATED, SECTION_UNRATED)
+# After SECTION_ORDER, before the per-playlist sections. None of them sink.
+TRIAGE_SECTION_ORDER = (SECTION_FAVORITES, SECTION_TOP_RATED, SECTION_UNRATED, SECTION_WATCHED)
 
 TAG_HANDMADE_AXES = 'Feature:Hand-made multi-axis'
 # `Queue:Up next` scene tag on every queued video. Adding / removing it in
@@ -97,6 +106,10 @@ TAG_TAG_PREFIX = 'Tag:'
 # always with one decimal (`Score:7.5`, `Score:7.0`, `Score:-3.0`), so
 # scenes with near-equal scores share a tag the headset can filter on.
 SCORE_TAG_PREFIX = 'Score:'
+# `Status:Watched` scene tag on every watched (rated) video. Read-only like
+# `Category:`: the rating decides it.
+STATUS_TAG_PREFIX = 'Status:'
+WATCHED_TAG = f'{STATUS_TAG_PREFIX}Watched'
 
 
 def _positive_number(value):
@@ -213,37 +226,95 @@ def rating_sections(video, ratings):
     return names
 
 
-def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_paths=None):
+def is_watched(ratings, path):
+    """True when `path` has a rating (> 0) in the ratings map. A favourite
+    flag alone doesn't make a video watched."""
+    return library_edits.rating_entry(ratings, path)[0] > 0
+
+
+def watched_last(items, watched):
+    """`items` with the ones `watched(item)` holds for moved to the end.
+    Stable: each group keeps the order it came in. Returns a new list."""
+    fresh, seen = [], []
+    for item in items:
+        (seen if watched(item) else fresh).append(item)
+    return fresh + seen
+
+
+def _updated_at(entry):
+    value = entry.get('updatedAt') if isinstance(entry, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return 0
+    return value
+
+
+def watched_paths(ratings):
+    """Every watched path in the ratings map, newest rating first
+    (`updatedAt`, missing = 0); the path breaks ties."""
+    ratings = ratings or {}
+    rated = [p for p in ratings if isinstance(p, str) and is_watched(ratings, p)]
+    return sorted(rated, key=lambda p: (-_updated_at(ratings[p]), p))
+
+
+def watched_tags(path, ratings):
+    """`[Status:Watched]` when `path` is watched, else []. Read-only in the
+    headset: editing it there changes nothing."""
+    return [WATCHED_TAG] if path and is_watched(ratings, path) else []
+
+
+def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_paths=None, watched=None):
     """Group listing items into sections.
 
     `entries` yields `(item, video, is_3d)`. Returns `[(name, [item, ...])]`:
     `Queue` first (the entries named by `queue_paths`, in that order), then
     SECTION_ORDER, then Favorites / Top Rated / Unrated from `ratings`
-    (videoPath → {rating, favorite}), then one `Playlist: <name>` per entry
-    of `playlists` in the given order. Empty sections are omitted. Items keep
-    the order they came in, except the queue and playlist sections, which
-    follow their own order.
+    (videoPath → {rating, favorite, updatedAt}), Watched (the rated
+    entries, newest rating first), then one `Playlist: <name>` per entry of
+    `playlists` in the given order. Empty sections are omitted. Items keep
+    the order they came in, except the queue, Watched and playlist
+    sections, which follow their own order.
+
+    `watched` is the desktop's `{sink, playlistIds}` (`routes.media.
+    get_watched`): with `sink` on, the SECTION_ORDER sections and the
+    sections of the playlists in `playlistIds` list the unwatched items
+    first, then the watched ones (`watched_last`). None sinks nothing.
     """
     if now_ms is None:
         now_ms = time.time() * 1000
     ratings = ratings or {}
+    watched = watched or {}
+    sink = watched.get('sink') is True
+    sink_playlists = set(watched.get('playlistIds') or []) if sink else set()
+    # Items travel as (item, watched) pairs until the end, so sinking never
+    # has to look an item up again.
     grouped = {name: [] for name in SECTION_ORDER + TRIAGE_SECTION_ORDER}
     by_path = {}
     for item, video, is_3d in entries:
-        for name in video_sections(video, is_3d, now_ms) + rating_sections(video, ratings):
-            grouped[name].append(item)
         path = (video or {}).get('path')
+        pair = (item, is_watched(ratings, path))
+        for name in video_sections(video, is_3d, now_ms) + rating_sections(video, ratings):
+            grouped[name].append(pair)
         if path:
-            by_path[path] = item
+            by_path[path] = pair
+    grouped[SECTION_WATCHED] = [by_path[p] for p in watched_paths(ratings) if p in by_path]
+
+    def finish(pairs, sinks):
+        if sinks:
+            pairs = watched_last(pairs, lambda pair: pair[1])
+        return [item for item, _ in pairs]
+
     out = []
     queued = [by_path[p] for p in queue_paths or [] if p in by_path]
     if queued:
-        out.append((SECTION_QUEUE, queued))
-    out.extend((name, grouped[name]) for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name])
+        out.append((SECTION_QUEUE, finish(queued, False)))
+    out.extend(
+        (name, finish(grouped[name], sink and name in SECTION_ORDER))
+        for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name]
+    )
     for playlist in playlists or []:
-        items = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
-        if items:
-            out.append((playlist_section_name(playlist.get('name')), items))
+        pairs = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
+        if pairs:
+            out.append((playlist_section_name(playlist.get('name')), finish(pairs, playlist.get('id') in sink_playlists)))
     return out
 
 

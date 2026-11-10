@@ -9,12 +9,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
-  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, normName, sameVideo, DISCOVERY_NAME,
+  videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addToDiscovery, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk,
 } from '../../scripts/eroscripts-scout-lib.mjs';
-import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
+import { DISCOVERY_PLAYLIST, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
@@ -794,7 +794,7 @@ describe('addToDiscovery', () => {
     const again = addToDiscovery(config, ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'], { folder: { ...folder, path: '/GVP/EroScripts/' }, newId });
     expect(again).toEqual({ sourceAdded: false, playlistCreated: false, added: ['/GVP/EroScripts/b/b.mp4'] });
     expect(config.settings.library.sources.map((s) => [s.name, s.path])).toEqual([['Other', '/GVP/Other'], ['EroScripts', '/GVP/EroScripts']]);
-    expect(config.playlists).toEqual([{ id: 'id2', name: DISCOVERY_NAME, createdAt: 1, videoPaths: ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'] }]);
+    expect(config.playlists).toEqual([{ id: 'id2', name: DISCOVERY_PLAYLIST, createdAt: 1, videoPaths: ['/GVP/EroScripts/a/a.mp4', '/GVP/EroScripts/b/b.mp4'] }]);
   });
 
   it('uses an existing Discovery playlist whatever its case', () => {
