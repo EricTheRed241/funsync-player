@@ -223,7 +223,7 @@ describe('the vrbangers search feed', () => {
     const r = await listFeed(state, 'vrbangers', listPage, { maxNew: 1, backfill: 1, keepPending: true });
     expect(r.topics.map((t) => t.id)).toEqual([338156, 336077, 321639]);
     expect(calls).toEqual([['search', 'vrbangers', 0], ['search', 'vrbangers', 1]]);
-    expect(state.feeds.vrbangers).toEqual({ backfillPage: 2, exhausted: false });
+    expect(state.feeds.vrbangers).toMatchObject({ backfillPage: 2, exhausted: false });
     expect(state.feeds['multi-axis'].backfillPage).toBe(7);
     expect(Object.keys(state.pending).map(Number).sort()).toEqual([321639, 336077, 338156]);
     expect(waits).toEqual({ forum: 2, search: 2 });

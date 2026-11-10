@@ -11,10 +11,11 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addLibrarySource, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
+  staleTopicIds, autoFetchPick, feedProgress,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk,
 } from '../../scripts/eroscripts-scout-lib.mjs';
-import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
+import { AUTO_FETCH_MIN_SCORE, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
@@ -754,6 +755,31 @@ describe('scan state', () => {
     expect(pendingTopics(seen).map((t) => t.id)).toEqual([290]);
   });
 
+  it("records how far back a feed's listing reached, not counting posts --since skipped", async () => {
+    const state = emptyScoutState();
+    await listFeed(state, 'animation', datedFeed(300).listPage, { maxNew: 1, backfill: 2 });
+    expect(state.feeds.animation.reached).toBe(bumpedOf(211)); // pages 0-2: ids 300..211
+    expect(feedProgress(state.feeds.animation)).toBe(`p3, back to ${bumpedOf(211).slice(0, 10)}`);
+    await listFeed(state, 'animation', datedFeed(300).listPage, { maxNew: 1, backfill: 1 }); // top page again, then page 3
+    expect(state.feeds.animation.reached).toBe(bumpedOf(181));
+
+    const dated = emptyScoutState();
+    await listFeed(dated, 'multi-axis', datedFeed(300).listPage, { maxNew: 1, backfill: 50, since: '2025-01-01' });
+    expect(dated.feeds['multi-axis'].reached).toBe(bumpedOf(100));
+  });
+
+  it('finds posts with the given verdicts judged under older rules, newest first, leaving pending ones to the scan', () => {
+    const state = emptyScoutState();
+    markTopic(state, 10, 'no-video', 0, RULES_VERSION - 1);
+    markTopic(state, 30, 'no-video', 0, RULES_VERSION - 2);
+    markTopic(state, 20, 'no-video');
+    markTopic(state, 40, 'excluded', 0, RULES_VERSION - 1);
+    markTopic(state, 50, 'no-video', 0, RULES_VERSION - 1);
+    state.pending[50] = { id: 50 };
+    expect(staleTopicIds(state, ['no-video'])).toEqual([30, 10]);
+    expect(staleTopicIds(state, ['no-video', 'excluded'])).toEqual([40, 30, 10]);
+  });
+
   it('keeps earlier candidates until every scene is fetched, drops posts turned down or breaking the content rules, and ranks monsters lower', () => {
     const c = (id, likes, ...videos) => ({ id, likes, title: 'X', tags: ['vaginal'], scenes: videos.map((name) => ({ video: { name } })) });
     const done = new Set(['1|a.mp4', '2|b.mp4']);
@@ -761,6 +787,14 @@ describe('scan state', () => {
       [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4'), { ...c(6, 6, 'g.mp4'), tags: ['titjob'] }],
       (id, v) => done.has(`${id}|${v}`), new Set([3]));
     expect(merged.map((x) => x.id)).toEqual([4, 2, 5]);
+  });
+
+  it('auto-fetches only multi-axis posts scoring at least AUTO_FETCH_MIN_SCORE, tag scores included', () => {
+    const c = (axisType) => ({ id: 1, axisType, title: 'X', tags: ['vaginal', 'x-tag'], likes: 0, scenes: [{ video: { name: 'a.mp4' } }] });
+    const at = (axisType, score) => ({ tagScores: { 'x-tag': score - candidateScore(c(axisType)) } });
+    expect(autoFetchPick(c('multi'), at('multi', AUTO_FETCH_MIN_SCORE))).toBe(true);
+    expect(autoFetchPick(c('multi'), at('multi', AUTO_FETCH_MIN_SCORE - 0.5))).toBe(false);
+    expect(autoFetchPick(c('single'), at('single', AUTO_FETCH_MIN_SCORE + 5))).toBe(false);
   });
 
   it('scores a saved list again under the current weights', () => {

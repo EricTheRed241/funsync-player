@@ -6,6 +6,8 @@
 //   npm run eroscripts:scout -- --fetch      download the saved list
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
+//   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
+//   npm run eroscripts:scout -- --daily      scan, then download the waiting multi-axis posts scoring AUTO_FETCH_MIN_SCORE+
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //
@@ -19,7 +21,8 @@
 // config.json is written (to add the source) only while the app is closed.
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
-// last pass / app running (--retitle), 3 not logged in / session expired.
+// last pass / app running (--retitle) / another scout run going, 3 not logged
+// in / session expired.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -70,6 +73,8 @@ Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.
   --since YYYY-MM-DD     backfill only down to posts last active on that date; a feed that gets there
                          isn't backfilled again unless a later run passes an earlier date
   --full                 judge every listed post again, not only new ones
+  --rejudge v1,v2        no listing: judge again every post with one of these verdicts (e.g. no-video) that was
+                         judged under older rules (feeds only judge those again when they list them)
   --top N                candidates to print (default 40)
   --vrbangers            VRBangers posts only: the scan reads the vrbangers feed (unless --feeds is given) and
                          prints only posts with a vrbangers.com video; --fetch and --manual-list take only those
@@ -82,6 +87,7 @@ Download:
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids
+  --auto                 only posts with hand-made multi-axis scripts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+ (AUTO_FETCH_MIN_SCORE)
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -100,6 +106,11 @@ Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
                          and the paths config.json keeps for them (app must be closed);
                          with --ids, only those posts' scenes
+Daily (run once a day by the watchdog, see README):
+  --daily                scan, then --fetch --auto (takes --passes, --wait); writes <userData>/eroscripts-scout-daily.json
+Status:
+  --status               print the scan state without going online: backfill per feed (page and oldest last
+                         activity reached), verdicts, posts judged under older rules, the waiting list
 Both:
   --user-data <dir>      app data folder (default: the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
@@ -114,6 +125,10 @@ function parseArgs(argv) {
     const a = argv[i];
     switch (a) {
       case '--fetch': opts.fetch = true; break;
+      case '--auto': opts.auto = true; break;
+      case '--daily': opts.daily = true; break;
+      case '--status': opts.status = true; break;
+      case '--rejudge': opts.rejudge = value(i, a).split(',').map((s) => s.trim()).filter(Boolean); i++; break;
       case '--retitle': opts.retitle = true; break;
       case '--dry-run': opts.dryRun = true; break;
       case '--manual-list': opts.manualList = true; break;
@@ -144,6 +159,8 @@ function parseArgs(argv) {
   if (opts.vrbangers && !opts.feeds) opts.feeds = ['vrbangers'];
   if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
+  if (opts.auto && !opts.fetch) throw new Error('--auto goes with --fetch');
+  if (opts.rejudge && !opts.rejudge.length) throw new Error('--rejudge needs at least one verdict');
   return opts;
 }
 
@@ -349,29 +366,49 @@ async function scan(opts, { api, userData, config, incoming }) {
   let listed = 0;
   let judged = 0;
   try {
-    const topics = new Map();
-    let pages = 0;
-    const carried = lib.pendingTopics(state).length;
-    const listPage = lib.feedPage(api, { pacer });
-    for (const tag of opts.feeds || prefs.FEED_TAGS) {
-      const maxNew = tag === 'multi-axis' || Object.hasOwn(prefs.SEARCH_FEEDS, tag) ? opts.pages : opts.animPages;
-      const r = await lib.listFeed(state, tag, listPage, { maxNew, backfill: opts.backfill, full: opts.full, since: opts.since, keepPending: true });
-      pages += r.pagesRead;
-      for (const t of r.topics) topics.set(t.id, t);
+    let todo;
+    if (opts.rejudge) {
+      // No listing: the posts come from the state, each read once below (its listing fields from the same read).
+      todo = lib.staleTopicIds(state, opts.rejudge);
+      listed = todo.length;
+      console.log(`${todo.length} posts judged ${opts.rejudge.join(' / ')} under rules older than v${lib.RULES_VERSION} to judge again`);
+    } else {
+      const topics = new Map();
+      let pages = 0;
+      const carried = lib.pendingTopics(state).length;
+      const listPage = lib.feedPage(api, { pacer });
+      for (const tag of opts.feeds || prefs.FEED_TAGS) {
+        const maxNew = tag === 'multi-axis' || Object.hasOwn(prefs.SEARCH_FEEDS, tag) ? opts.pages : opts.animPages;
+        const r = await lib.listFeed(state, tag, listPage, { maxNew, backfill: opts.backfill, full: opts.full, since: opts.since, keepPending: true });
+        pages += r.pagesRead;
+        for (const t of r.topics) topics.set(t.id, t);
+      }
+      listed = topics.size;
+      // Everything listed now or by an earlier run that stopped before judging it.
+      todo = opts.full ? [...topics.values()] : lib.pendingTopics(state);
+      const bumped = todo.filter((t) => lib.seenTopic(state, t.id)).length;
+      console.log(`Listed ${listed} posts on ${pages} pages; ${todo.length} to judge${carried ? ` (${carried} left from an earlier run)` : ''}${bumped && !opts.full ? `, ${bumped} of them bumped since their verdict` : ''}`);
     }
-    listed = topics.size;
-    // Everything listed now or by an earlier run that stopped before judging it.
-    const todo = opts.full ? [...topics.values()] : lib.pendingTopics(state);
-    const bumped = todo.filter((t) => lib.seenTopic(state, t.id)).length;
-    console.log(`Listed ${listed} posts on ${pages} pages; ${todo.length} to judge${carried ? ` (${carried} left from an earlier run)` : ''}${bumped && !opts.full ? `, ${bumped} of them bumped since their verdict` : ''}`);
 
     const creators = [...library.creators];
-    for (const t of todo) {
-      const verdict = (v) => { lib.markTopic(state, t.id, v); judged++; if (v !== 'candidate') rejected[v]++; };
+    for (const item of todo) {
+      let t = item;
+      let data = null;
+      if (opts.rejudge) {
+        await pacer.wait();
+        data = await api.getTopicData(item);
+        if (!data?.post_stream?.posts?.[0]) { process.stderr.write(`! ${item} unreadable\n`); continue; }
+        // Moved out of Free Scripts since: nothing to download either way, so the verdict stands under the current rules.
+        if (data.category_id !== lib.FREE_SCRIPTS_CATEGORY) { lib.markTopic(state, item, state.topics[item].verdict); continue; }
+        t = lib.listedTopic(item, data);
+      }
+      const verdict = (v) => { lib.markTopic(state, t.id, v); judged++; if (v !== 'candidate') rejected[v] = (rejected[v] || 0) + 1; };
       const s = lib.screenTopic(t, { knownTopics, creators, sceneNames: library.sceneNames, favourites });
       if (!s.ok) { verdict(s.reason); continue; }
-      await pacer.wait();
-      const data = await api.getTopicData(t.id);
+      if (!data) {
+        await pacer.wait();
+        data = await api.getTopicData(t.id);
+      }
       const op = data?.post_stream?.posts?.[0];
       if (!op) { process.stderr.write(`! ${t.id} unreadable\n`); continue; }
       if (lib.isBlockedCreator({ author: op.username })) { verdict('blocked'); continue; }
@@ -422,8 +459,7 @@ async function scan(opts, { api, userData, config, incoming }) {
     console.log(`| ${i + 1} | ${freshIds.has(c.id) ? '✓' : ''} | [${c.title.replace(/[|[\]]/g, ' ').slice(0, 60)}](${c.url}) | ${axis} | ${tags} | ${c.scenes.length} | ${gb(c).toFixed(2)} | ${[...new Set(c.scenes.map((sc) => sc.video.host))].join('+')} |`);
   });
   const multi = shown.filter((c) => c.axisType === 'multi').length;
-  const feedStatus = (f) => (f?.exhausted ? 'done' : f?.doneSince ? `done to ${f.doneSince} (p${f.backfillPage})` : `p${f?.backfillPage ?? 0}`);
-  const backfill = lib.ALL_FEEDS.filter((tag) => prefs.FEED_TAGS.includes(tag) || state.feeds[tag]).map((tag) => `${tag} ${feedStatus(state.feeds[tag])}`).join(', ');
+  const backfill = lib.ALL_FEEDS.filter((tag) => prefs.FEED_TAGS.includes(tag) || state.feeds[tag]).map((tag) => `${tag} ${lib.feedProgress(state.feeds[tag])}`).join(', ');
   const left = Object.keys(state.pending || {}).length;
   const waiting = `waiting to download ${shown.length}${opts.vrbangers ? ` with a vrbangers.com video (of ${candidates.length})` : ''}`;
   console.log(`\nListed ${listed} · judged ${judged} · rejected ${JSON.stringify(rejected)} · new ${fresh.length} · ${waiting} (${multi} multi-axis, ${shown.length - multi} single-axis), ${shown.reduce((n, c) => n + c.scenes.length, 0)} videos, ${shown.reduce((n, c) => n + gb(c), 0).toFixed(1)} GB`);
@@ -446,7 +482,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const data = await api.getTopicData(id);
       const op = data?.post_stream?.posts?.[0];
       if (!op) { console.log(`✗ ${id}: unreadable`); continue; }
-      const t = { id, title: data.title || '', tags: (data.tags || []).map((x) => (typeof x === 'string' ? x : x?.name || '')).filter(Boolean), likes: data.like_count || 0 };
+      const t = lib.listedTopic(id, data);
       if (data.category_id !== lib.FREE_SCRIPTS_CATEGORY) { console.log(`✗ ${id} ${t.title}: not in Free Scripts`); continue; }
       const s = lib.screenPick(t, { knownTopics, creators: [...library.creators], sceneNames: library.sceneNames, favourites });
       if (!s.ok) { console.log(`✗ ${id} ${t.title}: ${s.reason}`); continue; }
@@ -794,7 +830,7 @@ function savedQueue(opts, { userData, config }) {
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
   return lib.downloadQueue(candidates, scoring, favourites)
-    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)));
+    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, scoring)));
 }
 
 /** Write ~/Downloads/download-for-fs.txt: the waiting posts' files to download by hand. */
@@ -896,6 +932,80 @@ function retitle(opts, { userData, incoming }) {
   return applyMoves(moves, { userData, incoming, sidecar: 'eroscripts.json' });
 }
 
+// ── Status, daily run, run lock ─────────────────────────────────────────
+
+const DAILY_FILE = 'eroscripts-scout-daily.json';
+const LOCK_FILE = 'eroscripts-scout.lock';
+
+/** `--status`: the scan state, backfill progress and waiting list, offline. */
+function status({ userData, config, incoming }) {
+  const state = readScoutState(userData);
+  const { favourites, scoring } = live.scoutPreferences(config);
+  let saved = [];
+  try { saved = JSON.parse(fs.readFileSync(path.join(userData, 'eroscripts-scout.json'), 'utf8')).candidates || []; } catch { /* no list yet */ }
+  const done = fetchedScenes(incoming, userData);
+  const candidates = lib.downloadQueue(saved, scoring, favourites).filter((c) => c.scenes.some((sc) => !done.has(lib.fetchedKey(c.id, sc.video.name))));
+  let daily = null;
+  try { daily = JSON.parse(fs.readFileSync(path.join(userData, DAILY_FILE), 'utf8')); } catch { /* no daily run yet */ }
+  for (const line of lib.scoutStatus(state, { candidates, scoring, daily })) console.log(line);
+  return 0;
+}
+
+/** The exit code of a run step: rate limit 2, expired session or VRBangers login 3; other errors are thrown. */
+async function exitCodeOf(step) {
+  try {
+    return await step();
+  } catch (err) {
+    if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
+    if (err instanceof SessionExpiredError) { console.error(err.message); return 3; }
+    if (err instanceof LoginError) { console.error(`vrbangers.com: ${err.message}`); return 3; }
+    throw err;
+  }
+}
+
+/**
+ * `--daily`: a scan (new posts plus the usual backfill), then `--fetch --auto`.
+ * `<userData>/eroscripts-scout-daily.json` records when each step ran and its
+ * exit code; it's written right after the scan, so the watchdog sees the day's
+ * run as done while the downloads go on.
+ */
+async function daily(opts, ctx) {
+  const file = path.join(ctx.userData, DAILY_FILE);
+  const scanAt = new Date().toISOString();
+  const scanExit = await exitCodeOf(() => scan(opts, ctx));
+  writeAtomic(file, JSON.stringify({ scanAt, scanExit }, null, 1));
+  if (scanExit === 3) return 3;
+  console.log(`\nDaily: downloading the waiting hand-made multi-axis posts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+`);
+  const fetchExit = await exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx));
+  writeAtomic(file, JSON.stringify({ scanAt, scanExit, fetchAt: new Date().toISOString(), fetchExit }, null, 1));
+  return scanExit || fetchExit;
+}
+
+/**
+ * One forum run at a time (scan, --add, --fetch, --daily): they all rewrite the
+ * scan state and the list. Null when this run holds `<userData>/eroscripts-scout.lock`
+ * (freed at exit), else the pid of the live run that does. A lock left by a
+ * dead run is taken over.
+ */
+function takeRunLock(userData) {
+  const file = path.join(userData, LOCK_FILE);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
+      process.on('exit', () => {
+        try { if (fs.readFileSync(file, 'utf8') === String(process.pid)) fs.rmSync(file); } catch { /* already gone */ }
+      });
+      return null;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+    const pid = Number(fs.readFileSync(file, 'utf8'));
+    try { process.kill(pid, 0); return pid; } catch (err) { if (err.code === 'EPERM') return pid; }
+    fs.rmSync(file, { force: true });
+  }
+  throw new Error(`Could not take ${file}`);
+}
+
 // ── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -904,10 +1014,13 @@ async function main() {
   const userData = opts.userData || defaultUserDataDir();
   const config = readConfig(userData);
   const incoming = downloadFolder(config, FOLDER, opts.incoming).path;
+  if (opts.status) return status({ userData, config, incoming });
   if (opts.retitle) return retitle(opts, { userData, incoming });
   if (opts.manualList) return manualList(opts, { userData, config, incoming });
   const session = config.settings?.eroscripts?.session || {};
   if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
+  const holder = takeRunLock(userData);
+  if (holder) { console.error(`Another eroscripts:scout run (pid ${holder}) is going; try again when it ends.`); return 2; }
 
   // The API module logs through electron-log; keep the CLI's output clean.
   const log = require('../electron/logger.js');
@@ -918,15 +1031,10 @@ async function main() {
   api.restoreSession(session.cookie, session.username);
   vrbangers = vrbHost.createVrbangers({ userData, credentialsFile: opts.vrbCredentials, log: (m) => process.stderr.write(`  vrbangers.com: ${m}\n`) });
 
-  try {
-    if (opts.add) return await addPicked(opts, { api, userData, config, incoming });
-    return opts.fetch ? await fetchAll(opts, { api, userData, config, incoming }) : await scan(opts, { api, userData, config, incoming });
-  } catch (err) {
-    if (err instanceof RateLimitedError) { console.error(err.message); return 2; }
-    if (err instanceof SessionExpiredError) { console.error(err.message); return 3; }
-    if (err instanceof LoginError) { console.error(`vrbangers.com: ${err.message}`); return 3; }
-    throw err;
-  }
+  const ctx = { api, userData, config, incoming };
+  if (opts.daily) return daily(opts, ctx);
+  if (opts.add) return exitCodeOf(() => addPicked(opts, ctx));
+  return exitCodeOf(() => (opts.fetch ? fetchAll(opts, ctx) : scan(opts, ctx)));
 }
 
 main().then((code) => process.exit(code), (err) => {

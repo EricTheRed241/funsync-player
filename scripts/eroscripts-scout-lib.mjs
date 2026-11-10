@@ -46,7 +46,7 @@ import path from 'node:path';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
+  ANIMATION_TAGS, AUTO_FETCH_MIN_SCORE, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
   MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SEX_TAGS, SEX_WORDS,
   SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
@@ -866,10 +866,11 @@ export function remapPaths(value, moves) {
 //
 // A scan only judges posts it hasn't judged before. `<userData>/
 // eroscripts-scout-state.json` keeps every judged post id with its verdict,
-// per feed how deep the backfill has read, and the posts listed but not
-// judged yet (a run stopped by a rate limit goes on with them next time):
+// per feed how deep the backfill has read (page, and `reached`: the oldest
+// last activity listed so far), and the posts listed but not judged yet (a
+// run stopped by a rate limit goes on with them next time):
 //
-//   { version, lastScanAt, feeds: {<tag>: {backfillPage, exhausted, doneSince?, olderFrom?}},
+//   { version, lastScanAt, feeds: {<tag>: {backfillPage, exhausted, reached?, doneSince?, olderFrom?}},
 //     topics: {<id>: {verdict, rules, at}}, pending: {<id>: <listed topic>} }
 //
 // Feeds are newest activity first. A scan reads pages from the top until a
@@ -941,6 +942,73 @@ export function feedState(state, tag) {
 
 /** Every feed `--feeds` takes: the tag feeds (FEED_TAGS), then the search feeds (SEARCH_FEEDS). */
 export const ALL_FEEDS = [...FEED_TAGS, ...Object.keys(SEARCH_FEEDS)];
+
+/** A feed's backfill progress in words: `done` (whole feed read), `done to 2025-01-01 (p65)`, or `p80, back to 2026-08-09` (oldest last activity listed). */
+export function feedProgress(feed) {
+  if (feed?.exhausted) return 'done';
+  if (feed?.doneSince) return `done to ${feed.doneSince} (p${feed.backfillPage})`;
+  return `p${feed?.backfillPage ?? 0}${feed?.reached ? `, back to ${feed.reached.slice(0, 10)}` : ''}`;
+}
+
+/** Posts with one of `verdicts` judged under older rules and not already pending, newest first (`--rejudge`). */
+export function staleTopicIds(state, verdicts, rules = RULES_VERSION) {
+  const want = new Set(verdicts);
+  return Object.entries(state.topics)
+    .filter(([id, t]) => want.has(t.verdict) && t.rules !== rules && !state.pending?.[id])
+    .map(([id]) => Number(id))
+    .sort((a, b) => b - a);
+}
+
+/** A post read by id (`api.getTopicData`) in the shape a feed lists it: `{id, title, tags, likes, created, bumped}`. */
+export function listedTopic(id, data) {
+  return {
+    id,
+    title: data.title || '',
+    tags: (data.tags || []).map((x) => (typeof x === 'string' ? x : x?.name || '')).filter(Boolean),
+    likes: data.like_count || 0,
+    created: data.created_at || null,
+    bumped: data.bumped_at || null,
+  };
+}
+
+/** True when `--fetch --auto` takes a waiting post: hand-made multi-axis (archives count) scoring at least AUTO_FETCH_MIN_SCORE. */
+export function autoFetchPick(c, scoring = {}) {
+  return c.axisType === 'multi' && candidateScore(c, scoring) >= AUTO_FETCH_MIN_SCORE;
+}
+
+/**
+ * `--status`: what the scan state says, as lines: last scan and daily run,
+ * each feed's backfill progress, verdicts (and how many predate the current
+ * rules), posts left pending, and the waiting list with what `--auto` takes.
+ *
+ * @param {object} state scan state
+ * @param {{candidates?: object[], scoring?: object, daily?: {scanAt, scanExit, fetchAt?, fetchExit?}|null, now?: number, rules?: number}} [o]
+ */
+export function scoutStatus(state, { candidates = [], scoring = {}, daily = null, now = Date.now(), rules = RULES_VERSION } = {}) {
+  const when = (iso) => {
+    if (!iso) return 'never';
+    const h = Math.round((now - Date.parse(iso)) / 3_600_000);
+    return `${iso.slice(0, 16).replace('T', ' ')} UTC (${h < 48 ? `${h} h` : `${Math.round(h / 24)} days`} ago)`;
+  };
+  const count = (list) => Object.entries(list.reduce((m, t) => ({ ...m, [t.verdict]: (m[t.verdict] || 0) + 1 }), {}))
+    .sort((a, b) => b[1] - a[1]).map(([v, n]) => `${v} ${n}`).join(' · ');
+  const lines = [`Last scan: ${when(state.lastScanAt)}`];
+  if (daily) lines.push(`Daily run: scan ${when(daily.scanAt)}, exit ${daily.scanExit}${daily.fetchAt ? `; auto-fetch ${when(daily.fetchAt)}, exit ${daily.fetchExit}` : ''}`);
+  lines.push('Backfill:');
+  for (const tag of new Set([...FEED_TAGS, ...Object.keys(state.feeds)])) {
+    lines.push(`  ${tag.padEnd(12)} ${feedProgress(state.feeds[tag])}${ALL_FEEDS.includes(tag) ? '' : ' (no longer a feed)'}`);
+  }
+  const all = Object.values(state.topics);
+  const stale = all.filter((t) => t.rules !== rules);
+  lines.push(`Judged: ${all.length} posts · ${count(all)}`);
+  if (stale.length) lines.push(`  ${stale.length} judged under rules older than v${rules} (judged again when a feed lists them; --rejudge <verdicts> for the rest): ${count(stale)}`);
+  const pending = Object.keys(state.pending || {}).length;
+  if (pending) lines.push(`Listed, not judged yet: ${pending} (the next run goes on with them)`);
+  const multi = candidates.filter((c) => c.axisType === 'multi').length;
+  const auto = candidates.filter((c) => autoFetchPick(c, scoring)).length;
+  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (multi-axis, score ≥ ${AUTO_FETCH_MIN_SCORE})`);
+  return lines;
+}
 
 /**
  * listFeed's `listPage` for the forum: a tag feed reads its Free Scripts tag
@@ -1036,6 +1104,7 @@ export async function listFeed(state, tag, listPage, { maxNew, backfill, full = 
   };
   const keep = (list) => {
     topics.push(...list);
+    for (const t of list) if (t.bumped && !(feed.reached && Date.parse(t.bumped) >= Date.parse(feed.reached))) feed.reached = t.bumped;
     if (keepPending) addPending(state, full ? list : list.filter((t) => needsJudging(state, t, rules)));
   };
   let page = 0;
