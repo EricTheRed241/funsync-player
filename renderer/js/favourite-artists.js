@@ -5,7 +5,8 @@
 // `library.favouriteArtists` holds only those changes: `{name: true}` adds an
 // artist, `{name: false}` removes a starting favourite. Names compare case-
 // and Unicode-insensitively (NFC, lower case), as artist folders do
-// (artist-playlists.js). The effective list replaces FAVOURITES everywhere:
+// (artist-playlists.js), and an alias (ARTIST_ALIASES) stands for the artist
+// it names. The effective list replaces FAVOURITES everywhere:
 // artist playlists and their cleanup, library scores, both scouts' screening,
 // naming and ranking.
 //
@@ -14,7 +15,7 @@
 // range and steps as a tag score; null = the default). Changes arrive as
 // library edits (library-edits.js). Pure and renderer-safe: no Node imports.
 
-import { artistOf } from './artist-playlists.js';
+import { artistOf, canonicalArtist } from './artist-playlists.js';
 import { FAVOURITES, RANKING } from './content-preferences.js';
 import { normalizeTagScore } from './preference-score.js';
 
@@ -22,23 +23,26 @@ export const FAVOURITE_ARTISTS_KEY = 'library.favouriteArtists';
 export const FAVOURITE_SCORE_KEY = 'library.favouriteArtistScore';
 
 const fold = (s) => String(s || '').normalize('NFC').trim().toLocaleLowerCase();
-const BUILT_IN = new Set(FAVOURITES.map(fold));
+// Two spellings of one artist, aliases (ARTIST_ALIASES) included, share a key.
+const keyOf = (name) => fold(canonicalArtist(String(name || '').trim()));
+const BUILT_IN = new Set(FAVOURITES.map(keyOf));
 
 /**
  * The favourite artists: FAVOURITES not set false in `changes`, plus the
- * names set true, each spelled as built in or as stored.
+ * names set true, each spelled as built in or as stored (an alias as the
+ * artist it names).
  *
  * @param {Object<string, boolean>} [changes] `library.favouriteArtists`
  * @returns {string[]}
  */
 export function effectiveFavourites(changes) {
-  const out = new Map(FAVOURITES.map((name) => [fold(name), name]));
+  const out = new Map(FAVOURITES.map((name) => [keyOf(name), canonicalArtist(name)]));
   if (changes && typeof changes === 'object') {
     for (const [name, favourite] of Object.entries(changes)) {
-      const key = fold(name);
+      const key = keyOf(name);
       if (!key) continue;
       if (favourite === false) out.delete(key);
-      else if (favourite === true && !out.has(key)) out.set(key, name.trim());
+      else if (favourite === true && !out.has(key)) out.set(key, canonicalArtist(name.trim()));
     }
   }
   return [...out.values()];
@@ -62,9 +66,10 @@ export function favouriteScoreOf(data) {
 
 /**
  * Make `name` a favourite or not. `library.favouriteArtists` keeps only the
- * change from FAVOURITES, under one spelling: any other key of the same name
- * goes, and a starting favourite set back to true (or another name set to
- * false) leaves no key. Returns `{artist, favourite}`; throws on an empty
+ * change from FAVOURITES, under one spelling (an alias becomes the artist it
+ * names): any other key of the same name goes, and a starting favourite set
+ * back to true (or another name set to false) leaves no key. Returns
+ * `{artist, favourite}`; throws on an empty
  * name or a non-boolean `favourite`.
  *
  * @param {object} data DataService (get, set)
@@ -72,12 +77,12 @@ export function favouriteScoreOf(data) {
  * @param {boolean} favourite
  */
 export function setFavouriteArtist(data, name, favourite) {
-  const artist = typeof name === 'string' ? name.trim() : '';
+  const artist = typeof name === 'string' ? canonicalArtist(name.trim()) : '';
   const key = fold(artist);
   if (!key) throw new Error('favourite artist without a name');
   if (typeof favourite !== 'boolean') throw new Error(`invalid favourite ${JSON.stringify(favourite)}`);
   const current = data.get(FAVOURITE_ARTISTS_KEY) || {};
-  const next = Object.fromEntries(Object.entries(current).filter(([n]) => fold(n) !== key));
+  const next = Object.fromEntries(Object.entries(current).filter(([n]) => keyOf(n) !== key));
   if (favourite !== BUILT_IN.has(key)) next[artist] = favourite;
   if (JSON.stringify(next) !== JSON.stringify(current)) data.set(FAVOURITE_ARTISTS_KEY, next);
   return { artist, favourite };

@@ -51,7 +51,8 @@
 // `overwatch`.
 
 import {
-  candidateScore, contentRuleBreak, coreName, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, liveNotPov, normName, sameVideo,
+  candidateScore, canonicalArtist, contentRuleBreak, coreName, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, liveNotPov,
+  normName, sameVideo,
   sceneTitle,
   titleArtist,
 } from './eroscripts-scout-lib.mjs';
@@ -186,12 +187,17 @@ const people = (performers) => (performers || [])
  * own artist (leading `[Name]`, `(by Name)`, trailing `by Name`); a library
  * creator named in the title or listed as performer; a performer FapTap
  * calls a model or pornstar (other performers are often characters); the
- * uploader.
+ * uploader. An alias (ARTIST_ALIASES) comes back as the artist it names.
  *
  * @param {{title: string, uploader?: string, performers?: ({name: string, category?: string}|string)[], tags?: string[]}} video
  * @param {{favourites?: string[], creatorNames?: string[]}} [ctx] creatorNames: library creator folders as spelled
  */
-export function faptapArtist({ title, uploader, performers, tags = [] }, { favourites = [], creatorNames = [] } = {}) {
+export function faptapArtist(video, ctx) {
+  return canonicalArtist(namedArtist(video, ctx));
+}
+
+/** faptapArtist as the video names it (an alias stays an alias). */
+function namedArtist({ title, uploader, performers, tags = [] }, { favourites = [], creatorNames = [] } = {}) {
   const cast = people(performers);
   const favourite = favouriteIn([title, ...cast.map((p) => p.name), ...tags], favourites);
   if (favourite) return favourite;
@@ -208,8 +214,9 @@ export function faptapArtist({ title, uploader, performers, tags = [] }, { favou
 
 /**
  * The scene's creator folder and file stem, `Artist - Title (metadata)` as
- * for EroScripts posts: the artist (faptapArtist) leads, its mentions leave
- * the title, a leading bracket naming someone else becomes metadata, and a
+ * for EroScripts posts: the artist (faptapArtist, an alias under the
+ * artist's own name) leads, its mentions (either spelling) leave the title,
+ * a leading bracket naming someone else becomes metadata, and a
  * VR projection suffix ends the stem.
  *
  * @param {{title: string, uploader?: string, performers?: object[], tags?: string[], vr?: boolean, projection?: string}} video
@@ -217,11 +224,13 @@ export function faptapArtist({ title, uploader, performers, tags = [] }, { favou
  * @returns {{artist: string, creator: string, stem: string}}
  */
 export function faptapSceneName(video, ctx = {}) {
-  const artist = faptapArtist(video, ctx);
-  const a = escapeRe(artist);
+  const named = namedArtist(video, ctx);
+  const artist = canonicalArtist(named);
+  // The longer spelling first, so `Horny Herring Studios` goes whole, not as `Studios`.
+  const a = [...new Set([named, artist])].sort((x, y) => y.length - x.length).map(escapeRe).join('|');
   let title = String(video.title || '')
-    .replace(new RegExp(`[\\[(（【]\\s*(?:by\\s+)?${a}\\s*[\\])）】]`, 'giu'), ' ')
-    .replace(new RegExp(`(?<![\\p{L}\\p{N}])(?:by\\s+)?${a}(?![\\p{L}\\p{N}])`, 'giu'), ' ')
+    .replace(new RegExp(`[\\[(（【]\\s*(?:by\\s+)?(?:${a})\\s*[\\])）】]`, 'giu'), ' ')
+    .replace(new RegExp(`(?<![\\p{L}\\p{N}])(?:by\\s+)?(?:${a})(?![\\p{L}\\p{N}])`, 'giu'), ' ')
     .replace(/\s+/g, ' ').trim();
   // A leading `[Someone]` that isn't the artist moves to the metadata.
   const lead = title.match(/^[\[(（【]([^\])）】]+)[\])）】]\s*/);
@@ -266,7 +275,7 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   }
   const name = normName(title);
   const words = ` ${name} `;
-  const uploader = String(video.user?.username || '').toLowerCase();
+  const uploader = canonicalArtist(String(video.user?.username || '')).toLowerCase();
   const artists = creators.filter((c) => c.length > 3 && !isCreatorLabel(c));
   const artist = artists.find((c) => words.includes(` ${normName(c)} `)) || (artists.includes(uploader) ? uploader : null);
   const favourite = favouriteIn([title, video.user?.username, ...(video.performers || []).map((p) => p?.name), ...tags], favourites);

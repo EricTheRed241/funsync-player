@@ -33,6 +33,13 @@ describe('effectiveFavourites', () => {
   it('keeps the starting spelling of a starting favourite set true, and ignores anything not a boolean', () => {
     expect(effectiveFavourites({ AGAPILORD: true, Shayuki: 'yes', '': true })).toEqual(FAVOURITES);
   });
+
+  it('lists an alias as the artist it names, once', () => {
+    // The user's real changes: three spellings of Rondoudou.
+    const list = effectiveFavourites({ Rondoudou: true, 'Rondoudou Media': true, RondoudouMedia: true, s022: true });
+    expect(list).toEqual([...FAVOURITES, 'Rondoudou', 'miffn']);
+    expect(effectiveFavourites({ Rondoudou: true, 'rondoudou media': false })).toEqual(FAVOURITES);
+  });
 });
 
 describe('setFavouriteArtist', () => {
@@ -58,6 +65,14 @@ describe('setFavouriteArtist', () => {
     const data = fakeData({ [FAVOURITE_ARTISTS_KEY]: { 'Cafe\u0301 Girl': true } });
     setFavouriteArtist(data, 'CAFÉ GIRL', false);
     expect(data.store[FAVOURITE_ARTISTS_KEY]).toEqual({});
+  });
+
+  it('stores an alias as the artist it names, replacing every other spelling', () => {
+    const data = fakeData({ [FAVOURITE_ARTISTS_KEY]: { 'Rondoudou Media': true, RondoudouMedia: true, Shayuki: true } });
+    expect(setFavouriteArtist(data, 'rondoudoumedia', true)).toEqual({ artist: 'Rondoudou', favourite: true });
+    expect(data.store[FAVOURITE_ARTISTS_KEY]).toEqual({ Shayuki: true, Rondoudou: true });
+    setFavouriteArtist(data, 'Rondoudou Media', false);
+    expect(data.store[FAVOURITE_ARTISTS_KEY]).toEqual({ Shayuki: true });
   });
 
   it('rejects an empty name or a favourite that is not a boolean', () => {
@@ -111,6 +126,17 @@ describe('artistRegistration', () => {
     expect(artistRegistration(data, videos).artists).toEqual([
       { name: 'Agapilord', videoPaths: ['/GVP/EroScripts/Agapilord/D/D.mp4'] },
       { name: 'Misiv', videoPaths: ['/GVP/EroScripts/Misiv/A/A.mp4', '/GVP/FapTap/misiv/B/B.mp4', '/GVP/EroScripts/Misiv/C/C.mp4'] },
+    ]);
+  });
+
+  it('counts alias folders under the artist they name', () => {
+    const videos = [
+      '/GVP/EroScripts/Rondoudou/A/A.mp4', '/GVP/EroScripts/Rondoudou Media/B/B.mp4', '/GVP/FapTap/RondoudouMedia/C/C.mp4',
+      '/GVP/EroScripts/S022/D/D.mp4', '/GVP/EroScripts/S069/E/E.mp4', '/GVP/EroScripts/miffn/F/F.mp4',
+      '/GVP/FapTap/Horny Herring Studios/G/G.mp4', '/GVP/EroScripts/Horny Herring/H/H.mp4',
+    ];
+    expect(artistRegistration(data, videos).artists.map((a) => [a.name, a.videoPaths.length])).toEqual([
+      ['Horny Herring', 2], ['miffn', 3], ['Rondoudou', 3],
     ]);
   });
 

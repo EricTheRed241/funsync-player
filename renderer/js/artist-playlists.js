@@ -4,7 +4,8 @@
 //
 // The library is laid out `<source>/<artist>/<scene>/<video>` (the scouts
 // name their artist folders the same way), so a video's artist is the
-// first folder under its source. After each library scan every artist folder
+// first folder under its source, under its own name when the folder is one
+// of ARTIST_ALIASES (canonicalArtist). After each library scan every artist folder
 // holding at least ARTIST_PLAYLIST_MIN videos, across all sources, gets a
 // playlist named after it, and new videos of that artist join it. A
 // favourite (favourite-artists.js: FAVOURITES with the user's changes),
@@ -24,17 +25,32 @@
 // FAVOURITES_PLAYLIST taken out again (and forgotten, so favouriting them
 // again puts them back); their own playlist stays until the cleanup.
 
-import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN, NOT_AN_ARTIST } from './content-preferences.js';
+import { FAVOURITES_PLAYLIST, ARTIST_PLAYLIST_MIN, ARTIST_ALIASES, NOT_AN_ARTIST } from './content-preferences.js';
 
 export const ARTIST_PLAYLISTS_KEY = 'library.artistPlaylists';
 export const FAVOURITES_STATE_KEY = ':favourites';
 
 const fold = (s) => String(s || '').normalize('NFC').trim().toLocaleLowerCase();
 const baseName = (p) => p.split(/[\\/]/).pop() || p;
+const ALIASES = new Map(Object.entries(ARTIST_ALIASES).map(([alias, artist]) => [fold(alias), artist]));
 
 /**
- * The artist folder of a video: the first folder under its source, when the
- * video sits at least one more folder deeper (`<artist>/<scene>/<video>`).
+ * An artist's own name for `name` (ARTIST_ALIASES, compared NFC, trimmed and
+ * case-insensitively); any other name comes back as given. The app's artist
+ * folders (artistOf), the favourites and the scouts' library creators and new
+ * download folders all go through it.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+export function canonicalArtist(name) {
+  return ALIASES.get(fold(name)) ?? name;
+}
+
+/**
+ * The artist of a video: the first folder under its source, when the
+ * video sits at least one more folder deeper (`<artist>/<scene>/<video>`),
+ * under its own name when the folder is an alias (canonicalArtist).
  *
  * @param {string} videoPath
  * @param {string[]} sourcePaths
@@ -49,7 +65,7 @@ export function artistOf(videoPath, sourcePaths) {
   if (!root) return null;
   const parts = p.slice(root.length + 1).split('/');
   if (parts.length < 3) return null;
-  const artist = parts[0].trim();
+  const artist = canonicalArtist(parts[0].trim());
   return artist && !NOT_AN_ARTIST.has(fold(artist)) ? artist : null;
 }
 

@@ -53,6 +53,13 @@ describe('naming: Artist - Title (metadata)', () => {
   it('ends a VR scene with the projection the headset reads', () => {
     expect(name('Kiriko rides (ScyllaHMV)', { vr: true, projection: 'STEREO_180_LR' }).stem).toBe('ScyllaHMV - Kiriko rides_180_LR');
   });
+
+  it('files an alias under the artist it names, without leaving the alias in the title', () => {
+    expect(faptapSceneName({ title: 'Horny Herring Studios - Tifa night', uploader: 'Horny Herring Studios' }))
+      .toEqual({ artist: 'Horny Herring', creator: 'Horny Herring', stem: 'Horny Herring - Tifa night' });
+    expect(faptapArtist({ title: 'Lantern night', uploader: 'shantiaoxiaozhi' })).toBe('shantianxiaozhi');
+    expect(name('[RondoudouMedia] Ride').creator).toBe('Rondoudou');
+  });
 });
 
 describe('thumbnailUrl', () => {

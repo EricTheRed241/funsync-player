@@ -13,7 +13,7 @@ import {
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   staleTopicIds, autoFetchPick, feedProgress,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
-  manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk,
+  manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { AUTO_FETCH_MIN_SCORE, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
@@ -457,6 +457,23 @@ describe('folders', () => {
     expect(creatorFolder('[1080p 60fps] [Bastati] Yuria', 'shuny404')).toBe('Bastati');
     expect(creatorFolder('[4K60] Tifa ride', 'kd99')).toBe('kd99');
     expect(creatorFolder('(G)I-DLE - Queencard PMV', 'loldorf')).toBe('loldorf');
+  });
+
+  it('never takes a leading series code or label for the artist (miffn\'s 【S022】 posts)', () => {
+    expect(creatorFolder('【Free】【S022】 Cute Command – Dominaa', 'miffn')).toBe('miffn');
+    expect(creatorFolder('【Free】【S069】【Multi-axis】 Euryaleエウリュアレ有聲SP ver', 'miffn')).toBe('miffn');
+    expect(creatorFolder('[PMV-64] Night drive', 'loldorf')).toBe('loldorf');
+    expect(creatorFolder('[EP 03] [Bastati] Yuria', 'shuny404')).toBe('Bastati');
+    expect(sceneTitle({ title: '【Free】【S022】 Cute Command – Dominaa', author: 'miffn', video: 'x.mp4' })).toBe('miffn - Cute Command – Dominaa (S022)');
+  });
+
+  it('files a new download by an alias under the artist it names', () => {
+    const post = (title, author) => ({ title, author, scenes: [{}] });
+    expect(sceneNameOf(post('[Rondoudou Media] Ride', 'someone'), { video: { name: 'Ride.mp4' } })).toEqual({ creator: 'Rondoudou', stem: 'Rondoudou - Ride' });
+    expect(sceneNameOf(post('Rondoudou Media - Ride', 'Rondoudou Media'), { video: { name: 'Ride.mp4' } })).toEqual({ creator: 'Rondoudou', stem: 'Rondoudou - Ride' });
+    expect(sceneNameOf(post('Lantern night', 'shantiaoxiaozhi'), { video: { name: 'a.mp4' } })).toEqual({ creator: 'shantianxiaozhi', stem: 'shantianxiaozhi - Lantern night' });
+    expect(creatorFolder('Tifa ride by Horny Herring Studios', 'kd99')).toBe('Horny Herring');
+    expect(vrbangersSceneName({ performers: ['Rondoudou Media'], title: 'Scene', slug: 'scene' }).creator).toBe('Rondoudou');
   });
 });
 
