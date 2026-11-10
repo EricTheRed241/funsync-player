@@ -51,6 +51,7 @@ import {
   SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
+import { canonicalArtist } from '../renderer/js/artist-playlists.js';
 import { durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
@@ -58,6 +59,8 @@ import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS 
 // The ranking (renderer/js/preference-score.js, shared with the app's library
 // score) is part of this module's API for the scouts.
 export { candidateScore, effectiveTagScores, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../renderer/js/preference-score.js';
+// So are artist aliases (renderer/js/artist-playlists.js, ARTIST_ALIASES).
+export { canonicalArtist };
 
 /** The minimum as words for messages: `1:50`. */
 export const MIN_VIDEO_LABEL = `${Math.floor(MIN_VIDEO_MS / 60_000)}:${String(Math.round(MIN_VIDEO_MS / 1000) % 60).padStart(2, '0')}`;
@@ -552,10 +555,11 @@ export function megaKeyOk(url) {
 
 const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
 // Leading title groups that label the post rather than name its artist,
-// resolution and frame-rate tags (`[4K]`, `(1080p)`, `[4K60]`, `[60fps]`) included.
-const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|suggest|vam|mmd|sfm|fap ?hero|cock ?hero|[hp]mv|r-?18|hentai|^[23]d$|^ai$|^iwara$|^(?:[1-9]k|\d{3,4}p|u?hd|fhd)(?:\s*\d{2,3}(?:\s*fps)?)?$|^\d{2,3}\s*fps$/i;
+// resolution and frame-rate tags (`[4K]`, `(1080p)`, `[4K60]`, `[60fps]`) and
+// series or serial codes (`【S022】`, `[PMV-64]`, `[EP 03]`) included.
+const NOT_A_CREATOR = /multi|axis|(^|[^a-z])vr([^a-z]|$)|initiative|free|sr6|osr|handy|commission|request|suggest|vam|mmd|sfm|fap ?hero|cock ?hero|[hp]mv|r-?18|hentai|^[23]d$|^ai$|^iwara$|^(?:[1-9]k|\d{3,4}p|u?hd|fhd)(?:\s*\d{2,3}(?:\s*fps)?)?$|^\d{2,3}\s*fps$|^[a-z]{1,2}[- ]?\d{2,4}$/i;
 
-/** True for a name that labels a script or genre (`Cock Hero`, `PMV`, `Multi-axis`) rather than naming an artist. */
+/** True for a name that labels a script, genre or series (`Cock Hero`, `PMV`, `Multi-axis`, `S022`) rather than naming an artist. */
 export const isCreatorLabel = (name) => NOT_A_CREATOR.test(String(name || ''));
 // `[…]`, `（…）`, `【…】`, `{…}`, and `(…)` unless glued to a word (`(G)I-DLE`).
 const GROUP_RE = /\[([^\]]*)\]|（([^）]*)）|【([^】]*)】|\{([^}]*)\}|\(([^()]*)\)(?![\p{L}\p{N}])/gu;
@@ -657,9 +661,9 @@ function capBytes(s, max) {
   return out.trim();
 }
 
-/** Creator folder: the post's artist (see parseName), else the poster. */
+/** Creator folder: the post's artist (see parseName), else the poster; an alias as the artist it names (canonicalArtist). */
 export function creatorFolder(title, author) {
-  return safeName(parseName(title, author).artist) || 'unknown';
+  return safeName(canonicalArtist(parseName(title, author).artist)) || 'unknown';
 }
 
 /** The artist a title names itself (leading `[Name]` / `(Name)`, trailing `by Name`), or ''. */
@@ -669,7 +673,8 @@ export function titleArtist(title) {
 
 /**
  * Scene folder and file stem, which the library shows as the title:
- * `Artist - Title (metadata)`. The title comes from the post; a post with
+ * `Artist - Title (metadata)`, with an alias artist under its own name
+ * (canonicalArtist). The title comes from the post; a post with
  * several videos (`shared`) names each by its own file instead, unless that
  * name says nothing (`7`, `03`), which then goes into the metadata. A VR
  * projection suffix of the video name (`_180_3DH`) is kept at the end.
@@ -694,15 +699,16 @@ export function sceneTitle({ title, author, video, shared = false }) {
       meta = ownMeta;
     } else meta = [tidy(own.core), ...ownMeta, ...meta];
   }
-  const artistKey = squash(post.artist);
+  const artist = canonicalArtist(post.artist);
+  const artistKeys = new Set([squash(post.artist), squash(artist)]);
   const seen = new Set();
   meta = meta.filter((m) => {
     const k = squash(m);
-    if (!k || k === artistKey || seen.has(k)) return false;
+    if (!k || artistKeys.has(k) || seen.has(k)) return false;
     seen.add(k);
     return true;
   });
-  const named = (m) => safeName(`${post.artist} - ${core}${m.length ? ` (${m.join(', ')})` : ''}`);
+  const named = (m) => safeName(`${artist} - ${core}${m.length ? ` (${m.join(', ')})` : ''}`);
   // Too long: drop metadata from the end, then cut the title.
   while (meta.length && Buffer.byteLength(named(meta)) > STEM_BYTES) meta = meta.slice(0, -1);
   return capBytes(named(meta), STEM_BYTES).replace(/[\s\-–—,;.(]+$/, '') + vrTail;
@@ -711,7 +717,7 @@ export function sceneTitle({ title, author, video, shared = false }) {
 /**
  * Name of a scene whose video comes from vrbangers.com (the pseudo file of
  * vrbangers-host.mjs, or a sidecar's `vrbangers` record: `{performers, title,
- * slug, projection}`): folder = the first performer, stem = `<Performers> -
+ * slug, projection}`): folder = the first performer (canonicalArtist), stem = `<Performers> -
  * <Scene title> (VRBangers)` plus the projection suffix (`_180x180_3dh`), as
  * `Riley Reid - Anal Virginity (VRBangers)_180x180_3dh`. Bracket parts that
  * only name the encode (`(Remastered)`, `[8K]`) leave the title; performers
@@ -726,7 +732,7 @@ export function vrbangersSceneName({ performers = [], title = null, slug = '', p
   const named = (who) => `${who.length ? who.join(', ') : 'VRBangers'} - ${core} (VRBangers)`;
   let who = people;
   while (who.length > 1 && Buffer.byteLength(named(who)) > STEM_BYTES) who = who.slice(0, -1);
-  return { creator: people[0] || 'VRBangers', stem: capBytes(named(who), STEM_BYTES).replace(/[\s\-–—,;.(]+$/, '') + tail };
+  return { creator: safeName(canonicalArtist(people[0] || '')) || 'VRBangers', stem: capBytes(named(who), STEM_BYTES).replace(/[\s\-–—,;.(]+$/, '') + tail };
 }
 
 /**

@@ -335,7 +335,7 @@ function scoutContext(config, userData, incoming) {
   try {
     const links = require('../electron/eroscripts-links.js').readLinksFile(userData);
     for (const l of Object.values(links?.links || {})) if (l.topicId != null) knownTopics.add(l.topicId);
-    for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
+    for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(lib.canonicalArtist(l.creator).toLowerCase());
   } catch { /* no links file yet */ }
   // Posts the user turned down in the app (2 stars or lower; formerly the No thank you playlist);
   // a short video or an extra copy of one (dedupe) doesn't turn down the post.
@@ -427,7 +427,8 @@ async function scan(opts, { api, userData, config, incoming }) {
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
       if (!scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
       const author = op.username;
-      const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
+      const creator = lib.canonicalArtist(author);
+      const artistInLibrary = s.artist || (library.creators.has(creator.toLowerCase()) ? creator : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
       fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first }, scoring));
       verdict('candidate');
@@ -500,7 +501,8 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
       if (!scenes.length) { console.log(`✗ ${id} ${t.title}: ${plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
       const author = op.username;
-      const artistInLibrary = s.artist || (library.creators.has(author.toLowerCase()) ? author : null);
+      const creator = lib.canonicalArtist(author);
+      const artistInLibrary = s.artist || (library.creators.has(creator.toLowerCase()) ? creator : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
       fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first, picked: true }, scoring));
       lib.markTopic(state, id, 'candidate');

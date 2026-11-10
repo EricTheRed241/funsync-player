@@ -315,6 +315,21 @@ export const ARTIST_PLAYLIST_MIN = 30;
 export const FAVOURITES_PLAYLIST = 'Favourite artists';
 /** Folder names that hold videos of many artists (lower case). */
 export const NOT_AN_ARTIST = new Set(['unknown', 'misc', 'various', 'other', 'others', 'new folder', 'cock hero', 'fap hero', 'pmv', 'hmv', 'compilation', 'compilations']);
+/**
+ * Other spellings of an artist folder → the artist's own name (user, 2026-11-10). Compared like
+ * artist folders (NFC, trimmed, any case; artist-playlists.js canonicalArtist): the app counts an
+ * alias folder's videos under the artist (Artists view, Overview, artist playlists, scores,
+ * favourites), and the scouts file new downloads under the artist's folder. Folders on disk keep
+ * their names. `S022` / `S069` are miffn's series codes an older scout took for artist folders.
+ */
+export const ARTIST_ALIASES = {
+  'Rondoudou Media': 'Rondoudou',
+  RondoudouMedia: 'Rondoudou',
+  'Horny Herring Studios': 'Horny Herring',
+  shantiaoxiaozhi: 'shantianxiaozhi',
+  S022: 'miffn',
+  S069: 'miffn',
+};
 
 // ── Play queue ──────────────────────────────────────────────────────────
 

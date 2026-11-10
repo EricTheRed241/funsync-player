@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { addLibrarySource, coreName, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
+import { canonicalArtist } from '../renderer/js/artist-playlists.js';
 
 const { rewriteVideoTagsFile } = createRequire(import.meta.url)('../electron/video-tags.js');
 
@@ -75,7 +76,10 @@ export function walk(dir, depth, visit) {
   }
 }
 
-/** What the library already has: creators (lower case, and as spelled), scene folder names, video names. */
+/**
+ * What the library already has: creators (lower case, and as spelled; an alias folder
+ * as the artist it names, canonicalArtist), scene folder names, video names.
+ */
 export function libraryState(roots) {
   const creators = new Set();
   const creatorNames = new Map();
@@ -85,8 +89,9 @@ export function libraryState(roots) {
     walk(root, 0, (full, e, depth) => {
       if (e.isDirectory()) {
         if (depth === 0) {
-          creators.add(e.name.toLowerCase());
-          if (!creatorNames.has(e.name.toLowerCase())) creatorNames.set(e.name.toLowerCase(), e.name.normalize('NFC'));
+          const creator = canonicalArtist(e.name.normalize('NFC'));
+          creators.add(creator.toLowerCase());
+          if (!creatorNames.has(creator.toLowerCase())) creatorNames.set(creator.toLowerCase(), creator);
         }
         if (depth === 1) sceneNames.push(normName(e.name));
       } else if (isVideoName(e.name)) videos.push(coreName(e.name));

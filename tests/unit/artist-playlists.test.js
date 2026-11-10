@@ -7,14 +7,46 @@
 // video, and the combined Favourite artists playlist
 // (renderer/js/artist-playlists.js): who counts, when a playlist is made,
 // and that the user's own edits stick.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
-  artistOf, planArtistPlaylists, applyArtistPlaylists, ARTIST_PLAYLISTS_KEY, FAVOURITES_STATE_KEY,
+  artistOf, canonicalArtist, planArtistPlaylists, applyArtistPlaylists, ARTIST_PLAYLISTS_KEY, FAVOURITES_STATE_KEY,
 } from '../../renderer/js/artist-playlists.js';
-import { ARTIST_PLAYLIST_MIN, FAVOURITES_PLAYLIST } from '../../renderer/js/content-preferences.js';
+import { ARTIST_ALIASES, ARTIST_PLAYLIST_MIN, FAVOURITES_PLAYLIST } from '../../renderer/js/content-preferences.js';
 
 const SOURCES = ['/GVP/Multi-Axis', '/GVP/Multi Generated/', '/GVP/_incoming'];
 const vids = (root, artist, n, from = 1) => Array.from({ length: n }, (_, i) => `${root}/${artist}/Scene ${i + from}/Scene ${i + from}.mp4`);
+
+// One extra alias with an accent, to show NFC / NFD spellings compare alike (the real ones are ASCII).
+vi.mock('../../renderer/js/content-preferences.js', async (importOriginal) => {
+  const prefs = await importOriginal();
+  return { ...prefs, ARTIST_ALIASES: { ...prefs.ARTIST_ALIASES, 'Caf\u00e9 Studio': 'Caf\u00e9' } };
+});
+
+describe('canonicalArtist', () => {
+  it('gives an alias the artist it names, whatever its case, Unicode form or padding', () => {
+    expect(canonicalArtist('Rondoudou Media')).toBe('Rondoudou');
+    expect(canonicalArtist('  rondoudoumedia ')).toBe('Rondoudou');
+    expect(canonicalArtist('HORNY HERRING STUDIOS')).toBe('Horny Herring');
+    expect(canonicalArtist('shantiaoxiaozhi')).toBe('shantianxiaozhi');
+    expect(canonicalArtist('s022')).toBe('miffn');
+    expect(canonicalArtist('S069')).toBe('miffn');
+    for (const [alias, artist] of Object.entries(ARTIST_ALIASES)) expect(canonicalArtist(alias)).toBe(artist);
+  });
+
+  it('compares NFC and NFD spellings alike', () => {
+    expect(canonicalArtist('Cafe\u0301 Studio')).toBe('Caf\u00e9');
+    expect(canonicalArtist('CAF\u00c9 STUDIO')).toBe('Caf\u00e9');
+    expect(canonicalArtist('Cafe\u0301 Girl')).toBe('Cafe\u0301 Girl');
+  });
+
+  it('passes any other name through as given', () => {
+    expect(canonicalArtist('Rondoudou')).toBe('Rondoudou');
+    expect(canonicalArtist('Rondoudou Media Group')).toBe('Rondoudou Media Group');
+    expect(canonicalArtist('S0222')).toBe('S0222');
+    expect(canonicalArtist(' Misiv ')).toBe(' Misiv ');
+    expect(canonicalArtist('')).toBe('');
+  });
+});
 
 describe('artistOf', () => {
   it('is the first folder under the source, only for <artist>/<scene>/<video>', () => {
@@ -22,6 +54,11 @@ describe('artistOf', () => {
     expect(artistOf('/GVP/_incoming/Scene/Scene.mp4', SOURCES)).toBe(null);
     expect(artistOf('/GVP/Multi Generated/Unknown/Scene/Scene.mp4', SOURCES)).toBe(null);
     expect(artistOf('/Elsewhere/Agapilord/Scene/Scene.mp4', SOURCES)).toBe(null);
+  });
+
+  it('is the artist an alias folder names', () => {
+    expect(artistOf('/GVP/Multi-Axis/Rondoudou Media/Scene/Scene.mp4', SOURCES)).toBe('Rondoudou');
+    expect(artistOf('/GVP/_incoming/S022/Cute Command/Cute Command.mp4', SOURCES)).toBe('miffn');
   });
 });
 
@@ -34,6 +71,17 @@ describe('planArtistPlaylists', () => {
     const r = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES });
     expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([['Misiv', ARTIST_PLAYLIST_MIN]]);
     expect(r.create[0].videoPaths.map((p) => p.split('/').pop())).toEqual(Array.from({ length: ARTIST_PLAYLIST_MIN }, (_, i) => `Scene ${i + 1}.mp4`));
+  });
+
+  it('merges alias folders into the artist they name', () => {
+    const half = Math.ceil(ARTIST_PLAYLIST_MIN / 2);
+    const videoPaths = [
+      ...vids('/GVP/Multi-Axis', 'Rondoudou Media', half), ...vids('/GVP/_incoming', 'RondoudouMedia', ARTIST_PLAYLIST_MIN - half - 1, half + 1),
+      ...vids('/GVP/Multi Generated', 'Rondoudou', 1, ARTIST_PLAYLIST_MIN),
+    ];
+    const r = planArtistPlaylists({ videoPaths, sourcePaths: SOURCES });
+    expect(r.create.map((c) => [c.name, c.videoPaths.length])).toEqual([['Rondoudou', ARTIST_PLAYLIST_MIN]]);
+    expect(r.state.created).toEqual(['rondoudou']);
   });
 
   it('adds new videos to an existing playlist of that name, not ones taken out by hand', () => {

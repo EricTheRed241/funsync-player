@@ -224,7 +224,7 @@ async function screenContext(config, userData, incoming) {
   const library = libraryState(roots);
   try {
     const links = require('../electron/eroscripts-links.js').readLinksFile(userData);
-    for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(l.creator.toLowerCase());
+    for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(scout.canonicalArtist(l.creator).toLowerCase());
   } catch { /* no links file yet */ }
   return {
     creators: [...library.creators],
