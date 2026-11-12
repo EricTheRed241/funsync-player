@@ -636,8 +636,8 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
   return 'ok';
 }
 
-/** Scenes not to fetch: those with a sidecar and video, and every rejected one. */
-function fetchedScenes(incoming, userData) {
+/** Scenes not to fetch: those with a sidecar and video, and every rejected one; `topics` (optional Set) gets the posts with a sidecar. */
+function fetchedScenes(incoming, userData, topics = null) {
   const done = new Set(rejectedVideos.readRejected(userData).entries.map((e) => e.key));
   walk(incoming, 0, (full, e) => {
     if (e.name !== 'eroscripts.json') return;
@@ -645,7 +645,10 @@ function fetchedScenes(incoming, userData) {
       const rec = JSON.parse(fs.readFileSync(full, 'utf8'));
       const dir = path.dirname(full);
       const file = rec.file || fs.readdirSync(dir).find((n) => !n.startsWith('._') && lib.isVideoName(n));
-      if (file && fs.existsSync(path.join(dir, file))) done.add(lib.fetchedKey(rec.topicId, rec.video));
+      if (file && fs.existsSync(path.join(dir, file))) {
+        done.add(lib.fetchedKey(rec.topicId, rec.video));
+        topics?.add(rec.topicId);
+      }
     } catch { /* unreadable sidecar: fetch again */ }
   });
   return done;
@@ -819,8 +822,11 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
   }
 }
 
-/** The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a vrbangers.com video only). */
-function savedQueue(opts, { userData, config }) {
+/**
+ * The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a
+ * vrbangers.com video only), checked again against the library as it is now (lib.notYetHeld).
+ */
+function savedQueue(opts, { userData, config, incoming }) {
   const file = path.join(userData, 'eroscripts-scout.json');
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
   const { favourites, scoring } = live.scoutPreferences(config);
@@ -832,14 +838,20 @@ function savedQueue(opts, { userData, config }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
-  return lib.downloadQueue(candidates, scoring, favourites)
+  const picked = lib.downloadQueue(candidates, scoring, favourites)
     .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, scoring)));
+  const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
+  const ownTopics = new Set();
+  fetchedScenes(incoming, userData, ownTopics);
+  const held = lib.notYetHeld(picked, { knownTopics, ownTopics, turnedDown, libraryVideos: library.videos });
+  if (held.posts || held.scenes) console.log(`Skipped what the library holds now: ${held.posts} posts, ${held.scenes} more scenes`);
+  return held.queue;
 }
 
 /** Write ~/Downloads/download-for-fs.txt: the waiting posts' files to download by hand. */
 function manualList(opts, { userData, config, incoming }) {
   const done = fetchedScenes(incoming, userData);
-  const posts = lib.manualDownloads(savedQueue(opts, { userData, config }), (id, video) => done.has(lib.fetchedKey(id, video)));
+  const posts = lib.manualDownloads(savedQueue(opts, { userData, config, incoming }), (id, video) => done.has(lib.fetchedKey(id, video)));
   fs.mkdirSync(opts.manualDir, { recursive: true });
   const out = path.join(DOWNLOADS, 'download-for-fs.txt');
   fs.writeFileSync(out, lib.manualListText(posts, { folder: opts.manualDir }));
@@ -848,7 +860,7 @@ function manualList(opts, { userData, config, incoming }) {
 }
 
 async function fetchAll(opts, { api, userData, config, incoming }) {
-  const queue = savedQueue(opts, { userData, config });
+  const queue = savedQueue(opts, { userData, config, incoming });
   const gb = queue.reduce((n, c) => n + c.scenes.reduce((m, sc) => m + (sc.video.size || 0), 0), 0) / 1e9;
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);
   if (opts.dryRun) {

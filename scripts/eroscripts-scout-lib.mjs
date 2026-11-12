@@ -1165,6 +1165,37 @@ export function downloadQueue(candidates, scoring = {}, favourites = undefined) 
 }
 
 /**
+ * The waiting list against the library as it is now, not as it was when the
+ * posts were judged (days or weeks earlier): a post the user turned down, or
+ * whose topic a library scene is linked to by another way (EroScripts sync,
+ * the app's download, a link) is dropped. A scene whose video the library
+ * holds now is dropped too, by the same check as at judging (planScenes);
+ * archives can't be told before unpacking. Posts the scout fetched in part
+ * (`ownTopics`, its sidecars) keep their other scenes: episodes of one post
+ * look alike to sameVideo (`Ep1`, `Ep2`), and the fetch skips the fetched ones.
+ *
+ * @param {object[]} candidates
+ * @param {{knownTopics?: Set<number>, ownTopics?: Set<number>, turnedDown?: Set<number>, libraryVideos?: string[]}} held
+ * @returns {{queue: object[], posts: number, scenes: number}} the rest, and how many posts and scenes were dropped
+ */
+export function notYetHeld(candidates, { knownTopics = new Set(), ownTopics = new Set(), turnedDown = new Set(), libraryVideos = [] } = {}) {
+  const queue = [];
+  let posts = 0;
+  let scenes = 0;
+  const inLibrary = (sc) => !sc.packed && libraryVideos.some((l) => sameVideo(coreName(sc.base), l) || sameVideo(coreName(sc.video.name), l));
+  for (const c of candidates) {
+    if (turnedDown.has(c.id)) { posts++; continue; }
+    if (ownTopics.has(c.id)) { queue.push(c); continue; }
+    if (knownTopics.has(c.id)) { posts++; continue; }
+    const open = c.scenes.filter((sc) => !inLibrary(sc));
+    scenes += c.scenes.length - open.length;
+    if (!open.length) { posts++; continue; }
+    queue.push(open.length === c.scenes.length ? c : { ...c, scenes: open });
+  }
+  return { queue, posts, scenes };
+}
+
+/**
  * Make sure the scout's download folder (`{name: 'EroScripts'|'FapTap', path}`)
  * is a library source in a parsed config.json (mutated). True when added.
  */
