@@ -2,10 +2,11 @@
 # --weekly runs only when the last complete run is 7+ days old, otherwise
 # it says "Not due" and exits 0. Needs the app running (ratings and the
 # review playlist go through its backend). The judge is omp, with its own
-# agent folder in the pod: config.yml (the judge's model) and the provider
-# key come from the funsync-omp Secret (`npm run k8s -- secrets`, from
-# ~/.config/funsync-k8s/omp/). Never the Mac's ~/.omp: its SQLite stores
-# aren't safe to share across the VM's file sharing.
+# agent folder in the pod, signed in through the Mac's omp auth broker
+# (deploy/macos/omp-broker.sh, Service omp-broker): the funsync-omp Secret
+# holds the broker token and config.yml (your model roles). Never the Mac's
+# ~/.omp: its SQLite stores aren't safe to share across the VM's file
+# sharing, and a second OAuth refresher could sign the Mac out.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -52,14 +53,16 @@ spec:
                   value: "/Volumes/2TB-AGENTS/GVP:/Users/classicus-gvp/Library/Application Support/funsync-player"
                 - name: PI_CODING_AGENT_DIR
                   value: "/home/runner/.omp/agent"
-                - name: OPENROUTER_API_KEY
-                  valueFrom: {secretKeyRef: {name: funsync-omp, key: OPENROUTER_API_KEY, optional: true}}
+                - name: OMP_AUTH_BROKER_URL
+                  value: "http://omp-broker:8765"
+                - name: OMP_AUTH_BROKER_TOKEN
+                  valueFrom: {secretKeyRef: {name: funsync-omp, key: OMP_AUTH_BROKER_TOKEN, optional: true}}
               resources:
                 requests: {cpu: 100m, memory: 128Mi}
                 limits: {memory: 2Gi}
               volumeMounts:
                 - name: library
-                  mountPath: "/Volumes/2TB-AGENTS/GVP"
+                  mountPath: "/Volumes"
                 - name: userdata
                   mountPath: "/Users/classicus-gvp/Library/Application Support/funsync-player"
                 - name: home
@@ -69,7 +72,7 @@ spec:
                   readOnly: true
           volumes:
             - name: library
-              hostPath: {path: "/Volumes/2TB-AGENTS/GVP", type: Directory}
+              hostPath: {path: "/Volumes", type: Directory}
             - name: userdata
               hostPath: {path: "/Users/classicus-gvp/Library/Application Support/funsync-player", type: Directory}
             - name: home

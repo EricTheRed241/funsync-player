@@ -11,6 +11,9 @@
 #   - KeepAlive SuccessfulExit=false: a crash (non-zero exit or a signal) is
 #     restarted after ThrottleInterval; quitting the app normally (exit 0)
 #     leaves it closed until the next login or `launchctl kickstart`.
+#   - Logs: the app logs to main.log itself (electron-log, rotated), so its
+#     stdout (the same lines) is dropped; stderr (warnings, errors, a crash)
+#     goes to ~/Library/Logs/funsync-player/app-launchd.log.
 # The app restarts its own backend when /health stops answering
 # (electron/python-bridge.js), so nothing else watches it.
 set -euo pipefail
@@ -48,7 +51,7 @@ install() {
   </dict>
   <key>ThrottleInterval</key><integer>30</integer>
   <key>ProcessType</key><string>Interactive</string>
-  <key>StandardOutPath</key><string>$LOG_DIR/app-launchd.log</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
   <key>StandardErrorPath</key><string>$LOG_DIR/app-launchd.log</string>
 </dict>
 </plist>

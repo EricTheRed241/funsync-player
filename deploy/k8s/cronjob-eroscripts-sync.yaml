@@ -50,14 +50,14 @@ spec:
                 limits: {memory: 1Gi}
               volumeMounts:
                 - name: library
-                  mountPath: "/Volumes/2TB-AGENTS/GVP"
+                  mountPath: "/Volumes"
                 - name: userdata
                   mountPath: "/Users/classicus-gvp/Library/Application Support/funsync-player"
                 - name: home
                   mountPath: "/home/runner"
           volumes:
             - name: library
-              hostPath: {path: "/Volumes/2TB-AGENTS/GVP", type: Directory}
+              hostPath: {path: "/Volumes", type: Directory}
             - name: userdata
               hostPath: {path: "/Users/classicus-gvp/Library/Application Support/funsync-player", type: Directory}
             - name: home
