@@ -1,0 +1,21 @@
+[package]
+name = "scout-report"
+version = "0.1.0"
+description = "Browse every EroScripts post the Discovery scout judged, with its verdict, and the waiting list, on a localhost-only webpage"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "scout_report"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scout-report"
+path = "src/main.rs"
+
+[dependencies]
+# The userData default (FUNSYNC_USER_DATA, else the app's folder).
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

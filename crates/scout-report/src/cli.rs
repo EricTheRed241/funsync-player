@@ -1,0 +1,120 @@
+//! Flags and `--help`.
+
+use std::ffi::OsString;
+use std::path::PathBuf;
+
+pub const DEFAULT_PORT: u16 = 5131;
+
+pub const USAGE: &str = "\
+scout-report: browse every EroScripts post the Discovery scout (npm run eroscripts:scout)
+has judged, with its verdict, and the waiting list, on a webpage served to this Mac only
+
+Usage:
+  npm run scout:report [-- --port N] [-- --user-data <dir>]
+
+Options:
+  --user-data <dir>    FunSync's userData folder
+                       (default $FUNSYNC_USER_DATA, else ~/Library/Application Support/funsync-player)
+  --port N             Port on 127.0.0.1 (default 5131; 0 picks a free one)
+  -h, --help           This text
+
+The page is http://127.0.0.1:<port>/ (bound to the loopback interface only, never
+the LAN). Every load of /api/report rereads eroscripts-scout-state.json (verdicts,
+feed coverage), eroscripts-scout.json (the waiting list) and
+eroscripts-scout-rejected.json (scenes turned down); a missing file shows as an
+empty section. The CLI never writes any file; stop it with Ctrl-C.
+
+Exit codes: 0 ok, 1 error (2 and 3 are not used).
+";
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Options {
+    pub help: bool,
+    pub user_data: Option<PathBuf>,
+    pub port: u16,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            help: false,
+            user_data: None,
+            port: DEFAULT_PORT,
+        }
+    }
+}
+
+pub fn parse(args: &[OsString]) -> Result<Options, String> {
+    let mut o = Options::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let arg = arg
+            .to_str()
+            .ok_or_else(|| format!("argument is not UTF-8: {}", arg.to_string_lossy()))?;
+        let (flag, inline) = match arg.split_once('=') {
+            Some((f, v)) if f.starts_with("--") => (f, Some(v)),
+            _ => (arg, None),
+        };
+        let mut value = |name: &str| -> Result<String, String> {
+            match inline {
+                Some(v) => Ok(v.to_string()),
+                None => it
+                    .next()
+                    .and_then(|v| v.to_str())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("{name} needs a value")),
+            }
+        };
+        match flag {
+            "-h" | "--help" if inline.is_none() => o.help = true,
+            "--user-data" => o.user_data = Some(PathBuf::from(value(flag)?)),
+            "--port" => {
+                let v = value(flag)?;
+                o.port = v
+                    .parse()
+                    .map_err(|_| format!("--port must be 0..65535, got {v}"))?;
+            }
+            "--help" => return Err("--help takes no value".into()),
+            _ => return Err(format!("unknown argument {arg} (see --help)")),
+        }
+    }
+    Ok(o)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<OsString> {
+        list.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn parses_flags() {
+        assert_eq!(parse(&args(&[])).unwrap(), Options::default());
+        assert_eq!(Options::default().port, 5131);
+        let o = parse(&args(&["--user-data", "/u", "--port", "8000"])).unwrap();
+        assert_eq!(o.user_data, Some(PathBuf::from("/u")));
+        assert_eq!(o.port, 8000);
+        let o = parse(&args(&["--user-data=/v", "--port=0"])).unwrap();
+        assert_eq!(o.user_data, Some(PathBuf::from("/v")));
+        assert_eq!(o.port, 0);
+        assert!(parse(&args(&["--help"])).unwrap().help);
+        assert!(parse(&args(&["-h"])).unwrap().help);
+    }
+
+    #[test]
+    fn rejects_bad_arguments() {
+        for bad in [
+            &["--port"][..],
+            &["--port", "70000"],
+            &["--port", "x"],
+            &["--user-data"],
+            &["--help=1"],
+            &["--host", "0.0.0.0"],
+            &["--bogus"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+}

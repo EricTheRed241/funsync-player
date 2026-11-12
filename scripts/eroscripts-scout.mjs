@@ -7,6 +7,7 @@
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
+//   npm run eroscripts:scout -- --titles     title, author, dates, image for posts judged before verdicts kept them
 //   npm run eroscripts:scout -- --daily      scan, then download the waiting multi-axis posts scoring AUTO_FETCH_MIN_SCORE+
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
@@ -112,6 +113,9 @@ Daily (run once a day by the watchdog, see README):
 Status:
   --status               print the scan state without going online: backfill per feed (page and oldest last
                          activity reached), verdicts, posts judged under older rules, the waiting list
+  --titles               fill in title, author, dates and image of judged posts that lack them (judged before
+                         verdicts kept them), newest first, one read per post at the usual pace; verdicts stay.
+                         For npm run scout:report. A stopped run goes on next time
 Both:
   --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
@@ -129,6 +133,7 @@ function parseArgs(argv) {
       case '--auto': opts.auto = true; break;
       case '--daily': opts.daily = true; break;
       case '--status': opts.status = true; break;
+      case '--titles': opts.titles = true; break;
       case '--rejudge': opts.rejudge = value(i, a).split(',').map((s) => s.trim()).filter(Boolean); i++; break;
       case '--retitle': opts.retitle = true; break;
       case '--dry-run': opts.dryRun = true; break;
@@ -400,10 +405,10 @@ async function scan(opts, { api, userData, config, incoming }) {
         data = await api.getTopicData(item);
         if (!data?.post_stream?.posts?.[0]) { process.stderr.write(`! ${item} unreadable\n`); continue; }
         // Moved out of Free Scripts since: nothing to download either way, so the verdict stands under the current rules.
-        if (data.category_id !== lib.FREE_SCRIPTS_CATEGORY) { lib.markTopic(state, item, state.topics[item].verdict); continue; }
+        if (data.category_id !== lib.FREE_SCRIPTS_CATEGORY) { lib.markTopic(state, item, state.topics[item].verdict, Date.now(), lib.RULES_VERSION, lib.postInfo(null, data)); continue; }
         t = lib.listedTopic(item, data);
       }
-      const verdict = (v) => { lib.markTopic(state, t.id, v); judged++; if (v !== 'candidate') rejected[v] = (rejected[v] || 0) + 1; };
+      const verdict = (v) => { lib.markTopic(state, t.id, v, Date.now(), lib.RULES_VERSION, lib.postInfo(t, data)); judged++; if (v !== 'candidate') rejected[v] = (rejected[v] || 0) + 1; };
       const s = lib.screenTopic(t, { knownTopics, creators, sceneNames: library.sceneNames, favourites });
       if (!s.ok) { verdict(s.reason); continue; }
       if (!data) {
@@ -506,7 +511,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const artistInLibrary = s.artist || (library.creators.has(creator.toLowerCase()) ? creator : null);
       const favourite = s.favourite || live.favouriteIn([author], favourites);
       fresh.push(makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first, picked: true }, scoring));
-      lib.markTopic(state, id, 'candidate');
+      lib.markTopic(state, id, 'candidate', Date.now(), lib.RULES_VERSION, lib.postInfo(t, data));
       const kind = scenes.every((sc) => sc.packed) ? 'packed in archives' : scenes.some((sc) => sc.axes.length) ? 'multi-axis' : 'single-axis';
       const on = [...new Set(scenes.map((sc) => sc.video.host).filter(Boolean))].join('+');
       console.log(`✓ ${id} ${t.title} (${scenes.length} ${scenes.every((sc) => sc.packed) ? 'archive' : 'video'}${scenes.length > 1 ? 's' : ''}, ${kind}${on ? `, ${on}` : ''})`);
@@ -979,6 +984,43 @@ async function exitCodeOf(step) {
 }
 
 /**
+ * `--titles`: title, author, dates and image for judged posts that lack them, newest first,
+ * paced like a scan. A post the forum no longer has (404) is marked `gone`; a run that hits
+ * the rate limit or a run of refusals (expired session) stops, saving what it has.
+ */
+async function fillTitles({ api, userData }) {
+  const pacer = createPacer();
+  const state = readScoutState(userData);
+  const ids = lib.untitledTopicIds(state);
+  console.log(`${ids.length} judged posts without a title`);
+  let done = 0; let gone = 0; let refused = 0; let skipped = 0;
+  try {
+    for (const id of ids) {
+      await pacer.wait();
+      const data = await api.getTopicData(id);
+      if (data?.error_type === 'rate_limit') throw new RateLimitedError();
+      if (data?.error_type === 'not_found') { lib.addPostInfo(state, id, null); gone++; refused = 0; continue; }
+      if (!data?.title) {
+        skipped++;
+        // 20 refusals or empty answers in a row: the session or the forum is down; go on next run.
+        if (++refused >= 20) throw (data?.error_type === 'invalid_access' ? new SessionExpiredError() : new RateLimitedError());
+        continue;
+      }
+      refused = 0;
+      lib.addPostInfo(state, id, data);
+      if (++done % 50 === 0) {
+        writeScoutState(userData, state);
+        console.log(`  ${done} of ${ids.length}`);
+      }
+    }
+  } finally {
+    writeScoutState(userData, state);
+    console.log(`Titles: ${done} filled in, ${gone} posts gone, ${skipped} unreadable (tried again next run)`);
+  }
+  return skipped ? 2 : 0;
+}
+
+/**
  * `--daily`: a scan (new posts plus the usual backfill), then `--fetch --auto`.
  * `<userData>/eroscripts-scout-daily.json` records when each step ran and its
  * exit code; it's written right after the scan, so the watchdog sees the day's
@@ -1035,6 +1077,7 @@ async function main() {
   const ctx = { api, userData, config, incoming };
   if (opts.daily) return daily(opts, ctx);
   if (opts.add) return exitCodeOf(() => addPicked(opts, ctx));
+  if (opts.titles) return exitCodeOf(() => fillTitles(ctx));
   return exitCodeOf(() => (opts.fetch ? fetchAll(opts, ctx) : scan(opts, ctx)));
 }
 
