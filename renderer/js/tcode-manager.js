@@ -21,7 +21,7 @@ export class TCodeManager {
     // snapshot ({ state, url, ip, attempts, lastError, … }).
     this._waiting = false;
     this._status = null;
-    this._transportKind = null; // 'serial' | 'udp' | 'websocket' — set on connect()
+    this._transportKind = null; // 'serial' | 'udp' | 'websocket' | 'remote-serial' — set on connect()
     this._portPath = '';
     this._baudRate = 115200;
     this._disconnectCleanup = null;
@@ -74,6 +74,8 @@ export class TCodeManager {
    *   serial   → connect('serial', { path: 'COM3', baudRate: 115200 })
    *   udp      → connect('udp',    { host: '192.168.1.42', port: 8080 })
    *   websocket→ connect('ws',     { url: 'ws://192.168.1.42:81' })
+   *   remote-serial → connect('remote-serial', { baudRate: 115200 })
+   *            (device on another computer via the backend relay)
    *
    * Back-compat: `connect(portPath, baudRate)` (two strings/numbers) still
    * routes to serial — preserves the original call sites and any saved
@@ -92,7 +94,8 @@ export class TCodeManager {
     let opts;
     const isLegacyCall = typeof kindOrPath === 'string'
       && kindOrPath !== 'serial' && kindOrPath !== 'udp'
-      && kindOrPath !== 'websocket' && kindOrPath !== 'ws';
+      && kindOrPath !== 'websocket' && kindOrPath !== 'ws'
+      && kindOrPath !== 'remote-serial';
     if (isLegacyCall) {
       kind = 'serial';
       opts = { path: kindOrPath, baudRate: typeof optsOrBaud === 'number' ? optsOrBaud : 115200 };
@@ -153,11 +156,11 @@ export class TCodeManager {
     if (down) { this._connected = false; this._waiting = true; }
     this._setStatus(status);
     if (up) {
-      console.log(`[TCode] Device connected: ${status.url} (${status.ip || '?'})`);
+      console.log(`[TCode] Device connected: ${this._describeLink(status)}`);
       if (this.onConnect) this.onConnect();
     }
     if (down) {
-      console.log(`[TCode] Device connection lost: ${status.url}; reconnecting`);
+      console.log(`[TCode] Device connection lost: ${this._describeLink(status)}; reconnecting`);
       if (this.onDisconnect) this.onDisconnect();
     }
   }
@@ -167,11 +170,18 @@ export class TCodeManager {
     if (this.onStatus) this.onStatus(this._status);
   }
 
+  /** Where a link-status update points (for logs). Pure. */
+  _describeLink(status) {
+    if (status?.transport === 'remote-serial') return `remote serial via ${status.sink?.ip || '?'}`;
+    return `${status?.url || '?'} (${status?.ip || '?'})`;
+  }
+
   /** Render a one-liner summary of the transport (for logs/UI). Pure. */
   _describeTransport(kind, opts) {
     if (kind === 'serial') return `${opts.path || '?'} @ ${opts.baudRate || 115200}`;
     if (kind === 'udp') return `${opts.host || '?'}:${opts.port || '?'}`;
     if (kind === 'websocket' || kind === 'ws') return opts.url || '?';
+    if (kind === 'remote-serial') return `remote serial @ ${opts.baudRate || 115200}`;
     return JSON.stringify(opts);
   }
 
@@ -279,8 +289,9 @@ export class TCodeManager {
     // understand DSTOP and expect explicit axis values. On real TCode firmware
     // (serial OSR2+/SR6) DSTOP already halts motion in place, and a BARE
     // (interval-less) 50% frame makes the device slam to center at full speed —
-    // the "violent jump on pause" OSR2+ users reported. So skip it on serial.
-    if (this._transportKind === 'serial') return;
+    // the "violent jump on pause" OSR2+ users reported. So skip it on serial,
+    // and on remote-serial (the same firmware over serial on another computer).
+    if (this._transportKind === 'serial' || this._transportKind === 'remote-serial') return;
     const mid = String(Math.round(this._valueMax / 2)).padStart(this._precision, '0');
     const off = '0'.padStart(this._precision, '0');
     // Position axes centre; intensity axes go to ZERO. A "neutral" frame that

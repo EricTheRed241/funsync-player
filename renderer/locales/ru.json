@@ -945,6 +945,31 @@
       "emptyBodyAutoFillOff": "Добавляйте видео кнопкой очереди или включите автозаполнение.",
       "loadFailedTitle": "Не удалось загрузить очередь",
       "loadFailedBody": "Проверьте, что FunSync запущен на компьютере, и попробуйте снова."
+    },
+    "serialRelay": {
+      "title": "Устройство на этом компьютере",
+      "close": "Закрыть",
+      "intro": "Подключите TCode-устройство к этому компьютеру — настольное приложение будет управлять им через эту страницу. Не закрывайте вкладку во время воспроизведения.",
+      "insecure": "Недоступно на этой странице: браузер разрешает USB-устройства только на защищённых (https) страницах. Чтобы разрешить для этого адреса, полностью закройте Chrome или Edge и запустите с флагом:",
+      "insecureFlags": "Или откройте chrome://flags/#unsafely-treat-insecure-origin-as-secure (в Edge — edge://flags/#unsafely-treat-insecure-origin-as-secure), добавьте этот адрес, выберите Enabled и нажмите Relaunch:",
+      "relayLabel": "Связь с компьютером",
+      "relay": {
+        "off": "Не подключено",
+        "connecting": "Подключение…",
+        "open": "Подключено"
+      },
+      "portLabel": "Устройство",
+      "port": {
+        "none": "Устройство не выбрано",
+        "open": "Открыт",
+        "closed": "Закрыт"
+      },
+      "baudLabel": "Скорость (бод)",
+      "usbLabel": "USB ID",
+      "connect": "Подключить устройство",
+      "disconnect": "Отключить",
+      "kicked": "Устройство перехватил другой браузер. Подключите снова, чтобы использовать его здесь.",
+      "error": "Ошибка: {message}"
     }
   },
   "hevc": {
@@ -1631,7 +1656,14 @@
       "errSelectPort": "Выберите порт",
       "errEnterHost": "Введите хост",
       "errInvalidPort": "Введите допустимый порт (1-65535)",
-      "errInvalidUrl": "URL должен начинаться с ws:// или wss://"
+      "errInvalidUrl": "URL должен начинаться с ws:// или wss://",
+      "transportRemoteSerial": "Последовательный порт на другом компьютере (через браузер)",
+      "remoteHint": "На компьютере с устройством откройте {url} в Chrome или Edge, запущенном с --unsafely-treat-insecure-origin-as-secure={origin} (или добавьте {origin} в chrome://flags/#unsafely-treat-insecure-origin-as-secure), затем «Устройство на этом компьютере» → «Подключить устройство».",
+      "remoteHintBackendDown": "Бэкенд не запущен: невозможно показать адрес для другого компьютера.",
+      "remoteConnected": "Подключено через браузер на {ip}",
+      "remoteWaitingBackend": "Ожидание бэкенда…",
+      "remoteWaitingBrowser": "Ожидание браузера на другом компьютере…",
+      "remoteWaitingPort": "Браузер на {ip} подключён; ожидание порта устройства…"
     },
     "sync": {
       "experimental": "ЭКСПЕРИМЕНТАЛЬНОЕ",

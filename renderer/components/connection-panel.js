@@ -165,6 +165,7 @@ export class ConnectionPanel {
           <option value="serial" selected data-i18n="connection.tcode.transportSerial">${_esc(t('connection.tcode.transportSerial'))}</option>
           <option value="udp" data-i18n="connection.tcode.transportUdp">${_esc(t('connection.tcode.transportUdp'))}</option>
           <option value="websocket" data-i18n="connection.tcode.transportWs">${_esc(t('connection.tcode.transportWs'))}</option>
+          <option value="remote-serial" data-i18n="connection.tcode.transportRemoteSerial">${_esc(t('connection.tcode.transportRemoteSerial'))}</option>
         </select>
 
         <div id="tcode-serial-fields" class="connection-panel__transport-fields">
@@ -201,6 +202,19 @@ export class ConnectionPanel {
           <div class="connection-panel__hint" style="margin-top:4px;font-size:11px;color:var(--text-secondary)" data-i18n="connection.tcode.wsHint">
             ${_esc(t('connection.tcode.wsHint'))}
           </div>
+        </div>
+
+        <div id="tcode-remote-fields" class="connection-panel__transport-fields" hidden>
+          <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.baudRate">${_esc(t('connection.tcode.baudRate'))}</label>
+          <select id="tcode-remote-baud-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.baudRateAria" aria-label="${_esc(t('connection.tcode.baudRateAria'))}">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200" selected>115200</option>
+            <option value="250000">250000</option>
+          </select>
+          <div id="tcode-remote-hint" class="connection-panel__hint" style="margin-top:4px;font-size:11px;color:var(--text-secondary)"></div>
         </div>
 
         <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.precision">${_esc(t('connection.tcode.precision'))}</label>
@@ -400,6 +414,7 @@ export class ConnectionPanel {
       const savedUdpHost = this.settings.get('tcode.udpHost') || '';
       const savedUdpPort = this.settings.get('tcode.udpPort') || '';
       const savedWsUrl = this.settings.get('tcode.wsUrl') || '';
+      const savedRemoteBaud = this.settings.get('tcode.remoteBaudRate') || 115200;
       const savedPrecision = Number(this.settings.get('tcode.precision')) || 3;
 
       if (transportSelect) transportSelect.value = savedTransport;
@@ -411,6 +426,8 @@ export class ConnectionPanel {
       if (udpHost) udpHost.value = savedUdpHost;
       if (udpPort && savedUdpPort) udpPort.value = String(savedUdpPort);
       if (wsUrl) wsUrl.value = savedWsUrl;
+      const remoteBaud = this._panel.querySelector('#tcode-remote-baud-select');
+      if (remoteBaud) remoteBaud.value = String(savedRemoteBaud);
       if (precisionSelect) {
         precisionSelect.value = String(savedPrecision);
         // Apply immediately so the manager emits the right precision even
@@ -1361,9 +1378,34 @@ export class ConnectionPanel {
     const serial = this._panel.querySelector('#tcode-serial-fields');
     const udp = this._panel.querySelector('#tcode-udp-fields');
     const ws = this._panel.querySelector('#tcode-ws-fields');
+    const remote = this._panel.querySelector('#tcode-remote-fields');
     if (serial) serial.hidden = kind !== 'serial';
     if (udp) udp.hidden = kind !== 'udp';
     if (ws) ws.hidden = kind !== 'websocket';
+    if (remote) remote.hidden = kind !== 'remote-serial';
+    if (kind === 'remote-serial') this._refreshRemoteSerialHint();
+  }
+
+  /**
+   * Tell the user which URL to open on the computer the device is plugged
+   * into: the plain web remote, in Chrome/Edge started with that origin
+   * treated as secure (Web Serial needs a secure context).
+   */
+  async _refreshRemoteSerialHint() {
+    const hint = this._panel.querySelector('#tcode-remote-hint');
+    if (!hint) return;
+    const port = this.settings.get('backend.port') || 5123;
+    let ip = null;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/network-info`);
+      if (res.ok) ip = (await res.json()).ip || null;
+    } catch { /* backend down */ }
+    if (!ip) {
+      hint.textContent = t('connection.tcode.remoteHintBackendDown');
+      return;
+    }
+    const origin = `http://${ip}:${port}`;
+    hint.textContent = t('connection.tcode.remoteHint', { url: `${origin}/remote/`, origin });
   }
 
   async _onTCodeConnect() {
@@ -1414,6 +1456,9 @@ export class ConnectionPanel {
         return;
       }
       opts = { url };
+    } else if (kind === 'remote-serial') {
+      const baudRate = parseInt(this._panel.querySelector('#tcode-remote-baud-select')?.value, 10) || 115200;
+      opts = { baudRate };
     } else {
       return;
     }
@@ -1435,6 +1480,9 @@ export class ConnectionPanel {
         this.settings.set('tcode.udpPort', opts.port);
       } else if (kind === 'websocket') {
         this.settings.set('tcode.wsUrl', opts.url);
+        this.settings.set('tcode.autoConnect', true);
+      } else if (kind === 'remote-serial') {
+        this.settings.set('tcode.remoteBaudRate', opts.baudRate);
         this.settings.set('tcode.autoConnect', true);
       }
     }
@@ -1488,6 +1536,8 @@ export class ConnectionPanel {
       text.textContent = status === 'connected' ? t('connection.status.connected')
         : status === 'connecting' ? t('connection.status.connecting')
         : (this._tcodeEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
+      const remote = this._remoteSerialStatusText(status);
+      if (remote) text.textContent = remote;
     }
     if (btn) {
       // A WebSocket device being waited for can be stopped from here too.
@@ -1498,6 +1548,24 @@ export class ConnectionPanel {
       axisSection.hidden = status !== 'connected';
       if (status === 'connected') this._renderTCodeAxes();
     }
+  }
+
+  /**
+   * Status line for the remote-serial relay: what it waits for (backend,
+   * the browser on the other computer, the device port) or, when up, the
+   * browser's IP. Null for other transports.
+   */
+  _remoteSerialStatusText(status) {
+    const st = this.tcodeManager?.status;
+    if (st?.transport !== 'remote-serial') return null;
+    if (status === 'connected') {
+      return t('connection.tcode.remoteConnected', { ip: st.sink?.ip || '?' });
+    }
+    if (status !== 'connecting') return null;
+    if (st.waitingFor === 'backend') return t('connection.tcode.remoteWaitingBackend');
+    if (st.waitingFor === 'browser') return t('connection.tcode.remoteWaitingBrowser');
+    if (st.waitingFor === 'port') return t('connection.tcode.remoteWaitingPort', { ip: st.sink?.ip || '?' });
+    return null;
   }
 
   /**

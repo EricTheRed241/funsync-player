@@ -181,12 +181,13 @@ const DEFAULTS = {
       port: 12345,
     },
     tcode: {
-      transport: 'serial',  // 'serial' | 'udp' | 'websocket'
+      transport: 'serial',  // 'serial' | 'udp' | 'websocket' | 'remote-serial'
       port: '',             // serial port path (legacy field, still in use)
       baudRate: 115200,
       udpHost: '',          // 2.4 GHz wireless ESP-NOW bridge etc.
       udpPort: 0,
       wsUrl: '',            // ws://device.local:81  (also restim/MFP-consumer URLs)
+      remoteBaudRate: 115200, // remote-serial: device baud on the other computer (Web Serial)
       precision: 3,         // 3 = TCode-0.2 (L0500), 4 = TCode-0.3 (L05000)
       updateRateHz: 60,     // keyframe poll/detect rate; higher = fast vibration survives on OSR2+/SR6 (advanced)
       axisRanges: {},

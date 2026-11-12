@@ -1,9 +1,10 @@
 """One-call status for diagnosing a session: GET /api/status.
 
 Combines what the backend knows itself (uptime, library size, the last
-headset scene request, the web-remote phone) with the desktop app's latest
-`desktop-status` snapshot (devices, TCode link, VR companion bridge, the
-current session; built in renderer/js/desktop-status.js and sent over the
+headset scene request, the web-remote phone, the TCode browser serial relay)
+with the desktop app's latest `desktop-status` snapshot (devices, TCode link,
+VR companion bridge, the current session; built in
+renderer/js/desktop-status.js and sent over the
 observer socket on every change and every 15 s). `issues` lists what looks
 wrong, in plain words, so a session going wrong mid-video can be read off
 one response instead of main.log.
@@ -15,7 +16,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from routes import remote_sync
+from routes import remote_sync, tcode_relay
 from routes.media import get_video_registry, last_vr_activity
 
 router = APIRouter()
@@ -38,6 +39,23 @@ def _age(ts, now):
     return round(now - ts, 1) if ts else None
 
 
+def _remote_serial_wait(link, state):
+    """What a TCode device behind the browser serial relay is waiting for."""
+    text = "TCode device (browser serial relay): "
+    if state == "reconnecting":
+        text += "connection lost, "
+    waiting_for = link.get("waitingFor")
+    if waiting_for == "backend":
+        return text + "the desktop app can't reach the backend's relay"
+    if waiting_for == "browser":
+        return text + "no browser is attached (open the web remote on the computer with the device and connect it there)"
+    if waiting_for == "port":
+        ip = (link.get("sink") or {}).get("ip")
+        where = f"the browser at {ip}" if ip else "the browser"
+        return text + f"{where} is attached but hasn't opened the device's serial port"
+    return text + ("reconnecting" if state == "reconnecting" else "connecting")
+
+
 def _issues(desktop, status, headset_age, now):
     issues = []
     if not desktop["connected"]:
@@ -57,12 +75,15 @@ def _issues(desktop, status, headset_age, now):
     if state in ("waiting", "reconnecting", "connecting"):
         since = link.get("downSince")
         err = (link.get("lastError") or {}).get("text")
-        doing = {
-            "waiting": "not answering yet",
-            "reconnecting": "connection lost, reconnecting",
-            "connecting": "connecting",
-        }[state]
-        text = f"TCode device {link.get('url')}: {doing}"
+        if link.get("transport") == "remote-serial":
+            text = _remote_serial_wait(link, state)
+        else:
+            doing = {
+                "waiting": "not answering yet",
+                "reconnecting": "connection lost, reconnecting",
+                "connecting": "connecting",
+            }[state]
+            text = f"TCode device {link.get('url')}: {doing}"
         if since:
             text += f" since {since}"
         text += f" ({link.get('attempts', 0)} attempts)"
@@ -129,4 +150,5 @@ async def get_status():
             "video": os.path.basename(phone["video_path"]) if phone["video_path"] else None,
             "lastState": phone["last_state"],
         },
+        "tcodeRelay": tcode_relay.relay_state(),
     }

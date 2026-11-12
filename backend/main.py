@@ -15,6 +15,7 @@ from routes.media import router as media_router, set_thumb_cache_dir
 from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
+from routes.tcode_relay import router as tcode_relay_router
 from routes.locale import router as locale_router, set_user_data_dir
 from routes.status import router as status_router
 from routes.device import router as device_router
@@ -51,6 +52,7 @@ app.include_router(media_router, prefix="/api/media", tags=["media"])
 app.include_router(vr_api_router, tags=["vr"])
 app.include_router(remote_router, prefix="/api/remote", tags=["remote"])
 app.include_router(remote_sync_router, prefix="/api/remote", tags=["remote-sync"])
+app.include_router(tcode_relay_router, prefix="/api/remote", tags=["tcode-relay"])
 app.include_router(locale_router, prefix="/api/remote", tags=["locale"])
 app.include_router(status_router, prefix="/api", tags=["status"])
 # Local-only device dashboard at /device/ (routes/device.py).

@@ -2746,3 +2746,57 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
   .queue-switch__track,
   .queue-switch__track::after { transition: none; }
 }
+
+/* ============================================================
+   "Device on this computer" sheet (serial-relay.js)
+   ============================================================ */
+.header__action--live { color: var(--accent); }
+.serial-relay__text {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.serial-relay__text--warn { color: var(--accent); }
+.serial-relay__code {
+  display: block;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.serial-relay__status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+.serial-relay__status dt { color: var(--text-dim); }
+.serial-relay__status dd { margin: 0; color: var(--text-primary); }
+.serial-relay__actions {
+  display: flex;
+  gap: 8px;
+}
+.serial-relay__btn {
+  min-height: var(--tap-min, 44px);
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+}
+.serial-relay__btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.serial-relay__btn:disabled { opacity: 0.5; }

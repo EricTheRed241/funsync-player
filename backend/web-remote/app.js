@@ -35,6 +35,7 @@ import {
   fetchArtists, setFavouriteArtist, setFavouriteScore, pollArtists, mergeArtistEdits, appliedArtistEdits,
   artistsPending, foldArtist, createFavouriteStar, updateFavouriteStar, sortArtists, ARTIST_SORTS,
 } from './artists.js';
+import { SerialRelaySink, looksLikeDesktopChromium } from './serial-relay.js';
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
@@ -2758,6 +2759,88 @@ function closeSheet(sheetEl) {
   }
   _lastFocusBeforeSheet = null;
 }
+
+// ============================================================
+// "Device on this computer" (serial-relay.js): a TCode device plugged
+// into the computer showing this page, driven by the desktop app through
+// the backend relay. Web Serial only exists on secure pages, so desktop
+// Chrome / Edge over plain http get the button too and the sheet names
+// the browser flag that allows it for this address. Hidden elsewhere
+// (phones, Safari, Firefox).
+// ============================================================
+const serialRelaySheetEl = document.getElementById('serialRelaySheet');
+const serialRelayBtn = document.getElementById('serialRelayBtn');
+const serialRelayConnectBtn = document.getElementById('serialRelayConnect');
+const serialRelayDisconnectBtn = document.getElementById('serialRelayDisconnect');
+const serialSupport = SerialRelaySink.support({ serial: navigator.serial, isSecureContext: window.isSecureContext });
+const serialSink = serialSupport.supported
+  ? new SerialRelaySink({
+    serial: navigator.serial,
+    WebSocketImpl: WebSocket,
+    location,
+    storage: window.localStorage,
+    isSecureContext: window.isSecureContext,
+    onState: renderSerialRelay,
+  })
+  : null;
+serialRelayBtn.hidden = !(serialSupport.supported
+  || (serialSupport.reason === 'insecure' && looksLikeDesktopChromium(navigator.userAgent)));
+serialRelayBtn.appendChild(svgIcon('usb', 18));
+
+function usbId(device) {
+  const hex = (n) => (Number.isInteger(n) ? n.toString(16).padStart(4, '0') : '????');
+  return `${hex(device.usbVendorId)}:${hex(device.usbProductId)}`;
+}
+
+function renderSerialRelay() {
+  const state = serialSink?.state;
+  serialRelayBtn.classList.toggle('header__action--live', state?.port === 'open');
+  if (serialRelaySheetEl.hidden) return;
+  const insecure = serialSupport.reason === 'insecure';
+  document.getElementById('serialRelayInsecure').hidden = !insecure;
+  document.getElementById('serialRelayControls').hidden = !state;
+  if (insecure) {
+    document.getElementById('serialRelayFlag').textContent =
+      `--unsafely-treat-insecure-origin-as-secure=${location.origin}`;
+    document.getElementById('serialRelayOrigin').textContent = location.origin;
+  }
+  if (!state) return;
+  const rows = [
+    ['webRemote.serialRelay.relayLabel', t(`webRemote.serialRelay.relay.${state.relay}`)],
+    ['webRemote.serialRelay.portLabel', t(`webRemote.serialRelay.port.${state.port}`)],
+    ['webRemote.serialRelay.baudLabel', String(state.baudRate)],
+  ];
+  if (state.device) rows.push(['webRemote.serialRelay.usbLabel', usbId(state.device)]);
+  const statusEl = document.getElementById('serialRelayStatus');
+  statusEl.replaceChildren();
+  for (const [labelKey, value] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = t(labelKey);
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    statusEl.append(dt, dd);
+  }
+  const noticeEl = document.getElementById('serialRelayNotice');
+  noticeEl.textContent = state.kicked
+    ? t('webRemote.serialRelay.kicked')
+    : (state.error ? t('webRemote.serialRelay.error', { message: state.error }) : '');
+  noticeEl.hidden = !noticeEl.textContent;
+  serialRelayConnectBtn.hidden = state.port === 'open';
+  serialRelayDisconnectBtn.hidden = state.relay === 'off' && state.port !== 'open';
+}
+
+serialRelayBtn.addEventListener('click', () => {
+  openSheet(serialRelaySheetEl);
+  renderSerialRelay();
+});
+// connect() must start inside the click: requestPort() needs the user gesture.
+serialRelayConnectBtn.addEventListener('click', async () => {
+  serialRelayConnectBtn.disabled = true;
+  try { await serialSink?.connect(); } finally { serialRelayConnectBtn.disabled = false; }
+});
+serialRelayDisconnectBtn.addEventListener('click', () => { serialSink?.disconnect(); });
+// Reopen the remembered device after a reload, without a click.
+serialSink?.resume();
 
 // ============================================================
 // Filter chips — visualise active filters; clicking the X removes

@@ -1814,6 +1814,8 @@ ipcMain.handle('tcode-list-ports', async () => {
  *   - serial:    { path, baudRate }
  *   - udp:       { host, port }
  *   - websocket: { url }
+ *   - remote-serial: { baudRate } — url (the backend's relay, desktop
+ *     role) is filled in here
  *
  * Legacy two-arg form `(portPath, baudRate)` from pre-UDP renderers is
  * still accepted — falls through to the serial branch with default kind.
@@ -1828,12 +1830,17 @@ ipcMain.handle('tcode-connect', async (_event, kindOrPath, optsOrBaud) => {
       && kindOrPath !== 'serial'
       && kindOrPath !== 'udp'
       && kindOrPath !== 'websocket'
-      && kindOrPath !== 'ws') {
+      && kindOrPath !== 'ws'
+      && kindOrPath !== 'remote-serial') {
     kind = 'serial';
     opts = { path: kindOrPath, baudRate: typeof optsOrBaud === 'number' ? optsOrBaud : 115200 };
   } else {
     kind = kindOrPath;
     opts = optsOrBaud || {};
+  }
+  if (kind === 'remote-serial') {
+    const { getBackendPort } = require('./python-bridge');
+    opts = { ...opts, url: `ws://127.0.0.1:${getBackendPort()}/api/remote/tcode-relay?role=desktop` };
   }
 
   await tearDownActiveTcodeTransport();

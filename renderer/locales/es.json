@@ -945,6 +945,31 @@
       "emptyBodyAutoFillOff": "Añade vídeos con el botón de cola o activa el relleno automático.",
       "loadFailedTitle": "No se pudo cargar la cola",
       "loadFailedBody": "Comprueba que FunSync se está ejecutando en tu escritorio e inténtalo de nuevo."
+    },
+    "serialRelay": {
+      "title": "Dispositivo en este ordenador",
+      "close": "Cerrar",
+      "intro": "Conecta un dispositivo TCode a este ordenador y la app de escritorio lo controlará a través de esta página. Mantén esta pestaña abierta durante la reproducción.",
+      "insecure": "No disponible en esta página: el navegador solo permite dispositivos USB en páginas seguras (https). Para permitirlo en esta dirección, cierra Chrome o Edge por completo e inícialo con este flag:",
+      "insecureFlags": "O abre chrome://flags/#unsafely-treat-insecure-origin-as-secure (edge://flags/#unsafely-treat-insecure-origin-as-secure en Edge), añade esta dirección, ponlo en Enabled y pulsa Relaunch:",
+      "relayLabel": "Enlace con el escritorio",
+      "relay": {
+        "off": "No conectado",
+        "connecting": "Conectando…",
+        "open": "Conectado"
+      },
+      "portLabel": "Dispositivo",
+      "port": {
+        "none": "Ningún dispositivo seleccionado",
+        "open": "Abierto",
+        "closed": "Cerrado"
+      },
+      "baudLabel": "Baudios",
+      "usbLabel": "ID USB",
+      "connect": "Conectar dispositivo",
+      "disconnect": "Desconectar",
+      "kicked": "Otro navegador ha tomado el dispositivo. Vuelve a conectar para usarlo aquí.",
+      "error": "Error: {message}"
     }
   },
   "hevc": {
@@ -1631,7 +1656,14 @@
       "errSelectPort": "Selecciona un puerto",
       "errEnterHost": "Introduce un host",
       "errInvalidPort": "Introduce un puerto válido (1-65535)",
-      "errInvalidUrl": "La URL debe empezar con ws:// o wss://"
+      "errInvalidUrl": "La URL debe empezar con ws:// o wss://",
+      "transportRemoteSerial": "Serie en otro ordenador (relé del navegador)",
+      "remoteHint": "En el ordenador con el dispositivo, abre {url} en Chrome o Edge iniciado con --unsafely-treat-insecure-origin-as-secure={origin} (o añade {origin} en chrome://flags/#unsafely-treat-insecure-origin-as-secure) y luego Dispositivo en este ordenador → Conectar dispositivo.",
+      "remoteHintBackendDown": "El backend no está en marcha: no se puede mostrar la dirección para el otro ordenador.",
+      "remoteConnected": "Conectado mediante el navegador en {ip}",
+      "remoteWaitingBackend": "Esperando al backend…",
+      "remoteWaitingBrowser": "Esperando al navegador del otro ordenador…",
+      "remoteWaitingPort": "Navegador en {ip} conectado; esperando el puerto del dispositivo…"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",

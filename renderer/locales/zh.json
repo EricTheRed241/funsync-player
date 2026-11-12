@@ -945,6 +945,31 @@
       "emptyBodyAutoFillOff": "用队列按钮添加视频，或开启自动填充。",
       "loadFailedTitle": "无法加载队列",
       "loadFailedBody": "请确认桌面上的 FunSync 正在运行，然后重试。"
+    },
+    "serialRelay": {
+      "title": "此电脑上的设备",
+      "close": "关闭",
+      "intro": "将 TCode 设备插入此电脑，桌面应用会通过此页面驱动它。播放时请保持此标签页打开。",
+      "insecure": "此页面不可用：浏览器只允许在安全 (https) 页面上使用 USB 设备。要为此地址启用，请完全退出 Chrome 或 Edge，并用以下参数启动：",
+      "insecureFlags": "或打开 chrome://flags/#unsafely-treat-insecure-origin-as-secure (Edge 中为 edge://flags/#unsafely-treat-insecure-origin-as-secure)，添加此地址，设为 Enabled 并点击 Relaunch：",
+      "relayLabel": "桌面连接",
+      "relay": {
+        "off": "未连接",
+        "connecting": "正在连接…",
+        "open": "已连接"
+      },
+      "portLabel": "设备",
+      "port": {
+        "none": "未选择设备",
+        "open": "已打开",
+        "closed": "已关闭"
+      },
+      "baudLabel": "波特率",
+      "usbLabel": "USB ID",
+      "connect": "连接设备",
+      "disconnect": "断开连接",
+      "kicked": "另一个浏览器接管了该设备。要在此使用，请重新连接。",
+      "error": "错误：{message}"
     }
   },
   "hevc": {
@@ -1631,7 +1656,14 @@
       "errSelectPort": "请选择端口",
       "errEnterHost": "请输入主机",
       "errInvalidPort": "请输入有效端口 (1-65535)",
-      "errInvalidUrl": "URL 必须以 ws:// 或 wss:// 开头"
+      "errInvalidUrl": "URL 必须以 ws:// 或 wss:// 开头",
+      "transportRemoteSerial": "另一台电脑上的串口 (浏览器中继)",
+      "remoteHint": "在连接设备的电脑上，用带 --unsafely-treat-insecure-origin-as-secure={origin} 启动的 Chrome 或 Edge 打开 {url} (或在 chrome://flags/#unsafely-treat-insecure-origin-as-secure 中添加 {origin})，然后选择“此电脑上的设备”→“连接设备”。",
+      "remoteHintBackendDown": "后端未运行：无法显示要在另一台电脑上打开的地址。",
+      "remoteConnected": "已通过 {ip} 上的浏览器连接",
+      "remoteWaitingBackend": "正在等待后端…",
+      "remoteWaitingBrowser": "正在等待另一台电脑上的浏览器…",
+      "remoteWaitingPort": "{ip} 上的浏览器已连接；正在等待设备端口…"
     },
     "sync": {
       "experimental": "实验性",
