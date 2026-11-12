@@ -918,10 +918,57 @@ export function needsJudging(state, topic, rules = RULES_VERSION) {
   return REJUDGE_ON_BUMP.has(seen.verdict) && !!topic.bumped && Date.parse(topic.bumped) > Date.parse(seen.at);
 }
 
-/** Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending. */
-export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION) {
-  state.topics[id] = { verdict, rules, at: new Date(now).toISOString() };
+/** What a verdict keeps about its post, for `npm run scout:report`; kept from the earlier verdict when not given. */
+export const POST_INFO_KEYS = ['title', 'author', 'created', 'bumped', 'image'];
+
+/**
+ * Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending.
+ * `info` (postInfo) is stored with it: title, author, dates and image, each kept from the
+ * earlier verdict when `info` lacks it.
+ */
+export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION, info = null) {
+  const prev = state.topics[id] || {};
+  const rec = { verdict, rules, at: new Date(now).toISOString() };
+  for (const k of POST_INFO_KEYS) {
+    const v = info?.[k] || prev[k];
+    if (v) rec[k] = v;
+  }
+  if (prev.gone && !info?.title) rec.gone = true;
+  state.topics[id] = rec;
   if (state.pending) delete state.pending[id];
+}
+
+/**
+ * A post's title, author (the first post's), creation and last-activity dates and
+ * image (absolute URL), from what a feed lists (`t`) and its topic payload (`data`,
+ * api.getTopicData), whichever has each.
+ */
+export function postInfo(t, data = null) {
+  const image = t?.image || data?.image_url || null;
+  return {
+    title: t?.title || data?.title || null,
+    author: data?.post_stream?.posts?.[0]?.username || t?.author || null,
+    created: t?.created || data?.created_at || null,
+    bumped: t?.bumped || data?.bumped_at || null,
+    image: image && !/^https?:\/\//.test(image) ? `https://discuss.eroscripts.com${image}` : image,
+  };
+}
+
+/** Judged posts without a title (judged before verdicts kept one), newest first; posts found gone are left out (`--titles`). */
+export function untitledTopicIds(state) {
+  return Object.entries(state.topics)
+    .filter(([, t]) => !t.title && !t.gone)
+    .map(([id]) => Number(id))
+    .sort((a, b) => b - a);
+}
+
+/** Fill in a judged post's info from its topic payload, verdict and date unchanged; `null` data marks it gone (deleted or private). */
+export function addPostInfo(state, id, data) {
+  const rec = state.topics[id];
+  if (!rec) return;
+  if (!data) { rec.gone = true; return; }
+  for (const [k, v] of Object.entries(postInfo(null, data))) if (v) rec[k] = v;
+  delete rec.gone;
 }
 
 /** Keep listed posts until they get a verdict, so a run that stops early doesn't lose them. */
@@ -965,7 +1012,7 @@ export function staleTopicIds(state, verdicts, rules = RULES_VERSION) {
     .sort((a, b) => b - a);
 }
 
-/** A post read by id (`api.getTopicData`) in the shape a feed lists it: `{id, title, tags, likes, created, bumped}`. */
+/** A post read by id (`api.getTopicData`) in the shape a feed lists it: `{id, title, tags, likes, created, bumped, image}`. */
 export function listedTopic(id, data) {
   return {
     id,
@@ -974,6 +1021,7 @@ export function listedTopic(id, data) {
     likes: data.like_count || 0,
     created: data.created_at || null,
     bumped: data.bumped_at || null,
+    image: data.image_url || null,
   };
 }
 

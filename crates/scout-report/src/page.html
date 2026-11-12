@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>EroScripts scout report</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --panel: #ffffff;
+  --accent: #2f6fdf; --row: #f2f2f5; --warn-bg: #fff4d6; --warn-fg: #6b4e00;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181b; --fg: #e6e6e9; --muted: #9a9aa3; --line: #34353b; --panel: #1f2024;
+    --accent: #7aa7ff; --row: #232429; --warn-bg: #3d3214; --warn-fg: #ffd98a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px 20px 40px; background: var(--bg); color: var(--fg);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 14px; margin: 0 0 6px; color: var(--muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.muted { color: var(--muted); }
+.meta { color: var(--muted); margin-bottom: 12px; }
+.meta button { margin-left: 8px; }
+.problems { background: var(--warn-bg); color: var(--warn-fg); padding: 8px 12px;
+  border-radius: 6px; margin-bottom: 12px; white-space: pre-wrap; }
+.top { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 640px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px 10px 3px 6px; cursor: pointer; user-select: none; }
+.chip input { margin: 0; }
+.chip b { font-variant-numeric: tabular-nums; }
+.chip-actions { margin-top: 6px; }
+.linkish { background: none; border: none; color: var(--accent); padding: 0 6px 0 0; cursor: pointer; font: inherit; }
+table { border-collapse: collapse; }
+.feeds td, .feeds th { padding: 2px 10px 2px 0; text-align: left; font-variant-numeric: tabular-nums; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; margin-bottom: 12px; }
+.filters label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.filters label.inline { flex-direction: row; align-items: center; gap: 6px; font-size: 14px; color: var(--fg); }
+.filters .range { display: flex; gap: 4px; }
+input, select, button { font: inherit; color: inherit; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+button { cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+input[type=search] { width: 260px; }
+input[type=number] { width: 80px; }
+.pager { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
+.pager .count { margin-right: auto; color: var(--muted); }
+.posts { width: 100%; }
+.posts th { position: sticky; top: 0; background: var(--bg); text-align: left; padding: 6px 8px;
+  border-bottom: 2px solid var(--line); white-space: nowrap; font-size: 12px; color: var(--muted); }
+.posts th.sortable { cursor: pointer; }
+.posts th.sortable:hover { color: var(--fg); }
+.posts th .arrow { display: inline-block; width: 1em; }
+.posts td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.posts tbody tr:nth-child(even) { background: var(--row); }
+.posts td.num, .posts td.date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.thumb { width: 96px; }
+.thumb img { width: 88px; height: 56px; object-fit: cover; border-radius: 4px; cursor: zoom-in; display: block;
+  background: var(--line); }
+.title { min-width: 260px; max-width: 560px; }
+.title .t { font-weight: 600; }
+.tags { color: var(--muted); font-size: 12px; margin-top: 2px; }
+details { margin-top: 4px; font-size: 12px; }
+details summary { cursor: pointer; color: var(--muted); }
+details ul { margin: 4px 0 0; padding-left: 18px; }
+.verdict { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap;
+  background: color-mix(in srgb, var(--vc, #888) 22%, transparent); border: 1px solid var(--vc, #888); }
+.v-candidate { --vc: #3aa655; } .v-known { --vc: #3b82f6; } .v-in-library { --vc: #14b8a6; }
+.v-excluded { --vc: #e05252; } .v-blocked { --vc: #b91c1c; } .v-not-sexual { --vc: #8b8b93; }
+.v-live-not-pov { --vc: #d08b2c; } .v-no-video { --vc: #a46ad6; }
+.waiting { color: #3aa655; font-weight: 600; }
+.empty { padding: 24px; text-align: center; color: var(--muted); }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center;
+  justify-content: center; cursor: zoom-out; z-index: 10; }
+.lightbox.open { display: flex; }
+.lightbox img { max-width: 95vw; max-height: 95vh; }
+</style>
+</head>
+<body>
+<h1>EroScripts scout report</h1>
+<div class="meta" id="meta">Loading…</div>
+<div class="problems" id="problems" hidden></div>
+
+<div class="top">
+  <div class="panel">
+    <h2>Verdicts</h2>
+    <div class="chips" id="verdicts"></div>
+    <div class="chip-actions">
+      <button type="button" class="linkish" id="verdicts-all">all</button>
+      <button type="button" class="linkish" id="verdicts-none">none</button>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Feed coverage</h2>
+    <table class="feeds">
+      <thead><tr><th>Feed</th><th>Backfill page</th><th>Exhausted</th><th>Reached</th><th>Done since</th></tr></thead>
+      <tbody id="feeds"></tbody>
+    </table>
+  </div>
+</div>
+
+<form class="filters" id="filters" autocomplete="off">
+  <label>Search (title, author, tags, id)<input type="search" id="q" placeholder="words…"></label>
+  <label class="inline"><input type="checkbox" id="waiting"> Waiting only</label>
+  <label>Min score<input type="number" id="min-score" step="any"></label>
+  <label>Axis<select id="axis"><option value="">any</option><option value="multi">multi</option><option value="single">single</option></select></label>
+  <label>Judged<span class="range"><input type="date" id="at-from"><input type="date" id="at-to"></span></label>
+  <label>Created<span class="range"><input type="date" id="created-from"><input type="date" id="created-to"></span></label>
+  <label>Last activity<span class="range"><input type="date" id="bumped-from"><input type="date" id="bumped-to"></span></label>
+  <button type="reset">Reset</button>
+</form>
+
+<div class="pager" id="pager-top"></div>
+<table class="posts">
+  <thead><tr id="head"></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="pager" id="pager-bottom"></div>
+
+<div class="lightbox" id="lightbox"><img alt=""></div>
+
+<script>
+'use strict';
+const PAGE_SIZE = 50;
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    n.append(c instanceof Node ? c : String(c));
+  }
+  return n;
+}
+
+const day = (iso) => (iso ? iso.slice(0, 10) : '');
+const dateCell = (iso) => el('td', { class: 'date', title: iso || null }, iso ? day(iso) : el('span', { class: 'muted' }, '—'));
+const fmtBytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
+
+let report = null;
+const selectedVerdicts = new Set();
+let knownVerdicts = [];
+let sort = { key: 'id', dir: -1 };
+let page = 0;
+
+const COLUMNS = [
+  { label: 'Image' },
+  { label: 'ID', key: 'id', dir: -1, get: (p) => p.id },
+  { label: 'Title', key: 'title', dir: 1, get: (p) => (p.title || '').toLowerCase() || null },
+  { label: 'Verdict', key: 'verdict', dir: 1, get: (p) => p.verdict },
+  { label: 'Score', key: 'score', dir: -1, get: (p) => p.score },
+  { label: 'Axis' },
+  { label: 'Created', key: 'created', dir: -1, get: (p) => p.created },
+  { label: 'Last activity', key: 'bumped', dir: -1, get: (p) => p.bumped },
+  { label: 'Judged', key: 'at', dir: -1, get: (p) => p.at },
+  { label: 'Waiting' },
+];
+
+function renderHead() {
+  $('head').replaceChildren(...COLUMNS.map((c) => {
+    if (!c.key) return el('th', {}, c.label);
+    const arrow = sort.key === c.key ? (sort.dir > 0 ? '▲' : '▼') : '';
+    return el('th', {
+      class: 'sortable',
+      title: 'Sort by ' + c.label.toLowerCase(),
+      onclick: () => {
+        sort = sort.key === c.key ? { key: c.key, dir: -sort.dir } : { key: c.key, dir: c.dir };
+        page = 0;
+        render();
+      },
+    }, c.label, ' ', el('span', { class: 'arrow' }, arrow));
+  }));
+}
+
+function renderTop() {
+  const r = report;
+  const total = r.posts.length;
+  $('meta').replaceChildren(
+    `${total} posts judged · ${r.waiting} waiting · last scan ${r.lastScanAt ? r.lastScanAt.replace('T', ' ').slice(0, 16) : 'never'}`
+      + (r.waitingListAt ? ` · waiting list from ${r.waitingListAt.replace('T', ' ').slice(0, 16)}` : ''),
+    el('button', { type: 'button', onclick: load }, 'Reload'),
+  );
+  $('problems').hidden = !r.problems.length;
+  $('problems').textContent = r.problems.join('\n');
+
+  const verdicts = Object.keys(r.verdicts).sort((a, b) => r.verdicts[b] - r.verdicts[a] || a.localeCompare(b));
+  // Keep the selection across reloads; a verdict seen for the first time starts selected.
+  for (const v of verdicts) if (!knownVerdicts.includes(v)) selectedVerdicts.add(v);
+  knownVerdicts = verdicts;
+  $('verdicts').replaceChildren(...verdicts.map((v) => el('label', { class: 'chip' },
+    el('input', {
+      type: 'checkbox', checked: selectedVerdicts.has(v),
+      onchange: (e) => { e.target.checked ? selectedVerdicts.add(v) : selectedVerdicts.delete(v); page = 0; render(); },
+    }),
+    el('span', { class: 'verdict v-' + v }, v), el('b', {}, r.verdicts[v]))));
+
+  const feeds = Object.entries(r.feeds);
+  $('feeds').replaceChildren(...(feeds.length ? feeds.map(([name, f]) => el('tr', {},
+    el('td', {}, el('a', { href: 'https://discuss.eroscripts.com/tag/' + encodeURIComponent(name), target: '_blank', rel: 'noopener' }, name)),
+    el('td', {}, f.backfillPage ?? '—'),
+    el('td', {}, f.exhausted ? 'yes' : 'no'),
+    el('td', { title: f.reached || null }, f.reached ? day(f.reached) : '—'),
+    el('td', {}, f.doneSince ? day(f.doneSince) : '—'),
+  )) : [el('tr', {}, el('td', { colspan: 5, class: 'muted' }, 'No feeds scanned yet'))]));
+}
+
+function filters() {
+  const num = (id) => { const v = $(id).value.trim(); return v === '' ? null : Number(v); };
+  return {
+    words: $('q').value.toLowerCase().split(/\s+/).filter(Boolean).map((w) => w.replace(/^#/, '')),
+    waiting: $('waiting').checked,
+    minScore: num('min-score'),
+    axis: $('axis').value,
+    ranges: ['at', 'created', 'bumped']
+      .map((k) => ({ k, from: $(k + '-from').value, to: $(k + '-to').value }))
+      .filter((r) => r.from || r.to),
+  };
+}
+
+function haystack(p) {
+  if (!p._hay) p._hay = [p.id, p.title, p.author, ...(p.tags || [])].filter((x) => x != null).join(' ').toLowerCase();
+  return p._hay;
+}
+
+function matches(p, f) {
+  if (!selectedVerdicts.has(p.verdict)) return false;
+  if (f.waiting && !p.waiting) return false;
+  if (f.minScore != null && !(p.score >= f.minScore)) return false;
+  if (f.axis && p.axisType !== f.axis) return false;
+  for (const r of f.ranges) {
+    const d = day(p[r.k]);
+    if (!d || (r.from && d < r.from) || (r.to && d > r.to)) return false;
+  }
+  if (f.words.length) {
+    const h = haystack(p);
+    if (!f.words.every((w) => h.includes(w))) return false;
+  }
+  return true;
+}
+
+function sorted(posts) {
+  const col = COLUMNS.find((c) => c.key === sort.key);
+  return posts.slice().sort((a, b) => {
+    const x = col.get(a), y = col.get(b);
+    if (x == null || y == null) return x == null && y == null ? b.id - a.id : x == null ? 1 : -1;
+    const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+    return c * sort.dir || b.id - a.id;
+  });
+}
+
+function thumbCell(p) {
+  if (!p.image || !/^https:\/\//.test(p.image)) return el('td', { class: 'thumb muted' }, '—');
+  return el('td', { class: 'thumb' }, el('img', {
+    src: p.image, loading: 'lazy', alt: '', title: 'Open image',
+    onclick: () => openImage(p.image),
+  }));
+}
+
+function titleCell(p) {
+  const title = el('a', { class: 't', href: p.url, target: '_blank', rel: 'noopener' }, p.title || '#' + p.id);
+  const extra = [];
+  if (p.author) extra.push(el('div', { class: 'muted' }, 'by ' + p.author));
+  const bits = [];
+  if (p.likes != null) bits.push(p.likes + ' likes');
+  if (p.vr) bits.push('VR');
+  if (p.hosts && p.hosts.length) bits.push(p.hosts.join(', '));
+  if (p.gb != null) bits.push(p.gb + ' GB');
+  if (bits.length) extra.push(el('div', { class: 'tags' }, bits.join(' · ')));
+  if (p.tags && p.tags.length) extra.push(el('div', { class: 'tags' }, p.tags.join(', ')));
+  if (p.scenes && p.scenes.length) {
+    extra.push(el('details', {}, el('summary', {}, `${p.scenes.length} scene${p.scenes.length > 1 ? 's' : ''}`),
+      el('ul', {}, p.scenes.map((s) => {
+        const v = s.video || {};
+        const info = [v.host, v.size != null ? fmtBytes(v.size) : null, s.axes && s.axes.length ? 'axes: ' + s.axes.join(', ') : null, s.packed ? 'packed' : null]
+          .filter(Boolean).join(' · ');
+        return el('li', {}, s.base || v.name || '?', info ? el('span', { class: 'muted' }, ' — ' + info) : null);
+      }))));
+  }
+  if (p.rejectedScenes && p.rejectedScenes.length) {
+    extra.push(el('details', {}, el('summary', {}, `${p.rejectedScenes.length} scene${p.rejectedScenes.length > 1 ? 's' : ''} turned down`),
+      el('ul', {}, p.rejectedScenes.map((r) => el('li', {},
+        el('b', {}, r.reason || '?'), ' ', r.video || r.key || '',
+        r.at ? el('span', { class: 'muted' }, ' — ' + day(r.at)) : null)))));
+  }
+  return el('td', { class: 'title' }, title, extra);
+}
+
+function row(p) {
+  return el('tr', {},
+    thumbCell(p),
+    el('td', { class: 'num' }, el('a', { href: p.url, target: '_blank', rel: 'noopener' }, '#' + p.id)),
+    titleCell(p),
+    el('td', {}, el('span', { class: 'verdict v-' + p.verdict, title: p.rules != null ? 'rules v' + p.rules : null }, p.verdict)),
+    el('td', { class: 'num' }, p.score != null ? p.score : ''),
+    el('td', {}, p.axisType || ''),
+    dateCell(p.created),
+    dateCell(p.bumped),
+    dateCell(p.at),
+    el('td', {}, p.waiting ? el('span', { class: 'waiting', title: 'On the waiting list' }, '●') : ''),
+  );
+}
+
+function pager(count, pages) {
+  const go = (n) => () => { page = n; render(); window.scrollTo(0, $('filters').offsetTop); };
+  return [
+    el('span', { class: 'count' }, `${count} post${count === 1 ? '' : 's'} match`),
+    el('button', { type: 'button', disabled: page === 0, onclick: go(0) }, '«'),
+    el('button', { type: 'button', disabled: page === 0, onclick: go(page - 1) }, '‹ Prev'),
+    el('span', {}, `Page ${pages ? page + 1 : 0} of ${pages}`),
+    el('button', { type: 'button', disabled: page >= pages - 1, onclick: go(page + 1) }, 'Next ›'),
+    el('button', { type: 'button', disabled: page >= pages - 1, onclick: go(pages - 1) }, '»'),
+  ];
+}
+
+function render() {
+  if (!report) return;
+  renderHead();
+  const f = filters();
+  const list = sorted(report.posts.filter((p) => matches(p, f)));
+  const pages = Math.ceil(list.length / PAGE_SIZE);
+  page = Math.max(0, Math.min(page, pages - 1));
+  const slice = list.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  $('rows').replaceChildren(...(slice.length ? slice.map(row)
+    : [el('tr', {}, el('td', { colspan: COLUMNS.length, class: 'empty' }, report.posts.length ? 'No post matches the filters' : 'No posts judged yet'))]));
+  $('pager-top').replaceChildren(...pager(list.length, pages));
+  $('pager-bottom').replaceChildren(...pager(list.length, pages));
+}
+
+function openImage(src) {
+  const box = $('lightbox');
+  box.querySelector('img').src = src;
+  box.classList.add('open');
+}
+$('lightbox').addEventListener('click', () => $('lightbox').classList.remove('open'));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('lightbox').classList.remove('open'); });
+
+$('filters').addEventListener('input', () => { page = 0; render(); });
+$('filters').addEventListener('submit', (e) => e.preventDefault());
+$('filters').addEventListener('reset', () => setTimeout(() => {
+  for (const v of knownVerdicts) selectedVerdicts.add(v);
+  page = 0;
+  renderTop();
+  render();
+}));
+$('verdicts-all').addEventListener('click', () => { for (const v of knownVerdicts) selectedVerdicts.add(v); page = 0; renderTop(); render(); });
+$('verdicts-none').addEventListener('click', () => { selectedVerdicts.clear(); page = 0; renderTop(); render(); });
+
+async function load() {
+  try {
+    const res = await fetch('/api/report', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status + ' ' + (await res.text()));
+    report = await res.json();
+    renderTop();
+    render();
+  } catch (e) {
+    $('meta').textContent = 'Could not load the report: ' + e.message;
+  }
+}
+load();
+</script>
+</body>
+</html>

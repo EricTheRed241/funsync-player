@@ -499,7 +499,7 @@ class EroScriptsAPI {
   /**
    * Latest topics with `tag` in the Free Scripts category, one page (30 per
    * page, newest activity first): `{ topics: [{id, title, tags, likes,
-   * created, bumped}], more }`. Used by `npm run eroscripts:scout`.
+   * created, bumped, image}], more }`. Used by `npm run eroscripts:scout`.
    */
   async listFreeTagTopics(tag, page = 0) {
     try {
@@ -518,6 +518,7 @@ class EroScriptsAPI {
         likes: t.like_count || 0,
         created: t.created_at || null,
         bumped: t.bumped_at || null,
+        image: t.image_url || null,
       }));
       return { topics, more: !!list.more_topics_url };
     } catch (err) {

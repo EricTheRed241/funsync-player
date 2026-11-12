@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addLibrarySource, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  staleTopicIds, autoFetchPick, feedProgress, notYetHeld,
+  staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, untitledTopicIds, addPostInfo,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
 } from '../../scripts/eroscripts-scout-lib.mjs';
@@ -731,6 +731,28 @@ describe('scan state', () => {
     state.topics[7].rules = RULES_VERSION - 1;
     expect(seenTopic(state, 7)).toBe(false);
     expect(normalizeScoutState({ version: 99 })).toEqual(emptyScoutState());
+  });
+
+  it('keeps a post\'s title, author, dates and image with its verdict, and keeps them when judged again without', () => {
+    const state = emptyScoutState();
+    const listed = { id: 7, title: 'Tracer rides', created: '2026-10-01T00:00:00Z', bumped: '2026-10-02T00:00:00Z', image: '/uploads/a.jpg' };
+    markTopic(state, 7, 'no-video', 0, RULES_VERSION, postInfo(listed, { post_stream: { posts: [{ username: 'Croove' }] } }));
+    expect(state.topics[7]).toMatchObject({ verdict: 'no-video', title: 'Tracer rides', author: 'Croove', created: '2026-10-01T00:00:00Z', image: 'https://discuss.eroscripts.com/uploads/a.jpg' });
+    markTopic(state, 7, 'candidate');
+    expect(state.topics[7]).toMatchObject({ verdict: 'candidate', title: 'Tracer rides', author: 'Croove' });
+  });
+
+  it('lists judged posts without a title newest first, fills them in without touching the verdict, and skips gone ones', () => {
+    const state = emptyScoutState();
+    markTopic(state, 5, 'excluded', 0);
+    markTopic(state, 9, 'no-video', 0);
+    markTopic(state, 7, 'candidate', 0, RULES_VERSION, { title: 'Has one' });
+    expect(untitledTopicIds(state)).toEqual([9, 5]);
+    addPostInfo(state, 9, { title: 'Kiriko', created_at: '2025-03-01T00:00:00Z', image_url: 'https://cdn/x.webp', post_stream: { posts: [{ username: 'Ent_Duke' }] } });
+    addPostInfo(state, 5, null);
+    expect(state.topics[9]).toMatchObject({ verdict: 'no-video', at: new Date(0).toISOString(), title: 'Kiriko', author: 'Ent_Duke', image: 'https://cdn/x.webp' });
+    expect(state.topics[5].gone).toBe(true);
+    expect(untitledTopicIds(state)).toEqual([]);
   });
 
   // Like feed(), with post `id` last active `id - 100` days after 2025-01-01.
