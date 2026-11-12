@@ -987,7 +987,7 @@ class App {
           console.log(
             `[TCode] Connected on ${this.tcodeManager.portPath} @ ${this.tcodeManager.baudRate} baud`
           );
-          this._registerKnownDevice('tcode', `TCode (${this.tcodeManager.portPath})`, 'tcode');
+          this._registerKnownDevice('tcode', this._tcodeDeviceLabel(), 'tcode');
           this._updateDeviceIndicators();
           this._tryStartTCodeSync();
           this._refreshOrgasmPlan();
@@ -2507,8 +2507,7 @@ class App {
       }
     }
     if (this.tcodeManager?.connected) {
-      const port = this.tcodeManager.portPath || 'serial';
-      devices.push({ kind: 'tcode', label: `TCode (${port})`, offsetMs: offsetFor('tcode') });
+      devices.push({ kind: 'tcode', label: this._tcodeDeviceLabel(), offsetMs: offsetFor('tcode') });
     }
 
     // Tracker still expects the per-kind boolean summary. Derive it from the
@@ -3589,20 +3588,42 @@ class App {
     }
   }
 
+  /** Device list label for the connected TCode transport. */
+  _tcodeDeviceLabel() {
+    if (this.tcodeManager._transportKind === 'remote-serial') return 'TCode (remote serial)';
+    return `TCode (${this.tcodeManager.portPath || 'serial'})`;
+  }
+
   /**
-   * Start-up connect for a saved WebSocket TCode device. Main keeps trying
-   * while it doesn't answer (switched off most of the time is normal), and
-   * the manager's onConnect starts sync once it does. Off after the user
-   * pressed Disconnect (`tcode.autoConnect` false) until they connect again.
+   * Start-up connect for a saved WebSocket or remote-serial TCode device.
+   * Main keeps trying while it doesn't answer (switched off, or the other
+   * computer's browser not attached yet, is normal), and the manager's
+   * onConnect starts sync once it does. Off after the user pressed
+   * Disconnect (`tcode.autoConnect` false) until they connect again.
    */
   async _autoConnectTCode() {
-    const url = this.settings.get('tcode.wsUrl');
-    if (this.settings.get('tcode.transport') !== 'websocket' || !url) return;
     if (this.settings.get('tcode.autoConnect') === false) return;
-    console.log(`[TCode] Auto-connecting to ${url}...`);
-    const success = await this.tcodeManager.connect('websocket', { url });
+    const transport = this.settings.get('tcode.transport');
+    let kind;
+    let opts;
+    let what;
+    if (transport === 'websocket') {
+      const url = this.settings.get('tcode.wsUrl');
+      if (!url) return;
+      kind = 'websocket';
+      opts = { url };
+      what = url;
+    } else if (transport === 'remote-serial') {
+      kind = 'remote-serial';
+      opts = { baudRate: Number(this.settings.get('tcode.remoteBaudRate')) || 115200 };
+      what = `remote serial @ ${opts.baudRate}`;
+    } else {
+      return;
+    }
+    console.log(`[TCode] Auto-connecting to ${what}...`);
+    const success = await this.tcodeManager.connect(kind, opts);
     if (!success && !this.tcodeManager.waiting) {
-      console.warn(`[TCode] Auto-connect to ${url} failed`);
+      console.warn(`[TCode] Auto-connect to ${what} failed`);
     }
   }
 

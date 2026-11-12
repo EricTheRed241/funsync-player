@@ -27,6 +27,7 @@
         <nav class="breadcrumb" id="breadcrumb" aria-label="Location" data-i18n-aria-label="webRemote.header.locationAria" hidden></nav>
       </div>
       <span class="header__count" id="count" aria-live="polite"></span>
+      <button class="header__action icon-btn" id="serialRelayBtn" aria-haspopup="dialog" aria-label="Device on this computer" data-i18n-aria-label="webRemote.serialRelay.title" title="Device on this computer" data-i18n-title="webRemote.serialRelay.title" hidden></button>
       <button class="header__action icon-btn" id="refreshBtn" aria-label="Refresh library" data-i18n-aria-label="webRemote.header.refresh" title="Refresh library" data-i18n-title="webRemote.header.refresh"></button>
     </header>
 
@@ -215,6 +216,39 @@
                    aria-label="New playlist name" data-i18n-aria-label="webRemote.triage.newPlaylistPlaceholder">
             <button type="submit" class="playlist-sheet__create" data-i18n="webRemote.triage.create">Create</button>
           </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- "Device on this computer" sheet: a TCode device plugged into the
+         computer showing this page, opened with Web Serial and driven by
+         the desktop app through the backend relay (serial-relay.js). Shown
+         only where Web Serial exists, or on desktop Chrome / Edge over plain
+         http, where it explains how to allow it. -->
+    <div class="sheet" id="serialRelaySheet" role="dialog" aria-modal="true" aria-labelledby="serialRelaySheetTitle" hidden>
+      <div class="sheet__backdrop" data-close-sheet></div>
+      <div class="sheet__panel" role="document">
+        <div class="sheet__handle" aria-hidden="true"></div>
+        <header class="sheet__header">
+          <h2 class="sheet__title" id="serialRelaySheetTitle" data-i18n="webRemote.serialRelay.title">Device on this computer</h2>
+          <button class="sheet__close icon-btn" data-close-sheet aria-label="Close" data-i18n-aria-label="webRemote.serialRelay.close"></button>
+        </header>
+        <div class="sheet__body">
+          <p class="serial-relay__text" data-i18n="webRemote.serialRelay.intro">Plug a TCode device into this computer and the desktop app drives it through this page. Keep this tab open while playing.</p>
+          <div id="serialRelayInsecure" hidden>
+            <p class="serial-relay__text" data-i18n="webRemote.serialRelay.insecure">Not available on this page: the browser only allows USB devices on secure (https) pages. To allow it for this address, quit Chrome or Edge completely and start it with this flag:</p>
+            <code class="serial-relay__code" id="serialRelayFlag"></code>
+            <p class="serial-relay__text" data-i18n="webRemote.serialRelay.insecureFlags">Or open chrome://flags/#unsafely-treat-insecure-origin-as-secure (edge://flags/#unsafely-treat-insecure-origin-as-secure in Edge), add this address, set it to Enabled and click Relaunch:</p>
+            <code class="serial-relay__code" id="serialRelayOrigin"></code>
+          </div>
+          <div id="serialRelayControls" hidden>
+            <dl class="serial-relay__status" id="serialRelayStatus"></dl>
+            <p class="serial-relay__text serial-relay__text--warn" id="serialRelayNotice" hidden></p>
+            <div class="serial-relay__actions">
+              <button type="button" class="serial-relay__btn serial-relay__btn--primary" id="serialRelayConnect" data-i18n="webRemote.serialRelay.connect">Connect device</button>
+              <button type="button" class="serial-relay__btn" id="serialRelayDisconnect" data-i18n="webRemote.serialRelay.disconnect" hidden>Disconnect</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

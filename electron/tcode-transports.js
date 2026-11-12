@@ -392,6 +392,7 @@ class WebsocketTransport {
     this._lastDrop = null;
     this._nextRetryAt = null;
     this._onStatus = null;
+    this._onMessage = null;
     this._setTimeout = setTimeoutImpl || ((typeof setTimeout !== 'undefined') ? setTimeout : null);
     this._clearTimeout = clearTimeoutImpl || ((typeof clearTimeout !== 'undefined') ? clearTimeout : null);
     this._now = nowImpl || Date.now;
@@ -492,6 +493,12 @@ class WebsocketTransport {
       // undici's ErrorEvent carries no detail and is always followed by a
       // close event; the close handler logs the explained failure.
       ws.onerror = () => {};
+      ws.onmessage = (ev) => {
+        if (this._ws !== ws || !this._onMessage) return;
+        try { this._onMessage(ev?.data); } catch (err) {
+          this._log.debug?.('[TCode/ws] message listener error:', err.message);
+        }
+      };
       ws.onclose = (ev) => {
         if (this._ws !== ws) {
           settle({ success: false, error: 'connection replaced or closed' });
@@ -740,6 +747,9 @@ class WebsocketTransport {
   /** Single subscriber, called with `status()` whenever it changes. */
   onStatus(cb) { this._onStatus = cb; }
 
+  /** Single subscriber, called with the data of every message on the current socket. */
+  onMessage(cb) { this._onMessage = cb; }
+
   _emitStatus() {
     if (!this._onStatus) return;
     try { this._onStatus(this.status()); } catch (err) {
@@ -792,6 +802,7 @@ class WebsocketTransport {
   destroy() {
     this._onDisconnect = null;
     this._onStatus = null;
+    this._onMessage = null;
     this._stopped = true;
     this._clearReconnectTimer();
     this._logStop();
@@ -800,6 +811,250 @@ class WebsocketTransport {
       this._ws = null;
       try { ws.close(); } catch {}
     }
+  }
+}
+
+/** Wait for the first `sink` message after the relay opens before connect() answers. */
+const SINK_WAIT_MS = 1000;
+/** Delay between the sink's port opening and the device-info query (ESP32 boards may reset on open). */
+const DEVICE_INFO_DELAY_MS = 1500;
+
+function usbIdsText(port) {
+  if (!port) return 'usb=?';
+  const hex = (n) => (typeof n === 'number' ? n.toString(16).padStart(4, '0') : '?');
+  return `usb=${hex(port.usbVendorId)}:${hex(port.usbProductId)}`;
+}
+
+class RemoteSerialTransport {
+  /**
+   * TCode over the backend's serial relay: the device hangs off another
+   * computer whose browser (web remote tab, Web Serial) is attached to
+   * the backend as the relay's sink. This side is a `WebsocketTransport`
+   * to `ws://127.0.0.1:<backend>/api/remote/tcode-relay?role=desktop`
+   * (same reconnect plan) plus the sink state the backend reports.
+   * Connected = relay open AND the sink's port open.
+   *
+   * @param opts same test overrides as `WebsocketTransport`.
+   */
+  constructor({
+    log = console, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl,
+    nowImpl, lookupImpl, probeImpl,
+  } = {}) {
+    this._log = log;
+    this._setTimeout = setTimeoutImpl || ((typeof setTimeout !== 'undefined') ? setTimeout : null);
+    this._clearTimeout = clearTimeoutImpl || ((typeof clearTimeout !== 'undefined') ? clearTimeout : null);
+    this._now = nowImpl || Date.now;
+    this._relay = new WebsocketTransport({
+      log, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, nowImpl, lookupImpl, probeImpl,
+    });
+    this._relay.onStatus(() => this._onRelayStatus());
+    this._relay.onMessage((data) => this._onRelayMessage(data));
+    this._relay.onDisconnect(() => {
+      this._clearInfoTimer();
+      if (this._onDisconnect) this._onDisconnect();
+    });
+    this._url = null;
+    this._baudRate = 115200;
+    this._stopped = true;
+    this._relayOpen = false;
+    this._sink = null;
+    this._hasEverConnected = false;
+    this._downSince = null;
+    this._infoTimer = null;
+    this._sinkWaiter = null;
+    this._lastKey = null;
+    this._onStatus = null;
+    this._onDisconnect = null;
+  }
+
+  async connect({ url, baudRate } = {}) {
+    this._url = url;
+    const baud = Number(baudRate);
+    this._baudRate = Number.isFinite(baud) && baud > 0 ? baud : 115200;
+    this._stopped = false;
+    this._relayOpen = false;
+    this._sink = null;
+    this._hasEverConnected = false;
+    this._downSince = null;
+    this._lastKey = null;
+    this._clearInfoTimer();
+    const sinkSeen = new Promise((resolve) => { this._sinkWaiter = resolve; });
+    const res = await this._relay.connect({ url });
+    if (!res.success) {
+      this._sinkWaiter = null;
+      if (res.retrying) return { success: false, retrying: true, error: `waiting for backend: ${res.error}` };
+      this._stopped = true;
+      this._emitStatus();
+      return res;
+    }
+    if (!this._sink && this._setTimeout) {
+      let timer;
+      await Promise.race([
+        sinkSeen,
+        new Promise((resolve) => { timer = this._setTimeout(resolve, SINK_WAIT_MS); }),
+      ]);
+      if (this._clearTimeout) this._clearTimeout(timer);
+    }
+    this._sinkWaiter = null;
+    if (this.connected) return { success: true };
+    if (this._stopped) return { success: false, error: 'stopped' };
+    return { success: false, retrying: true, error: `waiting for ${this._waitingFor()}` };
+  }
+
+  _onRelayStatus() {
+    const open = this._relay.connected;
+    if (open && !this._relayOpen) {
+      this._relayOpen = true;
+      this._relay.send(JSON.stringify({ type: 'config', baudRate: this._baudRate }));
+    } else if (!open && this._relayOpen) {
+      this._relayOpen = false;
+      this._sink = null;
+      this._clearInfoTimer();
+    }
+    this._emitStatus();
+  }
+
+  _onRelayMessage(data) {
+    let msg;
+    try { msg = JSON.parse(typeof data === 'string' ? data : String(data)); } catch {
+      this._log.debug?.('[TCode/remote-serial] Ignoring non-JSON relay message');
+      return;
+    }
+    if (msg?.type === 'sink') this._onSink(msg);
+    else if (msg?.type === 'reply') this._log.info?.(`[TCode/remote-serial] Device: ${msg.text}`);
+  }
+
+  _onSink(msg) {
+    const prev = this._sink;
+    const sink = {
+      attached: !!msg.attached,
+      ip: msg.ip ?? null,
+      portOpen: !!msg.attached && !!msg.portOpen,
+      port: msg.port ?? null,
+      baudRate: msg.baudRate ?? null,
+      since: msg.since ?? null,
+    };
+    this._sink = sink;
+    const wasAttached = !!prev?.attached;
+    const wasOpen = !!prev?.portOpen;
+    if (sink.attached && !wasAttached) this._log.info?.(`[TCode/remote-serial] Browser attached ip=${sink.ip ?? '?'}`);
+    if (!sink.attached && wasAttached) this._log.info?.(`[TCode/remote-serial] Browser detached ip=${prev.ip ?? '?'}`);
+    if (sink.portOpen && !wasOpen) {
+      this._log.info?.(`[TCode/remote-serial] Device port opened ${usbIdsText(sink.port)} baud=${sink.baudRate ?? '?'}`);
+      this._scheduleDeviceInfo();
+    } else if (!sink.portOpen && wasOpen) {
+      this._log.info?.(`[TCode/remote-serial] Device port closed ${usbIdsText(prev.port)}`);
+      this._clearInfoTimer();
+    }
+    if (this._sinkWaiter) this._sinkWaiter();
+    this._emitStatus();
+  }
+
+  _scheduleDeviceInfo() {
+    this._clearInfoTimer();
+    if (!this._setTimeout) return;
+    this._infoTimer = this._setTimeout(() => {
+      this._infoTimer = null;
+      if (!this.connected) return;
+      this._relay.send('D1\n');
+      this._relay.send('D2\n');
+    }, DEVICE_INFO_DELAY_MS);
+  }
+
+  _clearInfoTimer() {
+    if (this._infoTimer && this._clearTimeout) this._clearTimeout(this._infoTimer);
+    this._infoTimer = null;
+  }
+
+  _waitingFor() {
+    if (!this._relayOpen) return 'backend';
+    if (!this._sink?.attached) return 'browser';
+    if (!this._portReady()) return 'port';
+    return null;
+  }
+
+  _state() {
+    if (this._stopped || !this._url) return 'stopped';
+    if (this.connected) return 'connected';
+    if (this._hasEverConnected) return 'reconnecting';
+    const relayState = this._relay.status().state;
+    return relayState === 'connecting' ? 'connecting' : 'waiting';
+  }
+
+  /** Snapshot for the status API and the desktop UI (shape in the relay contract). */
+  status() {
+    const r = this._relay.status();
+    const state = this._state();
+    return {
+      transport: 'remote-serial',
+      state,
+      url: this._url,
+      relay: r.state,
+      waitingFor: state === 'stopped' || state === 'connected' ? null : this._waitingFor(),
+      sink: this._sink ? { ...this._sink } : null,
+      downSince: this._downSince == null ? null : new Date(this._downSince).toISOString(),
+      attempts: r.attempts,
+      lastError: r.lastError,
+      lastDisconnect: r.lastDisconnect,
+      sent: r.sent,
+    };
+  }
+
+  onStatus(cb) { this._onStatus = cb; }
+
+  _emitStatus() {
+    if (this.connected) {
+      this._hasEverConnected = true;
+      this._downSince = null;
+    } else if (this._hasEverConnected && this._downSince == null && !this._stopped) {
+      this._downSince = this._now();
+    }
+    if (!this._onStatus) return;
+    const st = this.status();
+    const key = JSON.stringify([st.state, st.relay, st.waitingFor, st.sink, st.attempts, st.lastError]);
+    if (key === this._lastKey) return;
+    this._lastKey = key;
+    try { this._onStatus(st); } catch (err) {
+      this._log.debug?.('[TCode/remote-serial] status listener error:', err.message);
+    }
+  }
+
+  async disconnect() {
+    this._stopped = true;
+    this._clearInfoTimer();
+    this._relayOpen = false;
+    this._sink = null;
+    if (this._sinkWaiter) this._sinkWaiter();
+    await this._relay.disconnect();
+    this._emitStatus();
+  }
+
+  send(command) {
+    if (!this.connected) return false;
+    return this._relay.send(command);
+  }
+
+  get connected() { return !this._stopped && this._relay.connected && this._portReady(); }
+
+  /**
+   * The sink's port is open at our baud rate. Right after a (re)connect
+   * with a new baud the tab reports its port open at the old one until our
+   * `config` makes it reopen; lines sent then would be garbled.
+   */
+  _portReady() {
+    const s = this._sink;
+    return !!s?.portOpen && (s.baudRate == null || s.baudRate === this._baudRate);
+  }
+
+  onDisconnect(cb) { this._onDisconnect = cb; }
+
+  destroy() {
+    this._onStatus = null;
+    this._onDisconnect = null;
+    this._stopped = true;
+    this._clearInfoTimer();
+    if (this._sinkWaiter) this._sinkWaiter();
+    this._relay.destroy();
   }
 }
 
@@ -814,6 +1069,7 @@ function createTransport(kind, opts = {}) {
     case 'websocket':
     case 'ws':
       return new WebsocketTransport(opts);
+    case 'remote-serial': return new RemoteSerialTransport(opts);
     default:
       throw new Error(`Unknown TCode transport: ${kind}`);
   }
@@ -823,5 +1079,6 @@ module.exports = {
   SerialTransport,
   UdpTransport,
   WebsocketTransport,
+  RemoteSerialTransport,
   createTransport,
 };

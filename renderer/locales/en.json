@@ -1413,6 +1413,31 @@
       "emptyBodyAutoFillOff": "Add videos with the queue button, or turn on auto-fill.",
       "loadFailedTitle": "Couldn't load the queue",
       "loadFailedBody": "Check that FunSync is running on your desktop, then try again."
+    },
+    "serialRelay": {
+      "title": "Device on this computer",
+      "close": "Close",
+      "intro": "Plug a TCode device into this computer and the desktop app drives it through this page. Keep this tab open while playing.",
+      "insecure": "Not available on this page: the browser only allows USB devices on secure (https) pages. To allow it for this address, quit Chrome or Edge completely and start it with this flag:",
+      "insecureFlags": "Or open chrome://flags/#unsafely-treat-insecure-origin-as-secure (edge://flags/#unsafely-treat-insecure-origin-as-secure in Edge), add this address, set it to Enabled and click Relaunch:",
+      "relayLabel": "Desktop link",
+      "relay": {
+        "off": "Not connected",
+        "connecting": "Connecting…",
+        "open": "Connected"
+      },
+      "portLabel": "Device",
+      "port": {
+        "none": "No device selected",
+        "open": "Open",
+        "closed": "Closed"
+      },
+      "baudLabel": "Baud rate",
+      "usbLabel": "USB ID",
+      "connect": "Connect device",
+      "disconnect": "Disconnect",
+      "kicked": "Another browser took over the device. Connect again to use it here.",
+      "error": "Error: {message}"
     }
   },
   "eroscripts": {
@@ -1708,7 +1733,14 @@
       "errSelectPort": "Select a port",
       "errEnterHost": "Enter a host",
       "errInvalidPort": "Enter a valid port (1-65535)",
-      "errInvalidUrl": "URL must start with ws:// or wss://"
+      "errInvalidUrl": "URL must start with ws:// or wss://",
+      "transportRemoteSerial": "Serial on another computer (browser relay)",
+      "remoteHint": "On the computer with the device, open {url} in Chrome or Edge started with --unsafely-treat-insecure-origin-as-secure={origin} (or add {origin} at chrome://flags/#unsafely-treat-insecure-origin-as-secure), then Device on this computer → Connect device.",
+      "remoteHintBackendDown": "Backend not running: can't show the address to open on the other computer.",
+      "remoteConnected": "Connected via browser at {ip}",
+      "remoteWaitingBackend": "Waiting for the backend…",
+      "remoteWaitingBrowser": "Waiting for the browser on the other computer…",
+      "remoteWaitingPort": "Browser at {ip} attached; waiting for the device port…"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",

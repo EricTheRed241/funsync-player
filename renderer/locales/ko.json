@@ -945,6 +945,31 @@
       "emptyBodyAutoFillOff": "대기열 버튼으로 동영상을 추가하거나 자동 채우기를 켜세요.",
       "loadFailedTitle": "대기열을 불러오지 못했습니다",
       "loadFailedBody": "데스크톱에서 FunSync가 실행 중인지 확인한 뒤 다시 시도하세요."
+    },
+    "serialRelay": {
+      "title": "이 컴퓨터의 기기",
+      "close": "닫기",
+      "intro": "이 컴퓨터에 TCode 기기를 연결하면 데스크톱 앱이 이 페이지를 통해 기기를 제어합니다. 재생 중에는 이 탭을 열어 두세요.",
+      "insecure": "이 페이지에서는 사용할 수 없습니다: 브라우저는 보안(https) 페이지에서만 USB 기기를 허용합니다. 이 주소에서 허용하려면 Chrome 또는 Edge를 완전히 종료한 뒤 다음 플래그로 실행하세요:",
+      "insecureFlags": "또는 chrome://flags/#unsafely-treat-insecure-origin-as-secure (Edge는 edge://flags/#unsafely-treat-insecure-origin-as-secure)를 열고 이 주소를 추가한 뒤 Enabled로 설정하고 Relaunch를 클릭하세요:",
+      "relayLabel": "데스크톱 연결",
+      "relay": {
+        "off": "연결 안 됨",
+        "connecting": "연결 중…",
+        "open": "연결됨"
+      },
+      "portLabel": "기기",
+      "port": {
+        "none": "선택된 기기 없음",
+        "open": "열림",
+        "closed": "닫힘"
+      },
+      "baudLabel": "전송 속도",
+      "usbLabel": "USB ID",
+      "connect": "기기 연결",
+      "disconnect": "연결 해제",
+      "kicked": "다른 브라우저가 기기를 가져갔습니다. 여기서 사용하려면 다시 연결하세요.",
+      "error": "오류: {message}"
     }
   },
   "hevc": {
@@ -1631,7 +1656,14 @@
       "errSelectPort": "포트를 선택하세요",
       "errEnterHost": "호스트를 입력하세요",
       "errInvalidPort": "유효한 포트를 입력하세요 (1-65535)",
-      "errInvalidUrl": "URL은 ws:// 또는 wss://로 시작해야 합니다"
+      "errInvalidUrl": "URL은 ws:// 또는 wss://로 시작해야 합니다",
+      "transportRemoteSerial": "다른 컴퓨터의 시리얼 (브라우저 릴레이)",
+      "remoteHint": "기기가 연결된 컴퓨터에서 --unsafely-treat-insecure-origin-as-secure={origin} 옵션으로 실행한 Chrome 또는 Edge로 {url} 을(를) 연 다음 (또는 chrome://flags/#unsafely-treat-insecure-origin-as-secure 에 {origin} 추가), 이 컴퓨터의 기기 → 기기 연결을 누르세요.",
+      "remoteHintBackendDown": "백엔드가 실행 중이 아닙니다: 다른 컴퓨터에서 열 주소를 표시할 수 없습니다.",
+      "remoteConnected": "{ip} 의 브라우저를 통해 연결됨",
+      "remoteWaitingBackend": "백엔드를 기다리는 중…",
+      "remoteWaitingBrowser": "다른 컴퓨터의 브라우저를 기다리는 중…",
+      "remoteWaitingPort": "{ip} 의 브라우저 연결됨; 기기 포트를 기다리는 중…"
     },
     "sync": {
       "experimental": "실험적",

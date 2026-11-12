@@ -945,6 +945,31 @@
       "emptyBodyAutoFillOff": "キューボタンで動画を追加するか、自動補充をオンにしてください。",
       "loadFailedTitle": "キューを読み込めませんでした",
       "loadFailedBody": "デスクトップで FunSync が起動しているか確認して、もう一度お試しください。"
+    },
+    "serialRelay": {
+      "title": "このコンピューターのデバイス",
+      "close": "閉じる",
+      "intro": "このコンピューターに TCode デバイスを接続すると、デスクトップアプリがこのページ経由で操作します。再生中はこのタブを開いたままにしてください。",
+      "insecure": "このページでは使用できません: ブラウザーは安全な (https) ページでのみ USB デバイスを許可します。このアドレスで許可するには、Chrome または Edge を完全に終了し、次のフラグを付けて起動してください:",
+      "insecureFlags": "または chrome://flags/#unsafely-treat-insecure-origin-as-secure (Edge では edge://flags/#unsafely-treat-insecure-origin-as-secure) を開き、このアドレスを追加して Enabled にし、Relaunch をクリックしてください:",
+      "relayLabel": "デスクトップとの接続",
+      "relay": {
+        "off": "未接続",
+        "connecting": "接続中…",
+        "open": "接続済み"
+      },
+      "portLabel": "デバイス",
+      "port": {
+        "none": "デバイスが選択されていません",
+        "open": "オープン",
+        "closed": "クローズ"
+      },
+      "baudLabel": "ボーレート",
+      "usbLabel": "USB ID",
+      "connect": "デバイスを接続",
+      "disconnect": "切断",
+      "kicked": "別のブラウザーがデバイスを引き継ぎました。ここで使うには再度接続してください。",
+      "error": "エラー: {message}"
     }
   },
   "hevc": {
@@ -1631,7 +1656,14 @@
       "errSelectPort": "ポートを選択してください",
       "errEnterHost": "ホストを入力してください",
       "errInvalidPort": "有効なポートを入力してください (1-65535)",
-      "errInvalidUrl": "URL は ws:// または wss:// で始まる必要があります"
+      "errInvalidUrl": "URL は ws:// または wss:// で始まる必要があります",
+      "transportRemoteSerial": "別のコンピューターのシリアル (ブラウザー中継)",
+      "remoteHint": "デバイスを接続したコンピューターで、--unsafely-treat-insecure-origin-as-secure={origin} を付けて起動した Chrome または Edge で {url} を開き (または chrome://flags/#unsafely-treat-insecure-origin-as-secure に {origin} を追加)、「このコンピューターのデバイス」→「デバイスを接続」を選んでください。",
+      "remoteHintBackendDown": "バックエンドが起動していません: 別のコンピューターで開くアドレスを表示できません。",
+      "remoteConnected": "{ip} のブラウザー経由で接続済み",
+      "remoteWaitingBackend": "バックエンドを待っています…",
+      "remoteWaitingBrowser": "別のコンピューターのブラウザーを待っています…",
+      "remoteWaitingPort": "{ip} のブラウザーが接続されました。デバイスのポートを待っています…"
     },
     "sync": {
       "experimental": "実験的",
