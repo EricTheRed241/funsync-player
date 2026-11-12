@@ -1,26 +1,11 @@
-//! The userData folder and, read only, the library sources from the app's
-//! `config.json` (`settings.library.sources[].path`), used to name videos by
-//! their path inside a source. Errors never quote the file: it holds the
-//! EroScripts session cookie.
+//! Read only, the library sources from the app's `config.json`
+//! (`settings.library.sources[].path`), used to name videos by their path
+//! inside a source. Errors never quote the file: it holds the EroScripts
+//! session cookie. (The userData default: `video_tags::host`.)
 
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
-
-/// Electron's userData folder for the app (`app.getPath('userData')`).
-pub fn default_user_data() -> Option<PathBuf> {
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
-    let base = if cfg!(target_os = "macos") {
-        home()?.join("Library/Application Support")
-    } else if cfg!(windows) {
-        PathBuf::from(std::env::var_os("APPDATA")?)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| Some(home()?.join(".config")))?
-    };
-    Some(base.join("funsync-player"))
-}
+use std::path::Path;
 
 /// The library source folders; empty when `config.json` is missing or
 /// lists none (titles then fall back to the last path segments).

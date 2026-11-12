@@ -7,6 +7,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod host;
 pub mod plan;
 pub mod proposals;
 pub mod rescan;
@@ -33,21 +34,6 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     }
 }
 
-/// Electron's userData folder for the app (`app.getPath('userData')`).
-pub fn default_user_data() -> Option<PathBuf> {
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
-    let base = if cfg!(target_os = "macos") {
-        home()?.join("Library/Application Support")
-    } else if cfg!(windows) {
-        PathBuf::from(std::env::var_os("APPDATA")?)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| Some(home()?.join(".config")))?
-    };
-    Some(base.join("funsync-player"))
-}
-
 fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Result<i32, String> {
     let opts = cli::parse(args)?;
     if opts.help {
@@ -56,7 +42,9 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
     }
     let user_data = match opts.user_data.clone() {
         Some(dir) => dir,
-        None => default_user_data().ok_or("can't find the userData folder; pass --user-data")?,
+        None => {
+            host::default_user_data().ok_or("can't find the userData folder; pass --user-data")?
+        }
     };
     if !user_data.is_dir() {
         return Err(format!("{} is not a folder", user_data.display()));
@@ -178,7 +166,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
                 .map(|c| c.backend_port)
                 .unwrap_or(config::DEFAULT_BACKEND_PORT),
         };
-        match rescan::request_rescan(port, rescan::TIMEOUT) {
+        match rescan::request_rescan(&host::backend_url(port), rescan::TIMEOUT) {
             Ok(status) => writeln!(out, "Rescan requested from the app ({status}).").map_err(io)?,
             Err(e) => writeln!(
                 out,

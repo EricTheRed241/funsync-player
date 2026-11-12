@@ -1,0 +1,16 @@
+# The native desktop app's backend (Electron spawns it on the Mac, 0.0.0.0:5123)
+# as a name inside the cluster: jobs use http://funsync-app:5123
+# (FUNSYNC_BACKEND_URL) for status, rescans, ratings and playlists. The app is
+# the access point to the devices and the headset; the cluster only reaches it
+# through this Service. host.docker.internal is Docker Desktop's name for the Mac.
+apiVersion: v1
+kind: Service
+metadata:
+  name: funsync-app
+  labels: {app.kubernetes.io/part-of: funsync}
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - name: http
+      port: 5123

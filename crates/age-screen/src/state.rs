@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use video_tags::host::{self, LockError, PidLock};
 
 pub const FILE_NAME: &str = "age-screen.json";
 pub const BACKUP_NAME: &str = "age-screen.json.bak";
@@ -145,72 +145,26 @@ pub fn is_due(last_run: Option<&str>, now_ms: i64, interval_days: f64) -> bool {
     (now_ms - last) as f64 >= interval_days * 86_400_000.0
 }
 
-/// `age-screen.lock` holding this process's pid; removed on drop.
-#[derive(Debug)]
-pub struct Lock {
-    path: PathBuf,
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-/// Take the lock. A lock whose pid is no longer running (or unreadable) is
-/// stale and taken over; a live one is an error.
-pub fn lock(user_data: &Path) -> Result<Lock, String> {
+/// Take `age-screen.lock` (`<pid>@<host>`, removed on drop). A lock whose
+/// run has ended (this host: its pid is gone; another host: older than
+/// `FOREIGN_LOCK_MAX_AGE`) or that is unreadable is stale and taken over;
+/// a live one is an error.
+pub fn lock(user_data: &Path) -> Result<PidLock, String> {
     let path = user_data.join(LOCK_NAME);
-    for _ in 0..3 {
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut f) => {
-                f.write_all(std::process::id().to_string().as_bytes())
-                    .map_err(|e| format!("{}: {e}", path.display()))?;
-                return Ok(Lock { path });
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let holder = fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|s| s.trim().parse::<u32>().ok());
-                match holder {
-                    Some(pid) if pid_alive(pid) => {
-                        return Err(format!(
-                            "another age-screen run (pid {pid}) holds {}",
-                            path.display()
-                        ));
-                    }
-                    _ => {
-                        let _ = fs::remove_file(&path);
-                    }
-                }
-            }
-            Err(e) => return Err(format!("{}: {e}", path.display())),
+    host::take_lock(&path).map_err(|e| match e {
+        LockError::Held(holder) => {
+            format!("another age-screen run ({holder}) holds {}", path.display())
         }
-    }
-    Err(format!("can't take {}", path.display()))
-}
-
-/// Whether a process with this pid runs (`kill -0`).
-pub fn pid_alive(pid: u32) -> bool {
-    if pid == std::process::id() {
-        return true;
-    }
-    Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+        LockError::Io(m) => m,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use std::time::{Duration, SystemTime};
+    use video_tags::host::LockHolder;
 
     fn temp(name: &str) -> PathBuf {
         let dir =
@@ -236,7 +190,7 @@ mod tests {
     fn a_stale_lock_is_taken_over_and_a_live_one_refused() {
         let dir = temp("lock");
         let lock_path = dir.join(LOCK_NAME);
-        // A pid that has exited.
+        // A pid that has exited, in the old format (no host): this host's.
         let mut child = Command::new("true").spawn().unwrap();
         let dead = child.id();
         child.wait().unwrap();
@@ -244,7 +198,7 @@ mod tests {
         let held = lock(&dir).unwrap();
         assert_eq!(
             fs::read_to_string(&lock_path).unwrap(),
-            std::process::id().to_string()
+            LockHolder::me().to_text()
         );
         // Held by a live process (this one): refused, left in place.
         assert!(lock(&dir).unwrap_err().contains("another age-screen run"));
@@ -252,6 +206,21 @@ mod tests {
         assert!(!lock_path.exists());
         // Garbage in the file counts as stale.
         fs::write(&lock_path, "not a pid").unwrap();
+        drop(lock(&dir).unwrap());
+        // Another host's (a pod's, the Mac's): its pid is never checked here;
+        // held for 12 hours, then stale.
+        fs::write(&lock_path, format!("{dead}@some-other-host")).unwrap();
+        let err = lock(&dir).unwrap_err();
+        assert!(
+            err.contains(&format!("pid {dead} on some-other-host")),
+            "{err}"
+        );
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&lock_path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(13 * 3600))
+            .unwrap();
         drop(lock(&dir).unwrap());
         let _ = fs::remove_dir_all(&dir);
     }

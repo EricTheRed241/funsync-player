@@ -1,0 +1,63 @@
+# Pornstar tags (PR #132), daily (was the watchdog's pornstar_tick): writes
+# <userData>/pornstar-tags.json and asks the app to rescan when tags change.
+# Local only, seconds.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pornstar-tags
+  labels: {app.kubernetes.io/part-of: funsync, funsync/job: pornstar-tags}
+spec:
+  schedule: "0 19 * * *"
+  timeZone: America/Toronto
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 72000
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    metadata:
+      labels: {app.kubernetes.io/part-of: funsync, funsync/job: pornstar-tags}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 1209600
+      template:
+        metadata:
+          labels: {app.kubernetes.io/part-of: funsync, funsync/job: pornstar-tags}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: pornstar-tags
+              image: funsync-runner:current
+              imagePullPolicy: Never
+              args:
+                - "pornstar-tags"
+                - "--apply"
+              env:
+                - name: TZ
+                  value: "America/Toronto"
+                - name: HOME
+                  value: "/home/runner"
+                - name: FUNSYNC_USER_DATA
+                  value: "/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: FUNSYNC_BACKEND_URL
+                  value: "http://funsync-app:5123"
+                - name: FUNSYNC_REQUIRE_PATHS
+                  value: "/Volumes/2TB-AGENTS/GVP:/Users/classicus-gvp/Library/Application Support/funsync-player"
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 256Mi}
+              volumeMounts:
+                - name: library
+                  mountPath: "/Volumes/2TB-AGENTS/GVP"
+                - name: userdata
+                  mountPath: "/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: home
+                  mountPath: "/home/runner"
+          volumes:
+            - name: library
+              hostPath: {path: "/Volumes/2TB-AGENTS/GVP", type: Directory}
+            - name: userdata
+              hostPath: {path: "/Users/classicus-gvp/Library/Application Support/funsync-player", type: Directory}
+            - name: home
+              emptyDir: {}

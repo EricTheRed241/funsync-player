@@ -1,0 +1,18 @@
+# Build context for deploy/k8s/Dockerfile (the jobs image): code only.
+**/node_modules
+target
+backend
+tests
+bench
+docs
+notes
+assets
+.git
+.claude
+**/.DS_Store
+**/._*
+*.log
+# Secrets never go into the image (Kubernetes Secrets instead).
+slr_creds.txt
+*creds*.txt
+vb_hack.txt

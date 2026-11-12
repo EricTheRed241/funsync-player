@@ -129,8 +129,17 @@ fn height(image: &Path) -> u32 {
     String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
 }
 
+/// The binary with no FUNSYNC_* variables inherited from the test's
+/// environment.
+fn command() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_age-screen"));
+    c.env_remove("FUNSYNC_USER_DATA")
+        .env_remove("FUNSYNC_BACKEND_URL");
+    c
+}
+
 fn run(user_data: &Path, judge_out: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_age-screen"))
+    command()
         .arg("--user-data")
         .arg(user_data)
         .args(args)
@@ -394,4 +403,58 @@ fn backend_down_exits_2_and_help_works() {
     let o = run(&tmp.0, &tmp.0, &["--list"]);
     assert_eq!(o.status.code(), Some(0));
     assert!(text(&o).contains("No videos screened yet"));
+}
+
+#[test]
+fn env_vars_set_the_defaults_and_flags_win() {
+    let tmp = TempDir::new();
+    let (url, posts) = fake_backend(json!([]), json!({}));
+    let dead = format!(
+        "http://127.0.0.1:{}",
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    );
+
+    // FUNSYNC_BACKEND_URL is the backend when --backend isn't given.
+    let o = command()
+        .args(["--run", "--user-data"])
+        .arg(&tmp.0)
+        .env("FUNSYNC_BACKEND_URL", format!("{url}/"))
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("0 video(s) in the library"));
+    assert!(posts.lock().unwrap().is_empty());
+
+    // --backend wins over it.
+    let o = command()
+        .args(["--run", "--backend", &dead, "--user-data"])
+        .arg(&tmp.0)
+        .env("FUNSYNC_BACKEND_URL", &url)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    assert!(text(&o).contains("is FunSync running?"));
+
+    // FUNSYNC_USER_DATA is the userData when --user-data isn't given, and
+    // --user-data wins over it.
+    let missing = tmp.0.join("no-such-userData");
+    let o = command()
+        .arg("--list")
+        .env("FUNSYNC_USER_DATA", &missing)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(text(&o).contains("no-such-userData is not a folder"));
+    let o = command()
+        .args(["--list", "--user-data"])
+        .arg(&tmp.0)
+        .env("FUNSYNC_USER_DATA", &missing)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("No flagged videos."), "{}", text(&o));
 }

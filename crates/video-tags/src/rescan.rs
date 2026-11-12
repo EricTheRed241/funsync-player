@@ -1,18 +1,21 @@
-//! Ask the running app to rescan (`POST /api/remote/request-rescan` on the
-//! local backend; the desktop polls the counter and rescans, merging the new
-//! file). Raw HTTP/1.1 over a TcpStream: one local request needs no HTTP
-//! crate.
+//! Ask the running app to rescan (`POST /api/remote/request-rescan` on its
+//! backend, [`crate::host::backend_url`]; the desktop polls the counter and
+//! rescans, merging the new file). Raw HTTP/1.1 over a TcpStream: one
+//! request needs no HTTP crate.
 
+use crate::host::HttpBase;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::TcpStream;
 use std::time::Duration;
 
 pub const PATH: &str = "/api/remote/request-rescan";
 pub const TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Send the request; `Ok(status line)` on a 2xx answer.
-pub fn request_rescan(port: u16, timeout: Duration) -> Result<String, String> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+/// Send the request to the backend at `base` (`http://host:port`);
+/// `Ok(status line)` on a 2xx answer.
+pub fn request_rescan(base: &str, timeout: Duration) -> Result<String, String> {
+    let base = HttpBase::parse(base)?;
+    let addr = base.resolve()?;
     let mut stream =
         TcpStream::connect_timeout(&addr, timeout).map_err(|e| format!("{addr}: {e}"))?;
     stream
@@ -22,7 +25,8 @@ pub fn request_rescan(port: u16, timeout: Duration) -> Result<String, String> {
         .set_write_timeout(Some(timeout))
         .map_err(|e| e.to_string())?;
     let request = format!(
-        "POST {PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        "POST {PATH} HTTP/1.1\r\nHost: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        base.host
     );
     stream
         .write_all(request.as_bytes())
@@ -56,34 +60,44 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
-    fn serve_once(answer: &'static str) -> (u16, thread::JoinHandle<String>) {
+    /// Answer one request; the server returns the request's first line and
+    /// its Host header.
+    fn serve_once(answer: &'static str) -> (String, thread::JoinHandle<(String, String)>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://{}", listener.local_addr().unwrap());
         let handle = thread::spawn(move || {
             let (mut conn, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(conn.try_clone().unwrap());
             let mut first = String::new();
-            BufReader::new(&conn).read_line(&mut first).unwrap();
+            reader.read_line(&mut first).unwrap();
+            let mut host = String::new();
+            reader.read_line(&mut host).unwrap();
             conn.write_all(answer.as_bytes()).unwrap();
-            first
+            (first, host)
         });
-        (port, handle)
+        (url, handle)
     }
 
     #[test]
     fn posts_to_the_rescan_endpoint() {
-        let (port, server) = serve_once("HTTP/1.1 200 OK\r\ncontent-length: 9\r\n\r\n{\"seq\":3}");
+        let (url, server) = serve_once("HTTP/1.1 200 OK\r\ncontent-length: 9\r\n\r\n{\"seq\":3}");
         assert_eq!(
-            request_rescan(port, TIMEOUT),
+            request_rescan(&format!("{url}/"), TIMEOUT),
             Ok("HTTP/1.1 200 OK".to_string())
         );
-        assert_eq!(server.join().unwrap(), format!("POST {PATH} HTTP/1.1\r\n"));
+        let (first, host) = server.join().unwrap();
+        assert_eq!(first, format!("POST {PATH} HTTP/1.1\r\n"));
+        assert_eq!(
+            host,
+            format!("Host: {}\r\n", url.trim_start_matches("http://"))
+        );
     }
 
     #[test]
     fn reports_an_error_status_or_no_backend() {
-        let (port, server) = serve_once("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n");
+        let (url, server) = serve_once("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n");
         assert!(
-            request_rescan(port, TIMEOUT)
+            request_rescan(&url, TIMEOUT)
                 .unwrap_err()
                 .ends_with("HTTP/1.1 404 Not Found")
         );
@@ -94,6 +108,7 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        assert!(request_rescan(port, TIMEOUT).is_err());
+        assert!(request_rescan(&format!("http://127.0.0.1:{port}"), TIMEOUT).is_err());
+        assert!(request_rescan("https://127.0.0.1:1", TIMEOUT).is_err());
     }
 }

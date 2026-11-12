@@ -45,11 +45,12 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 
 const lib = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, ensureLibrarySource, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
-const { createPacer, defaultUserDataDir, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
+const { createPacer, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
+const { defaultUserDataDir, describeHolder, takePidLock } = await import('./host-env.mjs');
 const live = await import('./scout-live.mjs');
 const streams = await import('./stream-hosts.mjs');
 const vrbHost = await import('./vrbangers-host.mjs');
-const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError } = await import('./vrbangers-browser.mjs');
+const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError, browserOptions } = await import('./vrbangers-browser.mjs');
 const { redactUrl } = await import('./vrbangers-lib.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
@@ -97,7 +98,7 @@ Download:
                          vrbangers.com scenes come from the paid account through headless Google Chrome (logged in
                          once per pass; ≤ 8K, the planned file); with --dry-run the signed link is resolved and
                          probed for 1 byte instead
-  --vrb-credentials <f>  VRBangers account file (default: ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
+  --vrb-credentials <f>  VRBangers account file (default: $FUNSYNC_VRB_CREDENTIALS, else ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
 By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
                          their pages and instructions (with --ids: only those posts); no login needed
@@ -112,11 +113,11 @@ Status:
   --status               print the scan state without going online: backfill per feed (page and oldest last
                          activity reached), verdicts, posts judged under older rules, the waiting list
 Both:
-  --user-data <dir>      app data folder (default: the desktop app's)
+  --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
 
 function parseArgs(argv) {
-  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs'), vrbCredentials: VRB_CREDENTIALS };
+  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs'), vrbCredentials: browserOptions().credentialsFile };
   const value = (i, flag) => {
     if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
     return argv[i + 1];
@@ -986,26 +987,12 @@ async function daily(opts, ctx) {
 /**
  * One forum run at a time (scan, --add, --fetch, --daily): they all rewrite the
  * scan state and the list. Null when this run holds `<userData>/eroscripts-scout.lock`
- * (freed at exit), else the pid of the live run that does. A lock left by a
- * dead run is taken over.
+ * (`<pid>@<host>`, freed at exit), else the holder of the live run that does. A
+ * lock left by an ended run (this host: its pid is gone; another host, e.g. a
+ * finished pod: older than 12 h) is taken over (scripts/host-env.mjs).
  */
 function takeRunLock(userData) {
-  const file = path.join(userData, LOCK_FILE);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
-      process.on('exit', () => {
-        try { if (fs.readFileSync(file, 'utf8') === String(process.pid)) fs.rmSync(file); } catch { /* already gone */ }
-      });
-      return null;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-    }
-    const pid = Number(fs.readFileSync(file, 'utf8'));
-    try { process.kill(pid, 0); return pid; } catch (err) { if (err.code === 'EPERM') return pid; }
-    fs.rmSync(file, { force: true });
-  }
-  throw new Error(`Could not take ${file}`);
+  return takePidLock(path.join(userData, LOCK_FILE));
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
@@ -1022,7 +1009,7 @@ async function main() {
   const session = config.settings?.eroscripts?.session || {};
   if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
   const holder = takeRunLock(userData);
-  if (holder) { console.error(`Another eroscripts:scout run (pid ${holder}) is going; try again when it ends.`); return 2; }
+  if (holder) { console.error(`Another eroscripts:scout run (${describeHolder(holder)}) is going; try again when it ends.`); return 2; }
 
   // The API module logs through electron-log; keep the CLI's output clean.
   const log = require('../electron/logger.js');

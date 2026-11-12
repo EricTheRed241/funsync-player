@@ -3,6 +3,8 @@
 
 use serde_json::{Value, json};
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -126,19 +128,33 @@ fn env() -> Env {
     }
 }
 
-fn run(env: &Env, args: &[&str]) -> (i32, String) {
-    let out: Output = Command::new(env!("CARGO_BIN_EXE_pornstar-tags"))
-        .arg("--user-data")
-        .arg(&env.user_data)
-        .args(args)
-        .output()
-        .unwrap();
+/// The binary with no FUNSYNC_* variables inherited from the test's
+/// environment.
+fn command() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_pornstar-tags"));
+    c.env_remove("FUNSYNC_USER_DATA")
+        .env_remove("FUNSYNC_BACKEND_URL");
+    c
+}
+
+fn output(out: Output) -> (i32, String) {
     let all = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     (out.status.code().unwrap_or(-1), all)
+}
+
+fn run(env: &Env, args: &[&str]) -> (i32, String) {
+    output(
+        command()
+            .arg("--user-data")
+            .arg(&env.user_data)
+            .args(args)
+            .output()
+            .unwrap(),
+    )
 }
 
 fn read_file(env: &Env) -> Value {
@@ -310,4 +326,61 @@ fn help_errors_and_missing_sources() {
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("can't be read"), "{out}");
     assert!(!env.user_data.join("pornstar-tags.json").exists());
+}
+
+#[test]
+fn env_vars_set_the_user_data_and_backend() {
+    let env = env();
+    // A backend answering one request; config.json's port (1) is unused.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let mut first = String::new();
+        BufReader::new(&conn).read_line(&mut first).unwrap();
+        conn.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+            .unwrap();
+        first
+    });
+    let (code, out) = output(
+        command()
+            .arg("--apply")
+            .env("FUNSYNC_USER_DATA", &env.user_data)
+            .env("FUNSYNC_BACKEND_URL", &url)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("Rescan requested from the app (HTTP/1.1 200 OK)"),
+        "{out}"
+    );
+    assert_eq!(
+        server.join().unwrap(),
+        "POST /api/remote/request-rescan HTTP/1.1\r\n"
+    );
+    assert!(env.user_data.join("pornstar-tags.json").exists());
+
+    // --user-data wins over FUNSYNC_USER_DATA.
+    let missing = env.user_data.join("missing");
+    let (code, out) = output(
+        command()
+            .arg("--list")
+            .arg("--user-data")
+            .arg(&env.user_data)
+            .env("FUNSYNC_USER_DATA", &missing)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("applied  candy-love"), "{out}");
+    let (code, out) = output(
+        command()
+            .arg("--list")
+            .env("FUNSYNC_USER_DATA", &missing)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("missing is not a folder"), "{out}");
 }

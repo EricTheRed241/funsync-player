@@ -37,7 +37,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 const { planReorganize, sourcesAfter, reverseMoves, SOURCE_FOLDERS } = await import('./library-reorganize-lib.mjs');
 const { remapPaths } = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, onDiskPath, readConfig, removeIfEmpty, renameWithSidecar } = await import('./discovery-io.mjs');
-const { defaultUserDataDir } = await import('./eroscripts-sync-lib.mjs');
+const { assertConfigWritable, defaultUserDataDir } = await import('./host-env.mjs');
 const require = createRequire(import.meta.url);
 const { VIDEO_EXTS, isAppleDoubleSidecar } = require('../electron/library-scan.js');
 const { readLinksFile } = require('../electron/eroscripts-links.js');
@@ -50,7 +50,7 @@ and <root>/Other, and rewrite the paths the app keeps. Close the app first.
   --dry-run           show what would move, change nothing (the app may run)
   --root <dir>        folder the source folders go in (default: the first library source's parent)
   --undo <log>        put back the run logged in <log> (logs/library-reorganize-*.json)
-  --user-data <dir>   app data folder (default: the desktop app's)
+  --user-data <dir>   app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   -h, --help          this help`;
 
 function parseArgs(argv) {
@@ -143,6 +143,7 @@ function pruneEmpty(moves, stopAt) {
  * also gets `sources`. Each changed file is backed up first.
  */
 function rewritePaths(userData, done, sources) {
+  assertConfigWritable();
   const report = [];
   for (const name of fs.readdirSync(userData).filter((n) => n.endsWith('.json')).sort()) {
     const file = path.join(userData, name);

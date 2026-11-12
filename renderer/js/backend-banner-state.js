@@ -60,8 +60,8 @@ export class BackendBannerState {
     }
 
     if (status === 'restarting') {
-      // User-initiated and transient. Always worth showing: the only way to
-      // reach it is to have pressed the button on a visible banner.
+      // Transient: the Restart button, or the automatic restart after the
+      // backend went down (python-bridge.js). Always worth showing.
       return { visible: true, startRearmTimer: false, cancelRearmTimer: true };
     }
 

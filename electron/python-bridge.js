@@ -44,6 +44,69 @@ let healthState = 'unknown';   // 'unknown' | 'running' | 'down' | 'restarting'
 let healthConsecutiveFailures = 0;
 let healthIntervalHandle = null;
 let healthListener = null;     // callback: (state, detail) => void
+// Set by stopBackend (quit, every window closed): no automatic restart, and a
+// restart in flight leaves the backend stopped. A restart clears it.
+let backendStopped = false;
+
+// --- Automatic restart ---
+//
+// A backend that goes `down` is restarted by the app itself (this replaced an
+// external watchdog's backend check): after 5 s, 30 s and 2 min, then at most
+// once every 10 min until /health answers again. A backend that then stays up
+// for 10 min starts the schedule over, so a crash loop keeps backing off.
+const AUTO_RESTART_DELAYS_MS = [5_000, 30_000, 120_000];
+const AUTO_RESTART_MAX_INTERVAL_MS = 600_000;
+const AUTO_RESTART_STABLE_MS = 600_000;
+
+/** Wait before automatic restart number `attempt` (0-based). */
+function autoRestartDelay(attempt) {
+  return AUTO_RESTART_DELAYS_MS[attempt] ?? AUTO_RESTART_MAX_INTERVAL_MS;
+}
+
+/**
+ * The automatic restart schedule, fed every health state transition
+ * (`onState`). `restart()` restarts the backend (restartBackend);
+ * `isStopped()` true while the app quits; `getState()` the current health
+ * state, re-checked after a restart.
+ */
+function createAutoRestart({ restart, isStopped, getState, now = Date.now, logger = log }) {
+  let attempts = 0;
+  let timer = null;
+  let busy = false;
+  let runningSince = null;
+  const auto = {
+    onState(state) {
+      if (state === 'running') { runningSince = now(); return; }
+      if (state !== 'down' || timer || busy || isStopped()) return;
+      if (runningSince != null && now() - runningSince >= AUTO_RESTART_STABLE_MS) attempts = 0;
+      runningSince = null;
+      const delay = autoRestartDelay(attempts);
+      logger.info(`[Backend] auto-restart in ${delay / 1000} s (attempt ${attempts + 1})`);
+      timer = setTimeout(async () => {
+        timer = null;
+        if (isStopped()) return;
+        attempts++;
+        busy = true;
+        logger.info(`[Backend] auto-restart attempt ${attempts}`);
+        try {
+          await restart();
+        } catch (err) {
+          logger.warn(`[Backend] auto-restart attempt ${attempts} failed: ${err.message}`);
+        } finally {
+          busy = false;
+        }
+        if (getState() === 'down') auto.onState('down');
+      }, delay);
+    },
+    /** Drop a pending restart (the user restarted, or the app quits). */
+    cancel() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    },
+    get attempts() { return attempts; },
+    get pending() { return timer !== null; },
+  };
+  return auto;
+}
 
 /**
  * Kill anything currently holding `port` so we don't fight an orphan backend
@@ -192,8 +255,8 @@ async function startBackend() {
   });
 }
 
-function stopBackend() {
-  stopHealthMonitor();
+/** Kill the backend process (tree) and anything else on its port. */
+function killBackend() {
   if (pythonProcess) {
     const pid = pythonProcess.pid;
     try {
@@ -215,6 +278,14 @@ function stopBackend() {
   // detached children, stale processes from earlier sessions, and the case
   // where taskkill on a parent didn't propagate to its uvicorn worker.
   killProcessesOnPort(backendPort);
+}
+
+/** Stop the backend for good (quit, every window closed): no automatic restart. */
+function stopBackend() {
+  backendStopped = true;
+  autoRestart.cancel();
+  stopHealthMonitor();
+  killBackend();
 }
 
 function getBackendPort() {
@@ -277,6 +348,7 @@ function _emitHealthState(newState, detail) {
     try { healthListener(newState, detail); }
     catch (err) { log.warn('[Backend] health listener threw:', err.message); }
   }
+  autoRestart.onState(newState);
 }
 
 function startHealthMonitor() {
@@ -305,17 +377,22 @@ function stopHealthMonitor() {
 
 /**
  * Stop the existing backend (if any) and start a new one. Used by the
- * "Restart Backend" affordance in the disconnected banner. Emits
- * `'restarting'` immediately so the UI can show transitional state.
+ * "Restart Backend" affordance in the disconnected banner and by the
+ * automatic restart (`reason` 'auto'). Emits `'restarting'` immediately so
+ * the UI can show transitional state.
  */
-async function restartBackend() {
-  _emitHealthState('restarting', 'user-initiated');
+async function restartBackend(reason = 'user-initiated') {
+  backendStopped = false;
+  autoRestart.cancel();
+  _emitHealthState('restarting', reason);
   stopHealthMonitor();
-  stopBackend();
+  killBackend();
   // Brief breather to let the OS reap the killed PID before respawn —
   // Windows in particular can take a moment to release the port.
   await new Promise(r => setTimeout(r, 500));
+  if (backendStopped) return; // the app quit meanwhile
   await startBackend();
+  if (backendStopped) { killBackend(); return; }
   startHealthMonitor();
   // First probe after restart — if it succeeds, the next interval tick
   // will emit 'running'. If it fails, threshold logic kicks in.
@@ -325,6 +402,12 @@ async function restartBackend() {
     _emitHealthState('running');
   }
 }
+
+const autoRestart = createAutoRestart({
+  restart: () => restartBackend('auto'),
+  isStopped: () => backendStopped,
+  getState: () => healthState,
+});
 
 /**
  * electron-log level for a chunk of backend stderr. Python logs everything
@@ -351,4 +434,6 @@ module.exports = {
   startHealthMonitor,
   restartBackend,
   backendHost,
+  autoRestartDelay,
+  createAutoRestart,
 };

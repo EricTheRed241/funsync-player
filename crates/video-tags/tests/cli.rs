@@ -2,6 +2,8 @@
 //! sources-only config.json and a library source with fake videos.
 
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -71,8 +73,17 @@ fn video(dir: &Path, name: &str) -> PathBuf {
     p
 }
 
+/// The binary with no FUNSYNC_* variables inherited from the test's
+/// environment.
+fn command() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_video-tags"));
+    c.env_remove("FUNSYNC_USER_DATA")
+        .env_remove("FUNSYNC_BACKEND_URL");
+    c
+}
+
 fn run(env: &Env, args: &[&str]) -> Output {
-    let out = Command::new(env!("CARGO_BIN_EXE_video-tags"))
+    let out = command()
         .arg("--user-data")
         .arg(&env.user_data)
         .args(args)
@@ -359,4 +370,66 @@ fn help_and_bad_flags() {
     let o = run(&env, &["--bogus"]);
     assert_eq!(o.status.code(), Some(1));
     assert!(stderr(&o).contains("unknown argument --bogus"));
+}
+
+/// A backend answering one request with 200; returns its URL and the
+/// request line it got.
+fn fake_backend() -> (String, std::thread::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let mut first = String::new();
+        BufReader::new(&conn).read_line(&mut first).unwrap();
+        conn.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 9\r\n\r\n{\"seq\":1}")
+            .unwrap();
+        first
+    });
+    (url, server)
+}
+
+#[test]
+fn env_vars_set_the_user_data_and_backend_and_flags_win() {
+    let env = env();
+    let a = video(&env.library.join("Artist").join("Scene"), "a.mp4");
+    let p = proposals(
+        &env,
+        serde_json::json!({ "by": "tagger", "videos": { s(&a): { "tags": ["pov"], "confidence": 0.9 } } }),
+    );
+    // No --user-data: FUNSYNC_USER_DATA; the rescan goes to
+    // FUNSYNC_BACKEND_URL instead of 127.0.0.1:<config port>.
+    let (url, server) = fake_backend();
+    let o = command()
+        .args(["--proposals", &p, "--apply"])
+        .env("FUNSYNC_USER_DATA", &env.user_data)
+        .env("FUNSYNC_BACKEND_URL", &url)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(
+        stdout(&o).contains("Rescan requested from the app (HTTP/1.1 200 OK)"),
+        "{}",
+        stdout(&o)
+    );
+    assert_eq!(
+        server.join().unwrap(),
+        "POST /api/remote/request-rescan HTTP/1.1\r\n"
+    );
+    assert!(env.user_data.join("video-tags.json").exists());
+
+    // --user-data wins over FUNSYNC_USER_DATA.
+    let o = command()
+        .args(["--list", "--user-data", s(&env.user_data)])
+        .env("FUNSYNC_USER_DATA", env.user_data.join("missing"))
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(stdout(&o).contains("1 video(s)"), "{}", stdout(&o));
+    let o = command()
+        .arg("--list")
+        .env("FUNSYNC_USER_DATA", env.user_data.join("missing"))
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stderr(&o).contains("missing is not a folder"));
 }

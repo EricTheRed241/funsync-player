@@ -43,7 +43,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write) -> Result<i32, String> {
     }
     let user_data = match opts.user_data.clone() {
         Some(dir) => dir,
-        None => video_tags::default_user_data()
+        None => video_tags::host::default_user_data()
             .ok_or("can't find the userData folder; pass --user-data")?,
     };
     if !user_data.is_dir() {
@@ -135,7 +135,8 @@ fn run_inner(args: &[OsString], out: &mut dyn Write) -> Result<i32, String> {
         )
         .map_err(io)?;
     } else {
-        match rescan::request_rescan(app.backend_port, rescan::TIMEOUT) {
+        let backend = video_tags::host::backend_url(app.backend_port);
+        match rescan::request_rescan(&backend, rescan::TIMEOUT) {
             Ok(status) => writeln!(out, "Rescan requested from the app ({status}).").map_err(io)?,
             Err(e) => writeln!(
                 out,

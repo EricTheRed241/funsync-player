@@ -15,11 +15,12 @@ Usage:
 
 Options:
   --user-data <dir>    FunSync's userData folder
-                       (default ~/Library/Application Support/funsync-player)
+                       (default $FUNSYNC_USER_DATA, else ~/Library/Application Support/funsync-player)
   --dry-run            Recompute and show the tags, scene counts and video changes;
                        write nothing (the default)
   --apply              Write the file when it changed (atomically; the previous one is
                        kept as pornstar-tags.json.bak), then ask the running app to rescan
+                       ($FUNSYNC_BACKEND_URL, else 127.0.0.1 on the app's backend port)
   --daily              --apply, but only once a day (UTC): exits 0 doing nothing when
                        pornstar-tags.json or pornstar-tags.last-run shows a run today
   --no-rescan          Don't ask the app to rescan after writing

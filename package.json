@@ -22,7 +22,9 @@
     "library:reorganize": "node scripts/library-reorganize.mjs",
     "video:tags": "cargo run -q --release -p video-tags --",
     "age:screen": "cargo run -q --release -p age-screen --",
-    "pornstar:tags": "cargo run -q --release -p pornstar-tags --"
+    "pornstar:tags": "cargo run -q --release -p pornstar-tags --",
+    "k8s": "bash deploy/k8s/k8s.sh",
+    "app:autostart": "bash deploy/macos/app-autostart.sh"
   },
   "keywords": [
     "video-player",

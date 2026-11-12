@@ -10,7 +10,9 @@
 // login survives runs; it is driven over the DevTools protocol (Node's
 // WebSocket, no extra dependency) and always closed on exit. The account comes
 // from `vb_hack.txt` (repo root, untracked; `Username: …` / `password: …`).
-// The password, cookies and link tokens are never printed.
+// In a container (Debian's Chromium, as root) the environment changes the
+// browser, its profile folder, the sandbox and the account file
+// (browserOptions). The password, cookies and link tokens are never printed.
 //
 // Exit codes: 0 done, 1 error, 3 not logged in (no credentials or the login failed).
 
@@ -33,7 +35,8 @@ if (IS_CLI && !process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACK
 }
 
 const lib = await import('./vrbangers-lib.mjs');
-const { createPacer, defaultUserDataDir } = await import('./eroscripts-sync-lib.mjs');
+const { createPacer } = await import('./eroscripts-sync-lib.mjs');
+const { defaultUserDataDir } = await import('./host-env.mjs');
 
 const REPO = path.dirname(path.dirname(SELF));
 export const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -50,8 +53,27 @@ export class LoginError extends Error {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The browser settings: explicit options win, then the environment, then the
+ * Mac defaults. `FUNSYNC_CHROME_PATH` the browser binary; `FUNSYNC_CHROME_PROFILE`
+ * the profile folder's name under userData (a pod's Linux Chromium must never
+ * open the Mac Chrome profile); `FUNSYNC_CHROME_NO_SANDBOX=1` adds `--no-sandbox`
+ * (Chromium running as root in a container); `FUNSYNC_VRB_CREDENTIALS` the
+ * account file.
+ */
+export function browserOptions({ chromePath, profileDir, noSandbox, credentialsFile } = {}, env = process.env) {
+  const dir = profileDir ?? (env.FUNSYNC_CHROME_PROFILE || PROFILE_DIR);
+  if (path.basename(dir) !== dir || dir === '.' || dir === '..') throw new Error(`The Chrome profile must be a folder name under userData, not a path: ${dir}`);
+  return {
+    chromePath: chromePath ?? (env.FUNSYNC_CHROME_PATH || CHROME_PATH),
+    profileDir: dir,
+    noSandbox: noSandbox ?? ['1', 'true', 'yes'].includes(String(env.FUNSYNC_CHROME_NO_SANDBOX || '').trim().toLowerCase()),
+    credentialsFile: credentialsFile ?? (env.FUNSYNC_VRB_CREDENTIALS ? path.resolve(env.FUNSYNC_VRB_CREDENTIALS) : DEFAULT_CREDENTIALS),
+  };
+}
+
 /** The account in the credentials file; LoginError when missing or unreadable. */
-export function readCredentials(file = DEFAULT_CREDENTIALS) {
+export function readCredentials(file = browserOptions().credentialsFile) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { throw new LoginError(`No VRBangers credentials file: ${file}`); }
   const creds = lib.parseCredentials(text);
@@ -69,15 +91,21 @@ export async function scenePublic(slug, { fetchImpl = fetch, userAgent = 'Mozill
 
 // ── Chrome over the DevTools protocol ───────────────────────────────────
 
-async function launchChrome({ chromePath, profile, headless }) {
+/** Chrome's command line: its own profile, DevTools on a free port. */
+export function chromeArgs({ profile, headless, noSandbox }) {
+  return [
+    `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check',
+    '--disable-background-networking', '--disable-sync', '--mute-audio', '--window-size=1366,900',
+    ...(noSandbox ? ['--no-sandbox'] : []),
+    ...(headless ? ['--headless=new'] : []), 'about:blank',
+  ];
+}
+
+async function launchChrome({ chromePath, profile, headless, noSandbox }) {
   fs.mkdirSync(profile, { recursive: true });
   const portFile = path.join(profile, 'DevToolsActivePort');
   fs.rmSync(portFile, { force: true });
-  const args = [
-    `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check',
-    '--disable-background-networking', '--disable-sync', '--mute-audio', '--window-size=1366,900',
-    ...(headless ? ['--headless=new'] : []), 'about:blank',
-  ];
+  const args = chromeArgs({ profile, headless, noSandbox });
   const child = spawn(chromePath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000); });
@@ -150,13 +178,16 @@ function connect(wsUrl) {
  */
 export async function openVrbangers({
   userData = defaultUserDataDir(),
-  credentialsFile = DEFAULT_CREDENTIALS,
-  chromePath = CHROME_PATH,
+  credentialsFile,
+  chromePath,
+  profileDir,
+  noSandbox,
   headless = true,
   log = () => {},
 } = {}) {
-  const profile = path.join(userData, PROFILE_DIR);
-  const { child, wsUrl } = await launchChrome({ chromePath, profile, headless });
+  const browser = browserOptions({ chromePath, profileDir, noSandbox, credentialsFile });
+  const profile = path.join(userData, browser.profileDir);
+  const { child, wsUrl } = await launchChrome({ chromePath: browser.chromePath, profile, headless, noSandbox: browser.noSandbox });
   const kill = () => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); };
   const onSignal = (signal) => { kill(); process.exit(signal === 'SIGINT' ? 130 : 143); };
   process.on('exit', kill);
@@ -220,7 +251,7 @@ export async function openVrbangers({
       // A kept session goes on to the dashboard; the form shows up otherwise.
       await waitFor(`${onDashboard} || ${hasLoginForm}`, 15_000);
       if (await evaluate(`${onDashboard} || !(${hasLoginForm})`)) return;
-      const { user, password } = readCredentials(credentialsFile);
+      const { user, password } = readCredentials(browser.credentialsFile);
       log('logging in');
       await evaluate(`(() => {
         for (const b of document.querySelectorAll('button, a')) {
@@ -270,13 +301,13 @@ const USAGE = `Usage: node scripts/vrbangers-browser.mjs <command> [options]
   --public <slug>        print what the public scene page says (no login, no browser)
 Options:
   --show-url             also print the chosen signed URL (secret: anyone holding it can download)
-  --user-data <dir>      app data folder holding the Chrome profile (default: the desktop app's)
-  --credentials <file>   account file (default: ${DEFAULT_CREDENTIALS})
+  --user-data <dir>      app data folder holding the Chrome profile (default: $FUNSYNC_USER_DATA, else the desktop app's)
+  --credentials <file>   account file (default: $FUNSYNC_VRB_CREDENTIALS, else ${DEFAULT_CREDENTIALS})
   --headful              show the Chrome window
 Exit codes: 0 done, 1 error, 3 not logged in.`;
 
 function parseArgs(argv) {
-  const opts = { userData: defaultUserDataDir(), credentialsFile: DEFAULT_CREDENTIALS, headless: true, showUrl: false };
+  const opts = { userData: defaultUserDataDir(), credentialsFile: browserOptions().credentialsFile, headless: true, showUrl: false };
   const value = (i, flag) => {
     if (argv[i + 1] === undefined || argv[i + 1].startsWith('--')) throw new Error(`${flag} needs a value`);
     return argv[i + 1];

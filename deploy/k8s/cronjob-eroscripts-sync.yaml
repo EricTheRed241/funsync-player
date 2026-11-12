@@ -1,0 +1,64 @@
+# EroScripts sync, every third day (was the launchd agent
+# com.funsync.eroscripts-sync, which never ran: EPERM on ~/Documents):
+# links library videos to their posts in <userData>/eroscripts-links.json,
+# which the app merges on its next scan.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: eroscripts-sync
+  labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-sync}
+spec:
+  schedule: "0 3 */3 * *"
+  timeZone: America/Toronto
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 172800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    metadata:
+      labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-sync}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 14400
+      ttlSecondsAfterFinished: 1209600
+      template:
+        metadata:
+          labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-sync}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: eroscripts-sync
+              image: funsync-runner:current
+              imagePullPolicy: Never
+              args:
+                - "node"
+                - "scripts/eroscripts-sync.mjs"
+              env:
+                - name: TZ
+                  value: "America/Toronto"
+                - name: HOME
+                  value: "/home/runner"
+                - name: FUNSYNC_USER_DATA
+                  value: "/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: FUNSYNC_BACKEND_URL
+                  value: "http://funsync-app:5123"
+                - name: FUNSYNC_REQUIRE_PATHS
+                  value: "/Volumes/2TB-AGENTS/GVP:/Users/classicus-gvp/Library/Application Support/funsync-player"
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 1Gi}
+              volumeMounts:
+                - name: library
+                  mountPath: "/Volumes/2TB-AGENTS/GVP"
+                - name: userdata
+                  mountPath: "/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: home
+                  mountPath: "/home/runner"
+          volumes:
+            - name: library
+              hostPath: {path: "/Volumes/2TB-AGENTS/GVP", type: Directory}
+            - name: userdata
+              hostPath: {path: "/Users/classicus-gvp/Library/Application Support/funsync-player", type: Directory}
+            - name: home
+              emptyDir: {}
