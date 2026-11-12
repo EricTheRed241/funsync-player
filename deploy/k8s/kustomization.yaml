@@ -1,0 +1,12 @@
+# FunSync's recurring jobs (issue #34). Apply with `npm run k8s -- apply`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: funsync
+resources:
+  - namespace.yaml
+  - service-funsync-app.yaml
+  - cronjob-eroscripts-scout.yaml
+  - cronjob-pornstar-tags.yaml
+  - cronjob-age-screen.yaml
+  - cronjob-eroscripts-sync.yaml
+  - cronjob-faptap-scout.yaml

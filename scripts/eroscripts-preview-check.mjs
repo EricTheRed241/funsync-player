@@ -24,6 +24,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { defaultUserDataDir } from './host-env.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -35,7 +36,7 @@ const USAGE = `Usage: npm run eroscripts:preview-check -- [options]
   --no-candidates      only check the current posters, fetch nothing from the forum
   --limit N            check at most N videos
   --only <text>        only videos whose path contains <text> (case-insensitive)
-  --user-data <dir>    app data folder (default: the desktop app's)
+  --user-data <dir>    app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --python <bin>       Python with the backend's dependencies (default: backend/.venv)`;
 
 function parseArgs(argv) {
@@ -60,12 +61,6 @@ function parseArgs(argv) {
   }
   if (!(opts.limit > 0)) throw new Error('--limit must be a positive number');
   return opts;
-}
-
-function defaultUserData() {
-  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'funsync-player');
-  if (process.platform === 'win32') return path.join(process.env.APPDATA || os.homedir(), 'funsync-player');
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'funsync-player');
 }
 
 function defaultPython() {
@@ -154,7 +149,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) { console.log(USAGE); return 0; }
-  const userData = opts.userData || defaultUserData();
+  const userData = opts.userData || defaultUserDataDir();
   const out = opts.out || path.join(os.tmpdir(), 'funsync-preview-check');
   fs.mkdirSync(out, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'funsync-preview-check-'));

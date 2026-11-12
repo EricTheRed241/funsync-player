@@ -1,0 +1,77 @@
+# EroScripts scout, daily (was the watchdog's scout_tick): a scan plus the
+# backfill, then downloads of the waiting hand-made multi-axis posts
+# (--fetch --auto). Exit 2 (rate limited, downloads left) counts as done
+# (run-job); a run missed while the Mac was off or logged out starts within
+# 12 h of its time.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: eroscripts-scout
+  labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-scout}
+spec:
+  schedule: "5 0 * * *"
+  timeZone: America/Toronto
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 43200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    metadata:
+      labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-scout}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 1209600
+      template:
+        metadata:
+          labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-scout}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: eroscripts-scout
+              image: funsync-runner:current
+              imagePullPolicy: Never
+              args:
+                - "node"
+                - "scripts/eroscripts-scout.mjs"
+                - "--daily"
+                - "--passes"
+                - "2"
+                - "--wait"
+                - "1h"
+              env:
+                - name: TZ
+                  value: "America/Toronto"
+                - name: HOME
+                  value: "/home/runner"
+                - name: FUNSYNC_USER_DATA
+                  value: "/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: FUNSYNC_BACKEND_URL
+                  value: "http://funsync-app:5123"
+                - name: FUNSYNC_REQUIRE_PATHS
+                  value: "/Volumes/2TB-AGENTS/GVP:/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: FUNSYNC_VRB_CREDENTIALS
+                  value: "/secrets/vrbangers/credentials"
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 3Gi}
+              volumeMounts:
+                - name: library
+                  mountPath: "/Volumes/2TB-AGENTS/GVP"
+                - name: userdata
+                  mountPath: "/Users/classicus-gvp/Library/Application Support/funsync-player"
+                - name: home
+                  mountPath: "/home/runner"
+                - name: secret-vrbangers
+                  mountPath: "/secrets/vrbangers"
+                  readOnly: true
+          volumes:
+            - name: library
+              hostPath: {path: "/Volumes/2TB-AGENTS/GVP", type: Directory}
+            - name: userdata
+              hostPath: {path: "/Users/classicus-gvp/Library/Application Support/funsync-player", type: Directory}
+            - name: home
+              emptyDir: {}
+            - name: secret-vrbangers
+              secret: {secretName: funsync-vrbangers, optional: true}

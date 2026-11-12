@@ -927,13 +927,6 @@ export function creatorOf(videoPath, sourceRoots) {
   return parts.length > 1 ? parts[0] : null;
 }
 
-/** Where the userData of the desktop app lives on this OS. */
-export function defaultUserDataDir(platform = process.platform, env = process.env, home = env.HOME || env.USERPROFILE || '') {
-  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'funsync-player');
-  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'funsync-player');
-  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'funsync-player');
-}
-
 // ── launchd schedule (macOS) ────────────────────────────────────────────
 
 export const LAUNCHD_LABEL = 'com.funsync.eroscripts-sync';

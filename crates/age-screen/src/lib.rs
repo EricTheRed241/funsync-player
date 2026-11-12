@@ -63,9 +63,8 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
     let prefs = prefs::load()?;
     let user_data = match opts.user_data.clone() {
         Some(dir) => dir,
-        None => {
-            config::default_user_data().ok_or("can't find the userData folder; pass --user-data")?
-        }
+        None => video_tags::host::default_user_data()
+            .ok_or("can't find the userData folder; pass --user-data")?,
     };
     if !user_data.is_dir() {
         return Err(format!("{} is not a folder", user_data.display()));
@@ -94,7 +93,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         return Ok(0);
     }
 
-    let backend = Backend::new(opts.backend.as_deref().unwrap_or(backend::DEFAULT_URL))?;
+    let backend = Backend::new(&backend::url(opts.backend.as_deref()))?;
     let videos = match backend.videos() {
         Ok(v) => v,
         Err(BackendError::Down(m)) => {

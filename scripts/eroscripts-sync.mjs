@@ -34,6 +34,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-sync-lib.mjs');
+const { defaultUserDataDir } = await import('./host-env.mjs');
 const require = createRequire(import.meta.url);
 
 const USAGE = `Usage: npm run eroscripts:sync -- [options]
@@ -48,7 +49,7 @@ const USAGE = `Usage: npm run eroscripts:sync -- [options]
   --archive <dir>        where --install-axes archives generated companions
                          (default <library parent>/Archive/_pruned-<date>)
   --report <file>        report path (.md or .json; default <userData>/eroscripts-sync-report.md)
-  --user-data <dir>      app data folder (default: the desktop app's)
+  --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --only <text>          check only videos whose path contains <text> (case-insensitive)
   --install-schedule 3d  run every 3 days via launchd (macOS); also 12h, 90m
   --uninstall-schedule   remove the launchd schedule`;
@@ -132,7 +133,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) { console.log(USAGE); return 0; }
-  const userData = opts.userData || lib.defaultUserDataDir();
+  const userData = opts.userData || defaultUserDataDir();
   if (opts.installSchedule) { installSchedule(opts.installSchedule, userData); return 0; }
   if (opts.uninstallSchedule) { uninstallSchedule(); return 0; }
 

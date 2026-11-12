@@ -40,7 +40,7 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 const lib = await import('./scene-dedupe-lib.mjs');
 const { DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER } = await import('../renderer/js/content-preferences.js');
 const { appRunning, readConfig, writeConfig } = await import('./discovery-io.mjs');
-const { defaultUserDataDir } = await import('./eroscripts-sync-lib.mjs');
+const { defaultUserDataDir } = await import('./host-env.mjs');
 const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes, actionsHash, isStrokeScriptName } = await import('./handmade-scenes.mjs');
 const { probeVideo, readFrameCache, readProbeCache, readStereoCache, stereoVr, writeFrameCache, writeProbeCache } = await import('./scene-probe.mjs');
 const require = createRequire(import.meta.url);
@@ -53,7 +53,7 @@ picture or identical script) and keep one: the video by ${DEDUPE_KEEP_ORDER.join
 its scripts by ${DEDUPE_SCRIPT_ORDER.join(', ')} (moved over from another copy when needed).
   --apply                delete the extra copies (default: only list them)
   --quiet                print only the summary line (used after scout downloads)
-  --user-data <dir>      app data folder (default: the desktop app's)`;
+  --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)`;
 
 function parseArgs(argv) {
   const opts = { apply: false, quiet: false };

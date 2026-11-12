@@ -15,5 +15,8 @@ name = "age-screen"
 path = "src/main.rs"
 
 [dependencies]
+# Shared with the other CLIs: userData and backend URL defaults (env vars),
+# host-aware lock files.
+video-tags = { path = "../video-tags" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

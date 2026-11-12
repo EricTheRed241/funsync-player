@@ -1,7 +1,7 @@
-//! The running app's backend (`--backend`, default `http://127.0.0.1:5123`):
-//! the video list and VR flags it serves, and the remote edits (rating,
-//! playlist) the desktop applies. Raw HTTP/1.1 over a TcpStream: a few local
-//! requests need no HTTP crate.
+//! The running app's backend (`--backend`, else `FUNSYNC_BACKEND_URL`, else
+//! `http://127.0.0.1:5123`): the video list and VR flags it serves, and the
+//! remote edits (rating, playlist) the desktop applies. Raw HTTP/1.1 over a
+//! TcpStream: a few requests need no HTTP crate.
 //!
 //! Writes come after minutes of judging, and the app may be restarting by
 //! then (the watchdog, an update): a write that finds nobody listening waits
@@ -11,10 +11,17 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
+use video_tags::host::{self, HttpBase};
 
-pub const DEFAULT_URL: &str = "http://127.0.0.1:5123";
+/// The backend URL: `--backend`, else `FUNSYNC_BACKEND_URL`, else the app's
+/// default port on this machine.
+pub fn url(flag: Option<&str>) -> String {
+    flag.map(str::to_string)
+        .unwrap_or_else(|| host::backend_url(video_tags::config::DEFAULT_BACKEND_PORT))
+}
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a write waits for an app that isn't answering (a restart takes
@@ -75,30 +82,10 @@ pub struct Backend {
 impl Backend {
     /// From `http://host:port` (a trailing `/` is fine).
     pub fn new(url: &str) -> Result<Self, String> {
-        let rest = url
-            .strip_prefix("http://")
-            .ok_or_else(|| format!("--backend {url}: only http://host:port is supported"))?;
-        let host = rest.trim_end_matches('/');
-        if host.is_empty() || host.contains('/') {
-            return Err(format!(
-                "--backend {url}: give http://host:port without a path"
-            ));
-        }
-        let with_port = if host
-            .rsplit_once(':')
-            .is_some_and(|(_, p)| p.parse::<u16>().is_ok())
-        {
-            host.to_string()
-        } else {
-            format!("{host}:80")
-        };
-        let addr = with_port
-            .to_socket_addrs()
-            .map_err(|e| format!("--backend {url}: {e}"))?
-            .next()
-            .ok_or_else(|| format!("--backend {url}: no address"))?;
+        let base = HttpBase::parse(url).map_err(|e| format!("backend {e}"))?;
+        let addr = base.resolve().map_err(|e| format!("backend {url}: {e}"))?;
         Ok(Backend {
-            host: host.to_string(),
+            host: base.host,
             addr,
             write_wait: WRITE_WAIT,
             retry_every: WRITE_RETRY_EVERY,
@@ -330,6 +317,12 @@ mod tests {
         assert!(matches!(b.videos(), Err(Error::Down(_))));
         assert!(Backend::new("https://x:1").is_err());
         assert!(Backend::new("http://127.0.0.1:5123/api").is_err());
+    }
+
+    #[test]
+    fn the_backend_flag_wins() {
+        // The env var and default are covered end to end (tests/cli.rs).
+        assert_eq!(url(Some("http://10.0.0.2:5200")), "http://10.0.0.2:5200");
     }
 
     #[test]

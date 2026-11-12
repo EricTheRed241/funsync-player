@@ -87,7 +87,10 @@ describe('sourcesAfter', () => {
 describe('library:reorganize CLI', () => {
   let tmp; let gvp; let userData;
   const cli = path.resolve('scripts/library-reorganize.mjs');
-  const run = (...args) => spawnSync(process.execPath, [cli, '--user-data', userData, ...args], { encoding: 'utf8' });
+  // No FUNSYNC_* variables from the environment running the tests.
+  const baseEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('FUNSYNC_')));
+  const runEnv = (env, args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { ...baseEnv(), ...env } });
+  const run = (...args) => runEnv({}, ['--user-data', userData, ...args]);
   const put = (p, text = 'x') => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); };
   const readJson = (name) => JSON.parse(fs.readFileSync(path.join(userData, name), 'utf8'));
 
@@ -162,9 +165,34 @@ describe('library:reorganize CLI', () => {
     for (const f of ['EroScripts', 'FapTap', 'Other']) expect(fs.existsSync(path.join(gvp, f)), f).toBe(false);
   });
 
-  it('refuses while the app holds its lock', () => {
-    fs.symlinkSync(`host-${process.pid}`, path.join(userData, 'SingletonLock'));
+  it('refuses while the app holds its lock: a live pid on this host, or any lock from another host', () => {
+    const lock = path.join(userData, 'SingletonLock');
+    fs.symlinkSync(`${os.hostname()}-${process.pid}`, lock);
+    expect(run().status).toBe(2);
+    fs.rmSync(lock);
+    // The Mac's lock seen from a pod: its pid can't be checked there.
+    fs.symlinkSync('some-other-host-1', lock);
     expect(run().status).toBe(2);
     expect(fs.existsSync(path.join(gvp, 'Multi-Axis/Misiv/One/One.mp4'))).toBe(true);
+  });
+
+  it('never writes config.json under FUNSYNC_CONFIG_READONLY, a run or an undo', () => {
+    const before = fs.readFileSync(path.join(userData, 'config.json'), 'utf8');
+    const r = runEnv({ FUNSYNC_CONFIG_READONLY: '1' }, ['--user-data', userData]);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('The app is running');
+    const u = runEnv({ FUNSYNC_CONFIG_READONLY: '1' }, ['--user-data', userData, '--undo', path.join(tmp, 'x.json')]);
+    expect(u.status).toBe(2);
+    expect(fs.readFileSync(path.join(userData, 'config.json'), 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(gvp, 'Multi-Axis/Misiv/One/One.mp4'))).toBe(true);
+  });
+
+  it('takes the userData from FUNSYNC_USER_DATA, and --user-data over it', () => {
+    const viaEnv = runEnv({ FUNSYNC_USER_DATA: userData }, ['--dry-run']);
+    expect(viaEnv.status, viaEnv.stderr).toBe(0);
+    expect(viaEnv.stdout).toContain('scene folders in 3 sources');
+    const flag = runEnv({ FUNSYNC_USER_DATA: path.join(tmp, 'nowhere') }, ['--dry-run', '--user-data', userData]);
+    expect(flag.status, flag.stderr).toBe(0);
+    expect(runEnv({ FUNSYNC_USER_DATA: path.join(tmp, 'nowhere') }, ['--dry-run']).status).not.toBe(0);
   });
 });

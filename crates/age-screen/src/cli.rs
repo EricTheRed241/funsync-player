@@ -39,8 +39,9 @@ Modes:
 
 Options:
   --user-data <dir>    FunSync's userData folder
-                       (default ~/Library/Application Support/funsync-player)
-  --backend <url>      The app's backend (default http://127.0.0.1:5123)
+                       (default $FUNSYNC_USER_DATA, else ~/Library/Application Support/funsync-player)
+  --backend <url>      The app's backend (default $FUNSYNC_BACKEND_URL, else
+                       http://127.0.0.1:5123)
   --limit N            Screen at most N videos this run (smoke tests); the rest
                        wait, and a --weekly run stays due
   --max-cost <usd>     Spending cap of the default judge (default 30)

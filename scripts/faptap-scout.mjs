@@ -43,7 +43,8 @@ const scout = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, ensureLibrarySource, librarySources, libraryState, libraryVideoCount, readConfig, walk } = await import('./discovery-io.mjs');
 const dedupe = await import('./scene-dedupe-lib.mjs');
 const { libraryVideos, readProbeCache, readStereoCache, writeProbeCache } = await import('./scene-probe.mjs');
-const { createPacer, defaultUserDataDir, parseInterval } = await import('./eroscripts-sync-lib.mjs');
+const { createPacer, parseInterval } = await import('./eroscripts-sync-lib.mjs');
+const { defaultUserDataDir } = await import('./host-env.mjs');
 const live = await import('./scout-live.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
@@ -73,7 +74,7 @@ Rename:
                          title's own artist, a library creator, the performer, else the uploader), filling in
                          performers and the thumbnail URL from faptap.net; moves config.json's paths (app closed)
 Both:
-  --user-data <dir>      app data folder (default: the desktop app's)
+  --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --incoming <dir>       download folder (default: the FapTap library source, else <library parent>/FapTap)`;
 
 function parseArgs(argv) {
