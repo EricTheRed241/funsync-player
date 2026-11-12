@@ -766,10 +766,10 @@ function filesUnder(dir) {
  * take the copy saved by hand), unpack it, and file every scene inside
  * (lib.unpackedScenes) like a downloaded one: named, scripts under the
  * library's axis names, sidecar (`video` = the archive, so it counts as
- * fetched), the length rule. An archive with no scene inside is
- * recorded as rejected so it isn't fetched again. The archive and its
- * unpacked files are removed once filed; a failed unpack keeps the archive
- * in staging for the next pass.
+ * fetched), the length rule. An archive that files no scene (none inside,
+ * all under the minimum length, or all in the library already) is recorded as
+ * rejected so it isn't fetched again. The archive and its unpacked files are
+ * removed once filed; a failed unpack keeps the archive in staging for the next pass.
  */
 async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now }) {
   const archive = path.join(staging, sc.video.name);
@@ -820,6 +820,8 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       console.log(`${now()} ✓ ${creator}/${stem}${note} (unpacked from ${sc.video.name}${got === 'local' ? ', saved by hand' : ''})`);
       r.ok++;
     }
+    // Nothing filed: no sidecar names this archive, so record it, or every pass and run fetches it again.
+    if (!r.ok) reject(r.short ? 'short' : 'duplicate');
     fs.rmSync(archive, { force: true });
     return r;
   } finally {
