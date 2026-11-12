@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addLibrarySource, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  staleTopicIds, autoFetchPick, feedProgress,
+  staleTopicIds, autoFetchPick, feedProgress, notYetHeld,
   contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
 } from '../../scripts/eroscripts-scout-lib.mjs';
@@ -633,6 +633,38 @@ describe('downloadQueue', () => {
     expect(downloadQueue(list).map((x) => x.id)).toEqual([1, 2, 3]);
     const q = downloadQueue(list, {}, ['Shayuki']);
     expect(q.map((x) => [x.id, x.favourite])).toEqual([[2, 'Shayuki'], [3, null], [1, null]]);
+  });
+});
+
+describe('notYetHeld', () => {
+  const scene = (base, video = `${base}.mp4`, extra = {}) => ({ base, video: { name: video }, axes: [], scripts: [], ...extra });
+  const post = (id, ...scenes) => ({ id, title: `Post ${id}`, scenes });
+
+  it('drops posts the library got by another way since judging, not the scout\'s own part-fetched ones', () => {
+    const r = notYetHeld([post(1, scene('Tracer rides')), post(2, scene('Mercy rides')), post(3, scene('Kiriko rides'))],
+      { knownTopics: new Set([1, 2]), ownTopics: new Set([2]) });
+    expect(r.queue.map((c) => c.id)).toEqual([2, 3]);
+    expect(r.posts).toBe(1);
+  });
+
+  it('drops posts turned down in the app, even ones the scout fetched', () => {
+    const r = notYetHeld([post(1, scene('Tracer rides'))], { turnedDown: new Set([1]), ownTopics: new Set([1]) });
+    expect(r.queue).toEqual([]);
+  });
+
+  it('drops scenes whose video the library holds now, and the post once none is left', () => {
+    const libraryVideos = [coreName('Tracer rides 1080p.mp4')];
+    const r = notYetHeld([post(1, scene('Tracer rides'), scene('Kiriko bunny')), post(2, scene('Tracer rides'))], { libraryVideos });
+    expect(r.queue.map((c) => [c.id, c.scenes.map((s) => s.base)])).toEqual([[1, ['Kiriko bunny']]]);
+    expect([r.posts, r.scenes]).toEqual([1, 2]);
+  });
+
+  it('keeps every scene of a post the scout fetched in part (episodes look alike), and archives', () => {
+    const libraryVideos = [coreName('Sukebe Elf no Mori Ep1.mp4'), coreName('Impa pack.mp4')];
+    const r = notYetHeld([post(1, scene('Sukebe Elf no Mori Ep1'), scene('Sukebe Elf no Mori Ep2')), post(2, scene('Impa pack', 'Impa pack.zip', { packed: true }))],
+      { libraryVideos, ownTopics: new Set([1]) });
+    expect(r.queue.map((c) => c.scenes.length)).toEqual([2, 1]);
+    expect([r.posts, r.scenes]).toEqual([0, 0]);
   });
 });
 
