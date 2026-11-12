@@ -1,0 +1,14 @@
+# The omp auth broker on the Mac (deploy/macos/omp-broker.sh, 127.0.0.1:8765)
+# as a name inside the cluster, for the age-screen judge (OMP_AUTH_BROKER_URL).
+# Docker Desktop forwards host.docker.internal to the Mac's loopback.
+apiVersion: v1
+kind: Service
+metadata:
+  name: omp-broker
+  labels: {app.kubernetes.io/part-of: funsync}
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - name: http
+      port: 8765

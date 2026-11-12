@@ -5,6 +5,7 @@ namespace: funsync
 resources:
   - namespace.yaml
   - service-funsync-app.yaml
+  - service-omp-broker.yaml
   - cronjob-eroscripts-scout.yaml
   - cronjob-pornstar-tags.yaml
   - cronjob-age-screen.yaml
