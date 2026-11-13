@@ -204,6 +204,8 @@ async function pixeldrainFiles(kind, id) {
  * Every script and video a post offers: author's forum uploads first, then MEGA, pixeldrain, rule34video pages
  * (one pseudo file per quality) and VRBangers scenes (one pseudo file each, the best quality within the VR caps:
  * a vrbangers.com/video link, a `VRBANGERS_<folder>…` file name, else the parts of a title naming VRBangers).
+ * `hostDown`: a rule34video page couldn't be read for a reason other than being gone (403, 429, 5xx, timeout),
+ * so a post without a video now may have one once the site answers again.
  */
 async function topicFiles(api, pacer, topicId, cooked, title) {
   await pacer.wait();
@@ -221,9 +223,11 @@ async function topicFiles(api, pacer, topicId, cooked, title) {
   }
   const r34 = streams.rule34videoLinks(hrefs);
   if (r34.length) hosts.add(streams.RULE34VIDEO_HOST);
+  let hostDown = false;
   for (const u of r34) {
     try { files.push(...await rule34video.files(u)); } catch (err) {
       hosts.add('rule34video (unreadable)');
+      if (err.status !== 404 && err.status !== 410) hostDown = true;
       process.stderr.write(`! ${topicId} ${err.message}\n`);
     }
   }
@@ -238,7 +242,7 @@ async function topicFiles(api, pacer, topicId, cooked, title) {
   }
   const byName = new Map();
   for (const f of files) if (!byName.has(f.name)) byName.set(f.name, f);
-  return { files: [...byName.values()], hosts: [...hosts] };
+  return { files: [...byName.values()], hosts: [...hosts], hostDown };
 }
 
 /** A script file's contents (forum, MEGA or pixeldrain), or null when it can't be read; forum errors become exceptions. */
@@ -422,8 +426,8 @@ async function scan(opts, { api, userData, config, incoming }) {
       const text = cooked.replace(/<[^>]+>/g, ' ');
       const first = lib.judgeFirstPost(t, text);
       if (!first.ok) { verdict(first.reason); continue; }
-      let files, hosts;
-      try { ({ files, hosts } = await topicFiles(api, pacer, t.id, cooked, t.title)); } catch (err) {
+      let files, hosts, hostDown;
+      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, t.id, cooked, t.title)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         process.stderr.write(`! ${t.id} ${err.message}\n`);
         continue;
@@ -431,6 +435,8 @@ async function scan(opts, { api, userData, config, incoming }) {
       const plan = await planTopic(api, pacer, t.id, files, { vr: s.vr, libraryVideos: library.videos });
       // Scripts and videos packed in archives: the post's archives are scenes (unpacked at --fetch).
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
+      // rule34video refused or failed (not 404): no verdict, so the post stays pending and the next run reads it again.
+      if (!scenes.length && hostDown) { process.stderr.write(`! ${t.id} rule34video unreachable: left for the next run\n`); continue; }
       if (!scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
       const author = op.username;
       const creator = lib.canonicalArtist(author);
@@ -497,15 +503,15 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const cooked = op.cooked || '';
       const first = lib.judgeFirstPost(t, cooked.replace(/<[^>]+>/g, ' '));
       if (!first.ok) { console.log(`✗ ${id} ${t.title}: ${first.reason}`); continue; }
-      let files, hosts;
-      try { ({ files, hosts } = await topicFiles(api, pacer, id, cooked, t.title)); } catch (err) {
+      let files, hosts, hostDown;
+      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, id, cooked, t.title)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         console.log(`✗ ${id} ${t.title}: ${err.message}`);
         continue;
       }
       const plan = await planTopic(api, pacer, id, files, { vr: s.vr, libraryVideos: library.videos });
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
-      if (!scenes.length) { console.log(`✗ ${id} ${t.title}: ${plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
+      if (!scenes.length) { console.log(`✗ ${id} ${t.title}: ${hostDown ? 'rule34video unreachable, try again later' : plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
       const author = op.username;
       const creator = lib.canonicalArtist(author);
       const artistInLibrary = s.artist || (library.creators.has(creator.toLowerCase()) ? creator : null);
