@@ -53,6 +53,9 @@ install() {
 </plist>
 EOF
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+  # bootout returns before the old process is gone; bootstrapping meanwhile
+  # fails with "5: Input/output error".
+  for _ in $(seq 30); do launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break; sleep 1; done
   launchctl bootstrap "$DOMAIN" "$PLIST"
   echo "installed $PLIST (omp auth-broker on $BIND); refresh the Secret with: npm run k8s -- secrets"
 }
