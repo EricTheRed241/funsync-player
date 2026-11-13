@@ -31,6 +31,12 @@ a:hover { text-decoration: underline; }
 .counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
   line-height: 1; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+.stacks { display: flex; gap: 0; width: min(100% - 32px, 528px); margin: 0 auto 8px; border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; }
+.stacks button { flex: 1; background: none; border: none; border-radius: 0; padding: 6px 4px; font: inherit; font-size: 13px;
+  color: var(--muted); cursor: pointer; touch-action: manipulation; }
+.stacks button + button { border-left: 1px solid var(--line); }
+.stacks button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); font-weight: 600; }
 .problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
   margin: 0 auto 6px; width: min(100% - 20px, 540px); white-space: pre-wrap; font-size: 13px; }
 .deck { position: relative; flex: 1; min-height: 0; width: min(100% - 20px, 540px); margin: 4px auto 0; }
@@ -95,6 +101,11 @@ a:hover { text-decoration: underline; }
   <button type="button" id="shuffle" title="Shuffle: deal the deck in a new order" aria-label="Shuffle">⇄</button>
   <a href="/">Report</a>
 </header>
+<nav class="stacks" id="stacks" aria-label="Which posts">
+  <button type="button" data-stack="mixed" title="Multi-axis and single-axis posts, 4 multi-axis to 1 single-axis">Mixed 4:1</button>
+  <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
+  <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
+</nav>
 <div class="problems" id="problems" hidden></div>
 <main class="deck" id="deck">
   <div class="empty" id="empty">Loading…</div>
@@ -116,7 +127,9 @@ const REFILL_AT = 5;
 // best first but low scorers come up too; Shuffle (or a page reload) deals a new order.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
-let generation = 0;     // bumped by Refresh / Shuffle: answers to older deck requests are dropped
+let generation = 0;     // bumped by Refresh / Shuffle / a stack change: answers to older deck requests are dropped
+// Which stack is dealt (mixed 4:1, multi, single); remembered on this device.
+let stack = ['mixed', 'multi', 'single'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'mixed';
 const $ = (id) => document.getElementById(id);
 const deckEl = $('deck');
 
@@ -482,7 +495,7 @@ function more() {
   const gen = generation;
   const held = [...queue, ...skipped].map((c) => c.id).join(',');
   serial(async () => {
-    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${seed}&exclude=${held}`, { cache: 'no-store' });
+    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${seed}&stack=${stack}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -552,6 +565,21 @@ function restart(newOrder) {
 
 $('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); restart(false); });
 $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
+
+function showStack() {
+  for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
+}
+$('stacks').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  b.blur();
+  if (b.dataset.stack === stack) return;
+  stack = b.dataset.stack;
+  localStorage.setItem('swipeStack', stack);
+  showStack();
+  restart(false);
+});
+showStack();
 
 // Buttons drop focus so Space keeps meaning "next image".
 $('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });

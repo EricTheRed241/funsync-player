@@ -29,7 +29,8 @@ file shows as an empty section.
 
 The swipe deck, http://127.0.0.1:<port>/swipe, shows the waiting posts not in the
 library, loosely highest score first (each deal shifts every score by up to 10 either
-way, so low scorers come up too), one card at a time. Right = wanted: the next
+way, so low scorers come up too), one card at a time; tabs pick the stack: Mixed (4
+multi-axis posts to 1 single-axis), Multi-axis or Single-axis. Right = wanted: the next
 npm run eroscripts:scout -- --fetch --auto downloads it whatever its score or axes.
 Left = hidden from the deck only (the scout treats the post as before). Skip (up)
 puts the card back a few cards later, saving nothing. Undo forgets the swipe or skip.
