@@ -250,7 +250,7 @@ fn swipes_through_the_deck() {
         json!({"id": 31, "url": "https://discuss.eroscripts.com/t/31", "title": "Thirty-one", "author": null,
                "images": ["https://x/31.jpg", "https://x/31b.jpg"], "score": 9.5, "vr": true,
                "axisType": "multi", "axes": 2, "videos": 1, "creampie": true,
-               "topTags": [{"tag": "pov", "score": 3.0}]})
+               "topTags": [{"tag": "pov", "score": 3.0}], "runtimeMs": null, "heat": []})
     );
 
     let (status, v) = post(port, "/api/swipe", r#"{"id":31,"dir":"right"}"#);

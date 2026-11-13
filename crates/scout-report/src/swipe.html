@@ -59,7 +59,8 @@ a:hover { text-decoration: underline; }
 .badge { padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
   background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
 .b-score { --bc: #2f6fdf; } .b-vr { --bc: #a46ad6; } .b-flat { --bc: #8b8b93; } .b-multi { --bc: #14b8a6; }
-.b-single { --bc: #8b8b93; } .b-videos { --bc: #d08b2c; } .b-cream { --bc: #e0529c; }
+.b-single { --bc: #8b8b93; } .b-videos { --bc: #d08b2c; } .b-cream { --bc: #e0529c; } .b-time { --bc: #6b7280; }
+.heat { display: block; width: 100%; height: 16px; border-radius: 4px; background: #000; image-rendering: pixelated; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
 .tag b { color: var(--like); font-variant-numeric: tabular-nums; }
 .ttl { font-weight: 650; font-size: 16px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
@@ -160,19 +161,55 @@ function toast(msg) {
 
 const fmt = (n) => String(Math.round(n * 10) / 10);
 
+/** m:ss, or h:mm:ss from an hour. */
+function clock(ms) {
+  const s = Math.round(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
 function badges(c) {
   const out = [el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
+  if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: c.videos > 1 ? 'Length of the first video' : 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
   const multi = c.axisType ? c.axisType === 'multi' : typeof c.axes === 'number' && c.axes > 1;
   if (multi) {
-    out.push(el('span', { class: 'badge b-multi' }, c.axes === 'packed' ? 'Multi (packed)'
-      : typeof c.axes === 'number' && c.axes > 1 ? `Multi (${c.axes} axes)` : 'Multi'));
+    out.push(el('span', { class: 'badge b-multi' }, c.axes === 'packed' ? 'Multi-axis (packed)'
+      : typeof c.axes === 'number' && c.axes > 1 ? `Multi-axis (${c.axes})` : 'Multi-axis'));
   } else {
-    out.push(el('span', { class: 'badge b-single' }, c.axes === 'packed' ? 'Single (packed)' : 'Single'));
+    out.push(el('span', { class: 'badge b-single' }, c.axes === 'packed' ? 'Single-axis (packed)' : 'Single-axis'));
   }
   if (c.videos > 1) out.push(el('span', { class: 'badge b-videos' }, `${c.videos} videos`));
   if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
   return out;
+}
+
+// The player's script heatmap colours (renderer/js/action-graph.js speedToColor): black, blue,
+// cyan, green, yellow, red; 300 position units per second and faster is red.
+const HEAT_STOPS = [[0, 0, 0], [0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]];
+const HEAT_MAX = 300;
+function heatColor(speed) {
+  const t = Math.min(1, speed / HEAT_MAX) * (HEAT_STOPS.length - 1);
+  const lo = Math.floor(t);
+  const hi = Math.min(lo + 1, HEAT_STOPS.length - 1);
+  const f = t - lo;
+  const [r, g, b] = HEAT_STOPS[lo].map((v, i) => Math.round(v + (HEAT_STOPS[hi][i] - v) * f));
+  return `rgb(${r},${g},${b})`;
+}
+
+/** The main script's speed over time, one block per bin (the post's first video). */
+function heatStrip(heat) {
+  if (!heat || !heat.length) return null;
+  const canvas = el('canvas', { class: 'heat', width: heat.length, height: 1, title: 'Script heatmap' });
+  const ctx = canvas.getContext('2d');
+  heat.forEach((speed, i) => {
+    if (speed <= 0) return;
+    ctx.fillStyle = heatColor(speed);
+    ctx.fillRect(i, 0, 1, 1);
+  });
+  return canvas;
 }
 
 function cardNode(c, isTop) {
@@ -195,6 +232,7 @@ function cardNode(c, isTop) {
     media,
     el('div', { class: 'info' },
       el('div', { class: 'badges' }, badges(c)),
+      heatStrip(c.heat),
       el('div', { class: 'ttl', title: c.title || null }, c.title || '#' + c.id),
       el('div', { class: 'by' },
         c.author ? el('span', {}, 'by ' + c.author) : null,

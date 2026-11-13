@@ -55,6 +55,7 @@ import {
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../renderer/js/preference-score.js';
 import { canonicalArtist } from '../renderer/js/artist-playlists.js';
+import { computeBins } from '../renderer/js/heatmap-strip.js';
 import { durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
@@ -310,6 +311,41 @@ export function unpackedScenes(files, { vr = false } = {}) {
 export function scriptDurationMs(script) {
   const actions = Array.isArray(script?.actions) ? script.actions : [];
   return actions.reduce((max, a) => (Number.isFinite(a?.at) && a.at > max ? a.at : max), 0);
+}
+
+/** Bins of a scene's heat strip (the swipe deck in `npm run scout:report`). */
+export const HEAT_BINS = 100;
+
+/**
+ * What the swipe deck shows of a scene's main script: its length (`durationMs`, null without
+ * actions) and `heat`, the average speed per time bin in position units per second, rounded
+ * (heatmap-strip.js computeBins; [] without two actions). `null` script = unreadable: both empty,
+ * so the scene isn't read again.
+ */
+export function scriptPreview(script, bins = HEAT_BINS) {
+  const actions = (Array.isArray(script?.actions) ? script.actions : [])
+    .filter((a) => Number.isFinite(a?.at) && Number.isFinite(a?.pos))
+    .sort((a, b) => a.at - b.at);
+  return {
+    durationMs: scriptDurationMs(script) || null,
+    heat: Array.from(computeBins(actions, bins), (v) => Math.round(v * 1000)),
+  };
+}
+
+/** A scene's main (stroke) script file, else its first; null for a packed scene. */
+export function mainScriptOf(scene) {
+  const scripts = Array.isArray(scene?.scripts) ? scene.scripts : [];
+  return scripts.find((s) => !s.axis) || scripts[0] || null;
+}
+
+/**
+ * Waiting candidates whose first scene has no preview yet (no `heat` key) and a script to read,
+ * best score first (the deck's order).
+ */
+export function candidatesMissingPreview(candidates) {
+  return (Array.isArray(candidates) ? candidates : [])
+    .filter((c) => c?.scenes?.[0] && !('heat' in c.scenes[0]) && mainScriptOf(c.scenes[0]))
+    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || b.id - a.id);
 }
 
 // ── Video variant ───────────────────────────────────────────────────────
