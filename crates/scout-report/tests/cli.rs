@@ -231,10 +231,11 @@ fn swipes_through_the_deck() {
     let report_page = String::from_utf8(get(port, "/").2).unwrap();
     assert!(report_page.contains(r#"href="/swipe""#));
 
+    // The default stack is multi-axis: only 31.
     let deck: Value = serde_json::from_slice(&get(port, "/api/deck?limit=2").2).unwrap();
     assert_eq!(
         (deck["remaining"].as_u64(), deck["wanted"].as_u64()),
-        (Some(3), Some(0))
+        (Some(1), Some(0))
     );
     let ids = |d: &Value| -> Vec<u64> {
         d["cards"]
@@ -244,7 +245,12 @@ fn swipes_through_the_deck() {
             .map(|c| c["id"].as_u64().unwrap())
             .collect()
     };
-    assert_eq!(ids(&deck), [31, 33]);
+    assert_eq!(ids(&deck), [31]);
+    let single: Value = serde_json::from_slice(&get(port, "/api/deck?stack=single").2).unwrap();
+    assert_eq!(
+        (ids(&single), single["remaining"].as_u64()),
+        (vec![33, 32], Some(2))
+    );
     assert_eq!(
         deck["cards"][0],
         json!({"id": 31, "url": "https://discuss.eroscripts.com/t/31", "title": "Thirty-one", "author": null,
@@ -262,6 +268,15 @@ fn swipes_through_the_deck() {
     assert_eq!(post(port, "/api/swipe", r#"{"id":32,"dir":"left"}"#).0, 200);
 
     let deck: Value = serde_json::from_slice(&get(port, "/api/deck").2).unwrap();
+    assert_eq!(
+        (
+            ids(&deck),
+            deck["remaining"].as_u64(),
+            deck["wanted"].as_u64()
+        ),
+        (vec![], Some(0), Some(1))
+    );
+    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=single").2).unwrap();
     assert_eq!(ids(&deck), [33]);
     assert_eq!(
         (deck["remaining"].as_u64(), deck["wanted"].as_u64()),
@@ -292,7 +307,7 @@ fn swipes_through_the_deck() {
     // Undo brings the card back and drops the entry.
     let (status, v) = post(port, "/api/swipe/undo", r#"{"id":32}"#);
     assert_eq!((status, v["removed"].as_bool()), (200, Some(true)));
-    let deck: Value = serde_json::from_slice(&get(port, "/api/deck").2).unwrap();
+    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=single").2).unwrap();
     assert_eq!(ids(&deck), [33, 32]);
     let file: Value =
         serde_json::from_slice(&fs::read(ud.join("eroscripts-scout-swipes.json")).unwrap())

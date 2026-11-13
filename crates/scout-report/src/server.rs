@@ -77,7 +77,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 
 /// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
 /// `seed=N` (shuffle a little), `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE)
-/// and `stack=mixed|multi|single` (default mixed).
+/// and `stack=multi|single` (default multi).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
@@ -107,7 +107,7 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
             }
             "stack" => {
                 d.stack = deck::Stack::parse(v)
-                    .ok_or_else(|| format!("stack is mixed, multi or single, got {v:?}\n"))?;
+                    .ok_or_else(|| format!("stack is multi or single, got {v:?}\n"))?;
             }
             _ => {}
         }
@@ -316,7 +316,7 @@ mod tests {
         let dir = user_data(name);
         std::fs::write(
             dir.join(report::WAITING_FILE),
-            br#"{"candidates":[{"id":7,"score":1},{"id":8,"score":3},{"id":9,"score":2}]}"#,
+            br#"{"candidates":[{"id":7,"score":1,"axisType":"multi"},{"id":8,"score":3,"axisType":"multi"},{"id":9,"score":2,"axisType":"multi"}]}"#,
         )
         .unwrap();
         dir
@@ -395,6 +395,7 @@ mod tests {
             "/api/deck?seed=-3",
             "/api/deck?exclude=8,x",
             "/api/deck?stack=both",
+            "/api/deck?stack=mixed",
         ] {
             assert_eq!(route("GET", bad, b"", &dir).status, 400, "{bad}");
         }
