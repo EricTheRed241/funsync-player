@@ -33,9 +33,10 @@
 //   • Videos the user picks by id (`--add`) skip the live-not-POV and focus
 //     rules; the exclusions, content rules, audio, length and library
 //     checks stay.
-//   • Sex required (as on EroScripts; picks too), at least MIN_VIDEO_MS
-//     long. `--fetch` and every scan drop saved candidates that now break
-//     the content rules (stillWanted).
+//   • No sex rule (as on EroScripts, since 2026-11-13: the ranking decides;
+//     sfw / non-nude tags are excluded), at least MIN_VIDEO_MS long.
+//     `--fetch` and every scan drop saved candidates that now break the
+//     content rules (stillWanted).
 //   • Ranking as on EroScripts (candidateScore with the user's tag scores,
 //     `library.tagScores`, and favourite artist bonus; monsters, feet and
 //     2D hentai only rank lower), saved lists scored again under it, with
@@ -51,22 +52,22 @@
 // `overwatch`.
 
 import {
-  candidateScore, canonicalArtist, contentRuleBreak, coreName, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, isSexual, liveNotPov,
+  candidateScore, canonicalArtist, contentRuleBreak, coreName, hasBlockedTag, hasExcludedText, isBlockedCreator, isCreatorLabel, isHentaiOnly, liveNotPov,
   normName, sameVideo,
   sceneTitle,
   titleArtist,
 } from './eroscripts-scout-lib.mjs';
 import {
   ANIMATION_TAGS, AUDIO_TITLE, FAPTAP_ANIMATION_TAGS, FAPTAP_FOCUS, FAPTAP_FOCUS_MIN, FLAT_MAX_HEIGHT, FURRY_TAGS, LIVE_TAGS,
-  MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
+  MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, SFW_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
 } from '../renderer/js/content-preferences.js';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 
 export const FAPTAP_ORIGIN = 'https://faptap.net';
 export const SIDECAR = 'faptap.json';
-/** Bump when the screening rules change, so every video is judged again. */
-export const FAPTAP_RULES_VERSION = 9;
+/** Bump when the screening rules change, so every video is judged again (10: no sex rule). */
+export const FAPTAP_RULES_VERSION = 10;
 /** The one feed: every video, newest first. */
 export const FEED = 'all';
 
@@ -261,13 +262,13 @@ export function faptapSceneName(video, ctx = {}) {
  * @param {boolean} [ctx.picked] the user asked for this video by id
  * @returns {{ok: false, reason: string} | {ok: true, tags: string[], vr: boolean, music: boolean, artist: string|null,
  *   focus: string[], live: boolean, favourite: string|null, picked: boolean, hentaiOnly: boolean}}
- *   reasons: excluded, blocked, audio-only, off-focus, not-sexual, live-not-pov, short, in-library
+ *   reasons: excluded (also sfw / non-nude tags), blocked, audio-only, off-focus, live-not-pov, short, in-library
  */
 export function screenVideo(video, { creators = [], knownTitles = [], livePerformers = [], favourites = [], picked = false } = {}) {
   const tags = videoTags(video);
   const title = String(video.name || '');
   const text = htmlText(video.description);
-  if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)) {
+  if (tags.some((t) => hasExcludedText(t) || FURRY_TAGS.has(t) || SFW_TAGS.has(t)) || hasExcludedText(title) || hasExcludedText(text)) {
     return { ok: false, reason: 'excluded' };
   }
   if (isBlockedCreator({ title, author: video.user?.username, performers: (video.performers || []).map((p) => p?.name) }) || hasBlockedTag({ tags, title })) {
@@ -286,7 +287,6 @@ export function screenVideo(video, { creators = [], knownTitles = [], livePerfor
   const vr = !!video.vr || tags.includes('vr');
   const focus = focusOf({ tags, title, vr });
   if (!picked && !favourite && focus.length < FAPTAP_FOCUS_MIN) return { ok: false, reason: 'off-focus' };
-  if (!isSexual({ tags, title })) return { ok: false, reason: 'not-sexual' };
   if (liveNotPov({ tags, title, live, vr, picked, favourite })) return { ok: false, reason: 'live-not-pov' };
   if (!(Number(video.duration) * 1000 >= MIN_VIDEO_MS)) return { ok: false, reason: 'short' };
   // Both ways: a five-word title sharing four generic words isn't the same video.
@@ -423,7 +423,7 @@ export function mergeCookies(jar, setCookies) {
 // The focus rule on a saved candidate (lists saved under older rules may miss it); picks and favourites need none.
 const inFocus = (c) => !!(c.picked || c.favourite) || focusOf(c).length >= FAPTAP_FOCUS_MIN;
 
-/** True when a saved candidate may still be downloaded: in focus, and within the content rules (sex; picks too). */
+/** True when a saved candidate may still be downloaded: in focus, and within the content rules (blocked, live-not-POV; picks too). */
 export const stillWanted = (c) => inFocus(c) && !contentRuleBreak(c);
 
 /**

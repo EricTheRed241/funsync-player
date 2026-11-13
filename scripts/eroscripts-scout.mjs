@@ -12,8 +12,8 @@
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //
-// Rules and ranking: scripts/eroscripts-scout-lib.mjs (sex required for
-// every post, favourites and picks too; monster, feet and 2D hentai posts
+// Rules and ranking: scripts/eroscripts-scout-lib.mjs (no sex rule, the
+// ranking decides; monster, feet and 2D hentai posts
 // rank lower). Scenes land in the library's EroScripts folder,
 // `<library parent>/EroScripts/<creator>/<Artist - Title (metadata)>/`, with an
 // `eroscripts.json` sidecar. Single-axis scenes get generated twist / roll / pitch companions
@@ -81,7 +81,7 @@ Scan (default; only posts not judged yet, see <userData>/eroscripts-scout-state.
   --vrbangers            VRBangers posts only: the scan reads the vrbangers feed (unless --feeds is given) and
                          prints only posts with a vrbangers.com video; --fetch and --manual-list take only those
 Pick:
-  --add 1,2,3            judge these post ids and put them on the list: only the exclusions, the sex rule,
+  --add 1,2,3            judge these post ids and put them on the list: only the exclusions,
                          posts the library has or the user turned down, and library duplicates count (the
                          live-not-POV rule doesn't); single-axis scenes get generated axes
 Download:
@@ -360,7 +360,7 @@ function makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes
   const c = {
     id: t.id, title: t.title, url: `https://discuss.eroscripts.com/t/${t.id}`, author,
     tags: t.tags, likes: t.likes,
-    vr: s.vr, music: s.music, axisType, artistInLibrary, hosts, live: s.live, favourite, sexual: first.sexual,
+    vr: s.vr, music: s.music, axisType, artistInLibrary, hosts, live: s.live, favourite,
     ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(first.ffm ? { ffm: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
@@ -371,7 +371,7 @@ async function scan(opts, { api, userData, config, incoming }) {
   const pacer = createPacer();
   const { library, knownTopics, turnedDown, favourites, scoring } = scoutContext(config, userData, incoming);
   const state = readScoutState(userData);
-  const rejected = { known: 0, excluded: 0, blocked: 0, 'not-sexual': 0, 'live-not-pov': 0, 'in-library': 0, 'no-video': 0 };
+  const rejected = { known: 0, excluded: 0, blocked: 0, 'live-not-pov': 0, 'in-library': 0, 'no-video': 0 };
   const fresh = [];
   let listed = 0;
   let judged = 0;
