@@ -5,8 +5,8 @@
 //   npm run faptap:scout                 scan new videos (+ some backfill) → <userData>/faptap-scout.json
 //   npm run faptap:scout -- --fetch      download the saved list
 //
-// Rules: scripts/faptap-scout-lib.mjs (sex required for every video,
-// favourites and picks too; monster, feet and 2D hentai videos rank lower). Scenes
+// Rules: scripts/faptap-scout-lib.mjs (no sex rule, the ranking decides;
+// monster, feet and 2D hentai videos rank lower). Scenes
 // land in the library's FapTap folder, `<library parent>/FapTap/<creator>/<Artist - Title>/`,
 // with a `faptap.json` sidecar. FapTap
 // scripts are single-axis, so every scene gets generated twist / roll /
@@ -60,7 +60,7 @@ Scan (default; only videos not judged before, see <userData>/faptap-scout-state.
   --top N                candidates to print (default 40)
 Pick:
   --add a,b,c            add these FapTap video ids to the list, skipping the live-not-POV and focus rules
-                         (exclusions, sex, audio roleplays, length and library duplicates still apply)
+                         (exclusions, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list, best first, into the FapTap library folder;
                          skips scripts under ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
@@ -271,7 +271,7 @@ async function scan(opts, { userData, config, incoming }) {
 
   const state = readState(userData);
   const rejected = {
-    known: 0, excluded: 0, blocked: 0, 'audio-only': 0, 'off-focus': 0, 'not-sexual': 0, 'live-not-pov': 0, short: 0, 'in-library': 0, duplicate: 0,
+    known: 0, excluded: 0, blocked: 0, 'audio-only': 0, 'off-focus': 0, 'live-not-pov': 0, short: 0, 'in-library': 0, duplicate: 0,
     'no-script': 0, 'no-stream': 0, 'low-quality': 0,
   };
   const fresh = [];
@@ -323,7 +323,7 @@ async function scan(opts, { userData, config, incoming }) {
   return 0;
 }
 
-/** `--add`: put videos the user picked on the list, past the animation, focus and sex rules. */
+/** `--add`: put videos the user picked on the list, past the animation and focus rules. */
 async function addPicked(opts, { userData, config, incoming }) {
   const ctx = await screenContext(config, userData, incoming);
   const done = doneScenes(incoming, userData);

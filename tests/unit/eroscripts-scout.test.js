@@ -8,11 +8,11 @@
 // (scripts/eroscripts-scout-lib.mjs). No forum, MEGA or pixeldrain.
 import { describe, it, expect } from 'vitest';
 import {
-  screenTopic, hasExcludedText, isSexual, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
+  screenTopic, hasExcludedText, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addLibrarySource, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, untitledTopicIds, addPostInfo,
-  contentRuleBreak, isHentaiOnly, sexEvidence, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
+  contentRuleBreak, isHentaiOnly, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { AUTO_FETCH_MIN_SCORE, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
@@ -92,10 +92,11 @@ describe('screenTopic', () => {
     expect(screenTopic(topic(['animation'], 'Agapilord - Bad (HMV)'), { sceneNames: ['agapilord bad'] }).reason).toBe('in-library');
   });
 
-  it('turns down posts tagged sfw or non-porn before reading them; the sex rule waits for the first post', () => {
-    expect(screenTopic(topic(['animation', 'sfw'])).reason).toBe('not-sexual');
-    expect(screenTopic(topic(['animation', 'dance', 'non-porn', 'riding'])).reason).toBe('not-sexual');
+  it('turns down posts tagged sfw or non-porn as excluded, and takes posts without sex tags or words', () => {
+    expect(screenTopic(topic(['animation', 'sfw'])).reason).toBe('excluded');
+    expect(screenTopic(topic(['animation', 'dance', 'non-porn', 'riding'])).reason).toBe('excluded');
     expect(screenTopic(topic(['animation', 'titjob'], 'Rio Paizuri'))).toMatchObject({ ok: true });
+    expect(screenTopic(topic(['sr6', 'multi-axis', 'animation', 'non-vr', 'straight'], '(Multi-Axis) Harry pxxter'))).toMatchObject({ ok: true });
   });
 
   it('marks 2D-hentai-only posts so they rank lower', () => {
@@ -185,16 +186,10 @@ describe('blocked tags (MMD)', () => {
 });
 
 describe('contentRuleBreak', () => {
-  it('names the rule a post or saved candidate breaks, by its tags and title; monsters and feet break none', () => {
+  it('names the rule a post or saved candidate breaks, by its tags and title; monsters, feet and non-sex acts break none', () => {
     expect(contentRuleBreak({ tags: ['sfm', 'riding'], title: 'Solace2K - Mercy X Horseguy' })).toBeNull();
     expect(contentRuleBreak({ tags: ['animation', 'footjob', 'vaginal'], title: 'X' })).toBeNull();
-    expect(contentRuleBreak({ tags: ['animation', 'blowjob'], title: 'X' })).toBe('not-sexual');
-    expect(contentRuleBreak({ tags: ['animation', 'blowjob', 'riding'], title: 'X' })).toBeNull();
-  });
-
-  it('lets sex shown by the first post pass', () => {
-    expect(contentRuleBreak({ tags: ['animation', 'straight'], title: 'X', sexual: 'text' })).toBeNull();
-    expect(contentRuleBreak({ tags: ['animation', 'sfw'], title: 'X', sexual: 'text' })).toBe('not-sexual');
+    expect(contentRuleBreak({ tags: ['animation', 'blowjob'], title: 'X' })).toBeNull();
   });
 
   it('drops a saved flat live music compilation that is not POV from the queue, unless a favourite, VR or picked', () => {
@@ -214,67 +209,14 @@ describe('contentRuleBreak', () => {
   });
 });
 
-describe('sexEvidence and judgeFirstPost', () => {
-  it('says where the sex shows: tags, then title, then the first post', () => {
-    expect(sexEvidence({ tags: ['riding'], title: 'X', text: 'riding' })).toBe('tags');
-    expect(sexEvidence({ tags: ['pmv'], title: 'Overwatch' })).toBe('tags');
-    expect(sexEvidence({ tags: ['animation'], title: 'Tifa rides' })).toBe('title');
-    expect(sexEvidence({ tags: ['animation'], title: 'Silver Streaks', text: 'She ends up riding him' })).toBe('text');
-    expect(sexEvidence({ tags: ['vam'], title: '[VAM]红衣', text: '骑乘 动作' })).toBe('text');
-    expect(sexEvidence({ tags: ['animation'], title: 'X', text: 'a titfuck and oral sex' })).toBeNull();
-    expect(sexEvidence({ tags: ['animation', 'sfw'], title: 'X', text: 'sex' })).toBeNull();
-  });
-
-  it('turns down a first post naming excluded content, then needs sex somewhere; monster / feet words only flag it', () => {
+describe('judgeFirstPost', () => {
+  it('turns down a first post naming excluded content; monster / feet / FFM words only flag it; no sex word needed', () => {
     expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'a loli edit')).toEqual({ ok: false, reason: 'excluded' });
-    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'with tentacles')).toEqual({ ok: true, sexual: 'tags', monster: true, feet: false, ffm: false });
-    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'soles and toes')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: true, ffm: false });
-    expect(judgeFirstPost({ tags: ['animation', 'titjob'], title: 'Rio Paizuri' }, 'paizuri only')).toEqual({ ok: false, reason: 'not-sexual' });
-    expect(judgeFirstPost({ tags: ['animation', 'blowjob'], title: 'Seraphine BJ' }, 'then she rides you')).toEqual({ ok: true, sexual: 'text', monster: false, feet: false, ffm: false });
-    expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, 'an FFM threesome')).toEqual({ ok: true, sexual: 'tags', monster: false, feet: false, ffm: true });
-  });
-});
-
-describe('isSexual', () => {
-  it('needs penetrative sex by tag or title word, in any language, dance or not', () => {
-    expect(isSexual({ tags: ['mmd', 'dance', 'solo-female'], title: 'CLC - Devil MMD Dance' })).toBe(false);
-    expect(isSexual({ tags: ['mmd', 'dance', 'straight', 'music'], title: 'Miku Tell Me What You Want' })).toBe(false);
-    expect(isSexual({ tags: ['mmd', 'dance', 'riding'], title: 'Lantern Rite' })).toBe(true);
-    expect(isSexual({ tags: ['mmd', 'dance'], title: 'Iroha Sex Dance' })).toBe(true);
-    expect(isSexual({ tags: ['vam'], title: '[VAM]红衣 骑乘' })).toBe(true);
-    expect(isSexual({ tags: ['mmd'], title: 'ミク 中出し' })).toBe(true);
-    expect(isSexual({ tags: ['3d'], title: 'Getting fucked on the couch' })).toBe(true);
-    expect(isSexual({ tags: ['3d'], title: 'Tifa mating press' })).toBe(true);
-  });
-
-  it('refuses blowjob, handjob, titjob or paizuri alone, and takes them with sex', () => {
-    expect(isSexual({ tags: ['animation', 'titjob', 'titfuck'], title: 'Rio Paizuri' })).toBe(false);
-    expect(isSexual({ tags: ['animation', 'blowjob', 'deepthroat', 'facefuck'], title: 'Tifa Side Facefuck' })).toBe(false);
-    expect(isSexual({ tags: ['animation', 'handjob', 'cumshot'], title: 'Hand service' })).toBe(false);
-    expect(isSexual({ tags: ['animation', 'oral-creampie'], title: 'Miku oral sex and face fucking' })).toBe(false);
-    expect(isSexual({ tags: ['animation', 'blowjob', 'riding'], title: 'Bocchi Blowjob' })).toBe(true);
-    expect(isSexual({ tags: ['animation', 'blowjob'], title: 'Blowjob then doggy' })).toBe(true);
-  });
-
-  it('takes a music video unless it is a dance or about a non-sex act', () => {
-    expect(isSexual({ tags: ['hmv', 'beat-based'], title: 'KDA PORN STARS' })).toBe(true);
-    expect(isSexual({ tags: ['animation'], title: 'Overwatch PMV' })).toBe(true);
-    expect(isSexual({ tags: ['pmv'], title: 'Blowjob PMV' })).toBe(false);
-    expect(isSexual({ tags: ['hmv'], title: 'Titjob HMV' })).toBe(false);
-    expect(isSexual({ tags: ['cock-hero'], title: 'JOI Cock Hero' })).toBe(false);
-    expect(isSexual({ tags: ['pmv'], title: 'Blowjob & Riding PMV' })).toBe(true);
-    expect(isSexual({ tags: ['hmv', 'dance', 'music'], title: 'Thumbs up' })).toBe(false);
-  });
-
-  it('no longer takes a porn genre tag alone', () => {
-    expect(isSexual({ tags: ['hentai', 'straight'], title: 'Fluorite - Caught You Staring' })).toBe(false);
-    expect(isSexual({ tags: ['animation', 'solo-female', 'ai-video'], title: 'Golden thread beauty sways' })).toBe(false);
-  });
-
-  it('never takes a post tagged sfw or non-porn, and matches whole words only', () => {
-    expect(isSexual({ tags: ['dance', 'non-porn', 'riding'], title: 'CH4NGE MMD sex' })).toBe(false);
-    expect(isSexual({ tags: ['animation'], title: 'Cumulus Dickens Analysis' })).toBe(false);
-    expect(isSexual({ tags: ['animation'], title: 'Sexy titfuck' })).toBe(false);
+    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'with tentacles')).toEqual({ ok: true, monster: true, feet: false, ffm: false });
+    expect(judgeFirstPost({ tags: ['animation', 'riding'], title: 'X' }, 'soles and toes')).toEqual({ ok: true, monster: false, feet: true, ffm: false });
+    expect(judgeFirstPost({ tags: ['animation', 'vaginal'], title: 'X' }, 'an FFM threesome')).toEqual({ ok: true, monster: false, feet: false, ffm: true });
+    expect(judgeFirstPost({ tags: ['animation', 'straight'], title: '(Multi-Axis) Harry pxxter' }, 'harry potter, hermione granger, draco malfoy'))
+      .toEqual({ ok: true, monster: false, feet: false, ffm: false });
   });
 });
 
@@ -606,17 +548,16 @@ describe('downloadQueue', () => {
     const q = downloadQueue([
       c(1, 'Solace2K - Mercy X Horseguy', ['sfm', 'riding']),
       c(2, 'Necromancer steamy footjob', ['animation', 'riding']),
-      c(3, 'Rio Paizuri', ['animation', 'titjob'], { picked: true }),
+      c(3, '[AidenHet] Rio', ['animation', 'riding'], { picked: true }),
       c(4, 'Tracer rides', ['animation', 'riding']),
       c(5, 'Werewolf footjob', ['animation', 'riding']),
     ]);
     expect(q.map((x) => x.id)).toEqual([4, 1, 2, 5]);
   });
 
-  it('takes a saved post whose first post shows the sex', () => {
-    const c = (id, extra) => ({ id, title: 'Silver Streaks', tags: ['animation', 'straight'], axisType: 'multi', score: 1, vr: false, scenes: [{ axes: ['twist'] }], ...extra });
-    const q = downloadQueue([c(1, { sexual: 'text' }), c(2, {})]);
-    expect(q.map((x) => x.id)).toEqual([1]);
+  it('keeps a saved post without sex tags or words, ranked below one with the riding bonus', () => {
+    const c = (id, tags) => ({ id, title: 'Silver Streaks', tags: ['animation', ...tags], axisType: 'multi', vr: false, likes: 0, scenes: [{ axes: ['twist'] }] });
+    expect(downloadQueue([c(1, ['straight']), c(2, ['riding'])]).map((x) => x.id)).toEqual([2, 1]);
   });
 
   it('orders by the user\'s tag scores too, within multi-axis and single-axis', () => {
@@ -678,7 +619,7 @@ describe('screenPick', () => {
   it('still refuses exclusions, the content rules, posts the library links or the user turned down, and library scenes', () => {
     expect(screenPick(topic(['pmv', 'futanari'], 'X', 6))).toEqual({ ok: false, reason: 'excluded' });
     expect(screenPick(topic(['sfm', 'pmv'], '2B X WW - BJ', 6))).toMatchObject({ ok: true, picked: true });
-    expect(screenPick(topic(['pmv', 'sfw'], 'X', 6))).toEqual({ ok: false, reason: 'not-sexual' });
+    expect(screenPick(topic(['pmv', 'sfw'], 'X', 6))).toEqual({ ok: false, reason: 'excluded' });
     expect(screenPick(topic(['pmv'], 'X', 7), { knownTopics: new Set([7]) })).toEqual({ ok: false, reason: 'known' });
     expect(screenPick(topic(['pmv'], 'JJULEZ - Work That Body', 8), { sceneNames: ['jjulez work that body'] })).toEqual({ ok: false, reason: 'in-library' });
   });
@@ -726,7 +667,7 @@ describe('scan state', () => {
 
   it('judges posts again after a rules change, and reads a foreign state as empty', () => {
     const state = emptyScoutState();
-    markTopic(state, 7, 'not-sexual');
+    markTopic(state, 7, 'excluded');
     expect(seenTopic(state, 7)).toBe(true);
     state.topics[7].rules = RULES_VERSION - 1;
     expect(seenTopic(state, 7)).toBe(false);
@@ -855,7 +796,7 @@ describe('scan state', () => {
     const c = (id, likes, ...videos) => ({ id, likes, title: 'X', tags: ['vaginal'], scenes: videos.map((name) => ({ video: { name } })) });
     const done = new Set(['1|a.mp4', '2|b.mp4']);
     const merged = mergeCandidates([c(1, 5, 'a.mp4'), c(2, 3, 'b.mp4', 'c.mp4'), c(3, 9, 'd.mp4'), { ...c(5, 8, 'f.mp4'), tags: ['tentacle', 'vaginal'] }],
-      [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4'), { ...c(6, 6, 'g.mp4'), tags: ['titjob'] }],
+      [c(4, 7, 'e.mp4'), c(2, 4, 'b.mp4', 'c.mp4'), { ...c(6, 6, 'g.mp4'), title: '[AidenHet] Rio' }],
       (id, v) => done.has(`${id}|${v}`), new Set([3]));
     expect(merged.map((x) => x.id)).toEqual([4, 2, 5]);
   });

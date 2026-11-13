@@ -124,7 +124,7 @@ describe('screenVideo', () => {
     expect(screenVideo(video(['PMV', 'tiktok', 'POV'], { name: 'FOLLOW ME Noodledude' }), { favourites })).toMatchObject({ ok: true, live: true, favourite: 'Noodledude' });
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Fit babe rides', performers: [{ name: 'NoFaceGirl' }] }), { favourites }).favourite).toBe('NoFaceGirl');
     expect(screenVideo(video(['Amateur', 'Blowjob', 'Riding', 'POV', 'noodledude'], { name: 'IWYC' }), { favourites }).favourite).toBe('Noodledude');
-    expect(screenVideo(video(['Amateur', 'Blowjob', 'noodledude'], { name: 'IWYC' }), { favourites }).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Amateur', 'Blowjob', 'noodledude'], { name: 'IWYC' }), { favourites })).toMatchObject({ ok: true, favourite: 'Noodledude' });
     expect(screenVideo(video(['Amateur', 'POV', 'Riding', 'Feet'], { name: 'Fit babe rides', performers: [{ name: 'NoFaceGirl' }] }), { favourites })).toMatchObject({ ok: true, favourite: 'NoFaceGirl' });
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Candy Lovers' }), { favourites }).reason).toBe('off-focus');
   });
@@ -138,7 +138,7 @@ describe('screenVideo', () => {
 
   it('lets a video picked by id past the live-not-POV and focus rules, but not the exclusions or content rules', () => {
     expect(screenVideo(video(['Amateur', 'POV'], { name: 'Pov riding' }), { picked: true })).toMatchObject({ ok: true, picked: true });
-    expect(screenVideo(video(['Amateur', 'POV'], { name: 'NoFaceGirl Pov boobfuck and blowjob' }), { picked: true }).reason).toBe('not-sexual');
+    expect(screenVideo(video(['Amateur', 'POV'], { name: 'NoFaceGirl Pov boobfuck and blowjob' }), { picked: true })).toMatchObject({ ok: true, picked: true });
     expect(screenVideo(video(['Amateur', 'Riding'], { name: 'Werewolf rides' }), { picked: true })).toMatchObject({ ok: true, picked: true });
     expect(screenVideo(video(['Amateur', 'Futa']), { picked: true }).reason).toBe('excluded');
     expect(screenVideo(video(['Amateur', 'Riding'], { duration: 30 }), { picked: true }).reason).toBe('short');
@@ -190,11 +190,10 @@ describe('screenVideo', () => {
     expect(hasLivePerformer({ performers: null })).toBe(false);
   });
 
-  it('needs penetrative sex and at least the minimum length (1:50)', () => {
-    expect(screenVideo(video(['Animated', 'dance', 'HMV', 'VR'], { name: 'Bulma dances' })).reason).toBe('not-sexual');
-    expect(screenVideo(video(['Animated', 'non-nude', ...FOCUS2])).reason).toBe('not-sexual');
-    expect(screenVideo(video(['Animated', 'Titjob', 'HMV', 'VR'], { name: 'Titjob HMV' })).reason).toBe('not-sexual');
-    expect(screenVideo(video(['Animated', 'Blowjob', 'PMV', 'VR'], { name: 'Blowjob PMV' })).reason).toBe('not-sexual');
+  it('takes videos without sex tags or words, never sfw / non-nude ones, and needs the minimum length (1:50)', () => {
+    expect(screenVideo(video(['Animated', 'dance', 'HMV', 'VR'], { name: 'Bulma dances' })).ok).toBe(true);
+    expect(screenVideo(video(['Animated', 'non-nude', ...FOCUS2])).reason).toBe('excluded');
+    expect(screenVideo(video(['Animated', 'Blowjob', 'PMV', 'VR'], { name: 'Blowjob PMV' })).ok).toBe(true);
     expect(screenVideo(video(['Animated', 'PMV', 'VR'], { name: 'Overwatch PMV' })).ok).toBe(true);
     expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 109 })).reason).toBe('short');
     expect(screenVideo(video(['Animated', ...FOCUS2], { duration: 110 })).ok).toBe(true);
@@ -264,8 +263,8 @@ describe('mergeCandidates', () => {
   it('drops saved candidates that break the content rules, picks and favourites too', () => {
     const c = (id, title, tags, extra = {}) => ({ id, score: 1, tags, title, ...extra });
     const saved = [
-      c('1', 'NoFaceGirl Pov boobfuck and blowjob', ['pov', 'blowjob'], { picked: true }),
-      c('2', 'JJULEZ - Goon Training JOI', ['pmv'], { favourite: 'JJULEZ' }),
+      c('1', '[AidenHet] Pov riding', ['pov', 'creampie', 'hmv'], { picked: true }),
+      c('2', 'MMD Kiriko rides', ['creampie', 'hmv'], { favourite: 'JJULEZ' }),
       c('3', 'Mercy X Horseguy', ['creampie', 'hmv']),
       c('4', 'Kiriko rides', ['creampie', 'hmv']),
     ];

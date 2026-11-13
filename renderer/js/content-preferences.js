@@ -68,7 +68,7 @@ export const isAudioRoleplayTag = (t) => t.includes('asmr') || t.includes('audio
 /** Shortest video worth downloading, by its main script's last action (FapTap also by listed length). 1:50 since 2026-11-09 (was 2:00). */
 export const MIN_VIDEO_MS = 110_000;
 
-// ── Discovery: animated or live action, sex required ────────────────────
+// ── Discovery: animated or live action ──────────────────────────────────
 
 /** Animation tags: a post with one (and no `real` tag) is animated; anything else is live action. AI video counts. */
 export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
@@ -80,23 +80,6 @@ export const LIVE_TAGS = new Set([
   'blacked', 'chaturbate', 'webcam', 'verified-amateurs', 'jav', 'celebrity', 'tiktok', 'cosplay', 'anime-cosplay', 'kbj',
   'egirl', 'sislovesme', 'dadcrush',
 ]);
-/** Penetrative sex tags: a post with one is sex. Blowjob, handjob and titjob alone don't count. Required of every post, favourites and picks too. */
-export const SEX_TAGS = new Set([
-  'sex', 'vaginal', 'vaginal-sex', 'anal', 'anal-sex', 'riding', 'cowgirl', 'reverse-cowgirl', 'doggy', 'doggystyle', 'doggy-style',
-  'standing-doggy', 'missionary', 'mating-press', 'pronebone', 'prone-bone', 'spooning', 'creampie', 'anal-creampie', 'cum-inside',
-  'cum-in-pussy', 'cum-in-ass', 'double-penetration', 'penetration', 'intercourse', 'threesome', 'foursome', 'fivesome', 'gangbang',
-  'orgy', 'group-sex', 'breeding', 'nakadashi',
-]);
-/** Sex words in a title (EroScripts: else in the first post, saved as `sexual: 'text'`), looked for after NON_SEX_PHRASES are taken out. */
-export const SEX_WORDS = /(?<![\p{L}\p{N}])(sex|segs|fuck|fucks|fucked|fucking|riding|rides?|cowgirl|doggy\w*|missionary|creampies?|anal|vaginal|mating ?press|prone ?bone|intercourse|penetration|gangbang\w*|threesome|foursome|orgy|orgies|nakadashi|breeding|cum ?inside)(?![\p{L}\p{N}])/iu;
-/** Sex words in scripts without spaces between words. */
-export const SEX_WORDS_CJK = /セックス|エッチ|中出し|騎乗|正常位|做爱|性爱|骑乘|后入|中出|内射|섹스|내사/u;
-/** Acts that aren't sex (`Face Fuck PMV`, `Titjob HMV`), removed from a title before sex words are looked for. */
-export const NON_SEX_PHRASES = /(?<![\p{L}\p{N}])(?:(?:face|throat|mouth|skull|tit|titty|boob|thigh|armpit|hand|foot|feet)[ -]?fuck\w*|oral[ -]?sex)/giu;
-/** A music video (PMV_TAGS / PMV_TITLE) counts as sex unless it's a dance or its title names one of these non-sex acts. */
-export const NON_SEX_ACT_TITLE = /(?<![\p{L}\p{N}])(blowjobs?|blow ?job|bj|handjobs?|hand ?job|hj|titjobs?|tit ?job|titfuck\w*|tittyfuck\w*|boobjobs?|paizuri|joi|deepthroat\w*|(?:face|throat|mouth|skull) ?fuck\w*|fellatio|oral)(?![\p{L}\p{N}])|フェラ|パイズリ|手コキ|口交|乳交/iu;
-/** A title that says the video is a dance counts like the `dance` tag. */
-export const DANCE_TITLE = /(?<![\p{L}\p{N}])danc(e|es|ing)(?![\p{L}\p{N}])|ダンス|踊り|舞蹈|跳舞|댄스/iu;
 
 // ── Discovery: scripts and axes ─────────────────────────────────────────
 

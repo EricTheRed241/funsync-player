@@ -17,12 +17,12 @@
 //     PMV / HMV / music compilation without POV) is turned down
 //     (liveNotPov, contentRuleBreak `live-not-pov`); favourites (title, tags
 //     or poster; scripts/scout-live.mjs) and picks skip that.
-//   • Sex required, picks included: a penetrative sex tag or sex word in the
-//     title, else in the first post. A music video counts unless it's a
-//     dance or its title is about a non-sex act. Never a post tagged sfw /
-//     non-porn. Candidates keep where the sex showed (`sexual: tags | title
-//     | text`). `--fetch` and every scan drop saved candidates that now
-//     break these content rules (contentRuleBreak).
+//   • No sex rule (user, 2026-11-13): posts without sex tags or words come
+//     in too (a multi-axis script can be worth it untagged) and the ranking
+//     decides (tag scores, AUTO_FETCH_MIN_SCORE for `--fetch --auto`).
+//     Never a post tagged sfw / non-porn (`excluded`). `--fetch` and every
+//     scan drop saved candidates that now break the content rules
+//     (contentRuleBreak).
 //   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
 //     downloaded; shorter scenes fetched under older rules stay.
 //   • Single-axis and multi-axis scenes alike (user, 2026-11-07: hand-made
@@ -46,9 +46,8 @@ import path from 'node:path';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, AUTO_FETCH_MIN_SCORE, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, DANCE_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
-  MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, NON_SEX_ACT_TITLE, NON_SEX_PHRASES, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SEX_TAGS, SEX_WORDS,
-  SEX_WORDS_CJK, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
+  ANIMATION_TAGS, AUTO_FETCH_MIN_SCORE, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
+  MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
 import { canonicalArtist } from '../renderer/js/artist-playlists.js';
@@ -186,26 +185,22 @@ export function liveNotPov({ tags = [], title = '', live, vr, picked, favourite 
  * Why a post or video breaks the content rules every scout list obeys
  * (favourites and picks included, except where noted), judged by its tags
  * and title, so a saved candidate can be checked again: `blocked`
- * (isBlockedCreator, hasBlockedTag), `not-sexual` (see isSexual),
- * `live-not-pov` (liveNotPov; favourites and picks skip this one), or null
- * when it doesn't. A candidate whose first post showed the sex
- * (`sexual: 'text'`) passes the sex rule. Monsters and feet only rank lower
- * (lessPreferred).
+ * (isBlockedCreator, hasBlockedTag), `live-not-pov` (liveNotPov; favourites
+ * and picks skip this one), or null when it doesn't. Monsters and feet only
+ * rank lower (lessPreferred).
  *
- * @param {{tags?: string[], title?: string, author?: string, artist?: string, sexual?: string,
+ * @param {{tags?: string[], title?: string, author?: string, artist?: string,
  *   live?: boolean, vr?: boolean, picked?: boolean, favourite?: string|null}} post
  */
-export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', sexual, live, vr, picked, favourite }) {
+export function contentRuleBreak({ tags = [], title = '', author = '', artist = '', live, vr, picked, favourite }) {
   if (isBlockedCreator({ title, author, artist }) || hasBlockedTag({ tags, title })) return 'blocked';
-  if (!isSexual({ tags, title }) && !(sexual === 'text' && !tags.some((t) => SFW_TAGS.has(t)))) return 'not-sexual';
   if (liveNotPov({ tags, title, live, vr, picked, favourite })) return 'live-not-pov';
   return null;
 }
 
 /**
- * First pass on a listed topic, before any request for its files. The sex
- * rule waits for the first post (judgeFirstPost), except for posts tagged
- * sfw / non-porn.
+ * First pass on a listed topic, before any request for its files. Posts
+ * tagged sfw / non-porn count as excluded.
  *
  * @param {{id: number, title: string, tags: string[]}} topic
  * @param {object} ctx
@@ -216,14 +211,13 @@ export function contentRuleBreak({ tags = [], title = '', author = '', artist = 
  * @param {boolean} [ctx.picked] the user asked for this post by id: the live-not-POV rule doesn't apply
  * @returns {{ok: false, reason: string} | {ok: true, music: boolean, vr: boolean, artist: string|null,
  *   live: boolean, favourite: string|null, hentaiOnly: boolean}}
- *   reasons: known, excluded, blocked, not-sexual, live-not-pov, in-library
+ *   reasons: known, excluded, blocked, live-not-pov, in-library
  */
 export function screenTopic(topic, { knownTopics = new Set(), creators = [], sceneNames = [], favourites = [], picked = false } = {}) {
   const tags = topic.tags || [];
   if (knownTopics.has(topic.id)) return { ok: false, reason: 'known' };
-  if (tags.some(hasExcludedText) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
+  if (tags.some((t) => hasExcludedText(t) || SFW_TAGS.has(t)) || hasExcludedText(topic.title)) return { ok: false, reason: 'excluded' };
   if (isBlockedCreator({ title: topic.title }) || hasBlockedTag({ tags, title: topic.title })) return { ok: false, reason: 'blocked' };
-  if (tags.some((t) => SFW_TAGS.has(t))) return { ok: false, reason: 'not-sexual' };
   const title = normName(topic.title);
   const artist = creators.find((c) => c.length > 3 && title.includes(normName(c))) || null;
   const live = !(tags.some((t) => ANIMATION_TAGS.has(t)) && !tags.includes('real'));
@@ -245,18 +239,16 @@ export function screenTopic(topic, { knownTopics = new Set(), creators = [], sce
 
 /**
  * Second pass, on the first post's text (tags stripped): the exclusions in
- * the text, then the sex rule with the text as a last resort. `sexual` says
- * where the sex showed, `monster` / `feet` what it names that ranks lower
- * (lessPreferred); all are saved on the candidate.
+ * the text, then what it names that ranks lower (`monster` / `feet` / `ffm`,
+ * lessPreferred), saved on the candidate.
  *
  * @param {{tags?: string[], title?: string}} topic
  * @param {string} text
- * @returns {{ok: false, reason: 'excluded' | 'not-sexual'} | {ok: true, sexual: 'tags' | 'title' | 'text', monster: boolean, feet: boolean}}
+ * @returns {{ok: false, reason: 'excluded'} | {ok: true, monster: boolean, feet: boolean, ffm: boolean}}
  */
 export function judgeFirstPost({ tags = [], title = '' }, text) {
   if (hasExcludedText(text)) return { ok: false, reason: 'excluded' };
-  const sexual = sexEvidence({ tags, title, text });
-  return sexual ? { ok: true, sexual, ...lessPreferred({ tags, title, text }) } : { ok: false, reason: 'not-sexual' };
+  return { ok: true, ...lessPreferred({ tags, title, text }) };
 }
 
 /** Discourse category of Free Scripts (Paid Scripts posts link to a store instead of files). */
@@ -306,40 +298,6 @@ export function unpackedScenes(files, { vr = false } = {}) {
     videos: local.filter((f) => isVideoName(f.name)),
     vr,
   }).scenes;
-}
-
-/**
- * Where a post shows penetrative sex, or null: `tags` for a sex tag
- * (vaginal, anal, riding, doggy, missionary, creampie, threesome …) or a
- * music-video tag, `title` for a sex word in the title (English, Japanese,
- * Chinese or Korean) or a music video named so, `text` for a sex word in
- * the first post. Blowjob, handjob, titjob or paizuri alone isn't sex. A
- * music video (PMV / HMV / Cock Hero / Fap Hero) counts unless it's a dance
- * or its title is about a non-sex act (`Blowjob PMV`, `Titjob HMV`, `JOI`)
- * without a sex word. A post tagged sfw / non-porn never is.
- *
- * @param {{tags?: string[], title?: string, text?: string}} post
- * @returns {'tags' | 'title' | 'text' | null}
- */
-export function sexEvidence({ tags = [], title = '', text = '' }) {
-  if (tags.some((t) => SFW_TAGS.has(t))) return null;
-  if (tags.some((t) => SEX_TAGS.has(t))) return 'tags';
-  if (hasSexWords(title)) return 'title';
-  const musicTag = tags.some((t) => PMV_TAGS.has(t));
-  if ((musicTag || PMV_TITLE.test(title)) && !(tags.includes('dance') || DANCE_TITLE.test(title)) && !NON_SEX_ACT_TITLE.test(title)) {
-    return musicTag ? 'tags' : 'title';
-  }
-  return text && hasSexWords(text) ? 'text' : null;
-}
-
-const hasSexWords = (s) => {
-  const words = String(s).replace(NON_SEX_PHRASES, ' ');
-  return SEX_WORDS.test(words) || SEX_WORDS_CJK.test(words);
-};
-
-/** True when a post shows penetrative sex (sexEvidence) by its tags, title or, when given, first-post text. */
-export function isSexual(post) {
-  return sexEvidence(post) !== null;
 }
 
 /** Last action time of a parsed funscript in ms; 0 when it has none. */
@@ -886,8 +844,8 @@ export function remapPaths(value, moves) {
 // Verdicts made under older rules count as unseen, and a `no-video` post
 // with activity after its verdict is judged again.
 
-/** Bump when the screening rules change, so every post is judged again (11: rule34video links count as videos; 12: vrbangers.com links too). */
-export const RULES_VERSION = 12;
+/** Bump when the screening rules change, so every post is judged again (12: vrbangers.com links count as videos; 13: no sex rule). */
+export const RULES_VERSION = 13;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
