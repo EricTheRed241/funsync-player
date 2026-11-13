@@ -28,10 +28,12 @@ no login: anyone on the network can read it, and swipe, while it runs. Every loa
 file shows as an empty section.
 
 The swipe deck, http://127.0.0.1:<port>/swipe, shows the waiting posts not in the
-library, highest score first, one card at a time. Right = wanted: the next
+library, roughly highest score first (each visit shifts every score by up to 2.5 either
+way, so the order varies), one card at a time. Right = wanted: the next
 npm run eroscripts:scout -- --fetch --auto downloads it whatever its score or axes.
-Left = hidden from the deck only (the scout treats the post as before). Undo forgets
-the swipe. Swipes go to eroscripts-scout-swipes.json, the only file the CLI writes
+Left = hidden from the deck only (the scout treats the post as before). Skip (up)
+puts the card back a few cards later, saving nothing. Undo forgets the swipe or skip.
+Swipes go to eroscripts-scout-swipes.json, the only file the CLI writes
 (atomically; the previous copy is kept as eroscripts-scout-swipes.json.bak). Stop it
 with Ctrl-C.
 

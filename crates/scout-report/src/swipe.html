@@ -77,6 +77,7 @@ a:hover { text-decoration: underline; }
 .round.small { width: 48px; height: 48px; font-size: 22px; }
 .round:disabled { opacity: .4; cursor: default; }
 .round.nope { color: var(--nope); } .round.like { color: var(--like); } .round.undo { color: var(--undo); }
+.round.skip { color: var(--accent); }
 .hint { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
 @media (hover: none) { .hint { display: none; } }
 .toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -97,15 +98,19 @@ a:hover { text-decoration: underline; }
 <div class="actions">
   <button type="button" class="round nope" id="nope" title="Hide from the deck (←)" aria-label="Hide">✕</button>
   <button type="button" class="round small undo" id="undo" title="Undo (Backspace)" aria-label="Undo">↺</button>
+  <button type="button" class="round small skip" id="skip" title="Skip: it comes back later in the deck (↓)" aria-label="Skip">↷</button>
   <button type="button" class="round like" id="like" title="Want: the scout downloads it (→)" aria-label="Want">♥</button>
 </div>
-<div class="hint">← hide · → want · Backspace undo · Space next image · tap the image's sides to browse</div>
+<div class="hint">← hide · → want · ↓ or drag up skip · Backspace undo · Space next image · tap the image's sides to browse</div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
 'use strict';
 const BATCH = 20;
 const REFILL_AT = 5;
+// This visit's shuffle: the server shifts every score by up to ±2.5 for this seed, so the deck is
+// roughly best first but not strictly; a reload deals a new order.
+const SEED = Math.floor(Math.random() * 2 ** 32);
 const $ = (id) => document.getElementById(id);
 const deckEl = $('deck');
 
@@ -125,7 +130,8 @@ function el(tag, attrs, ...children) {
 }
 
 let queue = [];         // cards not swiped yet; queue[0] is on top
-const undoStack = [];   // {card, dir}, newest last
+const undoStack = [];   // {card, dir}, newest last; dir 'skip' never reached the server
+let skipped = [];       // skipped cards waiting to go back into the deck
 let remaining = 0;
 let wanted = 0;
 let image = 0;          // the top card's image
@@ -252,7 +258,7 @@ function preload(url) {
 function renderCounter() {
   $('counter').textContent = loaded ? `${remaining} left · ${wanted} wanted` : 'Loading…';
   $('undo').disabled = !undoStack.length;
-  $('nope').disabled = $('like').disabled = !queue.length;
+  $('nope').disabled = $('like').disabled = $('skip').disabled = !queue.length;
 }
 
 /** Redraw the top two cards (a card flying off stays until its animation ends). */
@@ -272,7 +278,8 @@ function render(enterFrom) {
   const top = cardNode(queue[0], true);
   if (enterFrom) {
     top.classList.add('drag');
-    top.style.transform = `translateX(${enterFrom === 'right' ? '' : '-'}120%) rotate(${enterFrom === 'right' ? 20 : -20}deg)`;
+    top.style.transform = enterFrom === 'skip' ? 'translateY(-120%)'
+      : `translateX(${enterFrom === 'right' ? '' : '-'}120%) rotate(${enterFrom === 'right' ? 20 : -20}deg)`;
   }
   deckEl.append(top);
   if (enterFrom) {
@@ -346,6 +353,8 @@ function drag(node) {
     }
     if (Math.abs(dx) > threshold()) {
       swipe(dx > 0 ? 'right' : 'left', dy * 0.3);
+    } else if (-dy > threshold()) {
+      skip();
     } else {
       node.style.transform = '';
       setStamps(node, 0);
@@ -356,11 +365,15 @@ function drag(node) {
 }
 
 function fly(node, dir, dy) {
-  const sign = dir === 'right' ? 1 : -1;
   node.classList.remove('drag');
   node.classList.add('fly');
-  setStamps(node, sign);
-  node.style.transform = `translate(${sign * 1.4 * window.innerWidth}px, ${dy || 0}px) rotate(${sign * 30}deg)`;
+  if (dir === 'skip') {
+    node.style.transform = `translateY(${-1.2 * window.innerHeight}px)`;
+  } else {
+    const sign = dir === 'right' ? 1 : -1;
+    setStamps(node, sign);
+    node.style.transform = `translate(${sign * 1.4 * window.innerWidth}px, ${dy || 0}px) rotate(${sign * 30}deg)`;
+  }
   setTimeout(() => node.remove(), 400);
 }
 
@@ -397,13 +410,46 @@ function swipe(dir, dy) {
   if (queue.length <= REFILL_AT) more();
 }
 
+/** Put the top card aside; it goes back into the deck a few cards on (returnSkipped). Nothing is saved. */
+function skip() {
+  const card = queue[0];
+  if (!card) return;
+  const node = topNode();
+  if (node) fly(node, 'skip');
+  queue.shift();
+  undoStack.push({ card, dir: 'skip' });
+  skipped.push(card);
+  image = 0;
+  if (queue.length <= REFILL_AT) {
+    if (exhausted) returnSkipped(); else more();
+  }
+  render();
+}
+
+/**
+ * Shuffle the skipped cards back into the deck, each at a random place after the next
+ * REFILL_AT cards (or anywhere when fewer are left), so they come back later, not at once.
+ */
+function returnSkipped() {
+  for (const card of skipped) {
+    const from = Math.min(REFILL_AT, queue.length);
+    queue.splice(from + Math.floor(Math.random() * (queue.length - from + 1)), 0, card);
+  }
+  skipped = [];
+}
+
 function undo() {
   const last = undoStack.pop();
   if (!last) return;
   queue = queue.filter((c) => c.id !== last.card.id);
   queue.unshift(last.card);
-  count(1, last.dir === 'right' ? -1 : 0);
   image = 0;
+  if (last.dir === 'skip') {
+    skipped = skipped.filter((c) => c.id !== last.card.id);
+    render('skip');
+    return;
+  }
+  count(1, last.dir === 'right' ? -1 : 0);
   render(last.dir);
   serial(() => post('/api/swipe/undo', { id: last.card.id })).catch((e) => {
     // The swipe still stands: take the card off again.
@@ -416,14 +462,17 @@ function undo() {
   });
 }
 
-/** Fetch the next cards (the server leaves out everything swiped so far). */
+/**
+ * Fetch the next cards in this visit's order (SEED). The server leaves out everything swiped
+ * so far and the cards this page holds (on screen or skipped); skipped ones then go back in.
+ */
 function more() {
   if (loading || exhausted) return;
   loading = true;
   since = { remaining: 0, wanted: 0 };
-  const limit = Math.min(100, queue.length + BATCH);
+  const held = [...queue, ...skipped].map((c) => c.id).join(',');
   serial(async () => {
-    const res = await fetch('/api/deck?limit=' + limit, { cache: 'no-store' });
+    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${SEED}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -432,11 +481,12 @@ function more() {
     remaining = Math.max(0, d.remaining + since.remaining);
     wanted = Math.max(0, d.wanted + since.wanted);
     since = null;
-    exhausted = d.cards.length < limit;
-    const have = new Set([...queue, ...undoStack.map((u) => u.card)].map((c) => c.id));
+    exhausted = d.cards.length < BATCH;
+    const have = new Set([...queue, ...skipped, ...undoStack.map((u) => u.card)].map((c) => c.id));
     const fresh = d.cards.filter((c) => !have.has(c.id));
     const wasEmpty = !queue.length;
     queue.push(...fresh);
+    returnSkipped();
     $('problems').hidden = !d.problems.length;
     $('problems').textContent = d.problems.join('\n');
     loading = false;
@@ -456,7 +506,11 @@ function more() {
     loading = false;
     since = null;
     loadError = e.message;
-    if (!queue.length) render(); else toast('Could not load more cards: ' + e.message);
+    if (!queue.length) {
+      returnSkipped();
+      render();
+    }
+    if (queue.length) toast('Could not load more cards: ' + e.message);
   });
 }
 
@@ -471,10 +525,12 @@ function reload() {
 $('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });
 $('like').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('right'); });
 $('undo').addEventListener('click', (e) => { e.currentTarget.blur(); undo(); });
+$('skip').addEventListener('click', (e) => { e.currentTarget.blur(); skip(); });
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'ArrowLeft') swipe('left');
   else if (e.key === 'ArrowRight') swipe('right');
+  else if (e.key === 'ArrowDown') skip();
   else if (e.key === 'Backspace') undo();
   else if (e.key === ' ') showImage(image + 1);
   else return;

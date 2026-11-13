@@ -1,20 +1,46 @@
 //! The swipe deck: the waiting list's posts with no video in the library and
 //! no swipe yet, highest score first (the scout's download order), as cards
-//! for `/swipe`. Tag scores and creampie come from the scout's waiting list
-//! (`tagScores`, `creampie`); Rust never computes them.
+//! for `/swipe`; with a `seed`, each card's score is shifted by up to JITTER
+//! either way, so the order wanders a little. Tag scores and creampie come from
+//! the scout's waiting list (`tagScores`, `creampie`); Rust never computes them.
 
 use crate::report::{self, id_of, str_of};
 use crate::swipes::{Dir, Swipes};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 pub const DEFAULT_LIMIT: usize = 20;
 pub const MAX_LIMIT: usize = 100;
+/// Most ids one deck request may leave out (`exclude`: the cards the page holds).
+pub const MAX_EXCLUDE: usize = 1000;
+/// Score points a seeded deck moves each card by, at most, either way.
+pub const JITTER: f64 = 2.5;
 /// Images per card (the scout saves at most this many).
 pub const MAX_IMAGES: usize = 5;
 const TOP_TAGS: usize = 3;
+
+/// What one deck request asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deal {
+    pub limit: usize,
+    /// Shuffle a little (JITTER); the same seed deals the same order, so the pages of
+    /// one visit agree. None = strictly by score.
+    pub seed: Option<u64>,
+    /// Cards the page holds already (on screen, or skipped for later).
+    pub exclude: HashSet<u64>,
+}
+
+impl Default for Deal {
+    fn default() -> Self {
+        Deal {
+            limit: DEFAULT_LIMIT,
+            seed: None,
+            exclude: HashSet::new(),
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,8 +105,8 @@ pub struct TagScore {
 }
 
 /// Read the waiting list, the state, the library (`config.json`,
-/// `eroscripts-links.json`) and the swipes, and deal the first `limit` cards.
-pub fn load(user_data: &Path, limit: usize) -> Deck {
+/// `eroscripts-links.json`) and the swipes, and deal the cards `deal` asks for.
+pub fn load(user_data: &Path, deal: &Deal) -> Deck {
     let mut problems = Vec::new();
     let state = report::read_json(user_data, report::STATE_FILE, &mut problems);
     let waiting = report::read_json(user_data, report::WAITING_FILE, &mut problems);
@@ -89,9 +115,37 @@ pub fn load(user_data: &Path, limit: usize) -> Deck {
     let swipes = report::read_swipes(user_data, &mut problems);
     let videos = crate::library::topic_videos(&config, &links, &mut problems);
     let mut deck = build(&state, &waiting, &videos, &swipes);
-    deck.cards.truncate(limit);
+    deck.deal(deal);
     deck.problems = problems;
     deck
+}
+
+impl Deck {
+    /// Reorder by `seed`, leave out `exclude` and keep the first `limit` cards
+    /// (`remaining` still counts every card left to swipe).
+    pub fn deal(&mut self, deal: &Deal) {
+        if let Some(seed) = deal.seed {
+            let key = |c: &Card| {
+                c.score
+                    .map_or(f64::NEG_INFINITY, |s| s + jitter(seed, c.id))
+            };
+            self.cards
+                .sort_by(|a, b| key(b).total_cmp(&key(a)).then(b.id.cmp(&a.id)));
+        }
+        self.cards.retain(|c| !deal.exclude.contains(&c.id));
+        self.cards.truncate(deal.limit);
+    }
+}
+
+/// Card `id`'s score shift for `seed`, in [-JITTER, JITTER] (splitmix64 of both):
+/// the same for a seed and id on every request.
+pub fn jitter(seed: u64, id: u64) -> f64 {
+    let mut z = (seed ^ id.wrapping_mul(0x9E37_79B9_7F4A_7C15)).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    let unit = (z >> 11) as f64 / (1u64 << 53) as f64; // [0, 1)
+    (unit * 2.0 - 1.0) * JITTER
 }
 
 fn candidates(waiting: &Value) -> impl Iterator<Item = (u64, &Value)> {
@@ -369,6 +423,68 @@ mod tests {
         assert_eq!(c["images"], json!([]));
     }
 
+    fn ids(d: &Deck) -> Vec<u64> {
+        d.cards.iter().map(|c| c.id).collect()
+    }
+
+    /// `n` cards scored 0, 1, … n-1 (id = score), dealt with `deal`.
+    fn dealt(n: u64, deal: &Deal) -> Deck {
+        let cands: Vec<Value> = (0..n)
+            .map(|i| json!({"id": i, "score": i as f64}))
+            .collect();
+        let mut d = build(
+            &json!({}),
+            &json!({"candidates": cands}),
+            &HashMap::new(),
+            &Swipes::default(),
+        );
+        d.deal(deal);
+        d
+    }
+
+    #[test]
+    fn jitter_stays_within_bounds_and_repeats_per_seed() {
+        let shifts: Vec<f64> = (0..10_000).map(|id| jitter(7, id)).collect();
+        assert!(shifts.iter().all(|s| (-JITTER..=JITTER).contains(s)));
+        // Spread over the whole range, both ways.
+        assert!(
+            shifts.iter().any(|&s| s < -JITTER * 0.9) && shifts.iter().any(|&s| s > JITTER * 0.9)
+        );
+        assert_eq!(jitter(7, 42), jitter(7, 42));
+        assert_ne!(jitter(7, 42), jitter(8, 42));
+    }
+
+    #[test]
+    fn a_seed_shuffles_a_little_and_pages_agree() {
+        let all = Deal {
+            limit: MAX_LIMIT,
+            ..Deal::default()
+        };
+        // No seed: strictly best first.
+        assert_eq!(ids(&dealt(30, &all)), (0..30).rev().collect::<Vec<_>>());
+        let seeded = Deal {
+            seed: Some(3),
+            ..all.clone()
+        };
+        let order = ids(&dealt(30, &seeded));
+        assert_ne!(order, (0..30).rev().collect::<Vec<_>>());
+        // Never further than the jitter allows: a card only passes ones within 2 × JITTER points.
+        for (i, a) in order.iter().enumerate() {
+            for b in &order[i + 1..] {
+                assert!(*b as f64 - *a as f64 <= 2.0 * JITTER, "{a} before {b}");
+            }
+        }
+        // The second page (the first 10 left out) continues the same order.
+        let page2 = Deal {
+            limit: 10,
+            exclude: order[..10].iter().copied().collect(),
+            ..seeded.clone()
+        };
+        let d = dealt(30, &page2);
+        assert_eq!(ids(&d), order[10..20]);
+        assert_eq!(d.remaining, 30);
+    }
+
     #[test]
     fn axes_skip_packed_scenes() {
         let s = |v: Value| v.as_array().unwrap().clone();
@@ -418,18 +534,30 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("scout-report-deck-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let d = load(&dir, DEFAULT_LIMIT);
+        let d = load(&dir, &Deal::default());
         assert_eq!((d.remaining, d.wanted, d.cards.len()), (0, 0, 0));
         assert!(d.problems.is_empty());
 
         std::fs::write(dir.join(report::WAITING_FILE), waiting().to_string()).unwrap();
         std::fs::write(dir.join(report::STATE_FILE), state().to_string()).unwrap();
-        let d = load(&dir, 2);
+        let d = load(
+            &dir,
+            &Deal {
+                limit: 2,
+                ..Deal::default()
+            },
+        );
         assert_eq!(d.remaining, 7);
         assert_eq!(d.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [12, 14]);
 
         std::fs::write(dir.join(crate::swipes::FILE), b"nope").unwrap();
-        let d = load(&dir, 0);
+        let d = load(
+            &dir,
+            &Deal {
+                limit: 0,
+                ..Deal::default()
+            },
+        );
         assert_eq!((d.remaining, d.cards.len()), (7, 0));
         assert!(d.problems[0].starts_with(crate::swipes::FILE));
         let _ = std::fs::remove_dir_all(&dir);

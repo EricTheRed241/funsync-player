@@ -1,6 +1,6 @@
 //! The HTTP side: one request at a time. `GET /` (the report page),
 //! `GET /api/report` (the report, rebuilt from the files on every request),
-//! `GET /swipe` (the deck page), `GET /api/deck?limit=N` (the next cards),
+//! `GET /swipe` (the deck page), `GET /api/deck?limit=N&seed=N&exclude=ids` (the next cards),
 //! `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (the only
 //! writes: eroscripts-scout-swipes.json).
 
@@ -65,8 +65,8 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
         ("GET" | "HEAD", "/") => html(PAGE),
         ("GET" | "HEAD", "/swipe") => html(SWIPE_PAGE),
         ("GET" | "HEAD", "/api/report") => json_ok(&report::load(user_data)),
-        ("GET" | "HEAD", "/api/deck") => match limit(query) {
-            Ok(n) => json_ok(&deck::load(user_data, n)),
+        ("GET" | "HEAD", "/api/deck") => match deal(query) {
+            Ok(d) => json_ok(&deck::load(user_data, &d)),
             Err(e) => text(400, &e),
         },
         ("POST", "/api/swipe") => swipe(body, user_data),
@@ -75,15 +75,39 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
     }
 }
 
-/// `limit=N` from the query: default DEFAULT_LIMIT, at most MAX_LIMIT.
-fn limit(query: &str) -> Result<usize, String> {
-    match query.split('&').find_map(|p| p.strip_prefix("limit=")) {
-        None => Ok(deck::DEFAULT_LIMIT),
-        Some(v) => v
-            .parse::<usize>()
-            .map(|n| n.min(deck::MAX_LIMIT))
-            .map_err(|_| format!("limit must be a whole number, got {v:?}\n")),
+/// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
+/// `seed=N` (shuffle a little) and `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE).
+fn deal(query: &str) -> Result<deck::Deal, String> {
+    let mut d = deck::Deal::default();
+    for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
+        match key {
+            "limit" => {
+                d.limit = v
+                    .parse::<usize>()
+                    .map(|n| n.min(deck::MAX_LIMIT))
+                    .map_err(|_| format!("limit must be a whole number, got {v:?}\n"))?;
+            }
+            "seed" => {
+                d.seed = Some(
+                    v.parse::<u64>()
+                        .map_err(|_| format!("seed must be a whole number, got {v:?}\n"))?,
+                );
+            }
+            "exclude" => {
+                for id in v.split(',').filter(|s| !s.is_empty()) {
+                    let id = id
+                        .parse::<u64>()
+                        .map_err(|_| format!("exclude takes topic ids, got {id:?}\n"))?;
+                    d.exclude.insert(id);
+                }
+                if d.exclude.len() > deck::MAX_EXCLUDE {
+                    return Err(format!("exclude takes at most {} ids\n", deck::MAX_EXCLUDE));
+                }
+            }
+            _ => {}
+        }
     }
+    Ok(d)
 }
 
 /// The JSON object a POST carries, and its topic `id`.
@@ -356,15 +380,32 @@ mod tests {
             [] as [u64; 0]
         );
         assert_eq!(get_json("/api/deck?limit=100000", &dir)["remaining"], 3);
+        // Cards the page holds are left out; the count still covers them.
+        let v = get_json("/api/deck?exclude=8,7&limit=5", &dir);
+        assert_eq!((ids(&v), v["remaining"].as_u64()), (vec![9], Some(3)));
         for bad in [
             "/api/deck?limit=",
             "/api/deck?limit=-1",
             "/api/deck?limit=x",
+            "/api/deck?seed=-3",
+            "/api/deck?exclude=8,x",
         ] {
             assert_eq!(route("GET", bad, b"", &dir).status, 400, "{bad}");
         }
-        assert_eq!(limit("limit=100000"), Ok(deck::MAX_LIMIT));
-        assert_eq!(limit(""), Ok(deck::DEFAULT_LIMIT));
+        let many = (0..=deck::MAX_EXCLUDE)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            route("GET", &format!("/api/deck?exclude={many}"), b"", &dir).status,
+            400
+        );
+        assert_eq!(deal("limit=100000").map(|d| d.limit), Ok(deck::MAX_LIMIT));
+        assert_eq!(deal(""), Ok(deck::Deal::default()));
+        assert_eq!(
+            deal("seed=9&exclude=").map(|d| (d.seed, d.exclude.len())),
+            Ok((Some(9), 0))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
