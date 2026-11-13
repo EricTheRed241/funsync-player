@@ -101,12 +101,6 @@ export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{
 // scripts, so all of its scenes come in single-axis.
 /** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
 export const LIBRARY_MAX_VIDEOS = 1000;
-/**
- * `eroscripts:scout --fetch --auto` (the daily run, `--daily`) downloads only posts with hand-made multi-axis scripts
- * (archives count: they're multi-axis packs) that score at least this (candidateScore); the rest wait for the user's pick
- * (user, 2026-11-10; 10 → 15 the same day).
- */
-export const AUTO_FETCH_MIN_SCORE = 15;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
 export const FAPTAP_FOCUS = [
   { name: 'PMV / HMV', tags: [...PMV_TAGS], title: PMV_TITLE },
