@@ -1,6 +1,7 @@
 //! The HTTP side: one request at a time. `GET /` (the report page),
 //! `GET /api/report` (the report, rebuilt from the files on every request),
-//! `GET /swipe` (the deck page), `GET /api/deck?limit=N&seed=N&exclude=ids` (the next cards),
+//! `GET /swipe` (the deck page), `GET /api/deck?limit=N&seed=N&jitter=N&exclude=ids&stack=…`
+//! (the next cards),
 //! `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (the only
 //! writes: eroscripts-scout-swipes.json).
 
@@ -76,7 +77,8 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 }
 
 /// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
-/// `seed=N` (shuffle a little), `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE)
+/// `seed=N` (shuffle a little), `jitter=N` (how much, in score points: 0 ..= MAX_JITTER;
+/// default the stack's), `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE)
 /// and `stack=multi|single` (default multi).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
@@ -93,6 +95,19 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
                     v.parse::<u64>()
                         .map_err(|_| format!("seed must be a whole number, got {v:?}\n"))?,
                 );
+            }
+            "jitter" => {
+                let n = v
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| (0.0..=deck::MAX_JITTER).contains(n))
+                    .ok_or_else(|| {
+                        format!(
+                            "jitter must be a number from 0 to {}, got {v:?}\n",
+                            deck::MAX_JITTER
+                        )
+                    })?;
+                d.jitter = Some(n);
             }
             "exclude" => {
                 for id in v.split(',').filter(|s| !s.is_empty()) {
@@ -396,6 +411,13 @@ mod tests {
             "/api/deck?exclude=8,x",
             "/api/deck?stack=both",
             "/api/deck?stack=mixed",
+            "/api/deck?jitter=",
+            "/api/deck?jitter=31",
+            "/api/deck?jitter=30.01",
+            "/api/deck?jitter=-1",
+            "/api/deck?jitter=x",
+            "/api/deck?jitter=NaN",
+            "/api/deck?jitter=inf",
         ] {
             assert_eq!(route("GET", bad, b"", &dir).status, 400, "{bad}");
         }
@@ -412,6 +434,18 @@ mod tests {
         assert_eq!(
             deal("seed=9&exclude=").map(|d| (d.seed, d.exclude.len())),
             Ok((Some(9), 0))
+        );
+        // jitter: 0 ..= MAX_JITTER score points; 0 deals strictly by score, seed or not.
+        assert_eq!(deal("jitter=0").map(|d| d.jitter), Ok(Some(0.0)));
+        assert_eq!(deal("jitter=2.5").map(|d| d.jitter), Ok(Some(2.5)));
+        assert_eq!(
+            deal("jitter=30").map(|d| d.jitter),
+            Ok(Some(deck::MAX_JITTER))
+        );
+        assert_eq!(deal("seed=1").map(|d| d.jitter), Ok(None));
+        assert_eq!(
+            ids(&get_json("/api/deck?seed=12345&jitter=0", &dir)),
+            [8, 9, 7]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

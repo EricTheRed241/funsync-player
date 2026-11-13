@@ -230,6 +230,10 @@ fn swipes_through_the_deck() {
     assert!(page.contains(r#"href="/""#), "links back to the report");
     let report_page = String::from_utf8(get(port, "/").2).unwrap();
     assert!(report_page.contains(r#"href="/swipe""#));
+    // Both pages carry their tab icon inline.
+    for p in [&page, &report_page] {
+        assert!(p.contains(r#"<link rel="icon" href="data:image/svg+xml,"#));
+    }
 
     // The default stack is multi-axis: only 31.
     let deck: Value = serde_json::from_slice(&get(port, "/api/deck?limit=2").2).unwrap();
@@ -256,8 +260,15 @@ fn swipes_through_the_deck() {
         json!({"id": 31, "url": "https://discuss.eroscripts.com/t/31", "title": "Thirty-one", "author": null,
                "images": ["https://x/31.jpg", "https://x/31b.jpg"], "score": 9.5, "vr": true,
                "axisType": "multi", "axes": 2, "videos": 1, "creampie": true,
-               "topTags": [{"tag": "pov", "score": 3.0}], "runtimeMs": null, "heat": []})
+               "topTags": [{"tag": "pov", "score": 3.0}],
+               "tags": [{"tag": "pov", "score": 3.0}, {"tag": "anal", "score": -2.0}],
+               "runtimeMs": null, "heat": [], "likes": null, "hosts": [], "gb": null,
+               "created": null, "bumped": null,
+               "scenes": [{"name": null, "host": null, "size": null, "runtimeMs": null, "axes": ["twist"]}],
+               "moreScenes": 0})
     );
+    // A shuffle wider than MAX_JITTER is refused.
+    assert_eq!(get(port, "/api/deck?seed=1&jitter=31").0, 400);
 
     let (status, v) = post(port, "/api/swipe", r#"{"id":31,"dir":"right"}"#);
     assert_eq!(status, 200);

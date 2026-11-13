@@ -1,10 +1,11 @@
 //! The swipe deck: the waiting list's posts with no video in the library and
 //! no swipe yet, highest score first (the scout's download order), as cards
-//! for `/swipe`; with a `seed`, each card's score is shifted by up to the stack's
-//! jitter (MULTI_JITTER or SINGLE_JITTER) either way, so the order wanders a little. Tag scores and creampie come from
-//! the scout's waiting list (`tagScores`, `creampie`); Rust never computes them.
+//! for `/swipe`; with a `seed`, each card's score is shifted by up to the deal's jitter
+//! (the request's `jitter`, else the stack's MULTI_JITTER or SINGLE_JITTER) either way, so
+//! the order wanders a little. Tag scores and creampie come from the scout's waiting list
+//! (`tagScores`, `creampie`); Rust never computes them.
 
-use crate::report::{self, id_of, str_of};
+use crate::report::{self, id_of, str_of, strings_of};
 use crate::swipes::{Dir, Swipes};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -21,8 +22,12 @@ pub const MULTI_JITTER: f64 = 4.0;
 /// Score points a seeded single-axis deck moves each card by, at most, either way: wide enough
 /// (scores run about -4 … 24) that low-scoring posts surface too and the whole stack gets swiped.
 pub const SINGLE_JITTER: f64 = 10.0;
+/// Largest jitter a deck request may ask for (`jitter=N`), in score points.
+pub const MAX_JITTER: f64 = 30.0;
 /// Images per card (the scout saves at most this many).
 pub const MAX_IMAGES: usize = 5;
+/// Scenes listed per card; the rest only count (`moreScenes`).
+pub const MAX_SCENES: usize = 20;
 const TOP_TAGS: usize = 3;
 
 /// Which posts a deck request deals: multi-axis (the scout's `axisType`; packed archives count
@@ -53,12 +58,15 @@ impl Stack {
 }
 
 /// What one deck request asks for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Deal {
     pub limit: usize,
-    /// Shuffle a little (the stack's jitter); the same seed deals the same order, so the pages of
+    /// Shuffle a little (by `jitter`); the same seed deals the same order, so the pages of
     /// one visit agree. None = strictly by score.
     pub seed: Option<u64>,
+    /// Score points a seeded deal moves each card by, at most, either way (0 ..= MAX_JITTER;
+    /// 0 = strictly by score). None = the stack's own (`Stack::jitter`).
+    pub jitter: Option<f64>,
     /// Cards the page holds already (on screen, or skipped for later).
     pub exclude: HashSet<u64>,
     pub stack: Stack,
@@ -69,6 +77,7 @@ impl Default for Deal {
         Deal {
             limit: DEFAULT_LIMIT,
             seed: None,
+            jitter: None,
             exclude: HashSet::new(),
             stack: Stack::default(),
         }
@@ -106,12 +115,40 @@ pub struct Card {
     pub videos: usize,
     pub creampie: bool,
     pub top_tags: Vec<TagScore>,
+    /// Every tag of the post with its tag score (`tagScores`, else 0): highest first, ties by name.
+    pub tags: Vec<TagScore>,
     /// The first video's length: its main script's (`durationMs`, set by the scout),
     /// else the host's listed video length.
     pub runtime_ms: Option<u64>,
     /// The first video's main-script speed per time bin, in position units per second
     /// (`heat`, set by the scout from renderer/js/heatmap-strip.js computeBins); empty = unknown.
     pub heat: Vec<u32>,
+    pub likes: Option<i64>,
+    /// Hosts of the post's videos.
+    pub hosts: Vec<String>,
+    /// Total size of the videos whose size is known, in GB (10^9 bytes).
+    pub gb: Option<f64>,
+    /// When the topic was created and last active (the state's `created`, `bumped`).
+    pub created: Option<String>,
+    pub bumped: Option<String>,
+    /// The first MAX_SCENES scenes.
+    pub scenes: Vec<SceneInfo>,
+    /// Scenes left out of `scenes`.
+    pub more_scenes: usize,
+}
+
+/// One scene (video) of a post, as the card lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneInfo {
+    /// The video's file name, else the scene's base name.
+    pub name: Option<String>,
+    pub host: Option<String>,
+    /// Bytes, when the host lists them.
+    pub size: Option<u64>,
+    pub runtime_ms: Option<u64>,
+    /// Axes the scene scripts besides stroke (unknown for a packed archive).
+    pub axes: Vec<String>,
 }
 
 /// Axes of the post: 1 (stroke) plus every other axis its scenes script, or
@@ -154,11 +191,11 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
 }
 
 impl Deck {
-    /// Reorder by `seed` (shifting scores by up to the stack's jitter), keep `stack`'s posts
+    /// Reorder by `seed` (shifting scores by up to the deal's jitter), keep `stack`'s posts
     /// (`remaining` then counts that stack), leave out `exclude`, and keep the first `limit`.
     pub fn deal(&mut self, deal: &Deal) {
         if let Some(seed) = deal.seed {
-            let amp = deal.stack.jitter();
+            let amp = deal.jitter.unwrap_or_else(|| deal.stack.jitter());
             let key = |c: &Card| {
                 c.score
                     .map_or(f64::NEG_INFINITY, |s| s + jitter(seed, c.id, amp))
@@ -244,6 +281,7 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>) -> Card {
         .get("scenes")
         .and_then(Value::as_array)
         .map_or(&[], Vec::as_slice);
+    let tags = post_tags(cand);
     Card {
         id,
         url: format!("{}{id}", report::FORUM_TOPIC),
@@ -259,9 +297,28 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>) -> Card {
             .get("creampie")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        top_tags: top_tags(cand),
+        top_tags: top_tags(&tags),
+        tags,
         runtime_ms: scenes.first().and_then(runtime_ms),
         heat: scenes.first().map(heat).unwrap_or_default(),
+        likes: cand.get("likes").and_then(Value::as_i64),
+        hosts: strings_of(cand, "hosts").unwrap_or_default(),
+        gb: report::total_gb(scenes),
+        created: str_of(rec, "created"),
+        bumped: str_of(rec, "bumped"),
+        scenes: scenes.iter().take(MAX_SCENES).map(scene_info).collect(),
+        more_scenes: scenes.len().saturating_sub(MAX_SCENES),
+    }
+}
+
+fn scene_info(scene: &Value) -> SceneInfo {
+    let video = scene.get("video").unwrap_or(&Value::Null);
+    SceneInfo {
+        name: str_of(video, "name").or_else(|| str_of(scene, "base")),
+        host: str_of(video, "host"),
+        size: video.get("size").and_then(Value::as_u64),
+        runtime_ms: runtime_ms(scene),
+        axes: strings_of(scene, "axes").unwrap_or_default(),
     }
 }
 
@@ -342,25 +399,36 @@ fn axes(scenes: &[Value]) -> Axes {
     Axes::Count(1 + extra.len())
 }
 
-/// The post's best TOP_TAGS tags by the user's tag scores (`tagScores`): positive only,
+/// Every tag of the post (`tags`, plus any other `tagScores` key) with its tag score, else 0:
 /// highest first, ties by name.
-fn top_tags(cand: &Value) -> Vec<TagScore> {
-    let mut tags: Vec<TagScore> = cand
-        .get("tagScores")
-        .and_then(Value::as_object)
+fn post_tags(cand: &Value) -> Vec<TagScore> {
+    let scores = cand.get("tagScores").and_then(Value::as_object);
+    let names = strings_of(cand, "tags")
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .filter_map(|(tag, score)| {
-            let score = score.as_f64().filter(|s| *s > 0.0)?;
-            Some(TagScore {
-                tag: tag.clone(),
-                score,
-            })
+        .chain(scores.into_iter().flat_map(|m| m.keys().cloned()));
+    let mut seen = HashSet::new();
+    let mut tags: Vec<TagScore> = names
+        .filter(|t| !t.is_empty() && seen.insert(t.clone()))
+        .map(|tag| {
+            let score = scores
+                .and_then(|m| m.get(&tag))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            TagScore { tag, score }
         })
         .collect();
     tags.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.tag.cmp(&b.tag)));
-    tags.truncate(TOP_TAGS);
     tags
+}
+
+/// The post's best TOP_TAGS tags (`tags` comes sorted from post_tags): positive scores only.
+fn top_tags(tags: &[TagScore]) -> Vec<TagScore> {
+    tags.iter()
+        .filter(|t| t.score > 0.0)
+        .take(TOP_TAGS)
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -372,10 +440,12 @@ mod tests {
     fn waiting() -> Value {
         json!({"candidates": [
             {"id": 10, "title": "Ten", "author": "a", "score": 5.0, "vr": true, "axisType": "multi",
-             "creampie": true, "tagScores": {"pov": 2, "vr": 1, "anal": -3},
+             "creampie": true, "likes": 42, "hosts": ["pixeldrain", "MEGA"],
+             "tags": ["pov", "vr", "anal", "solo", "", "pov"],
+             "tagScores": {"pov": 2, "vr": 1, "anal": -3, "toys": 0.5},
              "scenes": [{"axes": ["twist", "roll"], "durationMs": 754321, "heat": [0, 120.4, -5, "x", 480],
-                         "video": {"duration": 9}},
-                        {"axes": ["roll", "surge"]}]},
+                         "video": {"duration": 9, "name": "Ten.mp4", "host": "pixeldrain", "size": 1_500_000_000u64}},
+                        {"base": "Ten B", "axes": ["roll", "surge"]}]},
             {"id": 11, "title": "Eleven", "score": 5.0, "axisType": "single",
              "scenes": [{"axes": [], "video": {"duration": 91.4}}]},
             {"id": 12, "title": "In library", "score": 99.0},
@@ -390,6 +460,7 @@ mod tests {
     fn state() -> Value {
         json!({"topics": {
             "10": {"title": "Ten from state", "image": "https://x/a.jpg",
+                   "created": "2026-01-02T00:00:00Z", "bumped": "2026-03-04T00:00:00Z",
                    "images": ["https://x/a.jpg", "http://x/insecure.jpg", "https://x/a.jpg", "https://x/b.jpg",
                               "https://x/c.jpg", "https://x/d.jpg", "https://x/e.jpg", "https://x/f.jpg"]},
             "11": {"image": "https://x/only.jpg"},
@@ -444,8 +515,18 @@ mod tests {
                 "author": "a",
                 "images": ["https://x/a.jpg", "https://x/b.jpg", "https://x/c.jpg", "https://x/d.jpg", "https://x/e.jpg"],
                 "score": 5.0, "vr": true, "axisType": "multi", "axes": 4, "videos": 2, "creampie": true,
-                "topTags": [{"tag": "pov", "score": 2.0}, {"tag": "vr", "score": 1.0}],
-                "runtimeMs": 754321, "heat": [0, 120, 0, 0, 480]
+                "topTags": [{"tag": "pov", "score": 2.0}, {"tag": "vr", "score": 1.0}, {"tag": "toys", "score": 0.5}],
+                "tags": [{"tag": "pov", "score": 2.0}, {"tag": "vr", "score": 1.0}, {"tag": "toys", "score": 0.5},
+                         {"tag": "solo", "score": 0.0}, {"tag": "anal", "score": -3.0}],
+                "runtimeMs": 754321, "heat": [0, 120, 0, 0, 480],
+                "likes": 42, "hosts": ["pixeldrain", "MEGA"], "gb": 1.5,
+                "created": "2026-01-02T00:00:00Z", "bumped": "2026-03-04T00:00:00Z",
+                "scenes": [
+                    {"name": "Ten.mp4", "host": "pixeldrain", "size": 1_500_000_000u64, "runtimeMs": 754321,
+                     "axes": ["twist", "roll"]},
+                    {"name": "Ten B", "host": null, "size": null, "runtimeMs": null, "axes": ["roll", "surge"]}
+                ],
+                "moreScenes": 0
             })
         );
         // Older lists: no tagScores / creampie / images; the single image stands in.
@@ -459,13 +540,43 @@ mod tests {
         // No script length: the host's listed length; no heat strip.
         assert_eq!((c.runtime_ms, c.heat.is_empty()), (Some(91400), true));
         assert_eq!(c.author, None);
+        // No tags, likes, hosts, sizes or dates: empty, not an error.
+        assert!(c.tags.is_empty() && c.hosts.is_empty());
+        assert_eq!(
+            (c.likes, c.gb, &c.created, &c.bumped),
+            (None, None, &None, &None)
+        );
+        assert_eq!(
+            c.scenes,
+            [SceneInfo {
+                name: None,
+                host: None,
+                size: None,
+                runtime_ms: Some(91400),
+                axes: vec![],
+            }]
+        );
         let c = d.cards.iter().find(|c| c.id == 15).unwrap();
         assert!(c.images.is_empty());
         assert_eq!((c.axes, c.videos, c.score), (Axes::Count(1), 0, None));
         assert_eq!(c.runtime_ms, None);
+        assert!(c.scenes.is_empty() && c.more_scenes == 0);
         let c = serde_json::to_value(d.cards.iter().find(|c| c.id == 16).unwrap()).unwrap();
         assert_eq!(c["axes"], "packed");
         assert_eq!(c["images"], json!([]));
+    }
+
+    #[test]
+    fn scene_list_is_capped() {
+        let scenes: Vec<Value> = (0..MAX_SCENES + 3)
+            .map(|i| json!({"base": format!("s{i}"), "video": {"size": 1_000_000_000u64}}))
+            .collect();
+        let c = card(1, &json!({"scenes": scenes}), None);
+        assert_eq!(c.videos, MAX_SCENES + 3);
+        assert_eq!((c.scenes.len(), c.more_scenes), (MAX_SCENES, 3));
+        assert_eq!(c.scenes[0].name.as_deref(), Some("s0"));
+        // The size counts every scene, listed or not.
+        assert_eq!(c.gb, Some((MAX_SCENES + 3) as f64));
     }
 
     fn ids(d: &Deck) -> Vec<u64> {
@@ -546,6 +657,43 @@ mod tests {
         }
     }
 
+    /// The most score points a card of `order` (ids = scores) got ahead of a better one.
+    fn most_passed(order: &[u64]) -> u64 {
+        let mut most = 0;
+        for (i, a) in order.iter().enumerate() {
+            for b in &order[i + 1..] {
+                most = most.max(b.saturating_sub(*a));
+            }
+        }
+        most
+    }
+
+    #[test]
+    fn a_requested_jitter_overrides_the_stacks() {
+        for stack in [Stack::Multi, Stack::Single] {
+            let seeded = |jitter: f64| Deal {
+                limit: MAX_LIMIT,
+                seed: Some(3),
+                jitter: Some(jitter),
+                stack,
+                ..Deal::default()
+            };
+            // 0: strictly by score, seed or not.
+            assert_eq!(
+                ids(&dealt(60, &seeded(0.0))),
+                (0..60).rev().collect::<Vec<_>>()
+            );
+            // A custom amplitude bounds how far a card moves: within 2 × amp points.
+            for amp in [1.5, 25.0] {
+                let order = ids(&dealt(60, &seeded(amp)));
+                assert_ne!(order, (0..60).rev().collect::<Vec<_>>(), "{stack:?} ±{amp}");
+                assert!(most_passed(&order) as f64 <= 2.0 * amp, "{stack:?} ±{amp}");
+            }
+            // Wider than either stack's own.
+            assert!(most_passed(&ids(&dealt(60, &seeded(25.0)))) as f64 > 2.0 * SINGLE_JITTER);
+        }
+    }
+
     /// Multi-axis posts 100…(100+m) and single-axis posts 1…s, higher id = higher score.
     fn kinds(m: u64, s: u64, deal: &Deal) -> Deck {
         let multi =
@@ -609,7 +757,7 @@ mod tests {
     #[test]
     fn top_tags_boundaries() {
         let tags = |scores: Value| -> Vec<(String, f64)> {
-            top_tags(&json!({"tagScores": scores}))
+            top_tags(&post_tags(&json!({"tagScores": scores})))
                 .into_iter()
                 .map(|t| (t.tag, t.score))
                 .collect()
@@ -623,7 +771,32 @@ mod tests {
         assert!(tags(json!({"x": -1, "y": 0})).is_empty());
         assert!(tags(json!({"x": "3"})).is_empty());
         assert!(tags(json!(null)).is_empty());
-        assert!(top_tags(&json!({})).is_empty());
+        assert!(top_tags(&post_tags(&json!({}))).is_empty());
+    }
+
+    #[test]
+    fn post_tags_score_every_tag() {
+        let tags = |cand: Value| -> Vec<(String, f64)> {
+            post_tags(&cand)
+                .into_iter()
+                .map(|t| (t.tag, t.score))
+                .collect()
+        };
+        // Unscored tags count 0; a scored tag missing from `tags` still shows; non-numbers are 0.
+        assert_eq!(
+            tags(
+                json!({"tags": ["b", "a", "neg", "s", 3], "tagScores": {"neg": -1, "x": 2, "s": "3"}})
+            ),
+            [
+                ("x".into(), 2.0),
+                ("a".into(), 0.0),
+                ("b".into(), 0.0),
+                ("s".into(), 0.0),
+                ("neg".into(), -1.0)
+            ]
+        );
+        assert!(tags(json!({"tags": null, "tagScores": []})).is_empty());
+        assert!(tags(Value::Null).is_empty());
     }
 
     #[test]
