@@ -31,6 +31,16 @@ build() {
   docker build -f "$REPO/deploy/k8s/Dockerfile" --build-arg GIT_SHA="$sha" \
     -t "funsync-runner:$sha" -t funsync-runner:current "$REPO"
   echo "built funsync-runner:$sha (tagged :current)"
+  # Docker's disk lives on the Mac's internal disk (Docker.raw grows, rarely
+  # shrinks): on 2026-11-13 old image tags and the build cache reached 45 GB
+  # and filled it. Keep only :current and this build, and cap the build cache.
+  local tag
+  for tag in $(docker images funsync-runner --format '{{.Tag}}'); do
+    [ "$tag" = current ] || [ "$tag" = "$sha" ] || docker rmi "funsync-runner:$tag" >/dev/null 2>&1 || true
+  done
+  docker image prune -f >/dev/null
+  docker builder prune -f --max-used-space 6gb >/dev/null
+  docker system df | sed -n '1,2p;5p'
 }
 
 secrets() {
