@@ -222,7 +222,7 @@ export function createRule34video(opts = {}) {
     const resp = await get(url, { headers: RULE34VIDEO_HEADERS, signal: AbortSignal.timeout(60_000) });
     if (!resp.ok) {
       await resp.body?.cancel?.().catch(() => {});
-      throw new Error(`rule34video: HTTP ${resp.status} for ${url}`);
+      throw Object.assign(new Error(`rule34video: HTTP ${resp.status} for ${url}`), { status: resp.status });
     }
     const page = parseRule34videoPage(await resp.text());
     pages.set(url, page);
