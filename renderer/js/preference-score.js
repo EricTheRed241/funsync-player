@@ -118,6 +118,36 @@ export function tagScoreSum(tags, tagScores, named = {}) {
   return sum;
 }
 
+/**
+ * A post's tags that score (effectiveTagScores, non-zero), by tagKey: what
+ * the tag part of its score is made of.
+ *
+ * @param {string[]} tags
+ * @param {Object<string, number>} [tagScores] `library.tagScores`
+ * @returns {Object<string, number>}
+ */
+export function postTagScores(tags, tagScores) {
+  const effective = effectiveTagScores(tagScores);
+  const out = {};
+  for (const key of new Set((Array.isArray(tags) ? tags : []).map(tagKey))) {
+    if (key && Object.hasOwn(effective, key)) out[key] = effective[key];
+  }
+  return out;
+}
+
+/**
+ * True when a post (or saved candidate) counts in the TAG_SCORE_GROUPS group
+ * called `name` the way candidateScore counts it: one of the group's tags,
+ * or for a `named` group its title or the first-post flag saved with it.
+ */
+export function inTagGroup(c, name) {
+  const group = TAG_SCORE_GROUPS.find((g) => g.name === name);
+  if (!group) return false;
+  const tags = new Set((Array.isArray(c?.tags) ? c.tags : []).map(tagKey));
+  if (group.tags.some((t) => tags.has(tagKey(t)))) return true;
+  return !!group.named && (lessPreferred(c)[group.named] || !!c[group.named]);
+}
+
 /** True when a post's tags or title name a monster (tentacles, werewolves, horse guys, orcs …). */
 export function hasMonster({ tags = [], title = '' }) {
   return tags.some((t) => MONSTER_TAGS.has(t)) || MONSTER_TITLE.test(title) || WEREWOLF_TOKEN.test(title);

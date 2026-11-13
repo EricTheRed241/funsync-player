@@ -1,14 +1,18 @@
 //! `npm run scout:report`: a webpage listing every EroScripts post the
 //! Discovery scout (`npm run eroscripts:scout`) has judged, with its verdict,
-//! and the waiting list. Reads `eroscripts-scout-state.json`,
-//! `eroscripts-scout.json` and `eroscripts-scout-rejected.json` in userData on
-//! every request and never writes any file. Bound to 127.0.0.1, or to every
-//! interface with `--lan`.
+//! and the waiting list, plus a swipe deck over the waiting list (`/swipe`).
+//! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json` and
+//! `eroscripts-scout-rejected.json` in userData on every request. The only
+//! file it writes is `eroscripts-scout-swipes.json` (the deck's swipes, which
+//! the scout reads; the previous copy kept as `.bak`). Bound to 127.0.0.1, or
+//! to every interface with `--lan`.
 
 pub mod cli;
+pub mod deck;
 pub mod library;
 pub mod report;
 pub mod server;
+pub mod swipes;
 
 use std::ffi::OsString;
 use std::io::Write;

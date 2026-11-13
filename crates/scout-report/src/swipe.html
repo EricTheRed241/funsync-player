@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>EroScripts scout swipe</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --panel: #ffffff;
+  --accent: #2f6fdf; --row: #f2f2f5; --warn-bg: #fff4d6; --warn-fg: #6b4e00;
+  --like: #3aa655; --nope: #e05252; --undo: #d08b2c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181b; --fg: #e6e6e9; --muted: #9a9aa3; --line: #34353b; --panel: #1f2024;
+    --accent: #7aa7ff; --row: #2a2b31; --warn-bg: #3d3214; --warn-fg: #ffd98a;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; overscroll-behavior: none;
+  background: var(--bg); color: var(--fg); font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.bar { display: flex; align-items: baseline; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 16px 6px;
+  width: min(100%, 560px); margin: 0 auto; }
+.bar h1 { font-size: 18px; margin: 0; }
+.counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
+  margin: 0 auto 6px; width: min(100% - 20px, 540px); white-space: pre-wrap; font-size: 13px; }
+.deck { position: relative; flex: 1; min-height: 0; width: min(100% - 20px, 540px); margin: 4px auto 0; }
+.card { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  transition: transform .3s ease, opacity .3s ease; will-change: transform; }
+.card.top { z-index: 2; cursor: grab; }
+.card.top:active { cursor: grabbing; }
+.card.next { z-index: 1; transform: scale(.95) translateY(12px); pointer-events: none; }
+.card.fly { z-index: 3; pointer-events: none; transition: transform .35s ease-in, opacity .35s ease-in; opacity: 0; }
+.card.drag { transition: none; }
+.media { position: relative; flex: 1; min-height: 0; background: #000; }
+.media img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; -webkit-user-drag: none; }
+.media .none { height: 100%; display: flex; align-items: center; justify-content: center; color: #9a9aa3; }
+.media.broken img { visibility: hidden; }
+.media.broken::after { content: 'Image unavailable'; position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: #9a9aa3; }
+.dots { position: absolute; top: 8px; left: 10px; right: 10px; display: flex; gap: 4px; }
+.dots span { flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,.35); box-shadow: 0 0 2px rgba(0,0,0,.5); }
+.dots span.on { background: #fff; }
+.stamp { position: absolute; top: 30px; padding: 2px 12px; border: 4px solid; border-radius: 8px; font-weight: 800;
+  font-size: 28px; letter-spacing: .06em; opacity: 0; background: rgba(0,0,0,.25); }
+.stamp.want { left: 18px; color: var(--like); transform: rotate(-14deg); }
+.stamp.hide { right: 18px; color: var(--nope); transform: rotate(14deg); }
+.info { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 6px; }
+.badges, .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
+.b-score { --bc: #2f6fdf; } .b-vr { --bc: #a46ad6; } .b-flat { --bc: #8b8b93; } .b-multi { --bc: #14b8a6; }
+.b-single { --bc: #8b8b93; } .b-videos { --bc: #d08b2c; } .b-cream { --bc: #e0529c; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
+.tag b { color: var(--like); font-variant-numeric: tabular-nums; }
+.ttl { font-weight: 650; font-size: 16px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.by { display: flex; gap: 10px; color: var(--muted); font-size: 13px; }
+.by a { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--muted); text-align: center; padding: 20px; }
+.actions { display: flex; justify-content: center; align-items: center; gap: 24px;
+  padding: 12px 0 calc(10px + env(safe-area-inset-bottom)); }
+.round { width: 64px; height: 64px; border-radius: 50%; font-size: 28px; line-height: 1; cursor: pointer; padding: 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: 0 2px 10px rgba(0,0,0,.14);
+  touch-action: manipulation; }
+.round.small { width: 48px; height: 48px; font-size: 22px; }
+.round:disabled { opacity: .4; cursor: default; }
+.round.nope { color: var(--nope); } .round.like { color: var(--like); } .round.undo { color: var(--undo); }
+.hint { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+@media (hover: none) { .hint { display: none; } }
+.toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: var(--warn-bg); color: var(--warn-fg); padding: 8px 14px; border-radius: 8px; z-index: 10;
+  box-shadow: 0 2px 10px rgba(0,0,0,.2); max-width: 90vw; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Swipe</h1>
+  <span class="counter" id="counter">Loading…</span>
+  <a href="/">Report</a>
+</header>
+<div class="problems" id="problems" hidden></div>
+<main class="deck" id="deck">
+  <div class="empty" id="empty">Loading…</div>
+</main>
+<div class="actions">
+  <button type="button" class="round nope" id="nope" title="Hide from the deck (←)" aria-label="Hide">✕</button>
+  <button type="button" class="round small undo" id="undo" title="Undo (Backspace)" aria-label="Undo">↺</button>
+  <button type="button" class="round like" id="like" title="Want: the scout downloads it (→)" aria-label="Want">♥</button>
+</div>
+<div class="hint">← hide · → want · Backspace undo · Space next image · tap the image's sides to browse</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+'use strict';
+const BATCH = 20;
+const REFILL_AT = 5;
+const $ = (id) => document.getElementById(id);
+const deckEl = $('deck');
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    n.append(c instanceof Node ? c : String(c));
+  }
+  return n;
+}
+
+let queue = [];         // cards not swiped yet; queue[0] is on top
+const undoStack = [];   // {card, dir}, newest last
+let remaining = 0;
+let wanted = 0;
+let image = 0;          // the top card's image
+let loading = false;
+let exhausted = false;  // the server has no card beyond the queue
+let loadError = null;
+let loaded = false;    // the first deck arrived
+let since = null;      // counter changes since the deck request in flight was sent
+
+// Swipes, undos and deck fetches reach the server in order.
+let chain = Promise.resolve();
+function serial(fn) {
+  const p = chain.then(fn);
+  chain = p.catch(() => {});
+  return p;
+}
+
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+  return res.json();
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  $('toast').textContent = msg;
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, 5000);
+}
+
+const fmt = (n) => String(Math.round(n * 10) / 10);
+
+function badges(c) {
+  const out = [el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
+  out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
+  const multi = c.axisType ? c.axisType === 'multi' : typeof c.axes === 'number' && c.axes > 1;
+  if (multi) {
+    out.push(el('span', { class: 'badge b-multi' }, c.axes === 'packed' ? 'Multi (packed)'
+      : typeof c.axes === 'number' && c.axes > 1 ? `Multi (${c.axes} axes)` : 'Multi'));
+  } else {
+    out.push(el('span', { class: 'badge b-single' }, c.axes === 'packed' ? 'Single (packed)' : 'Single'));
+  }
+  if (c.videos > 1) out.push(el('span', { class: 'badge b-videos' }, `${c.videos} videos`));
+  if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
+  return out;
+}
+
+function cardNode(c, isTop) {
+  const imgs = c.images || [];
+  const media = el('div', { class: 'media' });
+  if (imgs.length) {
+    const img = el('img', { alt: '', draggable: 'false', src: imgs[isTop ? image : 0] });
+    img.addEventListener('error', () => media.classList.add('broken'));
+    img.addEventListener('load', () => media.classList.remove('broken'));
+    media.append(img);
+    if (imgs.length > 1) {
+      media.append(el('div', { class: 'dots' }, imgs.map((_, i) => el('span', { class: i === (isTop ? image : 0) ? 'on' : null }))));
+    }
+  } else {
+    media.append(el('div', { class: 'none' }, 'No image'));
+  }
+  media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
+  const tags = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
+  const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
+    media,
+    el('div', { class: 'info' },
+      el('div', { class: 'badges' }, badges(c)),
+      el('div', { class: 'ttl', title: c.title || null }, c.title || '#' + c.id),
+      el('div', { class: 'by' },
+        c.author ? el('span', {}, 'by ' + c.author) : null,
+        el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, '#' + c.id + ' ↗')),
+      tags.length ? el('div', { class: 'tags' }, tags) : null));
+  if (isTop) drag(node);
+  return node;
+}
+
+const preloaded = new Set();
+function preload(url) {
+  if (!url || preloaded.has(url)) return;
+  preloaded.add(url);
+  new Image().src = url;
+}
+
+function renderCounter() {
+  $('counter').textContent = loaded ? `${remaining} left · ${wanted} wanted` : 'Loading…';
+  $('undo').disabled = !undoStack.length;
+  $('nope').disabled = $('like').disabled = !queue.length;
+}
+
+/** Redraw the top two cards (a card flying off stays until its animation ends). */
+function render(enterFrom) {
+  for (const n of deckEl.querySelectorAll('.card:not(.fly)')) n.remove();
+  renderCounter();
+  const empty = $('empty');
+  if (!queue.length) {
+    empty.hidden = false;
+    empty.replaceChildren(...(loadError ? ['Could not load the deck: ' + loadError, el('button', { type: 'button', class: 'round small', onclick: reload, title: 'Retry' }, '⟳')]
+      : loading ? ['Loading…']
+      : ['Nothing left to swipe.', el('a', { href: '/' }, 'Back to the report')]));
+    return;
+  }
+  empty.hidden = true;
+  if (queue[1]) deckEl.append(cardNode(queue[1], false));
+  const top = cardNode(queue[0], true);
+  if (enterFrom) {
+    top.classList.add('drag');
+    top.style.transform = `translateX(${enterFrom === 'right' ? '' : '-'}120%) rotate(${enterFrom === 'right' ? 20 : -20}deg)`;
+  }
+  deckEl.append(top);
+  if (enterFrom) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      top.classList.remove('drag');
+      top.style.transform = '';
+    }));
+  }
+  for (const url of queue[0].images || []) preload(url);
+  if (queue[1]) preload((queue[1].images || [])[0]);
+}
+
+function topNode() {
+  return deckEl.querySelector('.card.top:not(.fly)');
+}
+
+function showImage(i) {
+  const c = queue[0];
+  const imgs = (c && c.images) || [];
+  if (imgs.length < 2) return;
+  image = (i + imgs.length) % imgs.length;
+  const node = topNode();
+  if (!node) return;
+  node.querySelector('.media img').src = imgs[image];
+  node.querySelectorAll('.dots span').forEach((d, j) => d.classList.toggle('on', j === image));
+}
+
+function threshold() {
+  return Math.min(140, deckEl.clientWidth * 0.28);
+}
+
+function setStamps(node, t) {
+  node.querySelector('.stamp.want').style.opacity = Math.max(0, t);
+  node.querySelector('.stamp.hide').style.opacity = Math.max(0, -t);
+}
+
+/** Pointer drag with tilt; past the threshold it commits, a tap browses the gallery. */
+function drag(node) {
+  let start = null;
+  let dx = 0;
+  let dy = 0;
+  let moved = false;
+  node.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('a, button')) return;
+    start = { x: e.clientX, y: e.clientY };
+    dx = dy = 0;
+    moved = false;
+    node.setPointerCapture(e.pointerId);
+    node.classList.add('drag');
+  });
+  node.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    dx = e.clientX - start.x;
+    dy = e.clientY - start.y;
+    if (!moved && Math.hypot(dx, dy) < 8) return;
+    moved = true;
+    node.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx * 0.06}deg)`;
+    setStamps(node, Math.max(-1, Math.min(1, dx / threshold())));
+  });
+  const end = (e) => {
+    if (!start) return;
+    start = null;
+    node.classList.remove('drag');
+    if (!moved) {
+      // The card holds the pointer capture, so locate the tap by its coordinates.
+      const r = node.querySelector('.media').getBoundingClientRect();
+      if (e.type === 'pointerup' && e.clientY >= r.top && e.clientY <= r.bottom) {
+        showImage(image + (e.clientX < r.left + r.width / 2 ? -1 : 1));
+      }
+      return;
+    }
+    if (Math.abs(dx) > threshold()) {
+      swipe(dx > 0 ? 'right' : 'left', dy * 0.3);
+    } else {
+      node.style.transform = '';
+      setStamps(node, 0);
+    }
+  };
+  node.addEventListener('pointerup', end);
+  node.addEventListener('pointercancel', end);
+}
+
+function fly(node, dir, dy) {
+  const sign = dir === 'right' ? 1 : -1;
+  node.classList.remove('drag');
+  node.classList.add('fly');
+  setStamps(node, sign);
+  node.style.transform = `translate(${sign * 1.4 * window.innerWidth}px, ${dy || 0}px) rotate(${sign * 30}deg)`;
+  setTimeout(() => node.remove(), 400);
+}
+
+/** Change the counters; a deck request in flight hears of it too. */
+function count(dRemaining, dWanted) {
+  remaining = Math.max(0, remaining + dRemaining);
+  wanted = Math.max(0, wanted + dWanted);
+  if (since) {
+    since.remaining += dRemaining;
+    since.wanted += dWanted;
+  }
+}
+
+function swipe(dir, dy) {
+  const card = queue[0];
+  if (!card) return;
+  const node = topNode();
+  if (node) fly(node, dir, dy);
+  queue.shift();
+  undoStack.push({ card, dir });
+  count(-1, dir === 'right' ? 1 : 0);
+  image = 0;
+  render();
+  serial(() => post('/api/swipe', { id: card.id, dir })).catch((e) => {
+    // Not saved: put the card back on top.
+    const i = undoStack.findIndex((u) => u.card.id === card.id);
+    if (i >= 0) undoStack.splice(i, 1);
+    if (!queue.some((c) => c.id === card.id)) queue.unshift(card);
+    count(1, dir === 'right' ? -1 : 0);
+    image = 0;
+    render();
+    toast('Swipe not saved: ' + e.message);
+  });
+  if (queue.length <= REFILL_AT) more();
+}
+
+function undo() {
+  const last = undoStack.pop();
+  if (!last) return;
+  queue = queue.filter((c) => c.id !== last.card.id);
+  queue.unshift(last.card);
+  count(1, last.dir === 'right' ? -1 : 0);
+  image = 0;
+  render(last.dir);
+  serial(() => post('/api/swipe/undo', { id: last.card.id })).catch((e) => {
+    // The swipe still stands: take the card off again.
+    queue = queue.filter((c) => c.id !== last.card.id);
+    undoStack.push(last);
+    count(-1, last.dir === 'right' ? 1 : 0);
+    image = 0;
+    render();
+    toast('Undo not saved: ' + e.message);
+  });
+}
+
+/** Fetch the next cards (the server leaves out everything swiped so far). */
+function more() {
+  if (loading || exhausted) return;
+  loading = true;
+  since = { remaining: 0, wanted: 0 };
+  const limit = Math.min(100, queue.length + BATCH);
+  serial(async () => {
+    const res = await fetch('/api/deck?limit=' + limit, { cache: 'no-store' });
+    if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+    return res.json();
+  }).then((d) => {
+    loadError = null;
+    // The server answered before the swipes made since the request: count them on top.
+    remaining = Math.max(0, d.remaining + since.remaining);
+    wanted = Math.max(0, d.wanted + since.wanted);
+    since = null;
+    exhausted = d.cards.length < limit;
+    const have = new Set([...queue, ...undoStack.map((u) => u.card)].map((c) => c.id));
+    const fresh = d.cards.filter((c) => !have.has(c.id));
+    const wasEmpty = !queue.length;
+    queue.push(...fresh);
+    $('problems').hidden = !d.problems.length;
+    $('problems').textContent = d.problems.join('\n');
+    loading = false;
+    if (wasEmpty) image = 0;
+    loaded = true;
+    if (wasEmpty) {
+      render();
+    } else {
+      // Keep the top card (and a drag in progress); add the card under it if it was missing.
+      if (queue[1] && !deckEl.querySelector('.card.next:not(.fly)')) {
+        deckEl.append(cardNode(queue[1], false));
+        preload((queue[1].images || [])[0]);
+      }
+      renderCounter();
+    }
+  }).catch((e) => {
+    loading = false;
+    since = null;
+    loadError = e.message;
+    if (!queue.length) render(); else toast('Could not load more cards: ' + e.message);
+  });
+}
+
+function reload() {
+  exhausted = false;
+  loadError = null;
+  more();
+  render();
+}
+
+// Buttons drop focus so Space keeps meaning "next image".
+$('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });
+$('like').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('right'); });
+$('undo').addEventListener('click', (e) => { e.currentTarget.blur(); undo(); });
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'ArrowLeft') swipe('left');
+  else if (e.key === 'ArrowRight') swipe('right');
+  else if (e.key === 'Backspace') undo();
+  else if (e.key === ' ') showImage(image + 1);
+  else return;
+  e.preventDefault();
+});
+
+reload();
+</script>
+</body>
+</html>

@@ -91,6 +91,10 @@ const POSTER_WIDTH = 640;
 // Below this a preview makes a blurry tile. Plenty of posts set a 160×90
 // "thumbnail" for the topic list and show the real preview further down.
 const MIN_POSTER_SOURCE_WIDTH = 320;
+// Post images narrower than this (by their width attribute) are icons,
+// badges and host logos, not previews (postImages).
+const MIN_GALLERY_WIDTH = 200;
+const IMAGE_FILE_RE = /\.(jpe?g|png|gif|webp|avif)(\?[^"]*)?$/i;
 
 // Absolute URL for a forum-relative one (`/uploads/…`).
 function absoluteUrl(url) {
@@ -131,16 +135,80 @@ function topicPreviewUrl(data) {
   }
 
   let firstImage = null;
-  const html = data?.post_stream?.posts?.[0]?.cooked || '';
-  for (const [tag, src] of html.matchAll(/<img[^>]+src="([^"]+)"[^>]*>/gi)) {
-    if (/class="[^"]*\bemoji\b/i.test(tag) || src.includes('/images/emoji/')) continue;
-    if (!/\.(jpe?g|png|gif|webp|avif)(\?[^"]*)?$/i.test(src)) continue;
-    const url = absoluteUrl(decodeEntities(src));
+  for (const { url, width } of firstPostImages(data)) {
     firstImage ||= url;
-    const width = Number(tag.match(/\swidth="(\d+)"/i)?.[1]) || 0;
     if (width >= MIN_POSTER_SOURCE_WIDTH) return url;
   }
   return absoluteUrl(representative) || firstImage;
+}
+
+/** The off-forum file host (EXTERNAL_HOSTS label) a URL points at, or null. */
+function externalHostOf(url) {
+  let host;
+  try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
+  return EXTERNAL_HOSTS.find(([h]) => host === h || host.endsWith(`.${h}`))?.[1] || null;
+}
+
+/**
+ * The first post's `<img>`s of a topic payload, in order, emoji and
+ * non-image files skipped, as `{url, width, original, fileLink}`: `url` the
+ * image's src (absolute, entities decoded), `width` its width attribute (0
+ * when it has none), `original` the full-size image a lightbox link around
+ * it opens (absolute) or null, `fileLink` true when a link around it goes to
+ * an off-forum file host (a MEGA or pixeldrain button).
+ */
+function firstPostImages(data) {
+  const html = data?.post_stream?.posts?.[0]?.cooked || '';
+  const out = [];
+  for (const m of html.matchAll(/<img[^>]+src="([^"]+)"[^>]*>/gi)) {
+    const [tag, src] = m;
+    if (/class="[^"]*\bemoji\b/i.test(tag) || src.includes('/images/emoji/')) continue;
+    if (!IMAGE_FILE_RE.test(src)) continue;
+    // The link the image sits in: the last <a> opened before it and not closed since.
+    const before = html.slice(0, m.index);
+    const open = before.lastIndexOf('<a ');
+    const link = open >= 0 && !before.slice(open).includes('</a>') ? before.slice(open).match(/^<a\s[^>]*>/)?.[0] : null;
+    const href = link ? decodeEntities(link.match(/\shref="([^"]+)"/i)?.[1] || '') : '';
+    const lightbox = !!href && /\sclass="[^"]*\blightbox\b/i.test(link) && IMAGE_FILE_RE.test(href);
+    out.push({
+      url: absoluteUrl(decodeEntities(src)),
+      width: Number(tag.match(/\swidth="(\d+)"/i)?.[1]) || 0,
+      original: lightbox ? absoluteUrl(href) : null,
+      fileLink: !!href && !!externalHostOf(href),
+    });
+  }
+  return out;
+}
+
+/**
+ * Up to `max` preview images of a topic (`/t/{id}.json` payload), as
+ * absolute URLs: the topic's image (`image_url`) first, then the first
+ * post's images in order. Skipped: emoji, non-image files, images linking
+ * to an off-forum file host (MEGA / pixeldrain logos) and images under
+ * MIN_GALLERY_WIDTH wide when their width is known (the topic image by its
+ * widest thumbnail). A lightbox image comes as its full-size original, not
+ * the optimized copy the post shows. The same upload once (by the SHA-1 in
+ * its file name), as its original when one is linked.
+ *
+ * @param {object} data topic payload (api.getTopicData)
+ * @param {number} [max]
+ * @returns {string[]}
+ */
+function postImages(data, max = 5) {
+  const found = [];  // {key, url}
+  const add = (url, original = false) => {
+    const key = url.match(/\/([0-9a-f]{40})[^/]*$/i)?.[1]?.toLowerCase() || url;
+    const seen = found.find((x) => x.key === key);
+    if (!seen) found.push({ key, url });
+    else if (original) seen.url = url;
+  };
+  const thumbWidth = widestThumbnail(data?.thumbnails);
+  if (data?.image_url && IMAGE_FILE_RE.test(data.image_url) && !(thumbWidth && thumbWidth < MIN_GALLERY_WIDTH)) add(absoluteUrl(data.image_url));
+  for (const img of firstPostImages(data)) {
+    if (img.fileLink || (img.width && img.width < MIN_GALLERY_WIDTH)) continue;
+    add(img.original || img.url, !!img.original);
+  }
+  return found.slice(0, max).map((x) => x.url);
 }
 
 /**
@@ -253,10 +321,8 @@ function parsePostLinks(html) {
   for (const m of html.matchAll(PIXELDRAIN_RE)) pixeldrain.push({ kind: m[1].toLowerCase(), id: m[2] });
   for (const m of html.matchAll(/href="(https?:\/\/[^"]+)"/gi)) {
     const url = decodeEntities(m[1]);
-    let host;
-    try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { continue; }
-    const known = EXTERNAL_HOSTS.find(([h]) => host === h || host.endsWith(`.${h}`));
-    if (known) external.push({ host: known[1], url });
+    const host = externalHostOf(url);
+    if (host) external.push({ host, url });
   }
   return { attachments, pixeldrain, external };
 }
@@ -900,4 +966,4 @@ class EroScriptsAPI {
 
 }
 
-module.exports = { EroScriptsAPI, parsePostLinks, topicPreviewUrl };
+module.exports = { EroScriptsAPI, parsePostLinks, postImages, topicPreviewUrl };

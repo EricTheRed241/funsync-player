@@ -23,6 +23,9 @@
 //     Never a post tagged sfw / non-porn (`excluded`). `--fetch` and every
 //     scan drop saved candidates that now break the content rules
 //     (contentRuleBreak).
+//   • Swipes (user, 2026-11-13): a post swiped right in `npm run
+//     scout:report`'s deck is wanted, `--fetch --auto` takes it whatever its
+//     score or axes; a left swipe only hides it from the deck (readSwipes).
 //   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
 //     downloaded; shorter scenes fetched under older rules stay.
 //   • Single-axis and multi-axis scenes alike (user, 2026-11-07: hand-made
@@ -43,17 +46,20 @@
 //     download (scripts/upgrade-multi-axis.mjs); hand-made axes always win.
 
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
   ANIMATION_TAGS, AUTO_FETCH_MIN_SCORE, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
   MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
-import { isHentaiOnly, lessPreferred, candidateScore } from '../renderer/js/preference-score.js';
+import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../renderer/js/preference-score.js';
 import { canonicalArtist } from '../renderer/js/artist-playlists.js';
 import { durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
+
+const { postImages } = createRequire(import.meta.url)('../electron/eroscripts-api.js');
 
 // The ranking (renderer/js/preference-score.js, shared with the app's library
 // score) is part of this module's API for the scouts.
@@ -877,11 +883,11 @@ export function needsJudging(state, topic, rules = RULES_VERSION) {
 }
 
 /** What a verdict keeps about its post, for `npm run scout:report`; kept from the earlier verdict when not given. */
-export const POST_INFO_KEYS = ['title', 'author', 'created', 'bumped', 'image'];
+export const POST_INFO_KEYS = ['title', 'author', 'created', 'bumped', 'image', 'images'];
 
 /**
  * Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending.
- * `info` (postInfo) is stored with it: title, author, dates and image, each kept from the
+ * `info` (postInfo) is stored with it: title, author, dates and images, each kept from the
  * earlier verdict when `info` lacks it.
  */
 export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION, info = null) {
@@ -899,7 +905,9 @@ export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VE
 /**
  * A post's title, author (the first post's), creation and last-activity dates and
  * image (absolute URL), from what a feed lists (`t`) and its topic payload (`data`,
- * api.getTopicData), whichever has each.
+ * api.getTopicData), whichever has each; `images` (up to 5 absolute URLs, the topic
+ * image first: postImages in electron/eroscripts-api.js) only from the payload, `[]`
+ * when it has none worth showing, null without a payload.
  */
 export function postInfo(t, data = null) {
   const image = t?.image || data?.image_url || null;
@@ -909,15 +917,27 @@ export function postInfo(t, data = null) {
     created: t?.created || data?.created_at || null,
     bumped: t?.bumped || data?.bumped_at || null,
     image: image && !/^https?:\/\//.test(image) ? `https://discuss.eroscripts.com${image}` : image,
+    images: data ? postImages(data) : null,
   };
 }
 
-/** Judged posts without a title (judged before verdicts kept one), newest first; posts found gone are left out (`--titles`). */
-export function untitledTopicIds(state) {
-  return Object.entries(state.topics)
-    .filter(([, t]) => !t.title && !t.gone)
+/**
+ * Judged posts `--titles` reads again: those without a title (judged before verdicts kept
+ * one) or without `images` (judged before verdicts kept them); posts found gone are left
+ * out. The `first` ids (the waiting candidates, in their order) come first, the rest newest first.
+ *
+ * @param {object} state scan state
+ * @param {number[]} [first]
+ */
+export function topicsMissingInfo(state, first = []) {
+  const missing = (t) => t && !t.gone && (!t.title || !Array.isArray(t.images));
+  const lead = [...new Set(first)].filter((id) => missing(state.topics[id]));
+  const leadSet = new Set(lead);
+  const rest = Object.entries(state.topics)
+    .filter(([id, t]) => missing(t) && !leadSet.has(Number(id)))
     .map(([id]) => Number(id))
     .sort((a, b) => b - a);
+  return [...lead, ...rest];
 }
 
 /** Fill in a judged post's info from its topic payload, verdict and date unchanged; `null` data marks it gone (deleted or private). */
@@ -983,9 +1003,54 @@ export function listedTopic(id, data) {
   };
 }
 
-/** True when `--fetch --auto` takes a waiting post: hand-made multi-axis (archives count) scoring at least AUTO_FETCH_MIN_SCORE. */
-export function autoFetchPick(c, scoring = {}) {
-  return c.axisType === 'multi' && candidateScore(c, scoring) >= AUTO_FETCH_MIN_SCORE;
+/**
+ * True when `--fetch --auto` takes a waiting post: one the user swiped right on in `npm run scout:report`
+ * (`wanted`, readSwipes), whatever its score or axes, or hand-made multi-axis (archives count) scoring at
+ * least AUTO_FETCH_MIN_SCORE.
+ *
+ * @param {object} c saved candidate
+ * @param {object} [scoring] see candidateScore
+ * @param {Set<number>} [wanted] post ids swiped right
+ */
+export function autoFetchPick(c, scoring = {}, wanted = new Set()) {
+  return wanted.has(c.id) || (c.axisType === 'multi' && candidateScore(c, scoring) >= AUTO_FETCH_MIN_SCORE);
+}
+
+/** The swipe deck's file in userData: written by `npm run scout:report` only, read here (readSwipes). */
+export const SWIPES_FILE = 'eroscripts-scout-swipes.json';
+
+/**
+ * The posts swiped in `npm run scout:report`'s deck, from SWIPES_FILE parsed
+ * (`{version: 1, swipes: {"<id>": {dir: "right" | "left", at}}}`): `wanted`
+ * (right: `--fetch --auto` takes them) and `hidden` (left: only out of the
+ * deck; the scout takes no notice). An undone swipe has no entry. Anything
+ * else in the file is ignored.
+ *
+ * @param {object|null} json
+ * @returns {{wanted: Set<number>, hidden: Set<number>}}
+ */
+export function readSwipes(json) {
+  const wanted = new Set();
+  const hidden = new Set();
+  const swipes = json?.swipes;
+  if (swipes && typeof swipes === 'object') {
+    for (const [key, s] of Object.entries(swipes)) {
+      const id = Number(key);
+      if (!Number.isSafeInteger(id) || id <= 0) continue;
+      if (s?.dir === 'right') wanted.add(id);
+      else if (s?.dir === 'left') hidden.add(id);
+    }
+  }
+  return { wanted, hidden };
+}
+
+/**
+ * A candidate scored under `scoring` (candidateScore), with what the scout report's deck shows of it:
+ * `tagScores` (its tags that score, postTagScores) and `creampie` (in the Creampie group of
+ * TAG_SCORE_GROUPS, as the score counts it).
+ */
+export function scoredCandidate(c, scoring = {}) {
+  return { ...c, score: candidateScore(c, scoring), tagScores: postTagScores(c.tags, scoring.tagScores), creampie: inTagGroup(c, 'Creampie') };
 }
 
 /**
@@ -994,9 +1059,9 @@ export function autoFetchPick(c, scoring = {}) {
  * rules), posts left pending, and the waiting list with what `--auto` takes.
  *
  * @param {object} state scan state
- * @param {{candidates?: object[], scoring?: object, daily?: {scanAt, scanExit, fetchAt?, fetchExit?}|null, now?: number, rules?: number}} [o]
+ * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, fetchAt?, fetchExit?}|null, now?: number, rules?: number}} [o]
  */
-export function scoutStatus(state, { candidates = [], scoring = {}, daily = null, now = Date.now(), rules = RULES_VERSION } = {}) {
+export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new Set(), daily = null, now = Date.now(), rules = RULES_VERSION } = {}) {
   const when = (iso) => {
     if (!iso) return 'never';
     const h = Math.round((now - Date.parse(iso)) / 3_600_000);
@@ -1017,8 +1082,8 @@ export function scoutStatus(state, { candidates = [], scoring = {}, daily = null
   const pending = Object.keys(state.pending || {}).length;
   if (pending) lines.push(`Listed, not judged yet: ${pending} (the next run goes on with them)`);
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
-  const auto = candidates.filter((c) => autoFetchPick(c, scoring)).length;
-  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (multi-axis, score ≥ ${AUTO_FETCH_MIN_SCORE})`);
+  const auto = candidates.filter((c) => autoFetchPick(c, scoring, wanted)).length;
+  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (multi-axis, score ≥ ${AUTO_FETCH_MIN_SCORE}, or swiped right)`);
   return lines;
 }
 
@@ -1067,8 +1132,9 @@ export function withCurrentFavourite(c, favourites) {
  * ones that still have a scene to download, minus posts the user turned
  * down and posts that break the content rules (contentRuleBreak; lists
  * saved under older rules may hold some, picks too). Best score first, each
- * scored again under the current RANKING, the user's tag scores and the
- * favourite artist bonus, with its favourite under the current favourites.
+ * scored again (scoredCandidate) under the current RANKING, the user's tag
+ * scores and the favourite artist bonus, with its favourite under the
+ * current favourites.
  *
  * @param {object[]} previous candidates from the last list
  * @param {object[]} fresh candidates found by this scan
@@ -1083,7 +1149,7 @@ export function mergeCandidates(previous, fresh, isDone, turnedDown = new Set(),
   return [...byId.values()]
     .map((c) => withCurrentFavourite(c, favourites))
     .filter((c) => !turnedDown.has(c.id) && !contentRuleBreak(c) && c.scenes.some((sc) => !isDone(c.id, sc.video.name)))
-    .map((c) => ({ ...c, score: candidateScore(c, scoring) }))
+    .map((c) => scoredCandidate(c, scoring))
     .sort((a, b) => b.score - a.score);
 }
 

@@ -89,7 +89,8 @@ Download:
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids
-  --auto                 only posts with hand-made multi-axis scripts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+ (AUTO_FETCH_MIN_SCORE)
+  --auto                 only posts with hand-made multi-axis scripts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+ (AUTO_FETCH_MIN_SCORE), and the
+                         posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}) whatever their score
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -113,9 +114,9 @@ Daily (run once a day by the watchdog, see README):
 Status:
   --status               print the scan state without going online: backfill per feed (page and oldest last
                          activity reached), verdicts, posts judged under older rules, the waiting list
-  --titles               fill in title, author, dates and image of judged posts that lack them (judged before
-                         verdicts kept them), newest first, one read per post at the usual pace; verdicts stay.
-                         For npm run scout:report. A stopped run goes on next time
+  --titles               fill in title, author, dates and images of judged posts that lack them (judged before
+                         verdicts kept them), waiting posts first, then newest first, one read per post at the
+                         usual pace; verdicts stay. For npm run scout:report. A stopped run goes on next time
 Both:
   --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
@@ -354,7 +355,7 @@ function scoutContext(config, userData, incoming) {
   return { library, knownTopics, turnedDown, ...live.scoutPreferences(config) };
 }
 
-/** A judged post as a saved candidate, scored with the user's tag scores and favourite artist bonus. */
+/** A judged post as a saved candidate, scored with the user's tag scores and favourite artist bonus (lib.scoredCandidate). */
 function makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes, first, picked = false }, scoring) {
   const axisType = scenes.some((sc) => sc.axes.length || sc.packed) ? 'multi' : 'single';
   const c = {
@@ -364,7 +365,7 @@ function makeCandidate({ t, s, author, artistInLibrary, favourite, hosts, scenes
     ...(first.monster ? { monster: true } : {}), ...(first.feet ? { feet: true } : {}), ...(first.ffm ? { ffm: true } : {}), ...(picked ? { picked } : {}),
     scenes,
   };
-  return { ...c, score: lib.candidateScore(c, scoring) };
+  return lib.scoredCandidate(c, scoring);
 }
 
 async function scan(opts, { api, userData, config, incoming }) {
@@ -836,8 +837,23 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
 }
 
 /**
+ * The posts swiped in npm run scout:report's deck (lib.readSwipes): none when the file isn't there; an
+ * unreadable one is reported and counts as none.
+ */
+function readSwipesFile(userData) {
+  const file = path.join(userData, lib.SWIPES_FILE);
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return lib.readSwipes(null); }
+  try { return lib.readSwipes(JSON.parse(text)); } catch (err) {
+    console.error(`Ignoring ${file}: ${err.message}`);
+    return lib.readSwipes(null);
+  }
+}
+
+/**
  * The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a
- * vrbangers.com video only), checked again against the library as it is now (lib.notYetHeld).
+ * vrbangers.com video only; `--auto`: lib.autoFetchPick, swiped-right posts included), checked again against the
+ * library as it is now (lib.notYetHeld).
  */
 function savedQueue(opts, { userData, config, incoming }) {
   const file = path.join(userData, 'eroscripts-scout.json');
@@ -851,8 +867,9 @@ function savedQueue(opts, { userData, config, incoming }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
+  const { wanted } = opts.auto ? readSwipesFile(userData) : { wanted: new Set() };
   const picked = lib.downloadQueue(candidates, scoring, favourites)
-    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, scoring)));
+    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, scoring, wanted)));
   const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
   const ownTopics = new Set();
   fetchedScenes(incoming, userData, ownTopics);
@@ -975,7 +992,8 @@ function status({ userData, config, incoming }) {
   const candidates = lib.downloadQueue(saved, scoring, favourites).filter((c) => c.scenes.some((sc) => !done.has(lib.fetchedKey(c.id, sc.video.name))));
   let daily = null;
   try { daily = JSON.parse(fs.readFileSync(path.join(userData, DAILY_FILE), 'utf8')); } catch { /* no daily run yet */ }
-  for (const line of lib.scoutStatus(state, { candidates, scoring, daily })) console.log(line);
+  const { wanted } = readSwipesFile(userData);
+  for (const line of lib.scoutStatus(state, { candidates, scoring, wanted, daily })) console.log(line);
   return 0;
 }
 
@@ -992,15 +1010,18 @@ async function exitCodeOf(step) {
 }
 
 /**
- * `--titles`: title, author, dates and image for judged posts that lack them, newest first,
- * paced like a scan. A post the forum no longer has (404) is marked `gone`; a run that hits
- * the rate limit or a run of refusals (expired session) stops, saving what it has.
+ * `--titles`: title, author, dates and images for judged posts that lack them (lib.topicsMissingInfo:
+ * the waiting posts first, best score first, then newest first), paced like a scan. A post the forum
+ * no longer has (404) is marked `gone`; a run that hits the rate limit or a run of refusals (expired
+ * session) stops, saving what it has.
  */
 async function fillTitles({ api, userData }) {
   const pacer = createPacer();
   const state = readScoutState(userData);
-  const ids = lib.untitledTopicIds(state);
-  console.log(`${ids.length} judged posts without a title`);
+  let waiting = [];
+  try { waiting = JSON.parse(fs.readFileSync(path.join(userData, 'eroscripts-scout.json'), 'utf8')).candidates || []; } catch { /* no list yet */ }
+  const ids = lib.topicsMissingInfo(state, waiting.map((c) => c.id));
+  console.log(`${ids.length} judged posts without a title or images`);
   let done = 0; let gone = 0; let refused = 0; let skipped = 0;
   try {
     for (const id of ids) {
@@ -1040,7 +1061,7 @@ async function daily(opts, ctx) {
   const scanExit = await exitCodeOf(() => scan(opts, ctx));
   writeAtomic(file, JSON.stringify({ scanAt, scanExit }, null, 1));
   if (scanExit === 3) return 3;
-  console.log(`\nDaily: downloading the waiting hand-made multi-axis posts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+`);
+  console.log(`\nDaily: downloading the waiting hand-made multi-axis posts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+ and the posts swiped right`);
   const fetchExit = await exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx));
   writeAtomic(file, JSON.stringify({ scanAt, scanExit, fetchAt: new Date().toISOString(), fetchExit }, null, 1));
   return scanExit || fetchExit;
