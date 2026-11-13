@@ -28,8 +28,8 @@ no login: anyone on the network can read it, and swipe, while it runs. Every loa
 file shows as an empty section.
 
 The swipe deck, http://127.0.0.1:<port>/swipe, shows the waiting posts not in the
-library, roughly highest score first (each visit shifts every score by up to 2.5 either
-way, so the order varies), one card at a time. Right = wanted: the next
+library, loosely highest score first (each deal shifts every score by up to 10 either
+way, so low scorers come up too), one card at a time. Right = wanted: the next
 npm run eroscripts:scout -- --fetch --auto downloads it whatever its score or axes.
 Left = hidden from the deck only (the scout treats the post as before). Skip (up)
 puts the card back a few cards later, saving nothing. Undo forgets the swipe or skip.

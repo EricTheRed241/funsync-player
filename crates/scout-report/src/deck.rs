@@ -15,8 +15,9 @@ pub const DEFAULT_LIMIT: usize = 20;
 pub const MAX_LIMIT: usize = 100;
 /// Most ids one deck request may leave out (`exclude`: the cards the page holds).
 pub const MAX_EXCLUDE: usize = 1000;
-/// Score points a seeded deck moves each card by, at most, either way.
-pub const JITTER: f64 = 2.5;
+/// Score points a seeded deck moves each card by, at most, either way: wide enough (scores run
+/// about -4 … 24) that low-scoring posts surface too and the whole deck gets swiped over time.
+pub const JITTER: f64 = 10.0;
 /// Images per card (the scout saves at most this many).
 pub const MAX_IMAGES: usize = 5;
 const TOP_TAGS: usize = 3;
