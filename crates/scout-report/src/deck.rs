@@ -1,7 +1,7 @@
 //! The swipe deck: the waiting list's posts with no video in the library and
 //! no swipe yet, highest score first (the scout's download order), as cards
-//! for `/swipe`; with a `seed`, each card's score is shifted by up to JITTER
-//! either way, so the order wanders a little. Tag scores and creampie come from
+//! for `/swipe`; with a `seed`, each card's score is shifted by up to the stack's
+//! jitter (MULTI_JITTER or SINGLE_JITTER) either way, so the order wanders a little. Tag scores and creampie come from
 //! the scout's waiting list (`tagScores`, `creampie`); Rust never computes them.
 
 use crate::report::{self, id_of, str_of};
@@ -15,21 +15,21 @@ pub const DEFAULT_LIMIT: usize = 20;
 pub const MAX_LIMIT: usize = 100;
 /// Most ids one deck request may leave out (`exclude`: the cards the page holds).
 pub const MAX_EXCLUDE: usize = 1000;
-/// Score points a seeded deck moves each card by, at most, either way: wide enough (scores run
-/// about -4 … 24) that low-scoring posts surface too and the whole deck gets swiped over time.
-pub const JITTER: f64 = 10.0;
-/// Multi-axis cards dealt per single-axis card in the mixed stack, while both last.
-pub const MULTI_PER_SINGLE: usize = 4;
+/// Score points a seeded multi-axis deck moves each card by, at most, either way: multi-axis
+/// posts are a smaller, more valued pool, so the deck stays close to score order.
+pub const MULTI_JITTER: f64 = 4.0;
+/// Score points a seeded single-axis deck moves each card by, at most, either way: wide enough
+/// (scores run about -4 … 24) that low-scoring posts surface too and the whole stack gets swiped.
+pub const SINGLE_JITTER: f64 = 10.0;
 /// Images per card (the scout saves at most this many).
 pub const MAX_IMAGES: usize = 5;
 const TOP_TAGS: usize = 3;
 
-/// Which posts a deck request deals: both kinds mixed MULTI_PER_SINGLE multi-axis to one
-/// single-axis (the scout's `axisType`; packed archives count as multi), or one kind only.
+/// Which posts a deck request deals: multi-axis (the scout's `axisType`; packed archives count
+/// as multi) or single-axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Stack {
     #[default]
-    Mixed,
     Multi,
     Single,
 }
@@ -37,10 +37,17 @@ pub enum Stack {
 impl Stack {
     pub fn parse(s: &str) -> Option<Stack> {
         match s {
-            "mixed" => Some(Stack::Mixed),
             "multi" => Some(Stack::Multi),
             "single" => Some(Stack::Single),
             _ => None,
+        }
+    }
+
+    /// Most score points a seeded deal of this stack moves a card, either way.
+    pub fn jitter(self) -> f64 {
+        match self {
+            Stack::Multi => MULTI_JITTER,
+            Stack::Single => SINGLE_JITTER,
         }
     }
 }
@@ -49,7 +56,7 @@ impl Stack {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Deal {
     pub limit: usize,
-    /// Shuffle a little (JITTER); the same seed deals the same order, so the pages of
+    /// Shuffle a little (the stack's jitter); the same seed deals the same order, so the pages of
     /// one visit agree. None = strictly by score.
     pub seed: Option<u64>,
     /// Cards the page holds already (on screen, or skipped for later).
@@ -147,28 +154,24 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
 }
 
 impl Deck {
-    /// Reorder by `seed`, keep `stack`'s posts (`remaining` then counts that stack), leave out
-    /// `exclude`, interleave the mixed stack MULTI_PER_SINGLE to one, and keep the first `limit`.
-    /// Dealing from what's left each time keeps the 4:1 pattern across pages.
+    /// Reorder by `seed` (shifting scores by up to the stack's jitter), keep `stack`'s posts
+    /// (`remaining` then counts that stack), leave out `exclude`, and keep the first `limit`.
     pub fn deal(&mut self, deal: &Deal) {
         if let Some(seed) = deal.seed {
+            let amp = deal.stack.jitter();
             let key = |c: &Card| {
                 c.score
-                    .map_or(f64::NEG_INFINITY, |s| s + jitter(seed, c.id))
+                    .map_or(f64::NEG_INFINITY, |s| s + jitter(seed, c.id, amp))
             };
             self.cards
                 .sort_by(|a, b| key(b).total_cmp(&key(a)).then(b.id.cmp(&a.id)));
         }
         match deal.stack {
-            Stack::Mixed => {}
             Stack::Multi => self.cards.retain(Card::is_multi),
             Stack::Single => self.cards.retain(|c| !c.is_multi()),
         }
         self.remaining = self.cards.len();
         self.cards.retain(|c| !deal.exclude.contains(&c.id));
-        if deal.stack == Stack::Mixed {
-            self.cards = mix(std::mem::take(&mut self.cards));
-        }
         self.cards.truncate(deal.limit);
     }
 }
@@ -179,36 +182,15 @@ impl Card {
     }
 }
 
-/// MULTI_PER_SINGLE multi-axis cards, then one single-axis card, each kind in its own order;
-/// the rest of whichever kind lasts longer at the end.
-fn mix(cards: Vec<Card>) -> Vec<Card> {
-    let (multi, single): (Vec<Card>, Vec<Card>) = cards.into_iter().partition(Card::is_multi);
-    let (mut multi, mut single) = (multi.into_iter().peekable(), single.into_iter());
-    let mut out = Vec::new();
-    loop {
-        out.extend(multi.by_ref().take(MULTI_PER_SINGLE));
-        match single.next() {
-            Some(c) => out.push(c),
-            None => break,
-        }
-        if multi.peek().is_none() {
-            break;
-        }
-    }
-    out.extend(multi);
-    out.extend(single);
-    out
-}
-
-/// Card `id`'s score shift for `seed`, in [-JITTER, JITTER] (splitmix64 of both):
+/// Card `id`'s score shift for `seed`, in [-amplitude, amplitude] (splitmix64 of both):
 /// the same for a seed and id on every request.
-pub fn jitter(seed: u64, id: u64) -> f64 {
+pub fn jitter(seed: u64, id: u64, amplitude: f64) -> f64 {
     let mut z = (seed ^ id.wrapping_mul(0x9E37_79B9_7F4A_7C15)).wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^= z >> 31;
     let unit = (z >> 11) as f64 / (1u64 << 53) as f64; // [0, 1)
-    (unit * 2.0 - 1.0) * JITTER
+    (unit * 2.0 - 1.0) * amplitude
 }
 
 fn candidates(waiting: &Value) -> impl Iterator<Item = (u64, &Value)> {
@@ -490,10 +472,15 @@ mod tests {
         d.cards.iter().map(|c| c.id).collect()
     }
 
-    /// `n` cards scored 0, 1, … n-1 (id = score), dealt with `deal`.
+    /// `n` posts of `stack`'s kind scored 0, 1, … n-1 (id = score), dealt with `deal`.
     fn dealt(n: u64, deal: &Deal) -> Deck {
+        let axis = if deal.stack == Stack::Multi {
+            "multi"
+        } else {
+            "single"
+        };
         let cands: Vec<Value> = (0..n)
-            .map(|i| json!({"id": i, "score": i as f64}))
+            .map(|i| json!({"id": i, "score": i as f64, "axisType": axis}))
             .collect();
         let mut d = build(
             &json!({}),
@@ -507,45 +494,56 @@ mod tests {
 
     #[test]
     fn jitter_stays_within_bounds_and_repeats_per_seed() {
-        let shifts: Vec<f64> = (0..10_000).map(|id| jitter(7, id)).collect();
-        assert!(shifts.iter().all(|s| (-JITTER..=JITTER).contains(s)));
-        // Spread over the whole range, both ways.
-        assert!(
-            shifts.iter().any(|&s| s < -JITTER * 0.9) && shifts.iter().any(|&s| s > JITTER * 0.9)
-        );
-        assert_eq!(jitter(7, 42), jitter(7, 42));
-        assert_ne!(jitter(7, 42), jitter(8, 42));
+        for amp in [MULTI_JITTER, SINGLE_JITTER] {
+            let shifts: Vec<f64> = (0..10_000).map(|id| jitter(7, id, amp)).collect();
+            assert!(shifts.iter().all(|s| (-amp..=amp).contains(s)));
+            // Spread over the whole range, both ways.
+            assert!(
+                shifts.iter().any(|&s| s < -amp * 0.9) && shifts.iter().any(|&s| s > amp * 0.9)
+            );
+        }
+        assert_eq!(jitter(7, 42, 4.0), jitter(7, 42, 4.0));
+        assert_ne!(jitter(7, 42, 4.0), jitter(8, 42, 4.0));
+        assert_eq!(Stack::Multi.jitter(), MULTI_JITTER);
+        assert_eq!(Stack::Single.jitter(), SINGLE_JITTER);
     }
 
     #[test]
     fn a_seed_shuffles_a_little_and_pages_agree() {
-        let all = Deal {
-            limit: MAX_LIMIT,
-            ..Deal::default()
-        };
-        // No seed: strictly best first.
-        assert_eq!(ids(&dealt(30, &all)), (0..30).rev().collect::<Vec<_>>());
-        let seeded = Deal {
-            seed: Some(3),
-            ..all.clone()
-        };
-        let order = ids(&dealt(30, &seeded));
-        assert_ne!(order, (0..30).rev().collect::<Vec<_>>());
-        // Never further than the jitter allows: a card only passes ones within 2 × JITTER points.
-        for (i, a) in order.iter().enumerate() {
-            for b in &order[i + 1..] {
-                assert!(*b as f64 - *a as f64 <= 2.0 * JITTER, "{a} before {b}");
+        for stack in [Stack::Multi, Stack::Single] {
+            let amp = stack.jitter();
+            let all = Deal {
+                limit: MAX_LIMIT,
+                stack,
+                ..Deal::default()
+            };
+            // No seed: strictly best first.
+            assert_eq!(ids(&dealt(30, &all)), (0..30).rev().collect::<Vec<_>>());
+            let seeded = Deal {
+                seed: Some(3),
+                ..all.clone()
+            };
+            let order = ids(&dealt(30, &seeded));
+            assert_ne!(order, (0..30).rev().collect::<Vec<_>>());
+            // Never further than the jitter allows: a card only passes ones within 2 × amp points.
+            for (i, a) in order.iter().enumerate() {
+                for b in &order[i + 1..] {
+                    assert!(
+                        *b as f64 - *a as f64 <= 2.0 * amp,
+                        "{stack:?}: {a} before {b}"
+                    );
+                }
             }
+            // The second page (the first 10 left out) continues the same order.
+            let page2 = Deal {
+                limit: 10,
+                exclude: order[..10].iter().copied().collect(),
+                ..seeded.clone()
+            };
+            let d = dealt(30, &page2);
+            assert_eq!(ids(&d), order[10..20]);
+            assert_eq!(d.remaining, 30);
         }
-        // The second page (the first 10 left out) continues the same order.
-        let page2 = Deal {
-            limit: 10,
-            exclude: order[..10].iter().copied().collect(),
-            ..seeded.clone()
-        };
-        let d = dealt(30, &page2);
-        assert_eq!(ids(&d), order[10..20]);
-        assert_eq!(d.remaining, 30);
     }
 
     /// Multi-axis posts 100…(100+m) and single-axis posts 1…s, higher id = higher score.
@@ -562,37 +560,6 @@ mod tests {
         );
         d.deal(deal);
         d
-    }
-
-    #[test]
-    fn mixed_stack_deals_four_multi_to_one_single_across_pages() {
-        let all = Deal {
-            limit: MAX_LIMIT,
-            ..Deal::default()
-        };
-        let d = kinds(9, 4, &all);
-        assert_eq!(d.remaining, 13);
-        // 4 multi, 1 single, 4 multi, 1 single, the last multi, then the singles left.
-        assert_eq!(
-            ids(&d),
-            [108, 107, 106, 105, 4, 104, 103, 102, 101, 3, 100, 2, 1]
-        );
-        // The next page (the first 7 held) goes on with the pattern from what's left.
-        let held: HashSet<u64> = ids(&d)[..7].iter().copied().collect();
-        let page2 = kinds(
-            9,
-            4,
-            &Deal {
-                limit: 3,
-                exclude: held,
-                ..Deal::default()
-            },
-        );
-        assert_eq!(ids(&page2), [102, 101, 100]);
-        assert_eq!(page2.remaining, 13);
-        // Only one kind left: it just follows.
-        assert_eq!(ids(&kinds(0, 3, &all)), [3, 2, 1]);
-        assert_eq!(ids(&kinds(2, 0, &all)), [101, 100]);
     }
 
     #[test]
@@ -617,7 +584,10 @@ mod tests {
         );
         assert_eq!((ids(&single), single.remaining), (vec![5, 4, 3, 2, 1], 5));
         assert_eq!(Stack::parse("multi"), Some(Stack::Multi));
+        assert_eq!(Stack::parse("single"), Some(Stack::Single));
         assert_eq!(Stack::parse("Multi"), None);
+        assert_eq!(Stack::parse("both"), None);
+        assert_eq!(Stack::default(), Stack::Multi);
     }
 
     #[test]
@@ -682,9 +652,9 @@ mod tests {
                 ..Deal::default()
             },
         );
-        assert_eq!(d.remaining, 7);
-        // The mixed stack puts the only multi-axis post (10) before the best single-axis one.
-        assert_eq!(d.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [10, 12]);
+        // The default multi-axis stack: 10 is the only multi-axis post.
+        assert_eq!(d.remaining, 1);
+        assert_eq!(d.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [10]);
 
         std::fs::write(dir.join(crate::swipes::FILE), b"nope").unwrap();
         let d = load(
@@ -694,7 +664,7 @@ mod tests {
                 ..Deal::default()
             },
         );
-        assert_eq!((d.remaining, d.cards.len()), (7, 0));
+        assert_eq!((d.remaining, d.cards.len()), (1, 0));
         assert!(d.problems[0].starts_with(crate::swipes::FILE));
         let _ = std::fs::remove_dir_all(&dir);
     }

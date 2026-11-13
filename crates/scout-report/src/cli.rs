@@ -28,9 +28,10 @@ no login: anyone on the network can read it, and swipe, while it runs. Every loa
 file shows as an empty section.
 
 The swipe deck, http://127.0.0.1:<port>/swipe, shows the waiting posts not in the
-library, loosely highest score first (each deal shifts every score by up to 10 either
-way, so low scorers come up too), one card at a time; tabs pick the stack: Mixed (4
-multi-axis posts to 1 single-axis), Multi-axis or Single-axis. Right = wanted: the next
+library, loosely highest score first, one card at a time; tabs pick the stack:
+Multi-axis (default) or Single-axis. Each deal shifts every score by up to 4 either
+way on Multi-axis (MULTI_JITTER: it stays close to score order) and up to 10 on
+Single-axis (SINGLE_JITTER: low scorers come up too). Right = wanted: the next
 npm run eroscripts:scout -- --fetch --auto downloads it whatever its score or axes.
 Left = hidden from the deck only (the scout treats the post as before). Skip (up)
 puts the card back a few cards later, saving nothing. Undo forgets the swipe or skip.

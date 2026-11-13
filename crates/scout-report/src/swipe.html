@@ -102,7 +102,6 @@ a:hover { text-decoration: underline; }
   <a href="/">Report</a>
 </header>
 <nav class="stacks" id="stacks" aria-label="Which posts">
-  <button type="button" data-stack="mixed" title="Multi-axis and single-axis posts, 4 multi-axis to 1 single-axis">Mixed 4:1</button>
   <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
   <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
 </nav>
@@ -123,13 +122,15 @@ a:hover { text-decoration: underline; }
 'use strict';
 const BATCH = 20;
 const REFILL_AT = 5;
-// The deal's shuffle: the server shifts every score by up to ±10 for this seed, so the deck leans
-// best first but low scorers come up too; Shuffle (or a page reload) deals a new order.
+// The deal's shuffle: the server shifts every score by up to ±4 on the multi-axis stack (it stays
+// close to score order) and ±10 on the single-axis one (low scorers come up too) for this seed;
+// Shuffle (or a page reload) deals a new order.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a stack change: answers to older deck requests are dropped
-// Which stack is dealt (mixed 4:1, multi, single); remembered on this device.
-let stack = ['mixed', 'multi', 'single'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'mixed';
+// Which stack is dealt (multi, single); remembered on this device. Any other stored value
+// (e.g. a tab that no longer exists) falls back to multi.
+let stack = ['multi', 'single'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
 const $ = (id) => document.getElementById(id);
 const deckEl = $('deck');
 
