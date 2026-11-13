@@ -14,6 +14,7 @@ import {
   staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, topicsMissingInfo, addPostInfo, readSwipes, scoredCandidate,
   contentRuleBreak, isHentaiOnly, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
+  scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { AUTO_FETCH_MIN_SCORE, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
@@ -997,5 +998,38 @@ describe('findLocalCopy with a browser copy suffix', () => {
     expect(findLocalCopy({ name: 'Kunoichi Queens.mp4', size: 5 }, entries)?.path).toBe('/d/k1');
     expect(findLocalCopy({ name: 'Kunoichi Queens.mp4', size: 6 }, entries)).toBe(null);
     expect(findLocalCopy({ name: 'Kunoichi Queens.mp4' }, [...entries, { name: 'Kunoichi Queens.mp4', path: '/d/k', size: 5 }])?.path).toBe('/d/k');
+  });
+});
+
+describe('script previews for the swipe deck', () => {
+  it('gives the length and the speed per bin in position units per second', () => {
+    // 0→100 in 1 s (100 u/s), then rests at 100 for 1 s, out of order and with a junk action.
+    const p = scriptPreview({ actions: [{ at: 2000, pos: 100 }, { at: 0, pos: 0 }, { at: 1000, pos: 100 }, { at: 'x', pos: 5 }] }, 2);
+    expect(p).toEqual({ durationMs: 2000, heat: [100, 0] });
+    expect(scriptPreview({ actions: [{ at: 0, pos: 0 }, { at: 9000, pos: 90 }] }).heat).toHaveLength(HEAT_BINS);
+  });
+
+  it('marks an unreadable or empty script as read, with nothing to show', () => {
+    expect(scriptPreview(null)).toEqual({ durationMs: null, heat: [] });
+    expect(scriptPreview({ actions: [{ at: 500, pos: 10 }] })).toEqual({ durationMs: 500, heat: [] });
+  });
+
+  it('reads the stroke script, not an axis script', () => {
+    const roll = { url: 'r', axis: 'roll' }; const main = { url: 'm', axis: '' };
+    expect(mainScriptOf({ scripts: [roll, main] })).toBe(main);
+    expect(mainScriptOf({ scripts: [roll] })).toBe(roll);
+    expect(mainScriptOf({ packed: { url: 'a.rar' }, scripts: [] })).toBeNull();
+  });
+
+  it('lists waiting posts whose first scene has no preview yet, best score first', () => {
+    const sc = (extra = {}) => ({ scripts: [{ url: 'u', axis: '' }], ...extra });
+    const list = [
+      { id: 1, score: 3, scenes: [sc()] },
+      { id: 2, score: 9, scenes: [sc()] },
+      { id: 3, score: 20, scenes: [sc({ heat: [] })] },                   // read already (unreadable)
+      { id: 4, score: 30, scenes: [{ packed: { url: 'a.zip' }, scripts: [] }] }, // nothing to read
+      { id: 5, score: 9, scenes: [sc()] },
+    ];
+    expect(candidatesMissingPreview(list).map((c) => c.id)).toEqual([5, 2, 1]);
   });
 });

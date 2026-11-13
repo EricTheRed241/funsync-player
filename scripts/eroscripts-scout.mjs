@@ -7,7 +7,8 @@
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
-//   npm run eroscripts:scout -- --titles     title, author, dates, image for posts judged before verdicts kept them
+//   npm run eroscripts:scout -- --titles     title, author, dates, images for posts judged before verdicts kept them, and
+//                                            the waiting posts' script previews (length, heat strip)
 //   npm run eroscripts:scout -- --daily      scan, then download the waiting multi-axis posts scoring AUTO_FETCH_MIN_SCORE+
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
@@ -116,7 +117,8 @@ Status:
                          activity reached), verdicts, posts judged under older rules, the waiting list
   --titles               fill in title, author, dates and images of judged posts that lack them (judged before
                          verdicts kept them), waiting posts first, then newest first, one read per post at the
-                         usual pace; verdicts stay. For npm run scout:report. A stopped run goes on next time
+                         usual pace; verdicts stay. Waiting posts also get their first video's script read for
+                         its length and heat strip. For npm run scout:report. A stopped run goes on next time
 Both:
   --user-data <dir>      app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
@@ -281,27 +283,48 @@ async function scriptBytes(api, pacer, file) {
 const clock = (ms) => `${Math.floor(ms / 60_000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}`;
 
 /**
+ * A script file read and parsed, cached in `cache` by url (null = unreadable). Forum rate limits
+ * and an expired session are thrown; other failures are an unreadable script.
+ */
+async function parsedScript(api, pacer, f, cache) {
+  const key = `${f.url}|${f.remote || ''}`;
+  if (!cache.has(key)) {
+    let script = null;
+    try {
+      const bytes = await scriptBytes(api, pacer, f);
+      if (bytes) script = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+    } catch (err) {
+      if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
+    }
+    cache.set(key, script);
+  }
+  return cache.get(key);
+}
+
+/**
+ * Set `durationMs` and `heat` (lib.scriptPreview) on the first scene, reading its main script, and
+ * on every other scene whose main script `cache` already holds. Packed scenes have none to read.
+ */
+async function addScenePreviews(api, pacer, scenes, cache = new Map()) {
+  for (const [i, sc] of scenes.entries()) {
+    const main = lib.mainScriptOf(sc);
+    if (!main || sc.packed) continue;
+    if (i > 0 && !cache.has(`${main.url}|${main.remote || ''}`)) continue;
+    Object.assign(sc, lib.scriptPreview(await parsedScript(api, pacer, main, cache)));
+  }
+  return scenes;
+}
+
+/**
  * A post's scenes (lib.planWithStreams): its scripts paired with its video
  * files; a scene with a streaming page (rule34video, vrbangers.com) is
  * checked by the length of its main script (read now); a rule34video one
- * gets the chosen quality's size (a vrbangers.com page gives it).
+ * gets the chosen quality's size (a vrbangers.com page gives it). Scenes get
+ * their script preview for the swipe deck (addScenePreviews).
  */
 async function planTopic(api, pacer, topicId, files, { vr, libraryVideos }) {
-  const lengths = new Map();
-  const scriptMs = async (f) => {
-    const key = `${f.url}|${f.remote || ''}`;
-    if (!lengths.has(key)) {
-      let ms = null;
-      try {
-        const bytes = await scriptBytes(api, pacer, f);
-        if (bytes) ms = lib.scriptDurationMs(JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''))) || null;
-      } catch (err) {
-        if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
-      }
-      lengths.set(key, ms);
-    }
-    return lengths.get(key);
-  };
+  const scripts = new Map();
+  const scriptMs = async (f) => lib.scriptDurationMs(await parsedScript(api, pacer, f, scripts)) || null;
   const plan = await lib.planWithStreams({
     scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
     videos: files.filter((f) => lib.isVideoName(f.name)),
@@ -316,6 +339,7 @@ async function planTopic(api, pacer, topicId, files, { vr, libraryVideos }) {
     try { size = await rule34video.probeSize(sc.video); } catch { /* size unknown */ }
     sc.video = { ...sc.video, size };
   }
+  await addScenePreviews(api, pacer, plan.scenes, scripts);
   return plan;
 }
 
@@ -1011,18 +1035,34 @@ async function exitCodeOf(step) {
 
 /**
  * `--titles`: title, author, dates and images for judged posts that lack them (lib.topicsMissingInfo:
- * the waiting posts first, best score first, then newest first), paced like a scan. A post the forum
- * no longer has (404) is marked `gone`; a run that hits the rate limit or a run of refusals (expired
- * session) stops, saving what it has.
+ * the waiting posts first, best score first, then newest first), paced like a scan, and the script
+ * preview of each waiting post's first scene (lib.candidatesMissingPreview; one more read). A post the
+ * forum no longer has (404) is marked `gone`; a run that hits the rate limit or a run of refusals
+ * (expired session) stops, saving what it has.
  */
 async function fillTitles({ api, userData }) {
   const pacer = createPacer();
   const state = readScoutState(userData);
-  let waiting = [];
-  try { waiting = JSON.parse(fs.readFileSync(path.join(userData, 'eroscripts-scout.json'), 'utf8')).candidates || []; } catch { /* no list yet */ }
+  const listFile = path.join(userData, 'eroscripts-scout.json');
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(listFile, 'utf8')); } catch { /* no list yet */ }
+  const waiting = saved?.candidates || [];
   const ids = lib.topicsMissingInfo(state, waiting.map((c) => c.id));
-  console.log(`${ids.length} judged posts without a title or images`);
-  let done = 0; let gone = 0; let refused = 0; let skipped = 0;
+  // Waiting posts without a script preview (length, heat strip): read with their post, in deck order.
+  const previewless = new Map(lib.candidatesMissingPreview(waiting).map((c) => [c.id, c]));
+  console.log(`${ids.length} judged posts without a title or images, ${previewless.size} waiting posts without a script preview`);
+  let done = 0; let gone = 0; let refused = 0; let skipped = 0; let previews = 0;
+  const scripts = new Map();
+  const preview = async (c) => {
+    if (!previewless.delete(c.id)) return;
+    await addScenePreviews(api, pacer, c.scenes.slice(0, 1), scripts);
+    scripts.clear();
+    previews++;
+  };
+  const save = () => {
+    writeScoutState(userData, state);
+    if (saved && previews) writeAtomic(listFile, JSON.stringify(saved, null, 1));
+  };
   try {
     for (const id of ids) {
       await pacer.wait();
@@ -1037,14 +1077,22 @@ async function fillTitles({ api, userData }) {
       }
       refused = 0;
       lib.addPostInfo(state, id, data);
+      if (previewless.has(id)) await preview(previewless.get(id));
       if (++done % 50 === 0) {
-        writeScoutState(userData, state);
+        save();
         console.log(`  ${done} of ${ids.length}`);
       }
     }
+    for (const c of [...previewless.values()]) {
+      await preview(c);
+      if (previews % 50 === 0) {
+        save();
+        console.log(`  ${previews} script previews`);
+      }
+    }
   } finally {
-    writeScoutState(userData, state);
-    console.log(`Titles: ${done} filled in, ${gone} posts gone, ${skipped} unreadable (tried again next run)`);
+    save();
+    console.log(`Titles: ${done} filled in, ${gone} posts gone, ${skipped} unreadable (tried again next run); ${previews} script previews`);
   }
   return skipped ? 2 : 0;
 }

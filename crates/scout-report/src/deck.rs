@@ -47,6 +47,12 @@ pub struct Card {
     pub videos: usize,
     pub creampie: bool,
     pub top_tags: Vec<TagScore>,
+    /// The first video's length: its main script's (`durationMs`, set by the scout),
+    /// else the host's listed video length.
+    pub runtime_ms: Option<u64>,
+    /// The first video's main-script speed per time bin, in position units per second
+    /// (`heat`, set by the scout from renderer/js/heatmap-strip.js computeBins); empty = unknown.
+    pub heat: Vec<u32>,
 }
 
 /// Axes of the post: 1 (stroke) plus every other axis its scenes script, or
@@ -155,7 +161,40 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>) -> Card {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         top_tags: top_tags(cand),
+        runtime_ms: scenes.first().and_then(runtime_ms),
+        heat: scenes.first().map(heat).unwrap_or_default(),
     }
+}
+
+fn runtime_ms(scene: &Value) -> Option<u64> {
+    let ms = scene
+        .get("durationMs")
+        .and_then(Value::as_f64)
+        .or_else(|| {
+            scene
+                .pointer("/video/duration")
+                .and_then(Value::as_f64)
+                .map(|s| s * 1000.0)
+        })?;
+    (ms.is_finite() && ms > 0.0).then_some(ms.round() as u64)
+}
+
+/// Longest heat strip passed on (the scout stores 100 bins).
+const MAX_HEAT_BINS: usize = 200;
+
+fn heat(scene: &Value) -> Vec<u32> {
+    scene
+        .get("heat")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(MAX_HEAT_BINS)
+        .map(|v| {
+            v.as_f64()
+                .filter(|f| f.is_finite() && *f > 0.0)
+                .map_or(0, |f| f.round() as u32)
+        })
+        .collect()
 }
 
 /// The state record's `images` (https only, deduped, at most MAX_IMAGES),
@@ -235,8 +274,11 @@ mod tests {
         json!({"candidates": [
             {"id": 10, "title": "Ten", "author": "a", "score": 5.0, "vr": true, "axisType": "multi",
              "creampie": true, "tagScores": {"pov": 2, "vr": 1, "anal": -3},
-             "scenes": [{"axes": ["twist", "roll"]}, {"axes": ["roll", "surge"]}]},
-            {"id": 11, "title": "Eleven", "score": 5.0, "axisType": "single", "scenes": [{"axes": []}]},
+             "scenes": [{"axes": ["twist", "roll"], "durationMs": 754321, "heat": [0, 120.4, -5, "x", 480],
+                         "video": {"duration": 9}},
+                        {"axes": ["roll", "surge"]}]},
+            {"id": 11, "title": "Eleven", "score": 5.0, "axisType": "single",
+             "scenes": [{"axes": [], "video": {"duration": 91.4}}]},
             {"id": 12, "title": "In library", "score": 99.0},
             {"id": 13, "title": "Wanted", "score": 1.0},
             {"id": 14, "title": "Hidden", "score": 50.0},
@@ -303,7 +345,8 @@ mod tests {
                 "author": "a",
                 "images": ["https://x/a.jpg", "https://x/b.jpg", "https://x/c.jpg", "https://x/d.jpg", "https://x/e.jpg"],
                 "score": 5.0, "vr": true, "axisType": "multi", "axes": 4, "videos": 2, "creampie": true,
-                "topTags": [{"tag": "pov", "score": 2.0}, {"tag": "vr", "score": 1.0}]
+                "topTags": [{"tag": "pov", "score": 2.0}, {"tag": "vr", "score": 1.0}],
+                "runtimeMs": 754321, "heat": [0, 120, 0, 0, 480]
             })
         );
         // Older lists: no tagScores / creampie / images; the single image stands in.
@@ -314,10 +357,13 @@ mod tests {
             (Axes::Count(1), 1, false, false)
         );
         assert!(c.top_tags.is_empty());
+        // No script length: the host's listed length; no heat strip.
+        assert_eq!((c.runtime_ms, c.heat.is_empty()), (Some(91400), true));
         assert_eq!(c.author, None);
         let c = d.cards.iter().find(|c| c.id == 15).unwrap();
         assert!(c.images.is_empty());
         assert_eq!((c.axes, c.videos, c.score), (Axes::Count(1), 0, None));
+        assert_eq!(c.runtime_ms, None);
         let c = serde_json::to_value(d.cards.iter().find(|c| c.id == 16).unwrap()).unwrap();
         assert_eq!(c["axes"], "packed");
         assert_eq!(c["images"], json!([]));
