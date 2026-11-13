@@ -112,8 +112,8 @@ a:hover { text-decoration: underline; }
 'use strict';
 const BATCH = 20;
 const REFILL_AT = 5;
-// The deal's shuffle: the server shifts every score by up to ±2.5 for this seed, so the deck is
-// roughly best first but not strictly; Shuffle (or a page reload) deals a new order.
+// The deal's shuffle: the server shifts every score by up to ±10 for this seed, so the deck leans
+// best first but low scorers come up too; Shuffle (or a page reload) deals a new order.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle: answers to older deck requests are dropped
