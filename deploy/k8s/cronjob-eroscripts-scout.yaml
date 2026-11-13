@@ -1,6 +1,6 @@
 # EroScripts scout, daily (was the watchdog's scout_tick): a scan plus the
-# backfill, then downloads of the waiting hand-made multi-axis posts
-# (--fetch --auto). Exit 2 (rate limited, downloads left) counts as done
+# backfill, then downloads of the waiting posts swiped right in the swipe
+# deck (--fetch --auto). Exit 2 (rate limited, downloads left) counts as done
 # (run-job); a run missed while the Mac was off or logged out starts within
 # 12 h of its time.
 apiVersion: batch/v1

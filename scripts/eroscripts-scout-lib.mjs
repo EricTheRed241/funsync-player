@@ -19,13 +19,13 @@
 //     or poster; scripts/scout-live.mjs) and picks skip that.
 //   • No sex rule (user, 2026-11-13): posts without sex tags or words come
 //     in too (a multi-axis script can be worth it untagged) and the ranking
-//     decides (tag scores, AUTO_FETCH_MIN_SCORE for `--fetch --auto`).
-//     Never a post tagged sfw / non-porn (`excluded`). `--fetch` and every
-//     scan drop saved candidates that now break the content rules
-//     (contentRuleBreak).
-//   • Swipes (user, 2026-11-13): a post swiped right in `npm run
-//     scout:report`'s deck is wanted, `--fetch --auto` takes it whatever its
-//     score or axes; a left swipe only hides it from the deck (readSwipes).
+//     orders them (tag scores). Never a post tagged sfw / non-porn
+//     (`excluded`). `--fetch` and every scan drop saved candidates that now
+//     break the content rules (contentRuleBreak).
+//   • Swipes decide downloads (user, 2026-11-13): `--fetch --auto` (the
+//     daily run) takes only posts swiped right in `npm run scout:report`'s
+//     deck, whatever their score or axes; there's no score threshold any
+//     more. A left swipe only hides a post from the deck (readSwipes).
 //   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
 //     downloaded; shorter scenes fetched under older rules stay.
 //   • Single-axis and multi-axis scenes alike (user, 2026-11-07: hand-made
@@ -50,7 +50,7 @@ import { createRequire } from 'node:module';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch } from './scene-dedupe-lib.mjs';
 import {
-  ANIMATION_TAGS, AUTO_FETCH_MIN_SCORE, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
+  ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
   MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../renderer/js/preference-score.js';
@@ -1040,16 +1040,14 @@ export function listedTopic(id, data) {
 }
 
 /**
- * True when `--fetch --auto` takes a waiting post: one the user swiped right on in `npm run scout:report`
- * (`wanted`, readSwipes), whatever its score or axes, or hand-made multi-axis (archives count) scoring at
- * least AUTO_FETCH_MIN_SCORE.
+ * True when `--fetch --auto` takes a waiting post: only one the user swiped right on in
+ * `npm run scout:report` (`wanted`, readSwipes), whatever its score or axes (user, 2026-11-13).
  *
  * @param {object} c saved candidate
- * @param {object} [scoring] see candidateScore
  * @param {Set<number>} [wanted] post ids swiped right
  */
-export function autoFetchPick(c, scoring = {}, wanted = new Set()) {
-  return wanted.has(c.id) || (c.axisType === 'multi' && candidateScore(c, scoring) >= AUTO_FETCH_MIN_SCORE);
+export function autoFetchPick(c, wanted = new Set()) {
+  return wanted.has(c.id);
 }
 
 /** The swipe deck's file in userData: written by `npm run scout:report` only, read here (readSwipes). */
@@ -1118,8 +1116,8 @@ export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new
   const pending = Object.keys(state.pending || {}).length;
   if (pending) lines.push(`Listed, not judged yet: ${pending} (the next run goes on with them)`);
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
-  const auto = candidates.filter((c) => autoFetchPick(c, scoring, wanted)).length;
-  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (multi-axis, score ≥ ${AUTO_FETCH_MIN_SCORE}, or swiped right)`);
+  const auto = candidates.filter((c) => autoFetchPick(c, wanted)).length;
+  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (swiped right)`);
   return lines;
 }
 

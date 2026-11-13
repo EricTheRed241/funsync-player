@@ -16,7 +16,7 @@ import {
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
   scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS,
 } from '../../scripts/eroscripts-scout-lib.mjs';
-import { AUTO_FETCH_MIN_SCORE, MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
+import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
@@ -820,19 +820,6 @@ describe('scan state', () => {
     expect(merged.map((x) => x.id)).toEqual([4, 2, 5]);
   });
 
-  it('auto-fetches only multi-axis posts scoring at least AUTO_FETCH_MIN_SCORE, tag scores included', () => {
-    const c = (axisType) => ({ id: 1, axisType, title: 'X', tags: ['vaginal', 'x-tag', 'y-tag'], likes: 0, scenes: [{ video: { name: 'a.mp4' } }] });
-    // Tag scores are 0.5 steps capped at ±10 each: fill the first tag up to its cap, the rest on the second.
-    const at = (axisType, score) => {
-      const gap = score - candidateScore(c(axisType));
-      const x = Math.max(-10, Math.min(10, gap));
-      return { tagScores: { 'x-tag': x, 'y-tag': gap - x } };
-    };
-    expect(autoFetchPick(c('multi'), at('multi', AUTO_FETCH_MIN_SCORE))).toBe(true);
-    expect(autoFetchPick(c('multi'), at('multi', AUTO_FETCH_MIN_SCORE - 0.5))).toBe(false);
-    expect(autoFetchPick(c('single'), at('single', AUTO_FETCH_MIN_SCORE + 5))).toBe(false);
-  });
-
   describe('swipes (npm run scout:report deck)', () => {
     const single = { id: 343669, axisType: 'single', title: 'X', tags: ['vaginal'], likes: 0, scenes: [{ video: { name: 'a.mp4' } }] };
     const strong = { ...single, id: 2, axisType: 'multi', tags: ['vaginal', 'x-tag', 'y-tag'] };
@@ -847,16 +834,16 @@ describe('scan state', () => {
     });
 
     it('auto-fetches a post swiped right though single-axis and scoring low', () => {
-      expect(candidateScore(single)).toBeLessThan(AUTO_FETCH_MIN_SCORE);
       expect(autoFetchPick(single)).toBe(false);
-      expect(autoFetchPick(single, {}, swipes({ 343669: 'right' }).wanted)).toBe(true);
+      expect(autoFetchPick(single, swipes({ 343669: 'right' }).wanted)).toBe(true);
     });
 
-    it('takes no notice of a left swipe, and an undone right swipe (entry gone) drops the post again', () => {
-      expect(autoFetchPick(single, {}, swipes({ 343669: 'left' }).wanted)).toBe(false);
-      expect(autoFetchPick(strong, strongScoring)).toBe(true);
-      expect(autoFetchPick(strong, strongScoring, swipes({ 2: 'left' }).wanted)).toBe(true);
-      expect(autoFetchPick(single, {}, swipes({}).wanted)).toBe(false);
+    it('never auto-fetches an unswiped post, however high it scores (no score threshold)', () => {
+      expect(candidateScore(strong, strongScoring)).toBeGreaterThan(20);
+      expect(autoFetchPick(strong)).toBe(false);
+      expect(autoFetchPick(strong, swipes({ 2: 'left' }).wanted)).toBe(false);
+      expect(autoFetchPick(single, swipes({ 343669: 'left' }).wanted)).toBe(false);
+      expect(autoFetchPick(single, swipes({}).wanted)).toBe(false);
     });
   });
 

@@ -90,7 +90,7 @@ pub struct Deck {
     /// Cards left to swipe (all of them, not just the ones returned).
     pub remaining: usize,
     /// Right swipes still on the waiting list and not in the library: what the next
-    /// `--fetch --auto` adds on top of its own picks.
+    /// `--fetch --auto` downloads (it takes nothing else).
     pub wanted: usize,
     /// Files that exist but couldn't be read or parsed.
     pub problems: Vec<String>,

@@ -9,7 +9,7 @@
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
 //   npm run eroscripts:scout -- --titles     title, author, dates, images for posts judged before verdicts kept them, and
 //                                            the waiting posts' script previews (length, heat strip)
-//   npm run eroscripts:scout -- --daily      scan, then download the waiting multi-axis posts scoring AUTO_FETCH_MIN_SCORE+
+//   npm run eroscripts:scout -- --daily      scan, then download the waiting posts swiped right in npm run scout:report
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //
@@ -90,8 +90,8 @@ Download:
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids
-  --auto                 only posts with hand-made multi-axis scripts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+ (AUTO_FETCH_MIN_SCORE), and the
-                         posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}) whatever their score
+  --auto                 only the posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}),
+                         whatever their score or axes
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -876,7 +876,7 @@ function readSwipesFile(userData) {
 
 /**
  * The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a
- * vrbangers.com video only; `--auto`: lib.autoFetchPick, swiped-right posts included), checked again against the
+ * vrbangers.com video only; `--auto`: only posts swiped right, lib.autoFetchPick), checked again against the
  * library as it is now (lib.notYetHeld).
  */
 function savedQueue(opts, { userData, config, incoming }) {
@@ -893,7 +893,7 @@ function savedQueue(opts, { userData, config, incoming }) {
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
   const { wanted } = opts.auto ? readSwipesFile(userData) : { wanted: new Set() };
   const picked = lib.downloadQueue(candidates, scoring, favourites)
-    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, scoring, wanted)));
+    .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, wanted)));
   const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
   const ownTopics = new Set();
   fetchedScenes(incoming, userData, ownTopics);
@@ -1109,7 +1109,7 @@ async function daily(opts, ctx) {
   const scanExit = await exitCodeOf(() => scan(opts, ctx));
   writeAtomic(file, JSON.stringify({ scanAt, scanExit }, null, 1));
   if (scanExit === 3) return 3;
-  console.log(`\nDaily: downloading the waiting hand-made multi-axis posts scoring ${prefs.AUTO_FETCH_MIN_SCORE}+ and the posts swiped right`);
+  console.log('\nDaily: downloading the waiting posts swiped right');
   const fetchExit = await exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx));
   writeAtomic(file, JSON.stringify({ scanAt, scanExit, fetchAt: new Date().toISOString(), fetchExit }, null, 1));
   return scanExit || fetchExit;
