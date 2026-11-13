@@ -1,6 +1,7 @@
 //! The report: every post the scout judged (eroscripts-scout-state.json),
-//! merged with the waiting list (eroscripts-scout.json) and the scenes turned
-//! down (eroscripts-scout-rejected.json). Built fresh from the files on every
+//! merged with the waiting list (eroscripts-scout.json), the scenes turned
+//! down (eroscripts-scout-rejected.json) and how many of its videos the
+//! library holds (crate::library). Built fresh from the files on every
 //! request; a missing file is an empty section.
 
 use serde::Serialize;
@@ -24,6 +25,8 @@ pub struct Report {
     /// Posts per verdict.
     pub verdicts: BTreeMap<String, usize>,
     pub waiting: usize,
+    /// Posts with at least one video in the library.
+    pub in_library: usize,
     /// Files that exist but couldn't be read or parsed (their section is empty).
     pub problems: Vec<String>,
     /// Newest topic first.
@@ -65,9 +68,12 @@ pub struct Post {
     /// Entries of the rejected list for this topic (`reason`, `video`, `at`, …).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rejected_scenes: Vec<Value>,
+    /// Library videos from this post (scout downloads, app downloads, sync links); 0 = not downloaded.
+    pub in_library: usize,
 }
 
-/// Read the three files from `user_data` and build the report.
+/// Read the scout's three files, `config.json` and `eroscripts-links.json` from `user_data`
+/// and build the report.
 pub fn load(user_data: &Path) -> Report {
     let mut problems = Vec::new();
     let mut read = |name: &str| -> Value {
@@ -86,9 +92,21 @@ pub fn load(user_data: &Path) -> Report {
     let state = read(STATE_FILE);
     let waiting = read(WAITING_FILE);
     let rejected = read(REJECTED_FILE);
+    let config = read("config.json");
+    let links = read(crate::library::LINKS_FILE);
+    let videos = crate::library::topic_videos(&config, &links, &mut problems);
     let mut report = build(&state, &waiting, &rejected);
+    mark_in_library(&mut report, &videos);
     report.problems = problems;
     report
+}
+
+/// Set each post's library video count and the report's total.
+pub fn mark_in_library(report: &mut Report, videos: &HashMap<u64, usize>) {
+    for post in &mut report.posts {
+        post.in_library = videos.get(&post.id).copied().unwrap_or(0);
+    }
+    report.in_library = report.posts.iter().filter(|p| p.in_library > 0).count();
 }
 
 fn str_of(v: &Value, key: &str) -> Option<String> {
@@ -256,6 +274,7 @@ pub fn build(state: &Value, waiting: &Value, rejected: &Value) -> Report {
             gb: scenes.as_deref().and_then(total_gb),
             scenes,
             rejected_scenes: rejected_by_topic.remove(&id).unwrap_or_default(),
+            in_library: 0,
         });
     }
 
@@ -269,6 +288,7 @@ pub fn build(state: &Value, waiting: &Value, rejected: &Value) -> Report {
             .unwrap_or_default(),
         verdicts,
         waiting: candidates.len(),
+        in_library: 0,
         problems: Vec::new(),
         posts,
     }

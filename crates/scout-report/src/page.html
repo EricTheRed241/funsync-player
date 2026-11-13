@@ -32,6 +32,13 @@ a:hover { text-decoration: underline; }
   border-radius: 6px; margin-bottom: 12px; white-space: pre-wrap; }
 .top { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.panel > summary { cursor: pointer; list-style: none; }
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary h2 { display: inline; }
+.panel > summary::after { content: ' ▾'; color: var(--muted); }
+.panel:not([open]) > summary::after { content: ' ▸'; }
+.panel[open] > summary { margin-bottom: 6px; }
+.feeds-wrap { overflow-x: auto; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 640px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
   border-radius: 999px; padding: 3px 10px 3px 6px; cursor: pointer; user-select: none; }
@@ -76,12 +83,43 @@ details ul { margin: 4px 0 0; padding-left: 18px; }
 .v-candidate { --vc: #3aa655; } .v-known { --vc: #3b82f6; } .v-in-library { --vc: #14b8a6; }
 .v-excluded { --vc: #e05252; } .v-blocked { --vc: #b91c1c; } .v-not-sexual { --vc: #8b8b93; }
 .v-live-not-pov { --vc: #d08b2c; } .v-no-video { --vc: #a46ad6; }
-.waiting { color: #3aa655; font-weight: 600; }
+.waiting { color: #3aa655; font-weight: 600; white-space: nowrap; }
+.have { color: #14b8a6; font-weight: 600; white-space: nowrap; }
 .empty { padding: 24px; text-align: center; color: var(--muted); }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center;
   justify-content: center; cursor: zoom-out; z-index: 10; }
 .lightbox.open { display: flex; }
 .lightbox img { max-width: 95vw; max-height: 95vh; }
+
+/* Phones: posts become cards (image left, title, then labelled facts), controls stack. */
+@media (max-width: 760px) {
+  body { padding: 10px 10px 32px; font-size: 15px; }
+  h1 { font-size: 18px; }
+  .top { gap: 10px; }
+  .top .panel { flex: 1 1 100%; }
+  .chips { max-width: none; }
+  .filters { gap: 10px; }
+  .filters label { flex: 1 1 calc(50% - 10px); min-width: 0; }
+  .filters label.wide, .filters label.range-label { flex-basis: 100%; }
+  .filters label.inline { flex-basis: 100%; }
+  .filters .range input { flex: 1 1 0; min-width: 0; }
+  input[type=search], input[type=number], select { width: 100%; }
+  input, select, button { min-height: 38px; font-size: 16px; }
+  .pager { flex-wrap: wrap; }
+  .pager .count { flex-basis: 100%; }
+  .posts thead { display: none; }
+  .posts, .posts tbody { display: block; }
+  .posts tbody tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; position: relative;
+    padding: 10px 0 10px 100px; min-height: 76px; border-bottom: 1px solid var(--line); background: none; }
+  .posts tbody tr:nth-child(even) { background: none; }
+  .posts td { display: block; border: none; padding: 0; }
+  .posts td.thumb { position: absolute; left: 0; top: 10px; width: 88px; }
+  .posts td.title { order: -1; flex: 1 1 100%; min-width: 0; max-width: none; }
+  .posts td[data-label]::before { content: attr(data-label) ' '; color: var(--muted); font-size: 12px; }
+  .posts td:empty, .posts td.blank { display: none; }
+  .posts td.empty { flex-basis: 100%; padding: 24px 0; }
+  .posts tbody tr:has(td.empty) { padding-left: 0; min-height: 0; }
+}
 </style>
 </head>
 <body>
@@ -90,31 +128,44 @@ details ul { margin: 4px 0 0; padding-left: 18px; }
 <div class="problems" id="problems" hidden></div>
 
 <div class="top">
-  <div class="panel">
-    <h2>Verdicts</h2>
+  <details class="panel" open>
+    <summary><h2>Verdicts</h2></summary>
     <div class="chips" id="verdicts"></div>
     <div class="chip-actions">
       <button type="button" class="linkish" id="verdicts-all">all</button>
       <button type="button" class="linkish" id="verdicts-none">none</button>
     </div>
-  </div>
-  <div class="panel">
-    <h2>Feed coverage</h2>
-    <table class="feeds">
-      <thead><tr><th>Feed</th><th>Backfill page</th><th>Exhausted</th><th>Reached</th><th>Done since</th></tr></thead>
-      <tbody id="feeds"></tbody>
-    </table>
-  </div>
+  </details>
+  <details class="panel" open>
+    <summary><h2>Feed coverage</h2></summary>
+    <div class="feeds-wrap">
+      <table class="feeds">
+        <thead><tr><th>Feed</th><th>Backfill page</th><th>Exhausted</th><th>Reached</th><th>Done since</th></tr></thead>
+        <tbody id="feeds"></tbody>
+      </table>
+    </div>
+  </details>
 </div>
 
 <form class="filters" id="filters" autocomplete="off">
-  <label>Search (title, author, tags, id)<input type="search" id="q" placeholder="words…"></label>
+  <label class="wide">Search (title, author, tags, id)<input type="search" id="q" placeholder="words…"></label>
+  <label>Sort by<select id="sort">
+    <option value="id:-1">Newest post</option>
+    <option value="score:-1">Highest score</option>
+    <option value="score:1">Lowest score</option>
+    <option value="bumped:-1">Latest activity</option>
+    <option value="created:-1">Newest created</option>
+    <option value="at:-1">Recently judged</option>
+    <option value="title:1">Title A–Z</option>
+    <option value="inLibrary:-1">Most in library</option>
+  </select></label>
+  <label>Downloaded<select id="library"><option value="">any</option><option value="yes">in library</option><option value="no">not downloaded</option></select></label>
   <label class="inline"><input type="checkbox" id="waiting"> Waiting only</label>
-  <label>Min score<input type="number" id="min-score" step="any"></label>
+  <label>Min score<input type="number" id="min-score" step="any" inputmode="decimal"></label>
   <label>Axis<select id="axis"><option value="">any</option><option value="multi">multi</option><option value="single">single</option></select></label>
-  <label>Judged<span class="range"><input type="date" id="at-from"><input type="date" id="at-to"></span></label>
-  <label>Created<span class="range"><input type="date" id="created-from"><input type="date" id="created-to"></span></label>
-  <label>Last activity<span class="range"><input type="date" id="bumped-from"><input type="date" id="bumped-to"></span></label>
+  <label class="range-label">Judged<span class="range"><input type="date" id="at-from"><input type="date" id="at-to"></span></label>
+  <label class="range-label">Created<span class="range"><input type="date" id="created-from"><input type="date" id="created-to"></span></label>
+  <label class="range-label">Last activity<span class="range"><input type="date" id="bumped-from"><input type="date" id="bumped-to"></span></label>
   <button type="reset">Reset</button>
 </form>
 
@@ -148,7 +199,9 @@ function el(tag, attrs, ...children) {
 }
 
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
-const dateCell = (iso) => el('td', { class: 'date', title: iso || null }, iso ? day(iso) : el('span', { class: 'muted' }, '—'));
+const dateCell = (iso, label) => (iso
+  ? el('td', { class: 'date', title: iso, 'data-label': label }, day(iso))
+  : el('td', { class: 'date blank' }, el('span', { class: 'muted' }, '—')));
 const fmtBytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
 
 let report = null;
@@ -168,6 +221,7 @@ const COLUMNS = [
   { label: 'Last activity', key: 'bumped', dir: -1, get: (p) => p.bumped },
   { label: 'Judged', key: 'at', dir: -1, get: (p) => p.at },
   { label: 'Waiting' },
+  { label: 'In library', key: 'inLibrary', dir: -1, get: (p) => p.inLibrary || null },
 ];
 
 function renderHead() {
@@ -184,13 +238,17 @@ function renderHead() {
       },
     }, c.label, ' ', el('span', { class: 'arrow' }, arrow));
   }));
+  // The Sort by menu follows header clicks; an order it doesn't list shows blank.
+  const sel = $('sort');
+  sel.value = sort.key + ':' + sort.dir;
+  if (sel.value !== sort.key + ':' + sort.dir) sel.selectedIndex = -1;
 }
 
 function renderTop() {
   const r = report;
   const total = r.posts.length;
   $('meta').replaceChildren(
-    `${total} posts judged · ${r.waiting} waiting · last scan ${r.lastScanAt ? r.lastScanAt.replace('T', ' ').slice(0, 16) : 'never'}`
+    `${total} posts judged · ${r.waiting} waiting · ${r.inLibrary} in library · last scan ${r.lastScanAt ? r.lastScanAt.replace('T', ' ').slice(0, 16) : 'never'}`
       + (r.waitingListAt ? ` · waiting list from ${r.waitingListAt.replace('T', ' ').slice(0, 16)}` : ''),
     el('button', { type: 'button', onclick: load }, 'Reload'),
   );
@@ -225,6 +283,7 @@ function filters() {
     waiting: $('waiting').checked,
     minScore: num('min-score'),
     axis: $('axis').value,
+    library: $('library').value,
     ranges: ['at', 'created', 'bumped']
       .map((k) => ({ k, from: $(k + '-from').value, to: $(k + '-to').value }))
       .filter((r) => r.from || r.to),
@@ -241,6 +300,8 @@ function matches(p, f) {
   if (f.waiting && !p.waiting) return false;
   if (f.minScore != null && !(p.score >= f.minScore)) return false;
   if (f.axis && p.axisType !== f.axis) return false;
+  if (f.library === 'yes' && !(p.inLibrary > 0)) return false;
+  if (f.library === 'no' && p.inLibrary > 0) return false;
   for (const r of f.ranges) {
     const d = day(p[r.k]);
     if (!d || (r.from && d < r.from) || (r.to && d > r.to)) return false;
@@ -300,17 +361,23 @@ function titleCell(p) {
 }
 
 function row(p) {
+  const cell = (label, content, cls) => (content === '' || content == null
+    ? el('td', { class: ((cls || '') + ' blank').trim() })
+    : el('td', { class: cls || null, 'data-label': label }, content));
   return el('tr', {},
     thumbCell(p),
     el('td', { class: 'num' }, el('a', { href: p.url, target: '_blank', rel: 'noopener' }, '#' + p.id)),
     titleCell(p),
     el('td', {}, el('span', { class: 'verdict v-' + p.verdict, title: p.rules != null ? 'rules v' + p.rules : null }, p.verdict)),
-    el('td', { class: 'num' }, p.score != null ? p.score : ''),
-    el('td', {}, p.axisType || ''),
-    dateCell(p.created),
-    dateCell(p.bumped),
-    dateCell(p.at),
-    el('td', {}, p.waiting ? el('span', { class: 'waiting', title: 'On the waiting list' }, '●') : ''),
+    cell('Score', p.score, 'num'),
+    cell('Axis', p.axisType || ''),
+    dateCell(p.created, 'Created'),
+    dateCell(p.bumped, 'Active'),
+    dateCell(p.at, 'Judged'),
+    p.waiting ? el('td', {}, el('span', { class: 'waiting', title: 'On the waiting list' }, '● waiting')) : el('td', { class: 'blank' }),
+    p.inLibrary > 0
+      ? el('td', {}, el('span', { class: 'have', title: `${p.inLibrary} video${p.inLibrary > 1 ? 's' : ''} in the library` }, `✓ ${p.inLibrary} in library`))
+      : el('td', { class: 'blank' }),
   );
 }
 
@@ -348,10 +415,15 @@ function openImage(src) {
 $('lightbox').addEventListener('click', () => $('lightbox').classList.remove('open'));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('lightbox').classList.remove('open'); });
 
+$('sort').addEventListener('input', (e) => {
+  const [key, dir] = e.target.value.split(':');
+  sort = { key, dir: Number(dir) };
+});
 $('filters').addEventListener('input', () => { page = 0; render(); });
 $('filters').addEventListener('submit', (e) => e.preventDefault());
 $('filters').addEventListener('reset', () => setTimeout(() => {
   for (const v of knownVerdicts) selectedVerdicts.add(v);
+  sort = { key: 'id', dir: -1 };
   page = 0;
   renderTop();
   render();
@@ -369,6 +441,10 @@ async function load() {
   } catch (e) {
     $('meta').textContent = 'Could not load the report: ' + e.message;
   }
+}
+// Phones: the verdict and feed panels start folded so the posts come first.
+if (window.matchMedia('(max-width: 760px)').matches) {
+  for (const d of document.querySelectorAll('details.panel')) d.open = false;
 }
 load();
 </script>

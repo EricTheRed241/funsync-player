@@ -6,6 +6,7 @@
 //! interface with `--lan`.
 
 pub mod cli;
+pub mod library;
 pub mod report;
 pub mod server;
 
