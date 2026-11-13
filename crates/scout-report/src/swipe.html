@@ -29,6 +29,8 @@ a:hover { text-decoration: underline; }
   width: min(100%, 560px); margin: 0 auto; }
 .bar h1 { font-size: 18px; margin: 0; }
 .counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
+  line-height: 1; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
 .problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
   margin: 0 auto 6px; width: min(100% - 20px, 540px); white-space: pre-wrap; font-size: 13px; }
 .deck { position: relative; flex: 1; min-height: 0; width: min(100% - 20px, 540px); margin: 4px auto 0; }
@@ -89,6 +91,8 @@ a:hover { text-decoration: underline; }
 <header class="bar">
   <h1>Swipe</h1>
   <span class="counter" id="counter">Loading…</span>
+  <button type="button" id="refresh" title="Refresh: load the deck again (new images, runtimes, heat strips; skipped cards come back)" aria-label="Refresh">↻</button>
+  <button type="button" id="shuffle" title="Shuffle: deal the deck in a new order" aria-label="Shuffle">⇄</button>
   <a href="/">Report</a>
 </header>
 <div class="problems" id="problems" hidden></div>
@@ -108,9 +112,11 @@ a:hover { text-decoration: underline; }
 'use strict';
 const BATCH = 20;
 const REFILL_AT = 5;
-// This visit's shuffle: the server shifts every score by up to ±2.5 for this seed, so the deck is
-// roughly best first but not strictly; a reload deals a new order.
-const SEED = Math.floor(Math.random() * 2 ** 32);
+// The deal's shuffle: the server shifts every score by up to ±2.5 for this seed, so the deck is
+// roughly best first but not strictly; Shuffle (or a page reload) deals a new order.
+const newSeed = () => Math.floor(Math.random() * 2 ** 32);
+let seed = newSeed();
+let generation = 0;     // bumped by Refresh / Shuffle: answers to older deck requests are dropped
 const $ = (id) => document.getElementById(id);
 const deckEl = $('deck');
 
@@ -222,7 +228,7 @@ function cardNode(c, isTop) {
   const imgs = c.images || [];
   const media = el('div', { class: 'media' });
   if (imgs.length) {
-    const img = el('img', { alt: '', draggable: 'false', src: imgs[isTop ? image : 0] });
+    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: imgs[isTop ? image : 0] });
     img.addEventListener('error', () => media.classList.add('broken'));
     img.addEventListener('load', () => media.classList.remove('broken'));
     media.append(img);
@@ -288,7 +294,9 @@ function render(enterFrom) {
       top.style.transform = '';
     }));
   }
-  for (const url of queue[0].images || []) preload(url);
+  // Only what's shown next: the top card's next image and the next card's first. Forum GIFs run
+  // 3–7 MB each, so loading every image of a card up front made swiping lag on a phone.
+  preload((queue[0].images || [])[image + 1]);
   if (queue[1]) preload((queue[1].images || [])[0]);
 }
 
@@ -305,6 +313,7 @@ function showImage(i) {
   if (!node) return;
   node.querySelector('.media img').src = imgs[image];
   node.querySelectorAll('.dots span').forEach((d, j) => d.classList.toggle('on', j === image));
+  preload(imgs[(image + 1) % imgs.length]);
 }
 
 function threshold() {
@@ -463,26 +472,30 @@ function undo() {
 }
 
 /**
- * Fetch the next cards in this visit's order (SEED). The server leaves out everything swiped
+ * Fetch the next cards in this deal's order (seed). The server leaves out everything swiped
  * so far and the cards this page holds (on screen or skipped); skipped ones then go back in.
  */
 function more() {
   if (loading || exhausted) return;
   loading = true;
   since = { remaining: 0, wanted: 0 };
+  const gen = generation;
   const held = [...queue, ...skipped].map((c) => c.id).join(',');
   serial(async () => {
-    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${SEED}&exclude=${held}`, { cache: 'no-store' });
+    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${seed}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
+    if (gen !== generation) return; // dealt before a refresh or shuffle
     loadError = null;
     // The server answered before the swipes made since the request: count them on top.
     remaining = Math.max(0, d.remaining + since.remaining);
     wanted = Math.max(0, d.wanted + since.wanted);
     since = null;
     exhausted = d.cards.length < BATCH;
-    const have = new Set([...queue, ...skipped, ...undoStack.map((u) => u.card)].map((c) => c.id));
+    // Swiped cards (a swipe still on its way to the server) don't come back; skipped ones may.
+    const swiped = undoStack.filter((u) => u.dir !== 'skip').map((u) => u.card);
+    const have = new Set([...queue, ...skipped, ...swiped].map((c) => c.id));
     const fresh = d.cards.filter((c) => !have.has(c.id));
     const wasEmpty = !queue.length;
     queue.push(...fresh);
@@ -503,6 +516,7 @@ function more() {
       renderCounter();
     }
   }).catch((e) => {
+    if (gen !== generation) return;
     loading = false;
     since = null;
     loadError = e.message;
@@ -520,6 +534,24 @@ function reload() {
   more();
   render();
 }
+
+/**
+ * Deal the deck again from the server (new images, runtimes and heat strips the scout saved since,
+ * skipped cards back in their place); `newOrder` also picks a new seed. Undo keeps working.
+ */
+function restart(newOrder) {
+  generation++;
+  if (newOrder) seed = newSeed();
+  queue = [];
+  skipped = [];
+  image = 0;
+  loading = false;
+  since = null;
+  reload();
+}
+
+$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); restart(false); });
+$('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
 
 // Buttons drop focus so Space keeps meaning "next image".
 $('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });
