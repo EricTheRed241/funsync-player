@@ -76,7 +76,8 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 }
 
 /// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
-/// `seed=N` (shuffle a little) and `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE).
+/// `seed=N` (shuffle a little), `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE)
+/// and `stack=mixed|multi|single` (default mixed).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
@@ -103,6 +104,10 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
                 if d.exclude.len() > deck::MAX_EXCLUDE {
                     return Err(format!("exclude takes at most {} ids\n", deck::MAX_EXCLUDE));
                 }
+            }
+            "stack" => {
+                d.stack = deck::Stack::parse(v)
+                    .ok_or_else(|| format!("stack is mixed, multi or single, got {v:?}\n"))?;
             }
             _ => {}
         }
@@ -389,6 +394,7 @@ mod tests {
             "/api/deck?limit=x",
             "/api/deck?seed=-3",
             "/api/deck?exclude=8,x",
+            "/api/deck?stack=both",
         ] {
             assert_eq!(route("GET", bad, b"", &dir).status, 400, "{bad}");
         }
