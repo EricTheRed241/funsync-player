@@ -7,22 +7,24 @@ pub const DEFAULT_PORT: u16 = 5131;
 
 pub const USAGE: &str = "\
 scout-report: browse every EroScripts post the Discovery scout (npm run eroscripts:scout)
-has judged, with its verdict, and the waiting list, on a webpage served to this Mac only
+has judged, with its verdict, and the waiting list, on a webpage
 
 Usage:
-  npm run scout:report [-- --port N] [-- --user-data <dir>]
+  npm run scout:report [-- --lan] [-- --port N] [-- --user-data <dir>]
 
 Options:
   --user-data <dir>    FunSync's userData folder
                        (default $FUNSYNC_USER_DATA, else ~/Library/Application Support/funsync-player)
-  --port N             Port on 127.0.0.1 (default 5131; 0 picks a free one)
+  --port N             Port to listen on (default 5131; 0 picks a free one)
+  --lan                Serve the home network too (every interface, 0.0.0.0), not just this Mac
   -h, --help           This text
 
-The page is http://127.0.0.1:<port>/ (bound to the loopback interface only, never
-the LAN). Every load of /api/report rereads eroscripts-scout-state.json (verdicts,
-feed coverage), eroscripts-scout.json (the waiting list) and
-eroscripts-scout-rejected.json (scenes turned down); a missing file shows as an
-empty section. The CLI never writes any file; stop it with Ctrl-C.
+The page is http://127.0.0.1:<port>/, bound to the loopback interface only; with
+--lan it also answers on the Mac's network address, which the banner prints. It has
+no login: anyone on the network can read it while it runs. Every load of /api/report
+rereads eroscripts-scout-state.json (verdicts, feed coverage), eroscripts-scout.json
+(the waiting list) and eroscripts-scout-rejected.json (scenes turned down); a missing
+file shows as an empty section. The CLI never writes any file; stop it with Ctrl-C.
 
 Exit codes: 0 ok, 1 error (2 and 3 are not used).
 ";
@@ -32,6 +34,8 @@ pub struct Options {
     pub help: bool,
     pub user_data: Option<PathBuf>,
     pub port: u16,
+    /// Listen on every interface (0.0.0.0) instead of loopback only.
+    pub lan: bool,
 }
 
 impl Default for Options {
@@ -40,6 +44,7 @@ impl Default for Options {
             help: false,
             user_data: None,
             port: DEFAULT_PORT,
+            lan: false,
         }
     }
 }
@@ -67,6 +72,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
         };
         match flag {
             "-h" | "--help" if inline.is_none() => o.help = true,
+            "--lan" if inline.is_none() => o.lan = true,
             "--user-data" => o.user_data = Some(PathBuf::from(value(flag)?)),
             "--port" => {
                 let v = value(flag)?;
@@ -100,6 +106,8 @@ mod tests {
         assert_eq!(o.user_data, Some(PathBuf::from("/v")));
         assert_eq!(o.port, 0);
         assert!(parse(&args(&["--help"])).unwrap().help);
+        assert!(!parse(&args(&[])).unwrap().lan);
+        assert!(parse(&args(&["--lan"])).unwrap().lan);
         assert!(parse(&args(&["-h"])).unwrap().help);
     }
 
@@ -111,6 +119,7 @@ mod tests {
             &["--port", "x"],
             &["--user-data"],
             &["--help=1"],
+            &["--lan=1"],
             &["--host", "0.0.0.0"],
             &["--bogus"],
         ] {

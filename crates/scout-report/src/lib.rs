@@ -1,8 +1,9 @@
-//! `npm run scout:report`: a localhost-only webpage listing every EroScripts
-//! post the Discovery scout (`npm run eroscripts:scout`) has judged, with its
-//! verdict, and the waiting list. Reads `eroscripts-scout-state.json`,
+//! `npm run scout:report`: a webpage listing every EroScripts post the
+//! Discovery scout (`npm run eroscripts:scout`) has judged, with its verdict,
+//! and the waiting list. Reads `eroscripts-scout-state.json`,
 //! `eroscripts-scout.json` and `eroscripts-scout-rejected.json` in userData on
-//! every request and never writes any file. Bound to 127.0.0.1 only.
+//! every request and never writes any file. Bound to 127.0.0.1, or to every
+//! interface with `--lan`.
 
 pub mod cli;
 pub mod report;
@@ -39,10 +40,21 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
             user_data.display()
         ));
     }
-    let listener = server::bind(opts.port)
-        .map_err(|e| format!("can't listen on 127.0.0.1:{}: {e}", opts.port))?;
+    let listener = server::bind(opts.port, opts.lan).map_err(|e| {
+        let host = if opts.lan { "0.0.0.0" } else { "127.0.0.1" };
+        format!("can't listen on {host}:{}: {e}", opts.port)
+    })?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    writeln!(out, "Scout report: http://127.0.0.1:{port}/")
+    let mut banner = format!("Scout report: http://127.0.0.1:{port}/\n");
+    if opts.lan {
+        match server::lan_address() {
+            Some(ip) => banner.push_str(&format!("On the home network: http://{ip}:{port}/\n")),
+            None => banner.push_str(&format!(
+                "On the home network: port {port} on every interface (no network address found)\n"
+            )),
+        }
+    }
+    out.write_all(banner.as_bytes())
         .and_then(|()| out.flush())
         .map_err(|e| e.to_string())?;
     server::serve(&listener, &user_data, err);

@@ -59,9 +59,27 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-/// Bind `127.0.0.1:<port>` (0 = any free port). Never another interface.
-pub fn bind(port: u16) -> io::Result<TcpListener> {
-    TcpListener::bind((Ipv4Addr::LOCALHOST, port))
+/// Bind `127.0.0.1:<port>` (0 = any free port), or every interface (`0.0.0.0`) when `lan`.
+pub fn bind(port: u16, lan: bool) -> io::Result<TcpListener> {
+    let ip = if lan {
+        Ipv4Addr::UNSPECIFIED
+    } else {
+        Ipv4Addr::LOCALHOST
+    };
+    TcpListener::bind((ip, port))
+}
+
+/// The Mac's address on the home network: the source address the OS would use to reach
+/// a private address (a UDP `connect` sends nothing). None without a network.
+pub fn lan_address() -> Option<Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket
+        .connect((Ipv4Addr::new(192, 168, 255, 255), 9))
+        .ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
 }
 
 /// Serve requests one after another, forever.
@@ -175,8 +193,10 @@ mod tests {
     }
 
     #[test]
-    fn binds_loopback_only() {
-        let l = bind(0).unwrap();
+    fn binds_loopback_unless_lan() {
+        let l = bind(0, false).unwrap();
         assert!(l.local_addr().unwrap().ip().is_loopback());
+        let l = bind(0, true).unwrap();
+        assert!(l.local_addr().unwrap().ip().is_unspecified());
     }
 }
