@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='1.5' width='24' height='29' rx='5' fill='%23e0529c'/%3E%3Cpath d='M16 25.5C8.5 20.4 6.5 16.6 6.5 13.4 6.5 10.6 8.7 8.5 11.3 8.5c2 0 3.6 1.1 4.7 2.8 1.1-1.7 2.7-2.8 4.7-2.8 2.6 0 4.8 2.1 4.8 4.9 0 3.2-2 7-9.5 12.1z' fill='%23fff'/%3E%3C/svg%3E">
 <title>EroScripts scout swipe</title>
 <style>
 :root {
@@ -25,12 +28,21 @@ body { margin: 0; display: flex; flex-direction: column; height: 100dvh; overflo
   background: var(--bg); color: var(--fg); font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-.bar { display: flex; align-items: baseline; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 16px 6px;
-  width: min(100%, 560px); margin: 0 auto; }
+.bar { position: relative; display: flex; align-items: baseline; gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 6px; width: min(100%, 560px); margin: 0 auto; }
 .bar h1 { font-size: 18px; margin: 0; }
 .counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
   line-height: 1; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+.settings { position: absolute; top: 100%; right: 12px; z-index: 20; width: min(300px, calc(100vw - 24px));
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; font-size: 13px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.22); }
+.settings label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settings input { width: 76px; font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--fg); text-align: right; }
+.settings .note { color: var(--muted); font-size: 12px; }
+.settings .reset { align-self: flex-end; background: none; border: 1px solid var(--line); border-radius: 6px;
+  padding: 3px 10px; font: inherit; font-size: 12px; color: var(--accent); cursor: pointer; }
 .stacks { display: flex; gap: 0; width: min(100% - 32px, 528px); margin: 0 auto 8px; border: 1px solid var(--line);
   border-radius: 8px; overflow: hidden; }
 .stacks button { flex: 1; background: none; border: none; border-radius: 0; padding: 6px 4px; font: inherit; font-size: 13px;
@@ -71,10 +83,41 @@ a:hover { text-decoration: underline; }
 .heat { display: block; width: 100%; height: 16px; border-radius: 4px; background: #000; image-rendering: pixelated; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
 .tag b { color: var(--like); font-variant-numeric: tabular-nums; }
+.tag b.neg { color: var(--nope); }
+.tag b.zero { color: var(--muted); font-weight: 400; }
+.tag.best { font-weight: 650; box-shadow: inset 0 0 0 1.5px var(--like); }
 .ttl { font-weight: 650; font-size: 16px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .by { display: flex; gap: 10px; color: var(--muted); font-size: 13px; }
 .by a { margin-left: auto; font-size: 12px; white-space: nowrap; }
+/* The full post details: only in the wide (side panel) layout. */
+.sect, .facts, .scenes, .info .all-tags { display: none; }
+.sect { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  margin-top: 4px; }
+.facts { grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 13px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.scenes { list-style: none; margin: 0; padding: 0; flex-direction: column; gap: 6px; font-size: 13px; }
+.scenes li { padding: 5px 8px; border-radius: 6px; background: var(--row); }
+.scenes .sn { overflow-wrap: anywhere; }
+.scenes .sm { color: var(--muted); font-size: 12px; }
+/* Desktop and landscape tablets: the image large on the left, every detail in a scrolling panel beside it. */
+@media (min-width: 900px) {
+  .bar { width: min(100%, 1280px); }
+  .stacks { width: min(100% - 32px, 1248px); }
+  .problems, .deck { width: min(100% - 32px, 1248px); }
+  .card { flex-direction: row; }
+  .media { flex: 1 1 auto; min-width: 0; min-height: auto; }
+  .info { flex: 0 0 clamp(340px, 34%, 460px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+    padding: 16px 18px; gap: 9px; border-left: 1px solid var(--line); }
+  .info .ttl { order: -2; display: block; font-size: 19px; }
+  .info .by { order: -1; }
+  .heat { height: 44px; border-radius: 6px; flex: none; }
+  .info .top-tags { display: none; }
+  .sect { display: block; }
+  .facts { display: grid; }
+  .scenes, .info .all-tags { display: flex; }
+}
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; color: var(--muted); text-align: center; padding: 20px; }
 .actions { display: flex; justify-content: center; align-items: center; gap: 24px;
@@ -99,7 +142,14 @@ a:hover { text-decoration: underline; }
   <span class="counter" id="counter">Loading…</span>
   <button type="button" id="refresh" title="Refresh: load the deck again (new images, runtimes, heat strips; skipped cards come back)" aria-label="Refresh">↻</button>
   <button type="button" id="shuffle" title="Shuffle: deal the deck in a new order" aria-label="Shuffle">⇄</button>
+  <button type="button" id="gear" title="Shuffle settings: how far each stack's order may wander" aria-label="Shuffle settings" aria-expanded="false" aria-controls="settings">⚙</button>
   <a href="/">Report</a>
+  <div class="settings" id="settings" hidden>
+    <label>Multi-axis shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <label>Single-axis shuffle ± <input type="number" id="jitter-single" data-stack="single" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 multi-axis, ±10 single-axis). Saved on this device.</div>
+    <button type="button" class="reset" id="jitter-reset">Reset to defaults</button>
+  </div>
 </header>
 <nav class="stacks" id="stacks" aria-label="Which posts">
   <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
@@ -123,14 +173,27 @@ a:hover { text-decoration: underline; }
 const BATCH = 20;
 const REFILL_AT = 5;
 // The deal's shuffle: the server shifts every score by up to ±4 on the multi-axis stack (it stays
-// close to score order) and ±10 on the single-axis one (low scorers come up too) for this seed;
-// Shuffle (or a page reload) deals a new order.
+// close to score order) and ±10 on the single-axis one (low scorers come up too) for this seed,
+// unless ⚙ sets another amplitude for the stack; Shuffle (or a page reload) deals a new order.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a stack change: answers to older deck requests are dropped
 // Which stack is dealt (multi, single); remembered on this device. Any other stored value
 // (e.g. a tab that no longer exists) falls back to multi.
 let stack = ['multi', 'single'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
+// ⚙ shuffle amplitude per stack, in score points; unset = the server's default (deck.rs
+// MULTI_JITTER / SINGLE_JITTER), shown as the placeholder. Remembered on this device.
+const JITTER_DEFAULT = { multi: 4, single: 10 };
+const JITTER_MAX = 30;
+const validJitter = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= JITTER_MAX;
+let jitters = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem('swipeJitter') || '{}');
+    return Object.fromEntries(Object.entries(v).filter(([k, n]) => k in JITTER_DEFAULT && validJitter(n)));
+  } catch {
+    return {};
+  }
+})();
 const $ = (id) => document.getElementById(id);
 const deckEl = $('deck');
 
@@ -186,6 +249,8 @@ function toast(msg) {
 }
 
 const fmt = (n) => String(Math.round(n * 10) / 10);
+const day = (iso) => (iso ? iso.slice(0, 10) : '');
+const fmtBytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
 
 /** m:ss, or h:mm:ss from an hour. */
 function clock(ms) {
@@ -253,7 +318,8 @@ function cardNode(c, isTop) {
     media.append(el('div', { class: 'none' }, 'No image'));
   }
   media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
-  const tags = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
+  const best = new Set((c.topTags || []).map((t) => t.tag));
+  const topTags = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
   const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
     media,
     el('div', { class: 'info' },
@@ -263,9 +329,46 @@ function cardNode(c, isTop) {
       el('div', { class: 'by' },
         c.author ? el('span', {}, 'by ' + c.author) : null,
         el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, '#' + c.id + ' ↗')),
-      tags.length ? el('div', { class: 'tags' }, tags) : null));
+      topTags.length ? el('div', { class: 'tags top-tags' }, topTags) : null,
+      details(c, best)));
   if (isTop) drag(node);
   return node;
+}
+
+/** The wide layout's extra sections: every tag with its score, the post's facts, and its scenes. */
+function details(c, best) {
+  const out = [];
+  const tags = c.tags || [];
+  if (tags.length) {
+    out.push(el('div', { class: 'sect' }, 'Tags'), el('div', { class: 'tags all-tags' }, tags.map((t) => el('span',
+      { class: best.has(t.tag) ? 'tag best' : 'tag', title: 'Tag score ' + fmt(t.score) }, t.tag + ' ',
+      el('b', { class: t.score < 0 ? 'neg' : t.score > 0 ? null : 'zero' }, (t.score > 0 ? '+' : '') + fmt(t.score))))));
+  }
+  const facts = [
+    ['Likes', c.likes],
+    ['Hosts', c.hosts && c.hosts.length ? c.hosts.join(', ') : null],
+    ['Size', c.gb != null ? c.gb + ' GB' : null],
+    ['Created', day(c.created) || null],
+    ['Last activity', day(c.bumped) || null],
+  ].filter(([, v]) => v != null);
+  if (facts.length) {
+    out.push(el('div', { class: 'sect' }, 'Post'), el('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
+  }
+  const scenes = c.scenes || [];
+  if (scenes.length) {
+    const total = scenes.length + (c.moreScenes || 0);
+    out.push(el('div', { class: 'sect' }, total > 1 ? `Scenes (${total})` : 'Scene'), el('ol', { class: 'scenes' },
+      scenes.map((s) => el('li', {},
+        el('div', { class: 'sn' }, s.name || '(unnamed)'),
+        el('div', { class: 'sm' }, [
+          s.host,
+          s.size != null ? fmtBytes(s.size) : null,
+          s.runtimeMs ? '⏱ ' + clock(s.runtimeMs) : null,
+          s.axes && s.axes.length ? 'axes: ' + s.axes.join(', ') : null,
+        ].filter(Boolean).join(' · ') || ' '))),
+      c.moreScenes ? el('li', { class: 'sm' }, `+ ${c.moreScenes} more`) : null));
+  }
+  return out;
 }
 
 const preloaded = new Set();
@@ -347,6 +450,9 @@ function drag(node) {
   let moved = false;
   node.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('a, button')) return;
+    // The side panel's scrollbar scrolls, it doesn't drag.
+    const panel = e.target.closest('.info');
+    if (panel && e.clientX >= panel.getBoundingClientRect().left + panel.clientLeft + panel.clientWidth) return;
     start = { x: e.clientX, y: e.clientY };
     dx = dy = 0;
     moved = false;
@@ -369,7 +475,7 @@ function drag(node) {
     if (!moved) {
       // The card holds the pointer capture, so locate the tap by its coordinates.
       const r = node.querySelector('.media').getBoundingClientRect();
-      if (e.type === 'pointerup' && e.clientY >= r.top && e.clientY <= r.bottom) {
+      if (e.type === 'pointerup' && e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left && e.clientX <= r.right) {
         showImage(image + (e.clientX < r.left + r.width / 2 ? -1 : 1));
       }
       return;
@@ -496,7 +602,8 @@ function more() {
   const gen = generation;
   const held = [...queue, ...skipped].map((c) => c.id).join(',');
   serial(async () => {
-    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${seed}&stack=${stack}&exclude=${held}`, { cache: 'no-store' });
+    const jitter = jitters[stack] == null ? '' : `&jitter=${jitters[stack]}`;
+    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${seed}&stack=${stack}${jitter}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -582,6 +689,46 @@ $('stacks').addEventListener('click', (e) => {
 });
 showStack();
 
+/** ⚙: one shuffle amplitude per stack; a change to the dealt stack's re-deals it in the same seed. */
+function showJitters() {
+  for (const k of Object.keys(JITTER_DEFAULT)) {
+    const input = $('jitter-' + k);
+    input.placeholder = String(JITTER_DEFAULT[k]);
+    input.value = jitters[k] == null ? '' : String(jitters[k]);
+  }
+}
+function setJitters(next) {
+  const before = jitters[stack];
+  jitters = next;
+  localStorage.setItem('swipeJitter', JSON.stringify(jitters));
+  showJitters();
+  if (jitters[stack] !== before) restart(false);
+}
+function toggleSettings(open) {
+  $('settings').hidden = !open;
+  $('gear').setAttribute('aria-expanded', String(open));
+  if (open) showJitters();
+}
+$('gear').addEventListener('click', (e) => { e.currentTarget.blur(); toggleSettings($('settings').hidden); });
+$('settings').addEventListener('change', (e) => {
+  const input = e.target.closest('input');
+  if (!input) return;
+  const next = { ...jitters };
+  if (input.value === '' && !input.validity.badInput) {
+    delete next[input.dataset.stack];
+  } else {
+    const n = Number(input.value);
+    if (input.validity.badInput || !Number.isFinite(n)) { showJitters(); return; }
+    next[input.dataset.stack] = Math.min(JITTER_MAX, Math.max(0, n));
+  }
+  setJitters(next);
+});
+$('jitter-reset').addEventListener('click', (e) => { e.currentTarget.blur(); setJitters({}); });
+document.addEventListener('pointerdown', (e) => {
+  if (!$('settings').hidden && !e.target.closest('#settings, #gear')) toggleSettings(false);
+});
+showJitters();
+
 // Buttons drop focus so Space keeps meaning "next image".
 $('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });
 $('like').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('right'); });
@@ -589,6 +736,9 @@ $('undo').addEventListener('click', (e) => { e.currentTarget.blur(); undo(); });
 $('skip').addEventListener('click', (e) => { e.currentTarget.blur(); skip(); });
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Escape' && !$('settings').hidden) { toggleSettings(false); return; }
+  // Typing in the ⚙ panel's fields: keys are theirs.
+  if (e.target.closest && e.target.closest('input, select, textarea')) return;
   if (e.key === 'ArrowLeft') swipe('left');
   else if (e.key === 'ArrowRight') swipe('right');
   else if (e.key === 'ArrowDown') skip();

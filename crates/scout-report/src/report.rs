@@ -136,7 +136,7 @@ pub(crate) fn str_of(v: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn strings_of(v: &Value, key: &str) -> Option<Vec<String>> {
+pub(crate) fn strings_of(v: &Value, key: &str) -> Option<Vec<String>> {
     v.get(key).and_then(Value::as_array).map(|a| {
         a.iter()
             .filter_map(Value::as_str)
@@ -188,7 +188,8 @@ fn scene_summary(scene: &Value) -> Value {
     Value::Object(out)
 }
 
-fn total_gb(scenes: &[Value]) -> Option<f64> {
+/// Total size of the scenes' videos whose size is known, in GB (10^9 bytes, 2 decimals).
+pub(crate) fn total_gb(scenes: &[Value]) -> Option<f64> {
     let sizes: Vec<f64> = scenes
         .iter()
         .filter_map(|s| s.pointer("/video/size").and_then(Value::as_f64))
