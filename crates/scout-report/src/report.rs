@@ -1,9 +1,11 @@
 //! The report: every post the scout judged (eroscripts-scout-state.json),
 //! merged with the waiting list (eroscripts-scout.json), the scenes turned
-//! down (eroscripts-scout-rejected.json) and how many of its videos the
-//! library holds (crate::library). Built fresh from the files on every
-//! request; a missing file is an empty section.
+//! down (eroscripts-scout-rejected.json), how many of its videos the
+//! library holds (crate::library) and the deck's swipe (crate::swipes).
+//! Built fresh from the files on every request; a missing file is an empty
+//! section.
 
+use crate::swipes::{self, Dir, Swipes};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -70,33 +72,51 @@ pub struct Post {
     pub rejected_scenes: Vec<Value>,
     /// Library videos from this post (scout downloads, app downloads, sync links); 0 = not downloaded.
     pub in_library: usize,
+    /// The deck's swipe: `right` (wanted) or `left` (hidden from the deck).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swipe: Option<Dir>,
 }
 
-/// Read the scout's three files, `config.json` and `eroscripts-links.json` from `user_data`
-/// and build the report.
+/// Read and parse `<user_data>/<name>`: `Value::Null` when missing, or when
+/// unreadable / unparsable (then also a line in `problems`).
+pub fn read_json(user_data: &Path, name: &str, problems: &mut Vec<String>) -> Value {
+    match std::fs::read(user_data.join(name)) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            problems.push(format!("{name}: {e}"));
+            Value::Null
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
+        Err(e) => {
+            problems.push(format!("{name}: {e}"));
+            Value::Null
+        }
+    }
+}
+
+/// The deck's swipes; an unreadable file is a line in `problems` and no swipes.
+pub fn read_swipes(user_data: &Path, problems: &mut Vec<String>) -> Swipes {
+    swipes::read(user_data).unwrap_or_else(|e| {
+        problems.push(e);
+        Swipes::default()
+    })
+}
+
+/// Read the scout's three files, `config.json`, `eroscripts-links.json` and the swipes from
+/// `user_data` and build the report.
 pub fn load(user_data: &Path) -> Report {
     let mut problems = Vec::new();
-    let mut read = |name: &str| -> Value {
-        match std::fs::read(user_data.join(name)) {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                problems.push(format!("{name}: {e}"));
-                Value::Null
-            }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
-            Err(e) => {
-                problems.push(format!("{name}: {e}"));
-                Value::Null
-            }
-        }
-    };
-    let state = read(STATE_FILE);
-    let waiting = read(WAITING_FILE);
-    let rejected = read(REJECTED_FILE);
-    let config = read("config.json");
-    let links = read(crate::library::LINKS_FILE);
+    let state = read_json(user_data, STATE_FILE, &mut problems);
+    let waiting = read_json(user_data, WAITING_FILE, &mut problems);
+    let rejected = read_json(user_data, REJECTED_FILE, &mut problems);
+    let config = read_json(user_data, "config.json", &mut problems);
+    let links = read_json(user_data, crate::library::LINKS_FILE, &mut problems);
+    let swipes = read_swipes(user_data, &mut problems);
     let videos = crate::library::topic_videos(&config, &links, &mut problems);
     let mut report = build(&state, &waiting, &rejected);
     mark_in_library(&mut report, &videos);
+    for post in &mut report.posts {
+        post.swipe = swipes.dir(post.id);
+    }
     report.problems = problems;
     report
 }
@@ -109,7 +129,7 @@ pub fn mark_in_library(report: &mut Report, videos: &HashMap<u64, usize>) {
     report.in_library = report.posts.iter().filter(|p| p.in_library > 0).count();
 }
 
-fn str_of(v: &Value, key: &str) -> Option<String> {
+pub(crate) fn str_of(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
@@ -126,7 +146,7 @@ fn strings_of(v: &Value, key: &str) -> Option<Vec<String>> {
 }
 
 /// A topic id from a number or a numeric string.
-fn id_of(v: &Value) -> Option<u64> {
+pub(crate) fn id_of(v: &Value) -> Option<u64> {
     match v {
         Value::Number(n) => n.as_u64(),
         Value::String(s) => s.parse().ok(),
@@ -275,6 +295,7 @@ pub fn build(state: &Value, waiting: &Value, rejected: &Value) -> Report {
             scenes,
             rejected_scenes: rejected_by_topic.remove(&id).unwrap_or_default(),
             in_library: 0,
+            swipe: None,
         });
     }
 
@@ -481,6 +502,29 @@ mod tests {
         assert!(!post(&r, 300).waiting);
         assert_eq!(r.problems.len(), 1);
         assert!(r.problems[0].starts_with(WAITING_FILE));
+
+        // Posts carry their swipe; a broken swipes file is a problem, not an error.
+        std::fs::write(
+            dir.join(swipes::FILE),
+            br#"{"version":1,"swipes":{"300":{"dir":"right","at":"x"},"2095":{"dir":"left","at":"y"}}}"#,
+        )
+        .unwrap();
+        let r = load(&dir);
+        assert_eq!(post(&r, 300).swipe, Some(Dir::Right));
+        assert_eq!(post(&r, 2095).swipe, Some(Dir::Left));
+        assert_eq!(post(&r, 400).swipe, None);
+        let v = serde_json::to_value(post(&r, 300)).unwrap();
+        assert_eq!(v["swipe"], "right");
+        assert!(
+            serde_json::to_value(post(&r, 400))
+                .unwrap()
+                .get("swipe")
+                .is_none()
+        );
+        std::fs::write(dir.join(swipes::FILE), b"[]").unwrap();
+        let r = load(&dir);
+        assert_eq!(post(&r, 300).swipe, None);
+        assert!(r.problems.iter().any(|p| p.starts_with(swipes::FILE)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

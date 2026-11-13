@@ -1,0 +1,391 @@
+//! The swipe deck: the waiting list's posts with no video in the library and
+//! no swipe yet, highest score first (the scout's download order), as cards
+//! for `/swipe`. Tag scores and creampie come from the scout's waiting list
+//! (`tagScores`, `creampie`); Rust never computes them.
+
+use crate::report::{self, id_of, str_of};
+use crate::swipes::{Dir, Swipes};
+use serde::{Serialize, Serializer};
+use serde_json::Value;
+use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
+
+pub const DEFAULT_LIMIT: usize = 20;
+pub const MAX_LIMIT: usize = 100;
+/// Images per card (the scout saves at most this many).
+pub const MAX_IMAGES: usize = 5;
+const TOP_TAGS: usize = 3;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Deck {
+    /// Cards left to swipe (all of them, not just the ones returned).
+    pub remaining: usize,
+    /// Right swipes still on the waiting list and not in the library: what the next
+    /// `--fetch --auto` adds on top of its own picks.
+    pub wanted: usize,
+    /// Files that exist but couldn't be read or parsed.
+    pub problems: Vec<String>,
+    /// The first `limit` cards, in deck order.
+    pub cards: Vec<Card>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Card {
+    pub id: u64,
+    pub url: String,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    /// Up to MAX_IMAGES https URLs: the state's `images`, else its `image`.
+    pub images: Vec<String>,
+    pub score: Option<f64>,
+    pub vr: bool,
+    pub axis_type: Option<String>,
+    pub axes: Axes,
+    /// Scenes (one video each; a packed archive counts as one).
+    pub videos: usize,
+    pub creampie: bool,
+    pub top_tags: Vec<TagScore>,
+}
+
+/// Axes of the post: 1 (stroke) plus every other axis its scenes script, or
+/// `"packed"` when every scene is still an archive (axes unknown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axes {
+    Count(usize),
+    Packed,
+}
+
+impl Serialize for Axes {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Axes::Count(n) => s.serialize_u64(*n as u64),
+            Axes::Packed => s.serialize_str("packed"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TagScore {
+    pub tag: String,
+    pub score: f64,
+}
+
+/// Read the waiting list, the state, the library (`config.json`,
+/// `eroscripts-links.json`) and the swipes, and deal the first `limit` cards.
+pub fn load(user_data: &Path, limit: usize) -> Deck {
+    let mut problems = Vec::new();
+    let state = report::read_json(user_data, report::STATE_FILE, &mut problems);
+    let waiting = report::read_json(user_data, report::WAITING_FILE, &mut problems);
+    let config = report::read_json(user_data, "config.json", &mut problems);
+    let links = report::read_json(user_data, crate::library::LINKS_FILE, &mut problems);
+    let swipes = report::read_swipes(user_data, &mut problems);
+    let videos = crate::library::topic_videos(&config, &links, &mut problems);
+    let mut deck = build(&state, &waiting, &videos, &swipes);
+    deck.cards.truncate(limit);
+    deck.problems = problems;
+    deck
+}
+
+fn candidates(waiting: &Value) -> impl Iterator<Item = (u64, &Value)> {
+    waiting
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|c| Some((id_of(c.get("id")?)?, c)))
+}
+
+/// Whether `id` is on the waiting list.
+pub fn is_waiting(waiting: &Value, id: u64) -> bool {
+    candidates(waiting).any(|(c, _)| c == id)
+}
+
+/// Every card, in deck order (`problems` empty).
+pub fn build(
+    state: &Value,
+    waiting: &Value,
+    videos: &HashMap<u64, usize>,
+    swipes: &Swipes,
+) -> Deck {
+    let mut wanted = 0;
+    let mut cards = Vec::new();
+    for (id, cand) in candidates(waiting) {
+        if videos.get(&id).is_some_and(|&n| n > 0) {
+            continue;
+        }
+        match swipes.dir(id) {
+            Some(Dir::Right) => wanted += 1,
+            Some(Dir::Left) => {}
+            None => cards.push(card(id, cand, state.pointer(&format!("/topics/{id}")))),
+        }
+    }
+    cards.sort_by(|a, b| {
+        let score = |c: &Card| c.score.unwrap_or(f64::NEG_INFINITY);
+        score(b).total_cmp(&score(a)).then(b.id.cmp(&a.id))
+    });
+    Deck {
+        remaining: cards.len(),
+        wanted,
+        problems: Vec::new(),
+        cards,
+    }
+}
+
+fn card(id: u64, cand: &Value, rec: Option<&Value>) -> Card {
+    let rec = rec.unwrap_or(&Value::Null);
+    let scenes: &[Value] = cand
+        .get("scenes")
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice);
+    Card {
+        id,
+        url: format!("{}{id}", report::FORUM_TOPIC),
+        title: str_of(rec, "title").or_else(|| str_of(cand, "title")),
+        author: str_of(rec, "author").or_else(|| str_of(cand, "author")),
+        images: images(rec),
+        score: cand.get("score").and_then(Value::as_f64),
+        vr: cand.get("vr").and_then(Value::as_bool).unwrap_or(false),
+        axis_type: str_of(cand, "axisType"),
+        axes: axes(scenes),
+        videos: scenes.len(),
+        creampie: cand
+            .get("creampie")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        top_tags: top_tags(cand),
+    }
+}
+
+/// The state record's `images` (https only, deduped, at most MAX_IMAGES),
+/// else its single `image`.
+fn images(rec: &Value) -> Vec<String> {
+    let https = |s: &&str| s.starts_with("https://");
+    let mut out: Vec<String> = Vec::new();
+    for url in rec
+        .get("images")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(https)
+    {
+        if out.len() == MAX_IMAGES {
+            break;
+        }
+        if !out.iter().any(|u| u == url) {
+            out.push(url.to_string());
+        }
+    }
+    if out.is_empty()
+        && let Some(url) = rec.get("image").and_then(Value::as_str).filter(https)
+    {
+        out.push(url.to_string());
+    }
+    out
+}
+
+fn is_packed(scene: &Value) -> bool {
+    scene.get("packed").and_then(Value::as_bool) == Some(true)
+}
+
+fn axes(scenes: &[Value]) -> Axes {
+    if !scenes.is_empty() && scenes.iter().all(is_packed) {
+        return Axes::Packed;
+    }
+    let extra: BTreeSet<&str> = scenes
+        .iter()
+        .filter(|s| !is_packed(s))
+        .filter_map(|s| s.get("axes").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    Axes::Count(1 + extra.len())
+}
+
+/// The post's best TOP_TAGS tags by the user's tag scores (`tagScores`): positive only,
+/// highest first, ties by name.
+fn top_tags(cand: &Value) -> Vec<TagScore> {
+    let mut tags: Vec<TagScore> = cand
+        .get("tagScores")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(tag, score)| {
+            let score = score.as_f64().filter(|s| *s > 0.0)?;
+            Some(TagScore {
+                tag: tag.clone(),
+                score,
+            })
+        })
+        .collect();
+    tags.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.tag.cmp(&b.tag)));
+    tags.truncate(TOP_TAGS);
+    tags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::swipes::Swipe;
+    use serde_json::json;
+
+    fn waiting() -> Value {
+        json!({"candidates": [
+            {"id": 10, "title": "Ten", "author": "a", "score": 5.0, "vr": true, "axisType": "multi",
+             "creampie": true, "tagScores": {"pov": 2, "vr": 1, "anal": -3},
+             "scenes": [{"axes": ["twist", "roll"]}, {"axes": ["roll", "surge"]}]},
+            {"id": 11, "title": "Eleven", "score": 5.0, "axisType": "single", "scenes": [{"axes": []}]},
+            {"id": 12, "title": "In library", "score": 99.0},
+            {"id": 13, "title": "Wanted", "score": 1.0},
+            {"id": 14, "title": "Hidden", "score": 50.0},
+            {"id": "15", "title": "No score"},
+            {"id": 16, "title": "Low", "score": -2.5, "scenes": [{"packed": true, "axes": []}]},
+            {"id": "x", "title": "Bad id", "score": 7.0}
+        ]})
+    }
+
+    fn state() -> Value {
+        json!({"topics": {
+            "10": {"title": "Ten from state", "image": "https://x/a.jpg",
+                   "images": ["https://x/a.jpg", "http://x/insecure.jpg", "https://x/a.jpg", "https://x/b.jpg",
+                              "https://x/c.jpg", "https://x/d.jpg", "https://x/e.jpg", "https://x/f.jpg"]},
+            "11": {"image": "https://x/only.jpg"},
+            "16": {"image": "javascript:alert(1)"}
+        }})
+    }
+
+    fn swipes() -> Swipes {
+        let mut s = Swipes::default();
+        for (id, dir) in [(13, Dir::Right), (14, Dir::Left), (12, Dir::Right)] {
+            s.swipes.insert(
+                id,
+                Swipe {
+                    dir,
+                    at: "2026-11-13T00:00:00.000Z".into(),
+                },
+            );
+        }
+        s
+    }
+
+    fn deck() -> Deck {
+        build(
+            &state(),
+            &waiting(),
+            &HashMap::from([(12, 1), (11, 0)]),
+            &swipes(),
+        )
+    }
+
+    #[test]
+    fn deals_unswiped_posts_not_in_library_best_first() {
+        let d = deck();
+        // 12 is in the library, 13 wanted, 14 hidden; equal scores by newest id; no score last.
+        assert_eq!(
+            d.cards.iter().map(|c| c.id).collect::<Vec<_>>(),
+            [11, 10, 16, 15]
+        );
+        assert_eq!(d.remaining, 4);
+        // 12's right swipe doesn't count: it's in the library already.
+        assert_eq!(d.wanted, 1);
+    }
+
+    #[test]
+    fn card_fields() {
+        let d = deck();
+        let c = d.cards.iter().find(|c| c.id == 10).unwrap();
+        assert_eq!(
+            serde_json::to_value(c).unwrap(),
+            json!({
+                "id": 10, "url": "https://discuss.eroscripts.com/t/10", "title": "Ten from state",
+                "author": "a",
+                "images": ["https://x/a.jpg", "https://x/b.jpg", "https://x/c.jpg", "https://x/d.jpg", "https://x/e.jpg"],
+                "score": 5.0, "vr": true, "axisType": "multi", "axes": 4, "videos": 2, "creampie": true,
+                "topTags": [{"tag": "pov", "score": 2.0}, {"tag": "vr", "score": 1.0}]
+            })
+        );
+        // Older lists: no tagScores / creampie / images; the single image stands in.
+        let c = d.cards.iter().find(|c| c.id == 11).unwrap();
+        assert_eq!(c.images, ["https://x/only.jpg"]);
+        assert_eq!(
+            (c.axes, c.videos, c.creampie, c.vr),
+            (Axes::Count(1), 1, false, false)
+        );
+        assert!(c.top_tags.is_empty());
+        assert_eq!(c.author, None);
+        let c = d.cards.iter().find(|c| c.id == 15).unwrap();
+        assert!(c.images.is_empty());
+        assert_eq!((c.axes, c.videos, c.score), (Axes::Count(1), 0, None));
+        let c = serde_json::to_value(d.cards.iter().find(|c| c.id == 16).unwrap()).unwrap();
+        assert_eq!(c["axes"], "packed");
+        assert_eq!(c["images"], json!([]));
+    }
+
+    #[test]
+    fn axes_skip_packed_scenes() {
+        let s = |v: Value| v.as_array().unwrap().clone();
+        assert_eq!(axes(&[]), Axes::Count(1));
+        assert_eq!(
+            axes(&s(json!([{"packed": true, "axes": []}, {"packed": true}]))),
+            Axes::Packed
+        );
+        assert_eq!(
+            axes(&s(
+                json!([{"packed": true, "axes": ["x"]}, {"axes": ["twist"], "packed": null}])
+            )),
+            Axes::Count(2)
+        );
+    }
+
+    #[test]
+    fn top_tags_boundaries() {
+        let tags = |scores: Value| -> Vec<(String, f64)> {
+            top_tags(&json!({"tagScores": scores}))
+                .into_iter()
+                .map(|t| (t.tag, t.score))
+                .collect()
+        };
+        // Top 3 of more, ties by name; zero and negative scores never show.
+        assert_eq!(
+            tags(json!({"b": 2, "a": 2, "c": 5, "d": 1, "e": 0, "f": -9})),
+            [("c".into(), 5.0), ("a".into(), 2.0), ("b".into(), 2.0)]
+        );
+        assert_eq!(tags(json!({"x": 0.5})), [("x".into(), 0.5)]);
+        assert!(tags(json!({"x": -1, "y": 0})).is_empty());
+        assert!(tags(json!({"x": "3"})).is_empty());
+        assert!(tags(json!(null)).is_empty());
+        assert!(top_tags(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn waiting_ids() {
+        assert!(is_waiting(&waiting(), 10));
+        assert!(is_waiting(&waiting(), 15));
+        assert!(!is_waiting(&waiting(), 99));
+        assert!(!is_waiting(&Value::Null, 10));
+    }
+
+    #[test]
+    fn load_limits_and_reports_problems() {
+        let dir = std::env::temp_dir().join(format!("scout-report-deck-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = load(&dir, DEFAULT_LIMIT);
+        assert_eq!((d.remaining, d.wanted, d.cards.len()), (0, 0, 0));
+        assert!(d.problems.is_empty());
+
+        std::fs::write(dir.join(report::WAITING_FILE), waiting().to_string()).unwrap();
+        std::fs::write(dir.join(report::STATE_FILE), state().to_string()).unwrap();
+        let d = load(&dir, 2);
+        assert_eq!(d.remaining, 7);
+        assert_eq!(d.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [12, 14]);
+
+        std::fs::write(dir.join(crate::swipes::FILE), b"nope").unwrap();
+        let d = load(&dir, 0);
+        assert_eq!((d.remaining, d.cards.len()), (7, 0));
+        assert!(d.problems[0].starts_with(crate::swipes::FILE));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

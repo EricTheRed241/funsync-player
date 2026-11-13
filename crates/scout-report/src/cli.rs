@@ -7,7 +7,8 @@ pub const DEFAULT_PORT: u16 = 5131;
 
 pub const USAGE: &str = "\
 scout-report: browse every EroScripts post the Discovery scout (npm run eroscripts:scout)
-has judged, with its verdict, and the waiting list, on a webpage
+has judged, with its verdict, and the waiting list, on a webpage; swipe through the
+waiting list to pick what the scout downloads
 
 Usage:
   npm run scout:report [-- --lan] [-- --port N] [-- --user-data <dir>]
@@ -21,10 +22,18 @@ Options:
 
 The page is http://127.0.0.1:<port>/, bound to the loopback interface only; with
 --lan it also answers on the Mac's network address, which the banner prints. It has
-no login: anyone on the network can read it while it runs. Every load of /api/report
-rereads eroscripts-scout-state.json (verdicts, feed coverage), eroscripts-scout.json
+no login: anyone on the network can read it, and swipe, while it runs. Every load of
+/api/report rereads eroscripts-scout-state.json (verdicts, feed coverage), eroscripts-scout.json
 (the waiting list) and eroscripts-scout-rejected.json (scenes turned down); a missing
-file shows as an empty section. The CLI never writes any file; stop it with Ctrl-C.
+file shows as an empty section.
+
+The swipe deck, http://127.0.0.1:<port>/swipe, shows the waiting posts not in the
+library, highest score first, one card at a time. Right = wanted: the next
+npm run eroscripts:scout -- --fetch --auto downloads it whatever its score or axes.
+Left = hidden from the deck only (the scout treats the post as before). Undo forgets
+the swipe. Swipes go to eroscripts-scout-swipes.json, the only file the CLI writes
+(atomically; the previous copy is kept as eroscripts-scout-swipes.json.bak). Stop it
+with Ctrl-C.
 
 Exit codes: 0 ok, 1 error (2 and 3 are not used).
 ";

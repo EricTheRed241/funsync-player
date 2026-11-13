@@ -11,7 +11,7 @@ import {
   screenTopic, hasExcludedText, scriptDurationMs, scoreCandidate, scriptParts, matchScore, planScenes,
   videoPreference, creatorFolder, sceneTitle, retitlePlan, remapPaths, downloadQueue, addLibrarySource, coreName, normName, sameVideo,
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
-  staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, untitledTopicIds, addPostInfo,
+  staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, topicsMissingInfo, addPostInfo, readSwipes, scoredCandidate,
   contentRuleBreak, isHentaiOnly, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
 } from '../../scripts/eroscripts-scout-lib.mjs';
@@ -683,17 +683,35 @@ describe('scan state', () => {
     expect(state.topics[7]).toMatchObject({ verdict: 'candidate', title: 'Tracer rides', author: 'Croove' });
   });
 
-  it('lists judged posts without a title newest first, fills them in without touching the verdict, and skips gone ones', () => {
+  it('keeps up to 5 images of the post with its verdict, from the topic payload only', () => {
+    const state = emptyScoutState();
+    const cooked = '<p><img src="/uploads/default/original/1X/a.jpg" width="690"></p><p><img src="/uploads/default/original/1X/b.png" width="80"></p>';
+    markTopic(state, 7, 'candidate', 0, RULES_VERSION, postInfo({ id: 7, title: 'Tracer rides' }, { image_url: 'https://cdn/rep.webp', post_stream: { posts: [{ cooked }] } }));
+    expect(state.topics[7].images).toEqual(['https://cdn/rep.webp', 'https://discuss.eroscripts.com/uploads/default/original/1X/a.jpg']);
+    markTopic(state, 7, 'candidate', 0, RULES_VERSION, postInfo({ id: 7, title: 'Tracer rides' }));
+    expect(state.topics[7].images).toEqual(['https://cdn/rep.webp', 'https://discuss.eroscripts.com/uploads/default/original/1X/a.jpg']);
+    // A payload without images is remembered as read (no --titles again).
+    markTopic(state, 8, 'no-video', 0, RULES_VERSION, postInfo({ id: 8, title: 'Plain' }, { post_stream: { posts: [{ cooked: '<p>text</p>' }] } }));
+    expect(state.topics[8].images).toEqual([]);
+  });
+
+  it('lists judged posts without a title or images, waiting ones first, fills them in without touching the verdict, and skips gone ones', () => {
     const state = emptyScoutState();
     markTopic(state, 5, 'excluded', 0);
     markTopic(state, 9, 'no-video', 0);
     markTopic(state, 7, 'candidate', 0, RULES_VERSION, { title: 'Has one' });
-    expect(untitledTopicIds(state)).toEqual([9, 5]);
+    markTopic(state, 8, 'candidate', 0, RULES_VERSION, { title: 'Has both', images: [] });
+    markTopic(state, 3, 'no-video', 0);
+    state.topics[3].gone = true;
+    expect(topicsMissingInfo(state)).toEqual([9, 7, 5]);
+    expect(topicsMissingInfo(state, [5, 99, 8, 3])).toEqual([5, 9, 7]);
     addPostInfo(state, 9, { title: 'Kiriko', created_at: '2025-03-01T00:00:00Z', image_url: 'https://cdn/x.webp', post_stream: { posts: [{ username: 'Ent_Duke' }] } });
+    addPostInfo(state, 7, { title: 'Has one', post_stream: { posts: [{ username: 'Croove', cooked: '<p>no images</p>' }] } });
     addPostInfo(state, 5, null);
-    expect(state.topics[9]).toMatchObject({ verdict: 'no-video', at: new Date(0).toISOString(), title: 'Kiriko', author: 'Ent_Duke', image: 'https://cdn/x.webp' });
+    expect(state.topics[9]).toMatchObject({ verdict: 'no-video', at: new Date(0).toISOString(), title: 'Kiriko', author: 'Ent_Duke', image: 'https://cdn/x.webp', images: ['https://cdn/x.webp'] });
+    expect(state.topics[7]).toMatchObject({ verdict: 'candidate', title: 'Has one', images: [] });
     expect(state.topics[5].gone).toBe(true);
-    expect(untitledTopicIds(state)).toEqual([]);
+    expect(topicsMissingInfo(state)).toEqual([]);
   });
 
   // Like feed(), with post `id` last active `id - 100` days after 2025-01-01.
@@ -814,6 +832,33 @@ describe('scan state', () => {
     expect(autoFetchPick(c('single'), at('single', AUTO_FETCH_MIN_SCORE + 5))).toBe(false);
   });
 
+  describe('swipes (npm run scout:report deck)', () => {
+    const single = { id: 343669, axisType: 'single', title: 'X', tags: ['vaginal'], likes: 0, scenes: [{ video: { name: 'a.mp4' } }] };
+    const strong = { ...single, id: 2, axisType: 'multi', tags: ['vaginal', 'x-tag', 'y-tag'] };
+    const strongScoring = { tagScores: { 'x-tag': 10, 'y-tag': 10 } };
+    const swipes = (dirs) => readSwipes({ version: 1, swipes: Object.fromEntries(Object.entries(dirs).map(([id, dir]) => [id, { dir, at: '2026-11-13T15:00:00.000Z' }])) });
+
+    it('reads right swipes as wanted and left ones as hidden, ignoring anything else', () => {
+      const s = readSwipes({ version: 1, swipes: { 1: { dir: 'right' }, 2: { dir: 'left' }, x: { dir: 'right' }, 3: { dir: 'up' }, 4: null, '-5': { dir: 'right' } } });
+      expect([...s.wanted]).toEqual([1]);
+      expect([...s.hidden]).toEqual([2]);
+      for (const json of [null, {}, { swipes: 'x' }]) expect(readSwipes(json)).toEqual({ wanted: new Set(), hidden: new Set() });
+    });
+
+    it('auto-fetches a post swiped right though single-axis and scoring low', () => {
+      expect(candidateScore(single)).toBeLessThan(AUTO_FETCH_MIN_SCORE);
+      expect(autoFetchPick(single)).toBe(false);
+      expect(autoFetchPick(single, {}, swipes({ 343669: 'right' }).wanted)).toBe(true);
+    });
+
+    it('takes no notice of a left swipe, and an undone right swipe (entry gone) drops the post again', () => {
+      expect(autoFetchPick(single, {}, swipes({ 343669: 'left' }).wanted)).toBe(false);
+      expect(autoFetchPick(strong, strongScoring)).toBe(true);
+      expect(autoFetchPick(strong, strongScoring, swipes({ 2: 'left' }).wanted)).toBe(true);
+      expect(autoFetchPick(single, {}, swipes({}).wanted)).toBe(false);
+    });
+  });
+
   it('scores a saved list again under the current weights', () => {
     const saved = { id: 1, title: 'X', tags: ['vaginal'], likes: 0, axisType: 'multi', score: 1, scenes: [{ video: { name: 'a.mp4' } }] };
     const [c] = mergeCandidates([saved], [], () => false);
@@ -827,6 +872,22 @@ describe('scan state', () => {
     const by = (list) => Object.fromEntries(list.map((x) => [x.id, x.score]));
     expect(by(scored)).toEqual({ 1: by(plain)[1] - D.pov - 2, 2: by(plain)[2] + 3, 3: by(plain)[3] });
     expect(scored.map((x) => x.id)).toEqual([2, 3, 1]);
+  });
+
+  it("saves each candidate's scoring tags and creampie flag, following the user's tag scores", () => {
+    const c = (id, tags, title = `Scene ${id}`) => ({ id, title, tags, likes: 0, axisType: 'multi', scenes: [{ video: { name: `${id}.mp4` } }] });
+    const saved = [c(1, ['creampie', 'POV', 'vaginal']), c(2, ['anal-creampie', 'ahegao']), c(3, ['riding'], 'Creampie compilation'), c(4, ['tentacle'])];
+    const byId = (list) => Object.fromEntries(list.map((x) => [x.id, x]));
+    const plain = byId(mergeCandidates(saved, [], () => false));
+    expect(plain[1]).toMatchObject({ tagScores: { creampie: D.creampie, pov: D.pov }, creampie: true });
+    expect(plain[2]).toMatchObject({ tagScores: { 'anal-creampie': D['anal-creampie'] }, creampie: true });
+    // The ranking counts the creampie group by its tags only: a title naming it isn't one.
+    expect(plain[3]).toMatchObject({ tagScores: { riding: D.riding }, creampie: false });
+    expect(plain[4]).toMatchObject({ tagScores: { tentacle: D.tentacle }, creampie: false });
+    const changed = byId(mergeCandidates(saved, [], () => false, new Set(), { tagScores: { pov: 0, ahegao: 3, creampie: -1 } }));
+    expect(changed[1]).toMatchObject({ tagScores: { creampie: -1 }, creampie: true });
+    expect(changed[2].tagScores).toEqual({ 'anal-creampie': D['anal-creampie'], ahegao: 3 });
+    expect(scoredCandidate(saved[0], { tagScores: { ahegao: 3 } })).toMatchObject({ score: candidateScore(saved[0]), tagScores: { creampie: D.creampie, pov: D.pov }, creampie: true });
   });
 
   it('re-ranks a saved list when a favourite is removed or added, matching title, tags and author', () => {

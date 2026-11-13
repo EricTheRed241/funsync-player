@@ -21,6 +21,7 @@
 body { margin: 0; padding: 16px 20px 40px; background: var(--bg); color: var(--fg);
   font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 h1 { font-size: 20px; margin: 0 0 4px; }
+h1 .nav { font-size: 14px; font-weight: 400; margin-left: 10px; }
 h2 { font-size: 14px; margin: 0 0 6px; color: var(--muted); font-weight: 600;
   text-transform: uppercase; letter-spacing: .04em; }
 a { color: var(--accent); text-decoration: none; }
@@ -85,6 +86,8 @@ details ul { margin: 4px 0 0; padding-left: 18px; }
 .v-live-not-pov { --vc: #d08b2c; } .v-no-video { --vc: #a46ad6; }
 .waiting { color: #3aa655; font-weight: 600; white-space: nowrap; }
 .have { color: #14b8a6; font-weight: 600; white-space: nowrap; }
+.wanted { color: #e0529c; font-weight: 600; white-space: nowrap; }
+.swiped-left { color: var(--muted); white-space: nowrap; }
 .empty { padding: 24px; text-align: center; color: var(--muted); }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center;
   justify-content: center; cursor: zoom-out; z-index: 10; }
@@ -123,7 +126,7 @@ details ul { margin: 4px 0 0; padding-left: 18px; }
 </style>
 </head>
 <body>
-<h1>EroScripts scout report</h1>
+<h1>EroScripts scout report <a class="nav" href="/swipe">Swipe →</a></h1>
 <div class="meta" id="meta">Loading…</div>
 <div class="problems" id="problems" hidden></div>
 
@@ -374,7 +377,12 @@ function row(p) {
     dateCell(p.created, 'Created'),
     dateCell(p.bumped, 'Active'),
     dateCell(p.at, 'Judged'),
-    p.waiting ? el('td', {}, el('span', { class: 'waiting', title: 'On the waiting list' }, '● waiting')) : el('td', { class: 'blank' }),
+    p.waiting || p.swipe ? el('td', {},
+      p.waiting ? el('span', { class: 'waiting', title: 'On the waiting list' }, '● waiting') : null,
+      p.waiting && p.swipe ? ' ' : null,
+      p.swipe === 'right' ? el('span', { class: 'wanted', title: 'Swiped right: the next --fetch --auto downloads it' }, '♥ wanted')
+        : p.swipe === 'left' ? el('span', { class: 'swiped-left', title: 'Swiped left: hidden from the swipe deck' }, 'hidden') : null,
+    ) : el('td', { class: 'blank' }),
     p.inLibrary > 0
       ? el('td', {}, el('span', { class: 'have', title: `${p.inLibrary} video${p.inLibrary > 1 ? 's' : ''} in the library` }, `✓ ${p.inLibrary} in library`))
       : el('td', { class: 'blank' }),

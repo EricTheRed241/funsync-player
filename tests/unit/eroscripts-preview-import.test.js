@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const log = (await import('../../electron/logger.js')).default;
-const { EroScriptsAPI, topicPreviewUrl } = await import('../../electron/eroscripts-api.js');
+const { EroScriptsAPI, postImages, topicPreviewUrl } = await import('../../electron/eroscripts-api.js');
 const { importThumbnail, thumbStem } = await import('../../electron/custom-thumbs.js');
 
 const CDN = 'https://eroscripts-discourse.eroscripts.com/original/4X/a/b/c/abc.webp';
@@ -150,6 +150,48 @@ describe('topic preview choice (getTopicImage)', () => {
       .toBe('https://cdn/original/rep.webp');
     expect(topicPreviewUrl({ post_stream: { posts: [{ cooked: small }] } })).toBe('https://cdn/original/thumb.webp');
     expect(topicPreviewUrl({ post_stream: { posts: [{ cooked: '<p>no images</p>' }] } })).toBeNull();
+  });
+});
+
+describe('postImages (scout report gallery)', () => {
+  const SHA = 'a'.repeat(40);
+  const UP = 'https://discuss.eroscripts.com/uploads/default/original/1X';
+  // A lightbox around the optimized copy, the topic image being another copy of it,
+  // an emoji heading, host logos linking to MEGA / pixeldrain, a badge, a video.
+  const COOKED = '<h3><img src="https://discuss.eroscripts.com/images/emoji/twitter/framed_picture.png?v=15" class="emoji" width="20" height="20"> Preview</h3>'
+    + `<div class="lightbox-wrapper"><a class="lightbox" href="https://cdn/original/4X/a/b/c/${SHA}.jpeg" data-download-href="/uploads/short-url/x.jpeg?dl=1">`
+    + `<img src="https://cdn/optimized/4X/a/b/c/${SHA}_2_690x388.jpeg" width="690" height="388"><div class="meta"></div></a></div>`
+    + '<p><img src="/uploads/default/original/1X/second.png" width="500" height="300"></p>'
+    + '<p><a href="https://mega.nz/folder/abc#key"><img src="/uploads/default/original/1X/mega-logo.png" width="400" height="120"></a></p>'
+    + '<p><a href="https://pixeldrain.com/u/xyz"><img src="/uploads/default/original/1X/pd.png"></a></p>'
+    + '<p><img src="/uploads/default/original/1X/badge.png" width="120" height="40"></p>'
+    + '<p><img src="/uploads/default/original/1X/clip.mp4"></p>'
+    + '<p><img src="/uploads/default/original/1X/no-width.webp?a=1&amp;b=2"></p>'
+    + '<p><a href="https://example.com/page"><img src="/uploads/default/original/1X/linked.gif" width="300"></a></p>';
+
+  it('takes the topic image first, then post images as lightbox originals, skipping emoji, host logos, small and non-image ones', () => {
+    const data = {
+      image_url: `https://cdn/optimized/4X/a/b/c/${SHA}_2_1024x576.jpeg`,
+      thumbnails: [{ width: 1366, url: `https://cdn/original/4X/a/b/c/${SHA}.jpeg` }],
+      post_stream: { posts: [{ cooked: COOKED }] },
+    };
+    expect(postImages(data)).toEqual([
+      `https://cdn/original/4X/a/b/c/${SHA}.jpeg`,
+      `${UP}/second.png`,
+      `${UP}/no-width.webp?a=1&b=2`,
+      `${UP}/linked.gif`,
+    ]);
+  });
+
+  it('caps at 5, skips a topic image under 200 px wide and dedupes', () => {
+    const many = Array.from({ length: 8 }, (_, i) => `<p><img src="/uploads/default/original/1X/p${i}.jpg" width="690"></p>`).join('');
+    expect(postImages({ image_url: '/uploads/default/original/1X/p0.jpg', post_stream: { posts: [{ cooked: many }] } }))
+      .toEqual([0, 1, 2, 3, 4].map((i) => `${UP}/p${i}.jpg`));
+    expect(postImages({ post_stream: { posts: [{ cooked: many }] } }, 2)).toEqual([`${UP}/p0.jpg`, `${UP}/p1.jpg`]);
+    const tiny = { image_url: 'https://cdn/original/thumb.webp', thumbnails: [{ width: 160, url: 'https://cdn/original/thumb.webp' }] };
+    expect(postImages(tiny)).toEqual([]);
+    expect(postImages({ image_url: 'https://cdn/original/rep.webp' })).toEqual(['https://cdn/original/rep.webp']);
+    expect(postImages(null)).toEqual([]);
   });
 });
 
