@@ -1,5 +1,6 @@
 //! The swipe deck: the waiting list's posts with no video in the library and
-//! no swipe yet, highest score first (the scout's download order), as cards
+//! no swipe yet (posts with a video on SexLikeReal go to the SLR tab instead: `Pool`, slr.rs),
+//! highest score first (the scout's download order), as cards
 //! for `/swipe`; with a `seed`, each card's score is shifted by up to the deal's jitter
 //! (the request's `jitter`, else the stack's MULTI_JITTER or SINGLE_JITTER) either way, so
 //! the order wanders a little. Tag scores and creampie come from the scout's waiting list
@@ -67,8 +68,10 @@ pub struct Deal {
     /// Score points a seeded deal moves each card by, at most, either way (0 ..= MAX_JITTER;
     /// 0 = strictly by score). None = the stack's own (`Stack::jitter`).
     pub jitter: Option<f64>,
-    /// Cards the page holds already (on screen, or skipped for later).
+    /// Posts the page holds already (on screen, or skipped for later), by topic id.
     pub exclude: HashSet<u64>,
+    /// SLR scenes the page holds already, by SLR scene id (the SLR tab only).
+    pub exclude_scenes: HashSet<u64>,
     pub stack: Stack,
 }
 
@@ -79,6 +82,7 @@ impl Default for Deal {
             seed: None,
             jitter: None,
             exclude: HashSet::new(),
+            exclude_scenes: HashSet::new(),
             stack: Stack::default(),
         }
     }
@@ -135,6 +139,27 @@ pub struct Card {
     pub scenes: Vec<SceneInfo>,
     /// Scenes left out of `scenes`.
     pub more_scenes: usize,
+    /// The first scene whose video is on SexLikeReal (only on the SLR tab's posts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slr_video: Option<SlrVideo>,
+}
+
+/// A post's video on SexLikeReal (the scout's `scene.video` with `host: "slr"`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlrVideo {
+    pub scene_id: Option<u64>,
+    /// The scene's page (https only).
+    pub url: Option<String>,
+}
+
+/// Which waiting posts a deck holds: the ones whose videos are all elsewhere (the Multi-axis
+/// and Single-axis stacks), or the ones with a video on SexLikeReal (the SLR tab). Each post
+/// shows in one tab only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pool {
+    Hosts,
+    Slr,
 }
 
 /// One scene (video) of a post, as the card lists it.
@@ -178,16 +203,22 @@ pub struct TagScore {
 /// `eroscripts-links.json`) and the swipes, and deal the cards `deal` asks for.
 pub fn load(user_data: &Path, deal: &Deal) -> Deck {
     let mut problems = Vec::new();
-    let state = report::read_json(user_data, report::STATE_FILE, &mut problems);
-    let waiting = report::read_json(user_data, report::WAITING_FILE, &mut problems);
-    let config = report::read_json(user_data, "config.json", &mut problems);
-    let links = report::read_json(user_data, crate::library::LINKS_FILE, &mut problems);
-    let swipes = report::read_swipes(user_data, crate::swipes::EROSCRIPTS, &mut problems);
-    let videos = crate::library::topic_videos(&config, &links, &mut problems);
-    let mut deck = build(&state, &waiting, &videos, &swipes);
+    let (mut deck, _) = load_pool(user_data, Pool::Hosts, &mut problems);
     deck.deal(deal);
     deck.problems = problems;
     deck
+}
+
+/// Read the files `load` reads and build `pool`'s deck (not dealt; problems go to `problems`),
+/// with the waiting list it came from.
+pub fn load_pool(user_data: &Path, pool: Pool, problems: &mut Vec<String>) -> (Deck, Value) {
+    let state = report::read_json(user_data, report::STATE_FILE, problems);
+    let waiting = report::read_json(user_data, report::WAITING_FILE, problems);
+    let config = report::read_json(user_data, "config.json", problems);
+    let links = report::read_json(user_data, crate::library::LINKS_FILE, problems);
+    let swipes = report::read_swipes(user_data, crate::swipes::EROSCRIPTS, problems);
+    let videos = crate::library::topic_videos(&config, &links, problems);
+    (build(&state, &waiting, &videos, &swipes, pool), waiting)
 }
 
 impl Deck {
@@ -244,18 +275,42 @@ pub fn is_waiting(waiting: &Value, id: u64) -> bool {
     candidates(waiting).any(|(c, _)| c == id)
 }
 
-/// Every card, in deck order (`problems` empty).
+/// The scout's videos on SexLikeReal: the scenes' `video` objects with `host: "slr"`.
+fn slr_videos(cand: &Value) -> impl Iterator<Item = &Value> {
+    cand.get("scenes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s.get("video"))
+        .filter(|v| v.get("host").and_then(Value::as_str) == Some("slr"))
+}
+
+fn has_slr_video(cand: &Value) -> bool {
+    slr_videos(cand).next().is_some()
+}
+
+/// The SLR scene ids of every waiting post's videos (`slrSceneId`), swiped, in the library
+/// or not: those scenes come with the post (its script is free), never on their own.
+pub fn slr_scene_ids(waiting: &Value) -> HashSet<u64> {
+    candidates(waiting)
+        .flat_map(|(_, c)| slr_videos(c))
+        .filter_map(|v| id_of(v.get("slrSceneId")?))
+        .collect()
+}
+
+/// Every card of `pool`, in deck order (`problems` empty).
 pub fn build(
     state: &Value,
     waiting: &Value,
     videos: &HashMap<u64, usize>,
     swipes: &Swipes,
+    pool: Pool,
 ) -> Deck {
     let shared = image_counts(state);
     let mut wanted = 0;
     let mut cards = Vec::new();
     for (id, cand) in candidates(waiting) {
-        if videos.get(&id).is_some_and(|&n| n > 0) {
+        if videos.get(&id).is_some_and(|&n| n > 0) || has_slr_video(cand) != (pool == Pool::Slr) {
             continue;
         }
         match swipes.dir(id) {
@@ -314,6 +369,10 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>, shared: &HashMap<&str, usize
         bumped: str_of(rec, "bumped"),
         scenes: scenes.iter().take(MAX_SCENES).map(scene_info).collect(),
         more_scenes: scenes.len().saturating_sub(MAX_SCENES),
+        slr_video: slr_videos(cand).next().map(|v| SlrVideo {
+            scene_id: v.get("slrSceneId").and_then(id_of),
+            url: str_of(v, "url").filter(|u| u.starts_with("https://")),
+        }),
     }
 }
 
@@ -442,7 +501,7 @@ fn axes(scenes: &[Value]) -> Axes {
 
 /// Every tag of the post (`tags`, plus any other `tagScores` key) with its tag score, else 0:
 /// highest first, ties by name.
-fn post_tags(cand: &Value) -> Vec<TagScore> {
+pub(crate) fn post_tags(cand: &Value) -> Vec<TagScore> {
     let scores = cand.get("tagScores").and_then(Value::as_object);
     let names = strings_of(cand, "tags")
         .unwrap_or_default()
@@ -464,7 +523,7 @@ fn post_tags(cand: &Value) -> Vec<TagScore> {
 }
 
 /// The post's best TOP_TAGS tags (`tags` comes sorted from post_tags): positive scores only.
-fn top_tags(tags: &[TagScore]) -> Vec<TagScore> {
+pub(crate) fn top_tags(tags: &[TagScore]) -> Vec<TagScore> {
     tags.iter()
         .filter(|t| t.score > 0.0)
         .take(TOP_TAGS)
@@ -494,7 +553,15 @@ mod tests {
             {"id": 14, "title": "Hidden", "score": 50.0},
             {"id": "15", "title": "No score"},
             {"id": 16, "title": "Low", "score": -2.5, "scenes": [{"packed": true, "axes": []}]},
-            {"id": "x", "title": "Bad id", "score": 7.0}
+            {"id": "x", "title": "Bad id", "score": 7.0},
+            {"id": 17, "title": "On SLR", "score": 80.0, "axisType": "multi", "tagScores": {"pov": 2},
+             "scenes": [{"axes": ["twist"], "video": {"name": "A - B (C)_180_LR.mp4", "host": "slr", "slrSceneId": 66249,
+                         "slrLabel": "b-66249", "url": "https://www.sexlikereal.com/scenes/b-66249", "size": null, "height": 2880}}]},
+            {"id": 18, "title": "SLR and MEGA", "score": 3.0, "axisType": "single",
+             "scenes": [{"video": {"name": "m.mp4", "host": "MEGA"}},
+                        {"video": {"host": "slr", "slrSceneId": "51207", "url": "http://insecure/x"}}]},
+            {"id": 19, "title": "SLR in library", "score": 9.0,
+             "scenes": [{"video": {"host": "slr", "slrSceneId": 70000}}]}
         ]})
     }
 
@@ -511,7 +578,12 @@ mod tests {
 
     fn swipes() -> Swipes {
         let mut s = Swipes::default();
-        for (id, dir) in [(13, Dir::Right), (14, Dir::Left), (12, Dir::Right)] {
+        for (id, dir) in [
+            (13, Dir::Right),
+            (14, Dir::Left),
+            (12, Dir::Right),
+            (18, Dir::Right),
+        ] {
             s.swipes.insert(
                 id,
                 Swipe {
@@ -524,12 +596,68 @@ mod tests {
     }
 
     fn deck() -> Deck {
+        pool(Pool::Hosts)
+    }
+
+    fn pool(pool: Pool) -> Deck {
         build(
             &state(),
             &waiting(),
-            &HashMap::from([(12, 1), (11, 0)]),
+            &HashMap::from([(12, 1), (11, 0), (19, 1)]),
             &swipes(),
+            pool,
         )
+    }
+
+    #[test]
+    fn posts_with_an_slr_video_go_to_the_slr_pool_only() {
+        // The Multi-axis / Single-axis stacks never see 17, 18 or 19, nor count 18's right swipe.
+        let hosts = deck();
+        assert!(
+            hosts
+                .cards
+                .iter()
+                .all(|c| c.id < 17 && c.slr_video.is_none())
+        );
+        assert_eq!(hosts.wanted, 1);
+        for stack in [Stack::Multi, Stack::Single] {
+            let mut d = deck();
+            d.deal(&Deal {
+                stack,
+                ..Deal::default()
+            });
+            assert!(d.cards.iter().all(|c| c.id < 17), "{stack:?}");
+        }
+        // The SLR pool: 17 (unswiped), 18 wanted, 19 in the library.
+        let slr = pool(Pool::Slr);
+        assert_eq!(ids(&slr), [17]);
+        assert_eq!((slr.remaining, slr.wanted), (1, 1));
+        let c = serde_json::to_value(&slr.cards[0]).unwrap();
+        assert_eq!(
+            c["slrVideo"],
+            json!({"sceneId": 66249, "url": "https://www.sexlikereal.com/scenes/b-66249"})
+        );
+        assert_eq!(c["scenes"][0]["host"], "slr");
+        assert_eq!(c["topTags"], json!([{"tag": "pov", "score": 2.0}]));
+        // Every waiting post's SLR scenes, whatever its swipe or library state; ids as strings too.
+        assert_eq!(
+            slr_scene_ids(&waiting()),
+            HashSet::from([66249, 51207, 70000])
+        );
+        assert!(slr_scene_ids(&Value::Null).is_empty());
+        // Only https links.
+        let mut no_swipes = swipes();
+        no_swipes.swipes.remove(&18);
+        let d = build(&state(), &waiting(), &HashMap::new(), &no_swipes, Pool::Slr);
+        let c = d.cards.iter().find(|c| c.id == 18).unwrap();
+        assert_eq!(
+            c.slr_video,
+            Some(SlrVideo {
+                scene_id: Some(51207),
+                url: None
+            })
+        );
+        assert_eq!(ids(&d), [17, 19, 18]);
     }
 
     #[test]
@@ -669,6 +797,7 @@ mod tests {
             &json!({"candidates": cands}),
             &HashMap::new(),
             &Swipes::default(),
+            Pool::Hosts,
         );
         d.deal(deal);
         d
@@ -776,6 +905,7 @@ mod tests {
             &json!({"candidates": cands}),
             &HashMap::new(),
             &Swipes::default(),
+            Pool::Hosts,
         );
         d.deal(deal);
         d

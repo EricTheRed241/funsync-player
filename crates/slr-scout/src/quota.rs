@@ -245,8 +245,8 @@ pub fn parse_overview(v: &Value, checked_at: &str) -> Result<Quota, String> {
     })
 }
 
-/// Read the quota with the saved session, saving a rotated cookie.
-pub fn fetch(http: &dyn Http, user_data: &Path, now_iso: &str) -> Result<Quota, QuotaError> {
+/// An access token for the saved session, saving a rotated cookie.
+pub fn session_token(http: &dyn Http, user_data: &Path) -> Result<String, QuotaError> {
     let session = read_session(user_data)
         .map_err(QuotaError::Failed)?
         .ok_or(QuotaError::NoSession)?;
@@ -254,11 +254,21 @@ pub fn fetch(http: &dyn Http, user_data: &Path, now_iso: &str) -> Result<Quota, 
     if let Some(next) = rotated {
         write_session(user_data, &next).map_err(QuotaError::Failed)?;
     }
-    let req = Request::get(format!("{API}/users/v1/user/overview"))
+    Ok(token)
+}
+
+/// A GET to the API with the access token.
+pub fn authed(url: String, token: &str) -> Request {
+    Request::get(url)
         .header("Authorization", format!("Bearer {token}"))
         .header("Client-Type", "web")
         .header("project", "1")
-        .header("Accept", "application/json");
+        .header("Accept", "application/json")
+}
+
+/// The download limits, with an access token.
+pub fn overview(http: &dyn Http, token: &str, now_iso: &str) -> Result<Quota, QuotaError> {
+    let req = authed(format!("{API}/users/v1/user/overview"), token);
     let res = http
         .send(&req)
         .map_err(|e| QuotaError::Failed(format!("user overview: {e}")))?;
@@ -266,6 +276,21 @@ pub fn fetch(http: &dyn Http, user_data: &Path, now_iso: &str) -> Result<Quota, 
     let v: Value = serde_json::from_str(&res.body)
         .map_err(|_| QuotaError::Failed("user overview: not JSON".into()))?;
     parse_overview(&v, now_iso).map_err(QuotaError::Failed)
+}
+
+/// Read the quota with the saved session, saving a rotated cookie.
+pub fn fetch(http: &dyn Http, user_data: &Path, now_iso: &str) -> Result<Quota, QuotaError> {
+    let token = session_token(http, user_data)?;
+    overview(http, &token, now_iso)
+}
+
+/// An authorised API call's JSON: 401 means the session expired.
+pub fn authed_json(http: &dyn Http, req: &Request, what: &str) -> Result<Value, QuotaError> {
+    let res = http
+        .send(req)
+        .map_err(|e| QuotaError::Failed(format!("{what}: {e}")))?;
+    check(&res, what)?;
+    serde_json::from_str(&res.body).map_err(|_| QuotaError::Failed(format!("{what}: not JSON")))
 }
 
 /// The file's `quota` and `quotaError`: a fresh quota, or the previous

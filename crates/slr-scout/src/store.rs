@@ -37,6 +37,30 @@ pub enum Handmade {
     },
 }
 
+/// Where `slr:scout --fetch` would take a scene's script from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScriptSource {
+    /// A free EroScripts post's script.
+    #[serde(rename = "eroscripts")]
+    Eroscripts,
+    /// SLR's hand-crafted script (the monthly `downloadScript` quota).
+    #[serde(rename = "slr-handcrafted")]
+    SlrHandcrafted,
+    /// SLR's AI script (the monthly `downloadAiScript` quota).
+    #[serde(rename = "slr-ai")]
+    SlrAi,
+}
+
+impl ScriptSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            ScriptSource::Eroscripts => "eroscripts",
+            ScriptSource::SlrHandcrafted => "slr-handcrafted",
+            ScriptSource::SlrAi => "slr-ai",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Scene {
@@ -59,6 +83,20 @@ pub struct Scene {
     pub pmv: bool,
     pub compilation: bool,
     pub favorites: u64,
+    /// SLR's categories as tags (score::scene_tags).
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Each scored tag's score (postTagScores).
+    #[serde(default, serialize_with = "numbers")]
+    pub tag_scores: BTreeMap<String, f64>,
+    /// The favourite performer or studio, as the favourites spell it.
+    #[serde(default)]
+    pub favourite: Option<String>,
+    /// When `--fetch` put the scene in the library (kept across runs).
+    #[serde(default)]
+    pub fetched_at: Option<String>,
+    #[serde(default)]
+    pub script_source: Option<ScriptSource>,
     #[serde(serialize_with = "number")]
     pub score: f64,
     #[serde(serialize_with = "numbers")]
@@ -111,6 +149,31 @@ impl ScoutFile {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The previous file's `fetchedAt` for scene `id`.
+    pub fn fetched_at(&self, id: u64) -> Option<String> {
+        self.scenes
+            .iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.fetched_at.clone())
+    }
+}
+
+/// Where a download would take the script from: a free EroScripts post,
+/// else SLR's hand-crafted script, else its AI script.
+pub fn script_source(s: &Scene) -> Option<ScriptSource> {
+    if s.handmade
+        .iter()
+        .any(|h| matches!(h, Handmade::Eroscripts { free: true, .. }))
+    {
+        Some(ScriptSource::Eroscripts)
+    } else if s.handmade.iter().any(|h| matches!(h, Handmade::Slr { .. })) {
+        Some(ScriptSource::SlrHandcrafted)
+    } else if s.ai_script {
+        Some(ScriptSource::SlrAi)
+    } else {
+        None
     }
 }
 
@@ -198,6 +261,11 @@ mod tests {
             pmv: false,
             compilation: false,
             favorites: 1123,
+            tags: vec!["creampie".into(), "big-tits".into(), "bigtits".into()],
+            tag_scores: BTreeMap::from([("creampie".into(), 2.0)]),
+            favourite: Some("Miss Lexa".into()),
+            fetched_at: None,
+            script_source: Some(ScriptSource::SlrHandcrafted),
             score: 5.12,
             score_parts: BTreeMap::from([
                 ("handmadeScript".into(), 4.0),
@@ -219,6 +287,24 @@ mod tests {
         assert_eq!(v["durationS"], 1629);
         assert_eq!(v["aiScript"], true);
         assert_eq!(v["fps"], 60);
+        assert_eq!(v["tags"], json!(["creampie", "big-tits", "bigtits"]));
+        assert_eq!(v["tagScores"], json!({"creampie": 2}));
+        assert_eq!(v["favourite"], "Miss Lexa");
+        assert_eq!(v["fetchedAt"], json!(null));
+        assert_eq!(v["scriptSource"], "slr-handcrafted");
+        // A file from before these fields still reads.
+        let mut old = v.clone();
+        for k in [
+            "tags",
+            "tagScores",
+            "favourite",
+            "fetchedAt",
+            "scriptSource",
+        ] {
+            old.as_object_mut().unwrap().remove(k);
+        }
+        let old: Scene = serde_json::from_value(old).unwrap();
+        assert!(old.tags.is_empty() && old.script_source.is_none());
         let text = serde_json::to_string(&scene(1)).unwrap();
         assert!(text.contains(r#""scoreParts":{"handmadeScript":4,"popularity":1.12}"#));
         assert!(text.contains(r#""score":5.12"#));
@@ -254,5 +340,59 @@ mod tests {
             }
         ));
         assert!(file.forum_matches(8).is_empty());
+    }
+
+    #[test]
+    fn keeps_fetched_at_by_scene() {
+        let mut s = scene(7);
+        s.fetched_at = Some("2026-11-13T10:00:00.000Z".into());
+        let file = ScoutFile {
+            generated_at: String::new(),
+            actors: vec![],
+            quota: None,
+            quota_error: None,
+            scenes: vec![s],
+        };
+        assert_eq!(
+            file.fetched_at(7).as_deref(),
+            Some("2026-11-13T10:00:00.000Z")
+        );
+        assert_eq!(file.fetched_at(8), None);
+    }
+
+    #[test]
+    fn picks_the_script_source() {
+        let free = Handmade::Eroscripts {
+            topic_id: 1,
+            title: "t".into(),
+            free: true,
+            multi_axis: false,
+        };
+        let paid = Handmade::Eroscripts {
+            topic_id: 2,
+            title: "t".into(),
+            free: false,
+            multi_axis: true,
+        };
+        let slr = Handmade::Slr {
+            author: "kimera".into(),
+        };
+        let with = |handmade: Vec<Handmade>, ai: bool| {
+            let mut s = scene(1);
+            s.handmade = handmade;
+            s.ai_script = ai;
+            script_source(&s)
+        };
+        assert_eq!(
+            with(vec![slr.clone(), free], true),
+            Some(ScriptSource::Eroscripts)
+        );
+        assert_eq!(
+            with(vec![paid.clone(), slr], true),
+            Some(ScriptSource::SlrHandcrafted)
+        );
+        assert_eq!(with(vec![paid.clone()], true), Some(ScriptSource::SlrAi));
+        assert_eq!(with(vec![paid], false), None);
+        assert_eq!(with(vec![], false), None);
     }
 }

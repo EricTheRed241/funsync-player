@@ -56,8 +56,9 @@ import {
 import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../renderer/js/preference-score.js';
 import { canonicalArtist } from '../renderer/js/artist-playlists.js';
 import { computeBins } from '../renderer/js/heatmap-strip.js';
-import { durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl } from './stream-hosts.mjs';
+import { capBytes, durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl, safeName, STEM_BYTES } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
+import { SLR_ACCOUNT_DOWNLOAD, SLR_HOST, slrSceneName } from './slr-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
 
 const { postImages } = createRequire(import.meta.url)('../electron/eroscripts-api.js');
@@ -463,8 +464,8 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
   return { scenes, inLibrary };
 }
 
-/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs, scripts/vrbangers-host.mjs). */
-export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, VRBANGERS_HOST]);
+/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs, scripts/vrbangers-host.mjs, scripts/slr-host.mjs). */
+export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, VRBANGERS_HOST, SLR_HOST]);
 
 /**
  * planScenes, with each scene paired to a streaming page's video checked by
@@ -553,7 +554,6 @@ export function megaKeyOk(url) {
 
 // ── Folders ─────────────────────────────────────────────────────────────
 
-const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
 // Leading title groups that label the post rather than name its artist,
 // resolution and frame-rate tags (`[4K]`, `(1080p)`, `[4K60]`, `[60fps]`) and
 // series or serial codes (`【S022】`, `[PMV-64]`, `[EP 03]`) included.
@@ -569,8 +569,6 @@ const AXIS_WORDS = /(?:multi|\d+)[- ]?axis|\baxis\b/giu;
 // HereSphere / DeoVR projection tokens at the end of a video name (`_180_3DH`,
 // `_LRF_Full_SBS`). The headset and the flatten view read them from the file name.
 const VR_TAIL = /(?:[_ .-](?:180|360|180x180|360x180|3dh|3dv|lrf?|rl|tbf?|bt|ouf?|sbsf?|full|mono180|mono360|mkx2[02]0|rf52|fisheye\d*|vrca220|fb360|eac360|eac))+$/i;
-// Scene stems stay well under the 255-byte name limit with `.generated.twist.funscript`.
-const STEM_BYTES = 180;
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Letters in a name; a CJK character says as much as a short word, so it counts twice.
@@ -649,18 +647,6 @@ function parseName(text, fallback) {
   return { artist, core: tidy(core), meta: meta.filter(Boolean) };
 }
 
-/** Cut to `max` UTF-8 bytes on a character boundary. */
-function capBytes(s, max) {
-  let out = '';
-  let n = 0;
-  for (const ch of s) {
-    n += Buffer.byteLength(ch);
-    if (n > max) break;
-    out += ch;
-  }
-  return out.trim();
-}
-
 /** Creator folder: the post's artist (see parseName), else the poster; an alias as the artist it names (canonicalArtist). */
 export function creatorFolder(title, author) {
   return safeName(canonicalArtist(parseName(title, author).artist)) || 'unknown';
@@ -737,10 +723,12 @@ export function vrbangersSceneName({ performers = [], title = null, slug = '', p
 
 /**
  * Folder and stem of a post's scene: vrbangersSceneName for a vrbangers.com
- * video, else the post's `<artist>/<Artist - Title (metadata)>` (creatorFolder, sceneTitle).
+ * video, slrSceneName for a SexLikeReal one, else the post's
+ * `<artist>/<Artist - Title (metadata)>` (creatorFolder, sceneTitle).
  */
 export function sceneNameOf(c, sc) {
   if (sc.video?.host === VRBANGERS_HOST) return vrbangersSceneName(sc.video);
+  if (sc.video?.host === SLR_HOST) return slrSceneName(sc.video);
   return {
     creator: creatorFolder(c.title, c.author),
     stem: sceneTitle({ title: c.title, author: c.author, video: sc.video.name, shared: c.scenes.length > 1 }),
@@ -756,7 +744,8 @@ export function scriptFileName(stem, axis) {
  * The `eroscripts.json` sidecar of a fetched scene (read by the library
  * scan and by --retitle): the post, the post's video file name and the
  * file on disk. A vrbangers.com scene keeps its site name (`vrbangers`,
- * read by vrbangersSceneName); a rule34video one gets the page's cover as
+ * read by vrbangersSceneName), a SexLikeReal one too (`slrSceneId` and
+ * `slr`, read by slrSceneName); a rule34video one gets the page's cover as
  * `posterUrl`, which the app makes the scene's thumbnail.
  *
  * @param {object} c candidate (post)
@@ -771,6 +760,10 @@ export function sceneSidecar(c, video, file, at) {
     video: video.name, file, scenes: c.scenes.length,
     ...(video.host === VRBANGERS_HOST ? {
       vrbangers: { slug: video.slug, url: video.url, title: video.title, performers: video.performers, projection: video.projection },
+    } : {}),
+    ...(video.host === SLR_HOST ? {
+      slrSceneId: video.slrSceneId,
+      slr: { label: video.slrLabel, url: video.url, title: video.title, performers: video.performers, studio: video.studio, vrSuffix: video.vrSuffix },
     } : {}),
     ...(posterUrl ? { posterUrl } : {}),
     at,
@@ -823,10 +816,11 @@ export function retitlePlan(scenes, incoming, exists = () => false, nameOf = pos
   return moves;
 }
 
-/** An EroScripts scene's name from its post (`eroscripts.json`); a vrbangers.com video keeps its site name. */
+/** An EroScripts scene's name from its post (`eroscripts.json`); a vrbangers.com or SexLikeReal video keeps its site name. */
 function postSceneName(s, video, shared) {
   const { title, author } = s.rec;
   if (s.rec.vrbangers) return vrbangersSceneName(s.rec.vrbangers);
+  if (s.rec.slr) return slrSceneName(s.rec.slr);
   return { creator: creatorFolder(title, author), stem: sceneTitle({ title, author, video: s.rec.video || video, shared }) };
 }
 
@@ -886,8 +880,11 @@ export function remapPaths(value, moves) {
 // Verdicts made under older rules count as unseen, and a `no-video` post
 // with activity after its verdict is judged again.
 
-/** Bump when the screening rules change, so every post is judged again (12: vrbangers.com links count as videos; 13: no sex rule). */
-export const RULES_VERSION = 13;
+/**
+ * Bump when the screening rules change, so every post is judged again (12: vrbangers.com links count as videos;
+ * 13: no sex rule; 14: SexLikeReal scene links, and an SLR scene search for posts naming SLR, count as videos).
+ */
+export const RULES_VERSION = 14;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };
@@ -1353,9 +1350,11 @@ export function manualPageUrl(file) {
 
 /**
  * The posts of a download queue with files on MANUAL_HOSTS, in queue order:
- * `[{id, title, url, files: [{name, size, page}]}]`, every script and video
- * of the post's wanted scenes that sits on such a host. Scenes `isDone`
- * (already fetched or turned down) are left out.
+ * `[{id, title, url, files: [{name, size, page}], account: [{name, size,
+ * page}]}]`, every script and video of the post's wanted scenes that sits
+ * on such a host, and in `account` its SexLikeReal videos (`--fetch` takes
+ * them with the SLR account; nothing to do by hand). Scenes `isDone`
+ * (already fetched or turned down) are left out, and posts with neither.
  *
  * @param {object[]} queue downloadQueue's result
  * @param {(id: number, videoName: string) => boolean} [isDone]
@@ -1364,13 +1363,15 @@ export function manualDownloads(queue, isDone = () => false) {
   const out = [];
   for (const c of queue) {
     const files = new Map();
+    const account = new Map();
     for (const sc of c.scenes || []) {
       if (isDone(c.id, sc.video.name)) continue;
       for (const f of [...(sc.scripts || []), sc.video]) {
         if (f && MANUAL_HOSTS.has(f.host) && !files.has(f.name)) files.set(f.name, { name: f.name, size: f.size || null, page: manualPageUrl(f) });
       }
+      if (sc.video?.host === SLR_HOST && !account.has(sc.video.name)) account.set(sc.video.name, { name: sc.video.name, size: sc.video.size || null, page: sc.video.url });
     }
-    if (files.size) out.push({ id: c.id, title: c.title, url: c.url, files: [...files.values()] });
+    if (files.size || account.size) out.push({ id: c.id, title: c.title, url: c.url, files: [...files.values()], account: [...account.values()] });
   }
   return out;
 }
@@ -1405,14 +1406,23 @@ export function manualListText(posts, { folder, generatedAt = new Date().toISOSt
     `       npm run eroscripts:scout -- --fetch --ids ${posts.map((p) => p.id).join(',') || '<ids>'}`,
     '     Each file is moved into the library (EroScripts folder), the scene is named as',
     '     usual, and the file is taken out of Downloads.',
+    `  6. Lines marked "${SLR_ACCOUNT_DOWNLOAD}" need nothing by hand: --fetch downloads them`,
+    '     with the SexLikeReal account (npm run slr:scout -- --login once).',
     '',
-    `${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files${total ? `, about ${(total / 1e9).toFixed(1)} GB` : ''}`,
+    `${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files${total ? `, about ${(total / 1e9).toFixed(1)} GB` : ''}${accountLine(posts)}`,
   ];
   posts.forEach((p, i) => {
     lines.push('', `${i + 1}. ${p.title}`, `   Post: ${p.url}  (id ${p.id})`);
     for (const f of p.files) lines.push(`   - ${f.name}${size(f.size)}`, `     ${f.page}`);
+    for (const f of p.account || []) lines.push(`   ${SLR_ACCOUNT_DOWNLOAD}: ${f.name}${size(f.size)}  ${f.page}`);
   });
   return `${lines.join('\n')}\n`;
+}
+
+/** `, and 3 SexLikeReal videos the account downloads` for the list's count line; '' without any. */
+function accountLine(posts) {
+  const n = posts.reduce((k, p) => k + (p.account?.length || 0), 0);
+  return n ? `, and ${n} SexLikeReal video${n > 1 ? 's' : ''} the account downloads` : '';
 }
 
 /**

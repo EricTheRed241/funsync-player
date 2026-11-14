@@ -344,6 +344,108 @@ fn swipes_through_the_deck() {
 }
 
 #[test]
+fn slr_tab_deals_posts_on_slr_and_scenes() {
+    let tmp = TempDir::new("slr");
+    let ud = tmp.0.join("userData");
+    fs::create_dir_all(&ud).unwrap();
+    let waiting = json!({"candidates": [
+        {"id": 31, "title": "MEGA post", "score": 9.5, "axisType": "multi", "scenes": [{"video": {"host": "MEGA"}}]},
+        {"id": 34, "title": "SLR post", "score": 4, "axisType": "multi", "tagScores": {"pov": 2},
+         "scenes": [{"axes": ["twist"], "video": {"name": "A - B (C)_180_LR.mp4", "host": "slr", "slrSceneId": 66249,
+             "slrLabel": "b-66249", "url": "https://www.sexlikereal.com/scenes/b-66249", "size": null, "height": 2880}}]}
+    ]});
+    let scout = json!({"generatedAt": "2026-11-13T18:00:00.000Z",
+    "quota": {"videos": {"remaining": 30, "total": 35}},
+    "scenes": [
+        {"id": 66249, "title": "Same video as post 34", "score": 8},
+        {"id": 51207, "title": "Scene", "score": 6, "tags": ["milf"], "tagScores": {"milf": 2},
+         "scriptSource": "slr-handcrafted", "scoreParts": {"vr": 2, "tag:milf": 2}},
+        {"id": 70001, "title": "Downloaded", "score": 9, "fetchedAt": "2026-11-13T19:00:00.000Z"}
+    ]});
+    fs::write(ud.join("eroscripts-scout.json"), waiting.to_string()).unwrap();
+    fs::write(ud.join("slr-scout.json"), scout.to_string()).unwrap();
+    let (_server, port) = start(&ud);
+    let deck = |path: &str| -> Value { serde_json::from_slice(&get(port, path).2).unwrap() };
+    let cards = |d: &Value| -> Vec<(String, u64)> {
+        d["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    c["source"].as_str().unwrap().into(),
+                    c["id"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+
+    // Post 34 shows on the SLR tab only; scene 66249 comes with it, 70001 is downloaded.
+    let multi = deck("/api/deck");
+    assert_eq!(multi["cards"].as_array().unwrap().len(), 1);
+    assert_eq!(multi["cards"][0]["id"], 31);
+    let slr = deck("/api/slr/deck");
+    assert_eq!(
+        cards(&slr),
+        [("slr".into(), 51207), ("eroscripts".into(), 34)]
+    );
+    assert_eq!(
+        (slr["remaining"].as_u64(), slr["wanted"].as_u64()),
+        (Some(2), Some(0))
+    );
+    assert_eq!(slr["quota"]["videos"]["remaining"], 30);
+    let scene = &slr["cards"][0];
+    assert_eq!(scene["scriptSource"], "slr-handcrafted");
+    assert_eq!(scene["tags"], json!([{"tag": "milf", "score": 2.0}]));
+    let post34 = &slr["cards"][1];
+    assert_eq!(
+        post34["slrVideo"]["url"],
+        "https://www.sexlikereal.com/scenes/b-66249"
+    );
+    assert_eq!(post34["topTags"], json!([{"tag": "pov", "score": 2.0}]));
+
+    // Each card's swipe goes through its own endpoint into its own file.
+    assert_eq!(
+        post(port, "/api/swipe", r#"{"id":34,"dir":"right"}"#).0,
+        200
+    );
+    assert_eq!(
+        post(port, "/api/slr/swipe", r#"{"id":51207,"dir":"left"}"#).0,
+        200
+    );
+    let read = |name: &str| -> Value {
+        serde_json::from_slice(&fs::read(ud.join(name)).unwrap()).unwrap()
+    };
+    let ero = read("eroscripts-scout-swipes.json");
+    let scenes = read("slr-scout-swipes.json");
+    assert_eq!(ero["swipes"]["34"]["dir"], "right");
+    assert!(ero["swipes"].get("51207").is_none());
+    assert_eq!(scenes["swipes"]["51207"]["dir"], "left");
+    assert!(scenes["swipes"].get("34").is_none());
+    let slr = deck("/api/slr/deck");
+    assert_eq!(
+        (
+            cards(&slr).len(),
+            slr["remaining"].as_u64(),
+            slr["wanted"].as_u64()
+        ),
+        (0, Some(0), Some(1))
+    );
+    assert_eq!(deck("/api/deck")["wanted"], 0);
+
+    // Undo, each through its own endpoint.
+    assert_eq!(
+        post(port, "/api/slr/swipe/undo", r#"{"id":51207}"#).1["removed"],
+        true
+    );
+    assert_eq!(
+        post(port, "/api/swipe/undo", r#"{"id":34}"#).1["removed"],
+        true
+    );
+    assert_eq!(cards(&deck("/api/slr/deck")).len(), 2);
+}
+
+#[test]
 fn help_and_errors() {
     let out = Command::new(BIN).arg("--help").output().unwrap();
     assert_eq!(out.status.code(), Some(0));

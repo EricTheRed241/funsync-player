@@ -16,14 +16,20 @@
 //
 // Values the Rust CLIs read too live in content-preferences.json next to this
 // file (the shared part of the preferences: Rust embeds it at compile time,
-// crates/age-screen, crates/pornstar-tags). The ones the app uses are
-// exported here like the rest (`pornstarTags` is read by Rust only); change
-// them there.
+// crates/age-screen, crates/pornstar-tags, crates/slr-scout). The ones the app
+// uses are exported here like the rest (`pornstarTags` and `slrScout` are read
+// by Rust only); change them there: the ratings threshold, the underage
+// screener, LIBRARY_MAX_VIDEOS, the VR / flat caps, FAVOURITES, RANKING,
+// TAG_SCORE_GROUPS (whose tag lists MUSIC_TAGS, POV_TAGS, MONSTER_TAGS,
+// FEET_TAGS and FFM_TAGS are) and ANIMATION_TAGS.
 // Values with a copy outside JavaScript: TOP_RATED_MIN and the SCORE_BANDS
 // thresholds are mirrored in backend/services/vr_sections.py, DEFAULT_SORT in
 // backend/web-remote/sort-default.js (the phone can't import this file).
 
 import data from './content-preferences.json' with { type: 'json' };
+
+/** A TAG_SCORE_GROUPS group's tags. */
+const groupTags = (name) => data.tagScoreGroups.find((g) => g.name === name).tags;
 
 // ── Discovery: what never comes in ──────────────────────────────────────
 
@@ -45,19 +51,15 @@ export const FURRY_TAGS = new Set([
   'renamon-digimon', 'five-nights-at-freddy-s', 'roxanne-wolf-five-nights-at-freddy-s',
 ]);
 /** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post): not preferred, they rank lower (the Monster group of TAG_SCORE_GROUPS) but still come in. Succubi, demon girls and elves aren't monsters. */
-export const MONSTER_TAGS = new Set([
-  'monster', 'monsters', 'monstergirls', 'monstergirl', 'monster-girl', 'monster-girls', 'tentacle', 'tentacles', 'tentacle-sex',
-  'tentacle-monster', 'werewolf', 'werewolves', 'horse', 'horse-cock', 'horsecock', 'bestiality', 'animated-bestiality', 'zoophilia',
-  'orc', 'orcs', 'goblin', 'goblins', 'minotaur', 'ogre', 'troll', 'alien', 'aliens', 'beast', 'slime-girl', 'knot', 'knotted', 'knotting',
-]);
+export const MONSTER_TAGS = new Set(groupTags('Monster'));
 export const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
 /** `Mercy X WW`: Solace2K and Rekin3D's short for werewolf, a standalone capital token. */
 export const WEREWOLF_TOKEN = /(?<![\p{L}\p{N}])WW(?![\p{L}\p{N}])/u;
 /** Feet, by tag or title word (EroScripts also in the first post): not preferred, they rank lower (the Feet group of TAG_SCORE_GROUPS) but still come in. */
-export const FEET_TAGS = new Set(['footjob', 'feet', 'foot', 'foot-fetish', 'foot-worship', 'footsie', 'soles', 'toes']);
+export const FEET_TAGS = new Set(groupTags('Feet'));
 export const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|footsie)(?![\p{L}\p{N}])|足コキ/iu;
 /** FFM (two women, one man), by tag or title word (EroScripts also in the first post): not preferred, ranks lower (the FFM group of TAG_SCORE_GROUPS) but still comes in. */
-export const FFM_TAGS = new Set(['ffm', 'f-f-m', 'ffm-threesome']);
+export const FFM_TAGS = new Set(groupTags('FFM'));
 export const FFM_TITLE = /(?<![\p{L}\p{N}])ffm(?![\p{L}\p{N}])/iu;
 /** Tags that say a post has no porn in it: never taken. */
 export const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 'non-nude']);
@@ -70,8 +72,8 @@ export const MIN_VIDEO_MS = 110_000;
 
 // ── Discovery: animated or live action ──────────────────────────────────
 
-/** Animation tags: a post with one (and no `real` tag) is animated; anything else is live action. AI video counts. */
-export const ANIMATION_TAGS = new Set(['animation', '3d', 'hentai', 'vam', 'sfm', 'mmd', 'cgi', 'cartoon', 'blender', 'animate', 'anime', 'koikatsu', 'honey-select']);
+/** Animation tags: a post with one (and no `real` tag) is animated; anything else is live action. AI video counts. slr:scout drops them from SLR's categories (live action; its `3D` means stereoscopic). */
+export const ANIMATION_TAGS = new Set(data.animationTags);
 /** More animation tags, as FapTap uses them. */
 export const FAPTAP_ANIMATION_TAGS = new Set(['2d', 'ai-video', 'iwara']);
 /** FapTap tags that make a video live action even with an animation tag (also any `amateur…` tag, and FapTap models / pornstars as performers). */
@@ -87,9 +89,10 @@ export const LIVE_TAGS = new Set([
 export const FEED_TAGS = ['multi-axis', 'animation', '3d', 'vam', 'sfm'];
 /**
  * Feeds the forum has no tag for, listed by a search of Free Scripts first posts instead (feed → search words).
- * Not in a default scan: `--feeds vrbangers`, or `npm run vrbangers:scout` (VRBangers posts only).
+ * Not in a default scan: `--feeds vrbangers`, or `npm run vrbangers:scout` (VRBangers posts only); `--feeds slr`
+ * (posts whose video is on SexLikeReal, all performers; downloaded with the user's SLR account).
  */
-export const SEARCH_FEEDS = { vrbangers: 'vrbangers' };
+export const SEARCH_FEEDS = { vrbangers: 'vrbangers', slr: 'sexlikereal' };
 /** PMV / HMV / Cock Hero / Fap Hero, by tag … */
 export const PMV_TAGS = new Set(['pmv', 'hmv', 'cock-hero', 'fap-hero', 'music-video']);
 /** … or by title. */
@@ -100,7 +103,7 @@ export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{
 // RANKING.multiAxis higher and download first. FapTap has no multi-axis
 // scripts, so all of its scenes come in single-axis.
 /** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
-export const LIBRARY_MAX_VIDEOS = 1000;
+export const LIBRARY_MAX_VIDEOS = data.libraryMaxVideos;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
 export const FAPTAP_FOCUS = [
   { name: 'PMV / HMV', tags: [...PMV_TAGS], title: PMV_TITLE },
@@ -121,7 +124,7 @@ export const FAPTAP_FOCUS_MIN = 2;
  * in the web remote's Artists view; `library.favouriteArtists` holds only
  * those changes (renderer/js/favourite-artists.js).
  */
-export const FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle Mocap', 'Noodledude', 'NoFaceGirl', 'Candy Love', 'JJULEZ'];
+export const FAVOURITES = data.favourites;
 /**
  * Flat live action is turned down only when something shows it isn't POV
  * (user, 2026-11-03: favourites exempt; "let's not bother if we don't have
@@ -131,7 +134,7 @@ export const FAVOURITES = ['ScyllaHMV', 'Agapilord', 'Eternal Enigma', 'Cuddle M
  * a title word) always passes, and so do VR, favourites and posts the user
  * picks by id (`--add`). No indication either way passes.
  */
-export const POV_TAGS = new Set(['pov', 'male-pov']);
+export const POV_TAGS = new Set(groupTags('POV'));
 export const POV_TITLE = /(?<![\p{L}\p{N}])pov(?![\p{L}\p{N}])/iu;
 export const NON_POV_TAGS = new Set(['non-pov', 'no-pov', 'not-pov']);
 export const COMPILATION_TITLE = /(?<![\p{L}\p{N}])compilations?(?![\p{L}\p{N}])/iu;
@@ -139,7 +142,7 @@ export const COMPILATION_TITLE = /(?<![\p{L}\p{N}])compilations?(?![\p{L}\p{N}])
 // ── Discovery: ranking ──────────────────────────────────────────────────
 
 /** Music tags (the Music tag-score group). */
-export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-based', 'music-video', 'cock-hero', 'fap-hero', 'compilation']);
+export const MUSIC_TAGS = new Set(groupTags('Music'));
 /**
  * Candidate score for what isn't a single tag; higher downloads first. Likes
  * add likes / likesPer, up to likesMax; 2D hentai only loses hentaiOnly.
@@ -150,7 +153,7 @@ export const MUSIC_TAGS = new Set(['music', 'pmv', 'hmv', 'beat-based', 'music-b
  * Tag preferences are TAG_SCORE_GROUPS. The app scores every library scene
  * the same way (preference-score.js, library-scores.js).
  */
-export const RANKING = { vr: 3, artistInLibrary: 2, favouriteArtist: 5, multiAxis: 4, likesPer: 20, likesMax: 3, hentaiOnly: 3 };
+export const RANKING = data.ranking;
 /**
  * Tag scores the preference score starts from: every tag of a group starts at
  * the group's score, and a scene counts each group once (its highest positive
@@ -161,15 +164,7 @@ export const RANKING = { vr: 3, artistInLibrary: 2, favouriteArtist: 5, multiAxi
  * post) names it without a tag (lessPreferred in preference-score.js).
  * A tag belongs to one group at most.
  */
-export const TAG_SCORE_GROUPS = [
-  { name: 'Creampie', score: 2, tags: ['creampie', 'anal-creampie'] },
-  { name: 'Riding', score: 2, tags: ['riding', 'cowgirl', 'reverse-cowgirl', 'sitting-reverse-cowgirl'] },
-  { name: 'Music', score: 2, tags: [...MUSIC_TAGS] },
-  { name: 'POV', score: 1, tags: [...POV_TAGS] },
-  { name: 'Monster', score: -0.5, tags: [...MONSTER_TAGS], named: 'monster' },
-  { name: 'Feet', score: -0.5, tags: [...FEET_TAGS], named: 'feet' },
-  { name: 'FFM', score: -0.5, tags: [...FFM_TAGS], named: 'ffm' },
-];
+export const TAG_SCORE_GROUPS = data.tagScoreGroups;
 /** 2D hentai only: animation tags among these, no THREE_D_TAGS and no THREE_D_TITLE. */
 export const FLAT_HENTAI_TAGS = new Set(['hentai', '2d', 'anime']);
 export const THREE_D_TAGS = new Set(['3d', 'sfm', 'vam', 'mmd', 'cgi', 'blender', 'koikatsu', 'honey-select']);
@@ -178,10 +173,10 @@ export const THREE_D_TITLE = /(?<![\p{L}\p{N}])(3d|sfm|vam|mmd)(?![\p{L}\p{N}])/
 // ── Video quality ───────────────────────────────────────────────────────
 
 /** VR playback caps (heavier files stutter in the headset): ≤ 8K, ≤ 60 fps, the low bitrate when offered. */
-export const VR_MAX_HEIGHT = 4320;
-export const VR_MAX_FPS = 60;
+export const VR_MAX_HEIGHT = data.videoCaps.vrMaxHeight;
+export const VR_MAX_FPS = data.videoCaps.vrMaxFps;
 /** Flat: ≤ 4K, otherwise the highest quality. */
-export const FLAT_MAX_HEIGHT = 2160;
+export const FLAT_MAX_HEIGHT = data.videoCaps.flatMaxHeight;
 /** Lowest FapTap stream worth downloading (lower ones are preview uploads). */
 export const MIN_STREAM_HEIGHT = { flat: 720, vr: 1080 };
 

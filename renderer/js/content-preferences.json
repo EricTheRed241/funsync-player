@@ -8,6 +8,33 @@
   "ratings": {
     "deleteAtOrBelow": 2
   },
+  "libraryMaxVideos": 1000,
+  "videoCaps": {
+    "vrMaxHeight": 4320,
+    "vrMaxFps": 60,
+    "flatMaxHeight": 2160
+  },
+  "favourites": ["ScyllaHMV", "Agapilord", "Eternal Enigma", "Cuddle Mocap", "Noodledude", "NoFaceGirl", "Candy Love", "JJULEZ"],
+  "animationTags": ["animation", "3d", "hentai", "vam", "sfm", "mmd", "cgi", "cartoon", "blender", "animate", "anime", "koikatsu", "honey-select"],
+  "ranking": { "vr": 3, "artistInLibrary": 2, "favouriteArtist": 5, "multiAxis": 4, "likesPer": 20, "likesMax": 3, "hentaiOnly": 3 },
+  "tagScoreGroups": [
+    { "name": "Creampie", "score": 2, "tags": ["creampie", "anal-creampie"] },
+    { "name": "Riding", "score": 2, "tags": ["riding", "cowgirl", "reverse-cowgirl", "sitting-reverse-cowgirl"] },
+    { "name": "Music", "score": 2, "tags": ["music", "pmv", "hmv", "beat-based", "music-based", "music-video", "cock-hero", "fap-hero", "compilation"] },
+    { "name": "POV", "score": 1, "tags": ["pov", "male-pov"] },
+    {
+      "name": "Monster",
+      "score": -0.5,
+      "tags": [
+        "monster", "monsters", "monstergirls", "monstergirl", "monster-girl", "monster-girls", "tentacle", "tentacles", "tentacle-sex",
+        "tentacle-monster", "werewolf", "werewolves", "horse", "horse-cock", "horsecock", "bestiality", "animated-bestiality", "zoophilia",
+        "orc", "orcs", "goblin", "goblins", "minotaur", "ogre", "troll", "alien", "aliens", "beast", "slime-girl", "knot", "knotted", "knotting"
+      ],
+      "named": "monster"
+    },
+    { "name": "Feet", "score": -0.5, "tags": ["footjob", "feet", "foot", "foot-fetish", "foot-worship", "footsie", "soles", "toes"], "named": "feet" },
+    { "name": "FFM", "score": -0.5, "tags": ["ffm", "f-f-m", "ffm-threesome"], "named": "ffm" }
+  ],
   "pornstarTags": {
     "minScenes": 2,
     "pornstars": [
@@ -43,10 +70,11 @@
   },
   "slrScout": {
     "actors": ["Miss Lexa"],
+    "includeFavourites": true,
+    "includePornstars": true,
     "vrOnly": true,
-    "requireCreampie": true,
+    "requireCreampie": false,
     "bonuses": { "handmadeScript": 4, "pmv": 2, "compilation": 2 },
-    "popularityPer": 1000,
-    "popularityMax": 2
+    "popularityPer": 1500
   }
 }

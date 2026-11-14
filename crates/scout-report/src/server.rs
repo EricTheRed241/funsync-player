@@ -1,9 +1,10 @@
 //! The HTTP side: one request at a time. `GET /` (the report page),
 //! `GET /api/report` (the report, rebuilt from the files on every request),
 //! `GET /swipe` (the deck page), `GET /api/deck?limit=N&seed=N&jitter=N&exclude=ids&stack=…`
-//! (the next cards), `GET /api/slr/deck?limit=N&seed=N&jitter=N&exclude=ids` (the SLR tab's
-//! cards and quota), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}`, and the
-//! same under `/api/slr/` (the only writes: eroscripts-scout-swipes.json and
+//! (the next cards), `GET /api/slr/deck?limit=N&seed=N&jitter=N&exclude=ids&excludeScenes=ids`
+//! (the SLR tab's cards: EroScripts posts with their video on SLR and slr:scout's scenes, and
+//! the quota), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (posts), and the
+//! same under `/api/slr/` (scenes; the only writes: eroscripts-scout-swipes.json and
 //! slr-scout-swipes.json).
 
 use crate::swipes::{self, Dir, Store};
@@ -85,8 +86,9 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 
 /// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
 /// `seed=N` (shuffle a little), `jitter=N` (how much, in score points: 0 ..= MAX_JITTER;
-/// default the stack's), `exclude=id,id,…` (cards the page holds; at most MAX_EXCLUDE)
-/// and `stack=multi|single` (default multi).
+/// default the stack's), `exclude=id,id,…` (posts the page holds, by topic id) and
+/// `excludeScenes=id,id,…` (SLR scenes it holds, by scene id; the SLR deck only), at most
+/// MAX_EXCLUDE ids in all, and `stack=multi|single` (default multi).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
@@ -116,15 +118,23 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
                     })?;
                 d.jitter = Some(n);
             }
-            "exclude" => {
+            "exclude" | "excludeScenes" => {
+                let set = if key == "exclude" {
+                    &mut d.exclude
+                } else {
+                    &mut d.exclude_scenes
+                };
                 for id in v.split(',').filter(|s| !s.is_empty()) {
                     let id = id
                         .parse::<u64>()
-                        .map_err(|_| format!("exclude takes ids, got {id:?}\n"))?;
-                    d.exclude.insert(id);
+                        .map_err(|_| format!("{key} takes ids, got {id:?}\n"))?;
+                    set.insert(id);
                 }
-                if d.exclude.len() > deck::MAX_EXCLUDE {
-                    return Err(format!("exclude takes at most {} ids\n", deck::MAX_EXCLUDE));
+                if d.exclude.len() + d.exclude_scenes.len() > deck::MAX_EXCLUDE {
+                    return Err(format!(
+                        "exclude and excludeScenes take at most {} ids\n",
+                        deck::MAX_EXCLUDE
+                    ));
                 }
             }
             "stack" => {
@@ -569,11 +579,34 @@ mod tests {
         assert_eq!(v["quota"]["scripts"]["remaining"], 1);
         assert_eq!(v["quotaError"], "session expired");
         assert_eq!(v["cards"][0]["source"], "slr");
+        // The page's scenes go in excludeScenes; exclude holds posts (topic 66249 isn't one here).
         assert_eq!(
-            ids(&get_json("/api/slr/deck?exclude=66249&limit=5", &dir)),
+            ids(&get_json("/api/slr/deck?excludeScenes=66249&limit=5", &dir)),
             [8]
         );
+        assert_eq!(
+            ids(&get_json("/api/slr/deck?exclude=66249&limit=5", &dir)),
+            [66249, 8]
+        );
         assert_eq!(route("GET", "/api/slr/deck?limit=x", b"", &dir).status, 400);
+        assert_eq!(
+            route("GET", "/api/slr/deck?excludeScenes=1,x", b"", &dir).status,
+            400
+        );
+        let half = (0..deck::MAX_EXCLUDE / 2 + 1)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            route(
+                "GET",
+                &format!("/api/slr/deck?exclude={half}&excludeScenes={half}"),
+                b"",
+                &dir
+            )
+            .status,
+            400
+        );
 
         // Only scenes in slr-scout.json; topic 9 (waiting on EroScripts) isn't one.
         let post = |path: &str, body: &[u8]| route("POST", path, body, &dir).status;
@@ -593,6 +626,90 @@ mod tests {
 
         assert_eq!(post("/api/slr/swipe/undo", br#"{"id":66249}"#), 200);
         assert_eq!(ids(&get_json("/api/slr/deck", &dir)), [66249]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn slr_tab_deals_posts_with_an_slr_video_and_scenes() {
+        let dir = with_waiting("slr-posts");
+        let slr = |scene: u64| {
+            json!([{"video": {"host": "slr", "slrSceneId": scene,
+                "url": format!("https://www.sexlikereal.com/scenes/s-{scene}")}}])
+        };
+        let waiting = json!({"candidates": [
+            {"id": 7, "score": 1, "axisType": "multi"}, {"id": 8, "score": 3, "axisType": "multi"},
+            {"id": 9, "score": 2, "axisType": "multi"},
+            {"id": 40, "score": 5, "axisType": "multi", "scenes": slr(66249)},
+            {"id": 41, "score": 2, "axisType": "single", "scenes": slr(5555)}
+        ]});
+        std::fs::write(dir.join(report::WAITING_FILE), waiting.to_string()).unwrap();
+        std::fs::write(
+            dir.join(slr::SCOUT_FILE),
+            br#"{"scenes":[{"id":66249,"score":6},{"id":77,"score":3}]}"#,
+        )
+        .unwrap();
+        // The posts on SLR left the Multi-axis / Single-axis stacks.
+        let v = get_json("/api/deck", &dir);
+        assert_eq!((ids(&v), v["remaining"].as_u64()), (vec![8, 9, 7], Some(3)));
+        assert_eq!(
+            ids(&get_json("/api/deck?stack=single", &dir)),
+            [] as [u64; 0]
+        );
+        // The SLR tab: both posts and scene 77; 66249 comes with post 40.
+        let v = get_json("/api/slr/deck", &dir);
+        let cards = |v: &Value| -> Vec<(String, u64)> {
+            v["cards"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| {
+                    (
+                        c["source"].as_str().unwrap().to_string(),
+                        c["id"].as_u64().unwrap(),
+                    )
+                })
+                .collect()
+        };
+        let all = [
+            ("eroscripts".to_string(), 40),
+            ("slr".to_string(), 77),
+            ("eroscripts".to_string(), 41),
+        ];
+        assert_eq!(cards(&v), all);
+        assert_eq!(
+            (v["remaining"].as_u64(), v["wanted"].as_u64()),
+            (Some(3), Some(0))
+        );
+        assert_eq!(
+            v["cards"][0]["slrVideo"]["url"],
+            "https://www.sexlikereal.com/scenes/s-66249"
+        );
+        let v = get_json("/api/slr/deck?exclude=40&excludeScenes=77", &dir);
+        assert_eq!(cards(&v), all[2..]);
+
+        // A post's swipe goes to the EroScripts file, a scene's to the SLR file; neither
+        // endpoint takes the other's ids.
+        let post = |path: &str, body: &[u8]| route("POST", path, body, &dir).status;
+        assert_eq!(post("/api/slr/swipe", br#"{"id":40,"dir":"right"}"#), 400);
+        assert_eq!(post("/api/swipe", br#"{"id":77,"dir":"left"}"#), 400);
+        assert_eq!(post("/api/swipe", br#"{"id":40,"dir":"right"}"#), 200);
+        assert_eq!(post("/api/slr/swipe", br#"{"id":77,"dir":"left"}"#), 200);
+        let ero = swipes::EROSCRIPTS.read(&dir).unwrap();
+        let scenes = swipes::SLR.read(&dir).unwrap();
+        assert_eq!((ero.dir(40), ero.dir(77)), (Some(Dir::Right), None));
+        assert_eq!((scenes.dir(77), scenes.dir(40)), (Some(Dir::Left), None));
+        let v = get_json("/api/slr/deck", &dir);
+        assert_eq!(cards(&v), all[2..]);
+        assert_eq!(
+            (v["remaining"].as_u64(), v["wanted"].as_u64()),
+            (Some(1), Some(1))
+        );
+        // The Multi-axis stack doesn't count post 40's right swipe.
+        assert_eq!(get_json("/api/deck", &dir)["wanted"], 0);
+
+        assert_eq!(post("/api/swipe/undo", br#"{"id":40}"#), 200);
+        assert_eq!(post("/api/slr/swipe/undo", br#"{"id":77}"#), 200);
+        assert_eq!(cards(&get_json("/api/slr/deck", &dir)), all);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
