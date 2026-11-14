@@ -46,6 +46,17 @@ pub fn right_swipes(user_data: &Path) -> Result<Vec<u64>, String> {
     swipe_ids(user_data, |s| s["dir"] == "right")
 }
 
+/// The scenes to download: swiped right, not fetched yet, highest score first (ties by
+/// newest id), so the best ones get the weekly videos and monthly scripts before the rest.
+pub fn fetch_queue(scenes: &[crate::store::Scene], right: &[u64]) -> Vec<u64> {
+    let mut queue: Vec<&crate::store::Scene> = scenes
+        .iter()
+        .filter(|s| right.contains(&s.id) && s.fetched_at.is_none())
+        .collect();
+    queue.sort_by(|a, b| b.score.total_cmp(&a.score).then(b.id.cmp(&a.id)));
+    queue.into_iter().map(|s| s.id).collect()
+}
+
 /// The scene ids swiped either way (the deck shows neither again).
 pub fn swiped(user_data: &Path) -> Result<Vec<u64>, String> {
     swipe_ids(user_data, |_| true)
@@ -392,12 +403,7 @@ impl Fetch<'_> {
             .copied()
             .filter(|id| !file.scenes.iter().any(|s| s.id == *id))
             .collect();
-        let queue: Vec<u64> = file
-            .scenes
-            .iter()
-            .filter(|s| right.contains(&s.id) && s.fetched_at.is_none())
-            .map(|s| s.id)
-            .collect();
+        let queue = fetch_queue(&file.scenes, &right);
         let done = right.len() - missing.len() - queue.len();
         writeln!(
             out,
@@ -1060,6 +1066,28 @@ mod tests {
         assert_eq!(slr_script_id(&d, true), Some(1));
         assert_eq!(slr_script_id(&d, false), Some(2));
         assert_eq!(slr_script_id(&json!({}), false), None);
+    }
+
+    #[test]
+    fn fetches_highest_score_first() {
+        let s = |id: u64, score: f64, fetched: bool| {
+            let mut s = crate::slr::scene(&json!({"id": id, "label": format!("s-{id}")})).unwrap();
+            s.score = score;
+            if fetched {
+                s.fetched_at = Some("2026-11-14T00:00:00Z".into());
+            }
+            s
+        };
+        // Listed out of score order; 4 isn't swiped, 5 is fetched already.
+        let scenes = [
+            s(1, 3.0, false),
+            s(2, 9.5, false),
+            s(3, 9.5, false),
+            s(4, 20.0, false),
+            s(5, 30.0, true),
+            s(6, -1.0, false),
+        ];
+        assert_eq!(fetch_queue(&scenes, &[1, 2, 3, 5, 6]), [3, 2, 1, 6]);
     }
 
     #[test]
