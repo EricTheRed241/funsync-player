@@ -14,7 +14,7 @@ import {
   staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, topicsMissingInfo, addPostInfo, readSwipes, scoredCandidate,
   contentRuleBreak, isHentaiOnly, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
-  scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS,
+  scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS, IMAGES_VERSION,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
@@ -684,33 +684,37 @@ describe('scan state', () => {
     expect(state.topics[7]).toMatchObject({ verdict: 'candidate', title: 'Tracer rides', author: 'Croove' });
   });
 
-  it('keeps up to 5 images of the post with its verdict, from the topic payload only', () => {
+  it('keeps the post images (the topic image only when the post shows it) with its verdict, from the topic payload only', () => {
     const state = emptyScoutState();
-    const cooked = '<p><img src="/uploads/default/original/1X/a.jpg" width="690"></p><p><img src="/uploads/default/original/1X/b.png" width="80"></p>';
+    const cooked = '<p><img src="/uploads/default/original/1X/a.jpg" width="690" height="388"></p><p><img src="/uploads/default/original/1X/b.png" width="80" height="80"></p>';
     markTopic(state, 7, 'candidate', 0, RULES_VERSION, postInfo({ id: 7, title: 'Tracer rides' }, { image_url: 'https://cdn/rep.webp', post_stream: { posts: [{ cooked }] } }));
-    expect(state.topics[7].images).toEqual(['https://cdn/rep.webp', 'https://discuss.eroscripts.com/uploads/default/original/1X/a.jpg']);
+    expect(state.topics[7]).toMatchObject({ images: ['https://discuss.eroscripts.com/uploads/default/original/1X/a.jpg'], imagesVersion: IMAGES_VERSION });
     markTopic(state, 7, 'candidate', 0, RULES_VERSION, postInfo({ id: 7, title: 'Tracer rides' }));
-    expect(state.topics[7].images).toEqual(['https://cdn/rep.webp', 'https://discuss.eroscripts.com/uploads/default/original/1X/a.jpg']);
+    expect(state.topics[7]).toMatchObject({ images: ['https://discuss.eroscripts.com/uploads/default/original/1X/a.jpg'], imagesVersion: IMAGES_VERSION });
     // A payload without images is remembered as read (no --titles again).
     markTopic(state, 8, 'no-video', 0, RULES_VERSION, postInfo({ id: 8, title: 'Plain' }, { post_stream: { posts: [{ cooked: '<p>text</p>' }] } }));
     expect(state.topics[8].images).toEqual([]);
+    expect(topicsMissingInfo(state)).toEqual([]);
   });
 
-  it('lists judged posts without a title or images, waiting ones first, fills them in without touching the verdict, and skips gone ones', () => {
+  it('lists judged posts without a title or current images, waiting ones first, fills them in without touching the verdict, and skips gone ones', () => {
     const state = emptyScoutState();
     markTopic(state, 5, 'excluded', 0);
     markTopic(state, 9, 'no-video', 0);
     markTopic(state, 7, 'candidate', 0, RULES_VERSION, { title: 'Has one' });
-    markTopic(state, 8, 'candidate', 0, RULES_VERSION, { title: 'Has both', images: [] });
+    markTopic(state, 8, 'candidate', 0, RULES_VERSION, { title: 'Has both', images: [], imagesVersion: IMAGES_VERSION });
+    markTopic(state, 6, 'candidate', 0, RULES_VERSION, { title: 'Older pick', images: ['https://cdn/banner.png'] });
     markTopic(state, 3, 'no-video', 0);
     state.topics[3].gone = true;
-    expect(topicsMissingInfo(state)).toEqual([9, 7, 5]);
-    expect(topicsMissingInfo(state, [5, 99, 8, 3])).toEqual([5, 9, 7]);
-    addPostInfo(state, 9, { title: 'Kiriko', created_at: '2025-03-01T00:00:00Z', image_url: 'https://cdn/x.webp', post_stream: { posts: [{ username: 'Ent_Duke' }] } });
+    expect(topicsMissingInfo(state)).toEqual([9, 7, 6, 5]);
+    expect(topicsMissingInfo(state, [5, 99, 8, 3])).toEqual([5, 9, 7, 6]);
+    addPostInfo(state, 9, { title: 'Kiriko', created_at: '2025-03-01T00:00:00Z', image_url: 'https://cdn/x.webp', post_stream: { posts: [{ username: 'Ent_Duke', cooked: '<p><img src="https://cdn/x.webp" width="640" height="360"></p>' }] } });
     addPostInfo(state, 7, { title: 'Has one', post_stream: { posts: [{ username: 'Croove', cooked: '<p>no images</p>' }] } });
+    addPostInfo(state, 6, { title: 'Older pick', post_stream: { posts: [{ username: 'Croove', cooked: '<p><img src="https://cdn/banner.png" width="690" height="172"></p>' }] } });
     addPostInfo(state, 5, null);
     expect(state.topics[9]).toMatchObject({ verdict: 'no-video', at: new Date(0).toISOString(), title: 'Kiriko', author: 'Ent_Duke', image: 'https://cdn/x.webp', images: ['https://cdn/x.webp'] });
     expect(state.topics[7]).toMatchObject({ verdict: 'candidate', title: 'Has one', images: [] });
+    expect(state.topics[6].images).toEqual([]);
     expect(state.topics[5].gone).toBe(true);
     expect(topicsMissingInfo(state)).toEqual([]);
   });

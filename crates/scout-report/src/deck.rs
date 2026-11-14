@@ -251,6 +251,7 @@ pub fn build(
     videos: &HashMap<u64, usize>,
     swipes: &Swipes,
 ) -> Deck {
+    let shared = image_counts(state);
     let mut wanted = 0;
     let mut cards = Vec::new();
     for (id, cand) in candidates(waiting) {
@@ -260,7 +261,12 @@ pub fn build(
         match swipes.dir(id) {
             Some(Dir::Right) => wanted += 1,
             Some(Dir::Left) => {}
-            None => cards.push(card(id, cand, state.pointer(&format!("/topics/{id}")))),
+            None => cards.push(card(
+                id,
+                cand,
+                state.pointer(&format!("/topics/{id}")),
+                &shared,
+            )),
         }
     }
     cards.sort_by(|a, b| {
@@ -275,7 +281,7 @@ pub fn build(
     }
 }
 
-fn card(id: u64, cand: &Value, rec: Option<&Value>) -> Card {
+fn card(id: u64, cand: &Value, rec: Option<&Value>, shared: &HashMap<&str, usize>) -> Card {
     let rec = rec.unwrap_or(&Value::Null);
     let scenes: &[Value] = cand
         .get("scenes")
@@ -287,7 +293,7 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>) -> Card {
         url: format!("{}{id}", report::FORUM_TOPIC),
         title: str_of(rec, "title").or_else(|| str_of(cand, "title")),
         author: str_of(rec, "author").or_else(|| str_of(cand, "author")),
-        images: images(rec),
+        images: images(rec, shared),
         score: cand.get("score").and_then(Value::as_f64),
         vr: cand.get("vr").and_then(Value::as_bool).unwrap_or(false),
         axis_type: str_of(cand, "axisType"),
@@ -353,29 +359,64 @@ fn heat(scene: &Value) -> Vec<u32> {
         .collect()
 }
 
-/// The state record's `images` (https only, deduped, at most MAX_IMAGES),
-/// else its single `image`.
-fn images(rec: &Value) -> Vec<String> {
-    let https = |s: &&str| s.starts_with("https://");
-    let mut out: Vec<String> = Vec::new();
-    for url in rec
-        .get("images")
-        .and_then(Value::as_array)
+/// An upload shown by this many judged posts or more is the poster's branding (Patreon
+/// banner, host logo, signature), not a scene preview: the deck leaves it out.
+pub const SHARED_IMAGE_POSTS: usize = 3;
+
+/// An upload's identity: the SHA-1 Discourse puts in its file name (the original and its
+/// optimized copies share it), else the whole URL.
+fn image_key(url: &str) -> &str {
+    let name = url.rsplit('/').next().unwrap_or(url);
+    let hex = name.bytes().take_while(u8::is_ascii_hexdigit).count();
+    if hex == 40 { &name[..40] } else { url }
+}
+
+/// The image URLs a state record lists: `images`, else (records from before images were
+/// kept) its single `image`.
+fn record_images(rec: &Value) -> Vec<&str> {
+    match rec.get("images").and_then(Value::as_array) {
+        Some(list) => list.iter().filter_map(Value::as_str).collect(),
+        None => rec
+            .get("image")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect(),
+    }
+}
+
+/// How many judged posts show each upload (image_key).
+fn image_counts(state: &Value) -> HashMap<&str, usize> {
+    let mut counts = HashMap::new();
+    for rec in state
+        .get("topics")
+        .and_then(Value::as_object)
         .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .filter(https)
+        .flat_map(|t| t.values())
     {
+        let keys: BTreeSet<&str> = record_images(rec).into_iter().map(image_key).collect();
+        for key in keys {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// The record's images (record_images): https only, deduped, without uploads that
+/// SHARED_IMAGE_POSTS or more posts show, at most MAX_IMAGES. An empty `images` stays
+/// empty: the scout found nothing worth showing.
+fn images(rec: &Value, shared: &HashMap<&str, usize>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for url in record_images(rec) {
         if out.len() == MAX_IMAGES {
             break;
         }
-        if !out.iter().any(|u| u == url) {
-            out.push(url.to_string());
+        let key = image_key(url);
+        if !url.starts_with("https://")
+            || shared.get(key).is_some_and(|&n| n >= SHARED_IMAGE_POSTS)
+            || out.iter().any(|u| image_key(u) == key)
+        {
+            continue;
         }
-    }
-    if out.is_empty()
-        && let Some(url) = rec.get("image").and_then(Value::as_str).filter(https)
-    {
         out.push(url.to_string());
     }
     out
@@ -571,12 +612,42 @@ mod tests {
         let scenes: Vec<Value> = (0..MAX_SCENES + 3)
             .map(|i| json!({"base": format!("s{i}"), "video": {"size": 1_000_000_000u64}}))
             .collect();
-        let c = card(1, &json!({"scenes": scenes}), None);
+        let c = card(1, &json!({"scenes": scenes}), None, &HashMap::new());
         assert_eq!(c.videos, MAX_SCENES + 3);
         assert_eq!((c.scenes.len(), c.more_scenes), (MAX_SCENES, 3));
         assert_eq!(c.scenes[0].name.as_deref(), Some("s0"));
         // The size counts every scene, listed or not.
         assert_eq!(c.gb, Some((MAX_SCENES + 3) as f64));
+    }
+
+    #[test]
+    fn leaves_out_uploads_many_posts_share() {
+        let sha = |c: char| c.to_string().repeat(40);
+        let (banner, logo, preview) = (sha('a'), sha('b'), sha('c'));
+        let up = "https://cdn/original/4X/a/b/c";
+        // The banner is in 3 posts (once as an optimized copy), the logo in 2.
+        let state = json!({"topics": {
+            "1": {"images": [format!("{up}/{preview}.gif"), format!("{up}/{banner}.png"), format!("{up}/{logo}.png"),
+                             format!("https://cdn/optimized/4X/a/b/c/{preview}_2_690x388.gif")]},
+            "2": {"images": [format!("https://cdn/optimized/4X/a/b/c/{banner}_2_690x172.png"), format!("{up}/{logo}.png")]},
+            "3": {"image": format!("{up}/{banner}.png")},
+            "4": {"images": []}
+        }});
+        let shared = image_counts(&state);
+        let rec = |id: &str| state.pointer(&format!("/topics/{id}")).unwrap();
+        // The preview stays (once), the logo too; the banner goes.
+        assert_eq!(
+            images(rec("1"), &shared),
+            [format!("{up}/{preview}.gif"), format!("{up}/{logo}.png")]
+        );
+        // Records from before images were kept show their one image unless it's shared;
+        // an empty list means the scout found nothing worth showing.
+        assert!(images(rec("3"), &shared).is_empty());
+        assert!(images(rec("4"), &shared).is_empty());
+        assert_eq!(
+            image_key("https://cdn/x/plain.png"),
+            "https://cdn/x/plain.png"
+        );
     }
 
     fn ids(d: &Deck) -> Vec<u64> {

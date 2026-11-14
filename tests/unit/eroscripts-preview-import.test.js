@@ -156,42 +156,61 @@ describe('topic preview choice (getTopicImage)', () => {
 describe('postImages (scout report gallery)', () => {
   const SHA = 'a'.repeat(40);
   const UP = 'https://discuss.eroscripts.com/uploads/default/original/1X';
-  // A lightbox around the optimized copy, the topic image being another copy of it,
-  // an emoji heading, host logos linking to MEGA / pixeldrain, a badge, a video.
-  const COOKED = '<h3><img src="https://discuss.eroscripts.com/images/emoji/twitter/framed_picture.png?v=15" class="emoji" width="20" height="20"> Preview</h3>'
+  const img = (name, attrs = '') => `<p><img src="/uploads/default/original/1X/${name}" ${attrs}></p>`;
+  const linked = (href, name, attrs = '') => `<p><a href="${href}"><img src="/uploads/default/original/1X/${name}" ${attrs}></a></p>`;
+  // Markup as real posts have it: an emoji heading, a lightbox around the optimized copy, previews,
+  // and the clutter around them (seen in the deck, 2026-11-13).
+  const COOKED = '<h3><img src="https://discuss.eroscripts.com/images/emoji/twitter/framed_picture.png?v=15" class="emoji" alt=":framed_picture:" width="20" height="20"> Preview</h3>'
     + `<div class="lightbox-wrapper"><a class="lightbox" href="https://cdn/original/4X/a/b/c/${SHA}.jpeg" data-download-href="/uploads/short-url/x.jpeg?dl=1">`
-    + `<img src="https://cdn/optimized/4X/a/b/c/${SHA}_2_690x388.jpeg" width="690" height="388"><div class="meta"></div></a></div>`
-    + '<p><img src="/uploads/default/original/1X/second.png" width="500" height="300"></p>'
-    + '<p><a href="https://mega.nz/folder/abc#key"><img src="/uploads/default/original/1X/mega-logo.png" width="400" height="120"></a></p>'
-    + '<p><a href="https://pixeldrain.com/u/xyz"><img src="/uploads/default/original/1X/pd.png"></a></p>'
-    + '<p><img src="/uploads/default/original/1X/badge.png" width="120" height="40"></p>'
-    + '<p><img src="/uploads/default/original/1X/clip.mp4"></p>'
-    + '<p><img src="/uploads/default/original/1X/no-width.webp?a=1&amp;b=2"></p>'
-    + '<p><a href="https://example.com/page"><img src="/uploads/default/original/1X/linked.gif" width="300"></a></p>';
+    + `<img src="https://cdn/optimized/4X/a/b/c/${SHA}_2_690x388.jpeg" alt="p (1)" width="690" height="388"><div class="meta"></div></a></div>`
+    + img('preview.gif', 'class="animated" alt="gif1" width="200" height="140"')
+    + img('tall.webp', 'class="animated" alt="gif2" width="221" height="499"')
+    + img('no-size.webp?a=1&amp;b=2', 'alt="clip"')
+    + linked('https://www.patreon.com/someone', 'patreon.png', 'alt="" width="690" height="172"')
+    + linked('https://shop.example.com/?ref=x', 'promo.jpeg', 'alt="ad" width="517" height="300"')
+    + linked('https://mega.nz/folder/abc#key', 'mega.png', 'alt="MEGA" width="400" height="200"')
+    + linked('https://discuss.eroscripts.com/t/portfolio/1', 'about.png', 'alt="About ME" width="310" height="207"')
+    + img('heat.png', 'alt="MS" width="690" height="17"')
+    + img('sticker.gif', 'class="animated" alt="AHEI_1" width="137" height="137"')
+    + img('small.webp', 'class="animated" alt="Peach suck0" width="150" height="113"')
+    + img('pixel.gif', 'class="animated" alt="g" width="1" height="1"')
+    + img('named.png', 'alt="discord logo" width="400" height="400"')
+    + '<p><img src="https://cdn/site.png" class="site-icon" width="32" height="32"></p>'
+    + img('clip.mp4');
 
-  it('takes the topic image first, then post images as lightbox originals, skipping emoji, host logos, small and non-image ones', () => {
+  it('keeps only scene previews: no linked buttons, banners, heatmaps, stickers, icons or named logos', () => {
     const data = {
-      image_url: `https://cdn/optimized/4X/a/b/c/${SHA}_2_1024x576.jpeg`,
-      thumbnails: [{ width: 1366, url: `https://cdn/original/4X/a/b/c/${SHA}.jpeg` }],
-      post_stream: { posts: [{ cooked: COOKED }] },
+      image_url: `${UP}/preview.gif`,
+      post_stream: { posts: [{ username: 'maker', cooked: COOKED }] },
     };
     expect(postImages(data)).toEqual([
-      `https://cdn/original/4X/a/b/c/${SHA}.jpeg`,
-      `${UP}/second.png`,
-      `${UP}/no-width.webp?a=1&b=2`,
-      `${UP}/linked.gif`,
+      `${UP}/preview.gif`, // the topic image leads
+      `https://cdn/original/4X/a/b/c/${SHA}.jpeg`, // lightbox original, not the optimized copy
+      `${UP}/tall.webp`,
+      `${UP}/no-size.webp?a=1&b=2`, // no size to judge by: kept
     ]);
   });
 
-  it('caps at 5, skips a topic image under 200 px wide and dedupes', () => {
-    const many = Array.from({ length: 8 }, (_, i) => `<p><img src="/uploads/default/original/1X/p${i}.jpg" width="690"></p>`).join('');
-    expect(postImages({ image_url: '/uploads/default/original/1X/p0.jpg', post_stream: { posts: [{ cooked: many }] } }))
-      .toEqual([0, 1, 2, 3, 4].map((i) => `${UP}/p${i}.jpg`));
-    expect(postImages({ post_stream: { posts: [{ cooked: many }] } }, 2)).toEqual([`${UP}/p0.jpg`, `${UP}/p1.jpg`]);
-    const tiny = { image_url: 'https://cdn/original/thumb.webp', thumbnails: [{ width: 160, url: 'https://cdn/original/thumb.webp' }] };
-    expect(postImages(tiny)).toEqual([]);
-    expect(postImages({ image_url: 'https://cdn/original/rep.webp' })).toEqual(['https://cdn/original/rep.webp']);
+  it("adds replies' images, the author's first, and never pads to 5", () => {
+    const data = {
+      post_stream: { posts: [
+        { username: 'maker', cooked: img('main.gif', 'width="500" height="420"') },
+        { username: 'fan', cooked: img('fan-shot.jpg', 'width="690" height="388"') + linked('https://giphy.com/x', 'reaction.gif', 'width="300" height="300"') },
+        { username: 'maker', cooked: img('update.gif', 'width="480" height="270"') + img('main.gif', 'width="500" height="420"') },
+      ] },
+    };
+    expect(postImages(data)).toEqual([`${UP}/main.gif`, `${UP}/update.gif`, `${UP}/fan-shot.jpg`]);
+    // A topic image that isn't a good preview doesn't get in.
+    expect(postImages({ image_url: `${UP}/banner.png`, post_stream: { posts: [{ cooked: img('banner.png', 'width="690" height="172"') }] } })).toEqual([]);
+    expect(postImages({ image_url: 'https://cdn/original/rep.webp' })).toEqual([]);
     expect(postImages(null)).toEqual([]);
+  });
+
+  it('caps at max and dedupes the same upload', () => {
+    const many = Array.from({ length: 8 }, (_, i) => img(`p${i}.jpg`, 'width="690" height="388"')).join('');
+    const data = { image_url: '/uploads/default/original/1X/p3.jpg', post_stream: { posts: [{ cooked: many + img('p0.jpg', 'width="690" height="388"') }] } };
+    expect(postImages(data)).toEqual([3, 0, 1, 2, 4].map((i) => `${UP}/p${i}.jpg`));
+    expect(postImages(data, 2)).toEqual([`${UP}/p3.jpg`, `${UP}/p0.jpg`]);
   });
 });
 

@@ -94,6 +94,13 @@ const MIN_POSTER_SOURCE_WIDTH = 320;
 // Post images narrower than this (by their width attribute) are icons,
 // badges and host logos, not previews (postImages).
 const MIN_GALLERY_WIDTH = 200;
+// …and lower than this: 150×113 avatars, 137×137 stickers.
+const MIN_GALLERY_HEIGHT = 120;
+// …and longer than this to one side: script heatmaps (690×16), Patreon and
+// shop banners (690×172, 517×92).
+const MAX_GALLERY_ASPECT = 3;
+// Upload names (the alt text) of things that aren't the scene.
+const NOT_GALLERY_ALT = /\b(logo|banner|patreon|discord|ko-?fi|heat ?map|funscript|donate|support me|subscribe|twitter|icon|qr)\b/i;
 const IMAGE_FILE_RE = /\.(jpe?g|png|gif|webp|avif)(\?[^"]*)?$/i;
 
 // Absolute URL for a forum-relative one (`/uploads/…`).
@@ -150,19 +157,19 @@ function externalHostOf(url) {
 }
 
 /**
- * The first post's `<img>`s of a topic payload, in order, emoji and
- * non-image files skipped, as `{url, width, original, fileLink}`: `url` the
- * image's src (absolute, entities decoded), `width` its width attribute (0
- * when it has none), `original` the full-size image a lightbox link around
- * it opens (absolute) or null, `fileLink` true when a link around it goes to
- * an off-forum file host (a MEGA or pixeldrain button).
+ * The `<img>`s of one post's `cooked` HTML, in order, emoji, site icons and
+ * non-image files skipped, as `{url, width, height, alt, original, linked}`:
+ * `url` the image's src (absolute, entities decoded), `width` / `height` its
+ * attributes (0 when missing), `alt` its alt text (Discourse puts the
+ * upload's file name there), `original` the full-size image a lightbox link
+ * around it opens (absolute) or null, `linked` true when another link is
+ * around it (a Patreon, shop, MEGA or pixeldrain button).
  */
-function firstPostImages(data) {
-  const html = data?.post_stream?.posts?.[0]?.cooked || '';
+function cookedImages(html) {
   const out = [];
-  for (const m of html.matchAll(/<img[^>]+src="([^"]+)"[^>]*>/gi)) {
+  for (const m of (html || '').matchAll(/<img[^>]+src="([^"]+)"[^>]*>/gi)) {
     const [tag, src] = m;
-    if (/class="[^"]*\bemoji\b/i.test(tag) || src.includes('/images/emoji/')) continue;
+    if (/class="[^"]*\b(emoji|site-icon|avatar)\b/i.test(tag) || src.includes('/images/emoji/')) continue;
     if (!IMAGE_FILE_RE.test(src)) continue;
     // The link the image sits in: the last <a> opened before it and not closed since.
     const before = html.slice(0, m.index);
@@ -173,40 +180,71 @@ function firstPostImages(data) {
     out.push({
       url: absoluteUrl(decodeEntities(src)),
       width: Number(tag.match(/\swidth="(\d+)"/i)?.[1]) || 0,
+      height: Number(tag.match(/\sheight="(\d+)"/i)?.[1]) || 0,
+      alt: decodeEntities(tag.match(/\salt="([^"]*)"/i)?.[1] || ''),
       original: lightbox ? absoluteUrl(href) : null,
-      fileLink: !!href && !!externalHostOf(href),
+      linked: !!href && !lightbox,
     });
   }
   return out;
 }
 
+/** The first post's images (cookedImages). */
+function firstPostImages(data) {
+  return cookedImages(data?.post_stream?.posts?.[0]?.cooked);
+}
+
+/**
+ * Whether a post image is worth showing as a scene preview: not inside a
+ * link other than its own lightbox (Patreon, shop, host and "about me"
+ * buttons), at least MIN_GALLERY_WIDTH × MIN_GALLERY_HEIGHT and at most
+ * MAX_GALLERY_ASPECT to one side by its attributes when it has them, and not
+ * named like a logo, banner or heatmap (NOT_GALLERY_ALT).
+ */
+function isGalleryImage(img) {
+  if (img.linked) return false;
+  if (img.width && img.width < MIN_GALLERY_WIDTH) return false;
+  if (img.height && img.height < MIN_GALLERY_HEIGHT) return false;
+  if (img.width && img.height && Math.max(img.width, img.height) / Math.min(img.width, img.height) > MAX_GALLERY_ASPECT) return false;
+  return !NOT_GALLERY_ALT.test(img.alt);
+}
+
 /**
  * Up to `max` preview images of a topic (`/t/{id}.json` payload), as
- * absolute URLs: the topic's image (`image_url`) first, then the first
- * post's images in order. Skipped: emoji, non-image files, images linking
- * to an off-forum file host (MEGA / pixeldrain logos) and images under
- * MIN_GALLERY_WIDTH wide when their width is known (the topic image by its
- * widest thumbnail). A lightbox image comes as its full-size original, not
- * the optimized copy the post shows. The same upload once (by the SHA-1 in
- * its file name), as its original when one is linked.
+ * absolute URLs, fewer (or none) when the topic has fewer worth showing
+ * (isGalleryImage): the first post's images, then the author's replies',
+ * then other replies' (screenshots people post), in order; the topic's
+ * image (`image_url`) leads when it is one of them. A lightbox image comes
+ * as its full-size original, not the optimized copy the post shows. The same
+ * upload once (by the SHA-1 in its file name), as its original when one is
+ * linked. Only the replies the payload carries count (Discourse sends the
+ * first 20 posts).
  *
  * @param {object} data topic payload (api.getTopicData)
  * @param {number} [max]
  * @returns {string[]}
  */
 function postImages(data, max = 5) {
+  const keyOf = (url) => url.match(/\/([0-9a-f]{40})[^/]*$/i)?.[1]?.toLowerCase() || url;
   const found = [];  // {key, url}
   const add = (url, original = false) => {
-    const key = url.match(/\/([0-9a-f]{40})[^/]*$/i)?.[1]?.toLowerCase() || url;
+    const key = keyOf(url);
     const seen = found.find((x) => x.key === key);
     if (!seen) found.push({ key, url });
     else if (original) seen.url = url;
   };
-  const thumbWidth = widestThumbnail(data?.thumbnails);
-  if (data?.image_url && IMAGE_FILE_RE.test(data.image_url) && !(thumbWidth && thumbWidth < MIN_GALLERY_WIDTH)) add(absoluteUrl(data.image_url));
-  for (const img of firstPostImages(data)) {
-    if (img.fileLink || (img.width && img.width < MIN_GALLERY_WIDTH)) continue;
-    add(img.original || img.url, !!img.original);
+  const posts = Array.isArray(data?.post_stream?.posts) ? data.post_stream.posts : [];
+  const author = posts[0]?.username;
+  const replies = posts.slice(1);
+  const ordered = [posts[0], ...replies.filter((p) => p?.username === author), ...replies.filter((p) => p?.username !== author)];
+  for (const post of ordered) {
+    for (const img of cookedImages(post?.cooked)) {
+      if (isGalleryImage(img)) add(img.original || img.url, !!img.original);
+    }
+  }
+  if (data?.image_url) {
+    const lead = found.findIndex((x) => x.key === keyOf(absoluteUrl(data.image_url)));
+    if (lead > 0) found.unshift(...found.splice(lead, 1));
   }
   return found.slice(0, max).map((x) => x.url);
 }
