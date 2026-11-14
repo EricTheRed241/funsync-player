@@ -1,12 +1,13 @@
 //! The HTTP side: one request at a time. `GET /` (the report page),
 //! `GET /api/report` (the report, rebuilt from the files on every request),
 //! `GET /swipe` (the deck page), `GET /api/deck?limit=N&seed=N&jitter=N&exclude=ids&stack=…`
-//! (the next cards),
-//! `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (the only
-//! writes: eroscripts-scout-swipes.json).
+//! (the next cards), `GET /api/slr/deck?limit=N&seed=N&jitter=N&exclude=ids` (the SLR tab's
+//! cards and quota), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}`, and the
+//! same under `/api/slr/` (the only writes: eroscripts-scout-swipes.json and
+//! slr-scout-swipes.json).
 
-use crate::swipes::{self, Dir};
-use crate::{deck, report};
+use crate::swipes::{self, Dir, Store};
+use crate::{deck, report, slr};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -70,8 +71,14 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             Ok(d) => json_ok(&deck::load(user_data, &d)),
             Err(e) => text(400, &e),
         },
-        ("POST", "/api/swipe") => swipe(body, user_data),
-        ("POST", "/api/swipe/undo") => undo(body, user_data),
+        ("GET" | "HEAD", "/api/slr/deck") => match deal(query) {
+            Ok(d) => json_ok(&slr::load(user_data, &d)),
+            Err(e) => text(400, &e),
+        },
+        ("POST", "/api/swipe") => swipe(body, user_data, swipes::EROSCRIPTS),
+        ("POST", "/api/swipe/undo") => undo(body, user_data, swipes::EROSCRIPTS),
+        ("POST", "/api/slr/swipe") => swipe(body, user_data, swipes::SLR),
+        ("POST", "/api/slr/swipe/undo") => undo(body, user_data, swipes::SLR),
         _ => text(404, "Not found\n"),
     }
 }
@@ -113,7 +120,7 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
                 for id in v.split(',').filter(|s| !s.is_empty()) {
                     let id = id
                         .parse::<u64>()
-                        .map_err(|_| format!("exclude takes topic ids, got {id:?}\n"))?;
+                        .map_err(|_| format!("exclude takes ids, got {id:?}\n"))?;
                     d.exclude.insert(id);
                 }
                 if d.exclude.len() > deck::MAX_EXCLUDE {
@@ -130,7 +137,7 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
     Ok(d)
 }
 
-/// The JSON object a POST carries, and its topic `id`.
+/// The JSON object a POST carries, and its `id` (a topic or SLR scene id).
 fn swipe_request(body: &[u8]) -> Result<(Value, u64), Response> {
     let req: Value = serde_json::from_slice(body)
         .ok()
@@ -139,12 +146,13 @@ fn swipe_request(body: &[u8]) -> Result<(Value, u64), Response> {
     let id = req
         .get("id")
         .and_then(report::id_of)
-        .ok_or_else(|| text(400, "id must be a topic id\n"))?;
+        .ok_or_else(|| text(400, "id must be a topic or scene id\n"))?;
     Ok((req, id))
 }
 
-/// `POST /api/swipe {id, dir}`: record a swipe on a waiting post.
-fn swipe(body: &[u8], user_data: &Path) -> Response {
+/// `POST /api/swipe {id, dir}` (a waiting post) or `POST /api/slr/swipe {id, dir}` (a scene
+/// in slr-scout.json): record a swipe in `store`.
+fn swipe(body: &[u8], user_data: &Path, store: Store) -> Response {
     let (req, id) = match swipe_request(body) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -153,26 +161,37 @@ fn swipe(body: &[u8], user_data: &Path) -> Response {
         return text(400, "dir must be \"right\" or \"left\"\n");
     };
     let mut problems = Vec::new();
-    let waiting = report::read_json(user_data, report::WAITING_FILE, &mut problems);
+    let known = if store == swipes::SLR {
+        let scout = report::read_json(user_data, slr::SCOUT_FILE, &mut problems);
+        slr::is_scene(&scout, id)
+            .then_some(())
+            .ok_or("is not in slr-scout.json")
+    } else {
+        let waiting = report::read_json(user_data, report::WAITING_FILE, &mut problems);
+        deck::is_waiting(&waiting, id)
+            .then_some(())
+            .ok_or("is not on the waiting list")
+    };
     if !problems.is_empty() {
         return text(500, &format!("{}\n", problems.join("\n")));
     }
-    if !deck::is_waiting(&waiting, id) {
-        return text(400, &format!("{id} is not on the waiting list\n"));
+    if let Err(why) = known {
+        return text(400, &format!("{id} {why}\n"));
     }
-    match swipes::set(user_data, id, dir, video_tags::timefmt::now_iso()) {
+    match store.set(user_data, id, dir, video_tags::timefmt::now_iso()) {
         Ok(s) => json_ok(&json!({"id": id, "dir": s.dir, "at": s.at})),
         Err(e) => text(500, &format!("{e}\n")),
     }
 }
 
-/// `POST /api/swipe/undo {id}`: forget a swipe (any id; `removed` says whether there was one).
-fn undo(body: &[u8], user_data: &Path) -> Response {
+/// `POST /api/swipe/undo {id}` or `/api/slr/swipe/undo {id}`: forget a swipe in `store` (any
+/// id; `removed` says whether there was one).
+fn undo(body: &[u8], user_data: &Path, store: Store) -> Response {
     let id = match swipe_request(body) {
         Ok((_, id)) => id,
         Err(resp) => return resp,
     };
-    match swipes::undo(user_data, id) {
+    match store.undo(user_data, id) {
         Ok(removed) => json_ok(&json!({"id": id, "removed": removed})),
         Err(e) => text(500, &format!("{e}\n")),
     }
@@ -471,7 +490,7 @@ mod tests {
             (v["remaining"].as_u64(), v["wanted"].as_u64()),
             (Some(1), Some(1))
         );
-        let s = swipes::read(&dir).unwrap();
+        let s = swipes::EROSCRIPTS.read(&dir).unwrap();
         assert_eq!((s.dir(8), s.dir(9)), (Some(Dir::Right), Some(Dir::Left)));
         let report = get_json("/api/report", &dir);
         let post = |id: u64| {
@@ -519,18 +538,61 @@ mod tests {
             let r = route("POST", path, body, &dir);
             assert_eq!(r.status, 400, "{path} {}", String::from_utf8_lossy(body));
         }
-        assert!(!dir.join(swipes::FILE).exists(), "nothing written");
+        let file = swipes::EROSCRIPTS.file;
+        assert!(!dir.join(file).exists(), "nothing written");
 
         // A broken swipes file is never overwritten.
-        std::fs::write(dir.join(swipes::FILE), b"oops").unwrap();
+        std::fs::write(dir.join(file), b"oops").unwrap();
         let r = route("POST", "/api/swipe", br#"{"id":8,"dir":"right"}"#, &dir);
         assert_eq!(r.status, 500);
-        assert!(String::from_utf8_lossy(&r.body).starts_with(swipes::FILE));
+        assert!(String::from_utf8_lossy(&r.body).starts_with(file));
         assert_eq!(
             route("POST", "/api/swipe/undo", br#"{"id":8}"#, &dir).status,
             500
         );
-        assert_eq!(std::fs::read(dir.join(swipes::FILE)).unwrap(), b"oops");
+        assert_eq!(std::fs::read(dir.join(file)).unwrap(), b"oops");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn slr_deck_swipes_and_quota() {
+        // Topic 8 is waiting on EroScripts; SLR scene 8 is a different thing in its own file.
+        let dir = with_waiting("slr");
+        std::fs::write(
+            dir.join(slr::SCOUT_FILE),
+            br#"{"quota":{"scripts":{"remaining":1,"total":3}},"quotaError":"session expired",
+                "scenes":[{"id":8,"score":1},{"id":66249,"score":6}]}"#,
+        )
+        .unwrap();
+        let v = get_json("/api/slr/deck", &dir);
+        assert_eq!(ids(&v), [66249, 8]);
+        assert_eq!(v["quota"]["scripts"]["remaining"], 1);
+        assert_eq!(v["quotaError"], "session expired");
+        assert_eq!(v["cards"][0]["source"], "slr");
+        assert_eq!(
+            ids(&get_json("/api/slr/deck?exclude=66249&limit=5", &dir)),
+            [8]
+        );
+        assert_eq!(route("GET", "/api/slr/deck?limit=x", b"", &dir).status, 400);
+
+        // Only scenes in slr-scout.json; topic 9 (waiting on EroScripts) isn't one.
+        let post = |path: &str, body: &[u8]| route("POST", path, body, &dir).status;
+        assert_eq!(post("/api/slr/swipe", br#"{"id":9,"dir":"right"}"#), 400);
+        assert_eq!(post("/api/slr/swipe", br#"{"id":66249,"dir":"up"}"#), 400);
+        assert_eq!(
+            post("/api/slr/swipe", br#"{"id":66249,"dir":"right"}"#),
+            200
+        );
+        assert_eq!(post("/api/slr/swipe", br#"{"id":8,"dir":"left"}"#), 200);
+        let v = get_json("/api/slr/deck", &dir);
+        assert_eq!((ids(&v).len(), v["wanted"].as_u64()), (0, Some(1)));
+        // The EroScripts deck and its file are untouched.
+        assert_eq!(ids(&get_json("/api/deck", &dir)), [8, 9, 7]);
+        assert!(!dir.join(swipes::EROSCRIPTS.file).exists());
+        assert_eq!(swipes::SLR.read(&dir).unwrap().dir(66249), Some(Dir::Right));
+
+        assert_eq!(post("/api/slr/swipe/undo", br#"{"id":66249}"#), 200);
+        assert_eq!(ids(&get_json("/api/slr/deck", &dir)), [66249]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -576,6 +638,9 @@ mod tests {
             ("GET", "/../eroscripts-scout.json"),
             ("GET", "/eroscripts-scout-state.json"),
             ("GET", "/eroscripts-scout-swipes.json"),
+            ("GET", "/slr-scout.json"),
+            ("GET", "/api/slr/swipe"),
+            ("POST", "/api/slr/deck"),
             ("GET", "/api/swipe"),
             ("GET", "/swipe/"),
             ("POST", "/api/report"),

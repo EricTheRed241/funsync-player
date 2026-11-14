@@ -29,19 +29,26 @@ file shows as an empty section.
 
 The swipe deck, http://127.0.0.1:<port>/swipe, shows the waiting posts not in the
 library, loosely highest score first, one card at a time; tabs pick the stack:
-Multi-axis (default) or Single-axis. Each deal shifts every score by up to 4 either
-way on Multi-axis (MULTI_JITTER: it stays close to score order) and up to 10 on
-Single-axis (SINGLE_JITTER: low scorers come up too); the page's ⚙ sets either
-amplitude from 0 (strictly by score) to 30, per device (/api/deck?jitter=N).
+Multi-axis (default), Single-axis or SLR. Each deal shifts every score by up to 4 either
+way on Multi-axis (MULTI_JITTER: it stays close to score order), up to 10 on
+Single-axis (SINGLE_JITTER: low scorers come up too) and up to 2 on SLR (SLR_JITTER);
+the page's ⚙ sets each amplitude from 0 (strictly by score) to 30, per device
+(/api/deck?jitter=N, /api/slr/deck?jitter=N).
 On a wide window (900 px and up) the card puts the image on the left and every
 detail beside it: all tags with their tag scores, likes, hosts, size, dates and the
 scene list. Right = wanted: the next
 npm run eroscripts:scout -- --fetch --auto downloads it whatever its score or axes.
 Left = hidden from the deck only (the scout treats the post as before). Skip (up)
 puts the card back a few cards later, saving nothing. Undo forgets the swipe or skip.
-Swipes go to eroscripts-scout-swipes.json, the only file the CLI writes
-(atomically; the previous copy is kept as eroscripts-scout-swipes.json.bak). Stop it
-with Ctrl-C.
+Swipes go to eroscripts-scout-swipes.json (atomically; the previous copy is kept as
+eroscripts-scout-swipes.json.bak).
+
+The SLR tab deals the SexLikeReal scenes in slr-scout.json (npm run slr:scout) with
+their bonuses (hand-made script, PMV, compilation) and shows the account's download
+quota the scout last read: hand-crafted and AI scripts left this month, videos left in
+the 7-day window. Its swipes go to slr-scout-swipes.json (and .bak), by SLR scene id;
+right = wanted, left = hidden. These two swipes files are the only files the CLI
+writes. Stop it with Ctrl-C.
 
 Exit codes: 0 ok, 1 error (2 and 3 are not used).
 ";

@@ -1,0 +1,23 @@
+[package]
+name = "slr-scout"
+version = "0.1.0"
+description = "Find SexLikeReal VR scenes of chosen performers, score them, and record the account's download quota: <userData>/slr-scout.json"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "slr_scout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "slr-scout"
+path = "src/main.rs"
+
+[dependencies]
+# Shared with the other CLIs: userData default (env var), host-aware lock
+# files, atomic write, timestamps.
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-normalization = "0.1"
