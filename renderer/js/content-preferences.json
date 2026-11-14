@@ -40,5 +40,13 @@
       { "name": "MissAliceNZ", "tag": "alicenz", "aliases": ["AliceNZ", "Miss AliceNZ"] },
       { "name": "Willow Harper" }
     ]
+  },
+  "slrScout": {
+    "actors": ["Miss Lexa"],
+    "vrOnly": true,
+    "requireCreampie": true,
+    "bonuses": { "handmadeScript": 4, "pmv": 2, "compilation": 2 },
+    "popularityPer": 1000,
+    "popularityMax": 2
   }
 }

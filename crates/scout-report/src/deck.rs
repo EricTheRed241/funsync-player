@@ -182,7 +182,7 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
     let waiting = report::read_json(user_data, report::WAITING_FILE, &mut problems);
     let config = report::read_json(user_data, "config.json", &mut problems);
     let links = report::read_json(user_data, crate::library::LINKS_FILE, &mut problems);
-    let swipes = report::read_swipes(user_data, &mut problems);
+    let swipes = report::read_swipes(user_data, crate::swipes::EROSCRIPTS, &mut problems);
     let videos = crate::library::topic_videos(&config, &links, &mut problems);
     let mut deck = build(&state, &waiting, &videos, &swipes);
     deck.deal(deal);
@@ -829,7 +829,7 @@ mod tests {
         assert_eq!(d.remaining, 1);
         assert_eq!(d.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [10]);
 
-        std::fs::write(dir.join(crate::swipes::FILE), b"nope").unwrap();
+        std::fs::write(dir.join(crate::swipes::EROSCRIPTS.file), b"nope").unwrap();
         let d = load(
             &dir,
             &Deal {
@@ -838,7 +838,7 @@ mod tests {
             },
         );
         assert_eq!((d.remaining, d.cards.len()), (1, 0));
-        assert!(d.problems[0].starts_with(crate::swipes::FILE));
+        assert!(d.problems[0].starts_with(crate::swipes::EROSCRIPTS.file));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

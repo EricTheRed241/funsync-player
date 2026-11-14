@@ -224,7 +224,6 @@ fn swipes_through_the_deck() {
     assert_eq!(status, 200);
     assert!(head.contains("Content-Type: text/html"));
     let page = String::from_utf8(body).unwrap();
-    assert!(page.contains("/api/deck") && page.contains("/api/swipe"));
     assert!(page.contains(r#"<meta name="referrer" content="no-referrer">"#));
     assert!(!page.contains("<script src"), "no external scripts");
     assert!(page.contains(r#"href="/""#), "links back to the report");

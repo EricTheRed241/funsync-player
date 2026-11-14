@@ -24,6 +24,7 @@
     "age:screen": "cargo run -q --release -p age-screen --",
     "pornstar:tags": "cargo run -q --release -p pornstar-tags --",
     "scout:report": "cargo run -q --release -p scout-report --",
+    "slr:scout": "cargo run -q --release -p slr-scout --",
     "k8s": "bash deploy/k8s/k8s.sh",
     "app:autostart": "bash deploy/macos/app-autostart.sh",
     "omp:broker": "bash deploy/macos/omp-broker.sh"

@@ -104,6 +104,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slr-scout"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "video-tags",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

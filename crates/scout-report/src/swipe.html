@@ -80,6 +80,11 @@ a:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
 .b-score { --bc: #2f6fdf; } .b-vr { --bc: #a46ad6; } .b-flat { --bc: #8b8b93; } .b-multi { --bc: #14b8a6; }
 .b-single { --bc: #8b8b93; } .b-videos { --bc: #d08b2c; } .b-cream { --bc: #e0529c; } .b-time { --bc: #6b7280; }
+.b-hand { --bc: #14b8a6; } .b-music { --bc: #d08b2c; } .b-ai { --bc: #8b8b93; }
+.quota { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
+  font-variant-numeric: tabular-nums; }
+.quota b { color: var(--fg); }
+.quota .err { color: var(--nope); }
 .heat { display: block; width: 100%; height: 16px; border-radius: 4px; background: #000; image-rendering: pixelated; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
 .tag b { color: var(--like); font-variant-numeric: tabular-nums; }
@@ -104,7 +109,7 @@ a:hover { text-decoration: underline; }
 /* Desktop and landscape tablets: the image large on the left, every detail in a scrolling panel beside it. */
 @media (min-width: 900px) {
   .bar { width: min(100%, 1280px); }
-  .stacks { width: min(100% - 32px, 1248px); }
+  .stacks, .quota { width: min(100% - 32px, 1248px); }
   .problems, .deck { width: min(100% - 32px, 1248px); }
   .card { flex-direction: row; }
   .media { flex: 1 1 auto; min-width: 0; min-height: auto; }
@@ -147,14 +152,17 @@ a:hover { text-decoration: underline; }
   <div class="settings" id="settings" hidden>
     <label>Multi-axis shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
     <label>Single-axis shuffle ± <input type="number" id="jitter-single" data-stack="single" min="0" max="30" step="0.5" inputmode="decimal"></label>
-    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 multi-axis, ±10 single-axis). Saved on this device.</div>
+    <label>SLR shuffle ± <input type="number" id="jitter-slr" data-stack="slr" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 multi-axis, ±10 single-axis, ±2 SLR). Saved on this device.</div>
     <button type="button" class="reset" id="jitter-reset">Reset to defaults</button>
   </div>
 </header>
 <nav class="stacks" id="stacks" aria-label="Which posts">
   <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
   <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
+  <button type="button" data-stack="slr" title="SexLikeReal scenes from npm run slr:scout">SLR</button>
 </nav>
+<div class="quota" id="quota" hidden></div>
 <div class="problems" id="problems" hidden></div>
 <main class="deck" id="deck">
   <div class="empty" id="empty">Loading…</div>
@@ -178,12 +186,14 @@ const REFILL_AT = 5;
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a stack change: answers to older deck requests are dropped
-// Which stack is dealt (multi, single); remembered on this device. Any other stored value
+// Which stack is dealt (multi, single, slr); remembered on this device. Any other stored value
 // (e.g. a tab that no longer exists) falls back to multi.
-let stack = ['multi', 'single'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
+let stack = ['multi', 'single', 'slr'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
+// The SLR tab has its own deck and swipes (/api/slr/…: SexLikeReal scenes from slr:scout).
+const apiOf = (s) => (s === 'slr' ? '/api/slr' : '/api');
 // ⚙ shuffle amplitude per stack, in score points; unset = the server's default (deck.rs
-// MULTI_JITTER / SINGLE_JITTER), shown as the placeholder. Remembered on this device.
-const JITTER_DEFAULT = { multi: 4, single: 10 };
+// MULTI_JITTER / SINGLE_JITTER, slr.rs SLR_JITTER), shown as the placeholder. Remembered on this device.
+const JITTER_DEFAULT = { multi: 4, single: 10, slr: 2 };
 const JITTER_MAX = 30;
 const validJitter = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= JITTER_MAX;
 let jitters = (() => {
@@ -262,6 +272,7 @@ function clock(ms) {
 }
 
 function badges(c) {
+  if (c.source === 'slr') return slrBadges(c);
   const out = [el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: c.videos > 1 ? 'Length of the first video' : 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
@@ -275,6 +286,33 @@ function badges(c) {
   if (c.videos > 1) out.push(el('span', { class: 'badge b-videos' }, `${c.videos} videos`));
   if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
   return out;
+}
+
+/** An SLR scene: score, length, VR, creampie and the bonuses slr:scout scored (hand-made script, PMV, compilation). */
+function slrBadges(c) {
+  const parts = c.scoreParts || {};
+  const why = Object.entries(parts).map(([k, v]) => `${k} +${fmt(v)}`).join(', ');
+  const out = [el('span', { class: 'badge b-score', title: why ? 'Score: ' + why : 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
+  if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.runtimeMs)));
+  out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
+  if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
+  const hand = c.handmade || [];
+  if (hand.length) {
+    const free = hand.some((h) => h.source === 'slr' || h.free);
+    out.push(el('span', { class: 'badge b-hand', title: hand.map(handLabel).join('\n') },
+      free ? 'Hand-made script' : 'Hand-made script (paid)'));
+  }
+  if (c.pmv) out.push(el('span', { class: 'badge b-music' }, 'PMV'));
+  if (c.compilation) out.push(el('span', { class: 'badge b-music' }, 'Compilation'));
+  if (c.aiScript) out.push(el('span', { class: 'badge b-ai', title: 'SLR has an AI script for it' }, 'AI script'));
+  return out;
+}
+
+/** Where a hand-made script for an SLR scene is: SLR's own (hand-crafted), or an EroScripts post. */
+function handLabel(h) {
+  if (h.source === 'slr') return 'SLR hand-crafted script' + (h.author ? ' by ' + h.author : '');
+  const kind = [h.free ? 'free' : 'paid', h.multiAxis ? 'multi-axis' : null].filter(Boolean).join(', ');
+  return `EroScripts #${h.topicId} (${kind})` + (h.title ? ': ' + h.title : '');
 }
 
 // The player's script heatmap colours (renderer/js/action-graph.js speedToColor): black, blue,
@@ -318,8 +356,14 @@ function cardNode(c, isTop) {
     media.append(el('div', { class: 'none' }, 'No image'));
   }
   media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
+  const slr = c.source === 'slr';
   const best = new Set((c.topTags || []).map((t) => t.tag));
-  const topTags = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
+  const topTags = slr
+    ? (c.handmade || []).map((h) => h.source === 'eroscripts'
+      ? el('a', { class: 'tag', href: 'https://discuss.eroscripts.com/t/' + h.topicId, target: '_blank', rel: 'noopener noreferrer', title: h.title || null },
+        `EroScripts #${h.topicId} ` + (h.free ? 'free' : 'paid'))
+      : el('span', { class: 'tag' }, 'SLR hand-crafted' + (h.author ? ' · ' + h.author : '')))
+    : (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
   const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
     media,
     el('div', { class: 'info' },
@@ -327,10 +371,10 @@ function cardNode(c, isTop) {
       heatStrip(c.heat),
       el('div', { class: 'ttl', title: c.title || null }, c.title || '#' + c.id),
       el('div', { class: 'by' },
-        c.author ? el('span', {}, 'by ' + c.author) : null,
-        el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, '#' + c.id + ' ↗')),
+        c.author ? el('span', {}, (slr ? '' : 'by ') + c.author) : null,
+        el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (slr ? 'SLR ' : '#' + c.id + ' ') + '↗')),
       topTags.length ? el('div', { class: 'tags top-tags' }, topTags) : null,
-      details(c, best)));
+      slr ? slrDetails(c) : details(c, best)));
   if (isTop) drag(node);
   return node;
 }
@@ -371,6 +415,63 @@ function details(c, best) {
   return out;
 }
 
+/** The wide layout's sections for an SLR scene: its facts, the score's parts and its hand-made scripts. */
+function slrDetails(c) {
+  const out = [];
+  const facts = [
+    ['Performers', c.actors && c.actors.length ? c.actors.join(', ') : null],
+    ['Studio', c.author],
+    ['Released', c.date],
+    ['Favourites', c.favorites],
+    ['FPS', c.fps],
+    ['Passthrough', c.passthrough ? 'yes' : null],
+    ['SLR AI script', c.aiScript ? 'yes' : null],
+  ].filter(([, v]) => v != null);
+  out.push(el('div', { class: 'sect' }, 'Scene'), el('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
+  const parts = Object.entries(c.scoreParts || {});
+  if (parts.length) {
+    out.push(el('div', { class: 'sect' }, 'Score'), el('div', { class: 'tags all-tags' },
+      parts.map(([k, v]) => el('span', { class: 'tag' }, k + ' ', el('b', {}, '+' + fmt(v))))));
+  }
+  const hand = c.handmade || [];
+  if (hand.length) {
+    out.push(el('div', { class: 'sect' }, 'Hand-made scripts'), el('ol', { class: 'scenes' }, hand.map((h) => el('li', {},
+      h.source === 'eroscripts'
+        ? el('a', { class: 'sn', href: 'https://discuss.eroscripts.com/t/' + h.topicId, target: '_blank', rel: 'noopener noreferrer' }, h.title || '#' + h.topicId)
+        : el('div', { class: 'sn' }, 'SLR hand-crafted script'),
+      el('div', { class: 'sm' }, h.source === 'eroscripts'
+        ? ['EroScripts #' + h.topicId, h.free ? 'free' : 'paid', h.multiAxis ? 'multi-axis' : null].filter(Boolean).join(' · ')
+        : (h.author ? 'by ' + h.author + ' · ' : '') + 'counts against the hand-crafted script quota')))));
+  }
+  return out;
+}
+
+/** The SLR tab's line: the account's downloads left, as slr:scout last read them. */
+function renderQuota(d) {
+  const q = $('quota');
+  if (stack !== 'slr' || !d) { q.hidden = true; return; }
+  const parts = [];
+  const left = (x, what) => (x && x.total != null ? [el('b', {}, `${x.remaining} of ${x.total}`), ' ' + what] : null);
+  const quota = d.quota || {};
+  for (const p of [left(quota.scripts, 'hand-crafted scripts'), left(quota.aiScripts, 'AI scripts')]) if (p) parts.push(p);
+  const line = [];
+  if (parts.length) {
+    line.push('Left this month: ', ...parts.flatMap((p, i) => (i ? [' · ', ...p] : p)));
+    if (quota.videos && quota.videos.total != null) line.push(' · videos ', el('b', {}, `${quota.videos.remaining} of ${quota.videos.total}`), ' (7 days)');
+    if (quota.checkedAt) line.push(` · checked ${day(quota.checkedAt)}`);
+  } else if (!d.generatedAt) {
+    line.push('No SLR scenes yet: run npm run slr:scout');
+  } else {
+    line.push('Quota not read yet');
+  }
+  if (d.quotaError) {
+    const login = /session/i.test(d.quotaError) ? ': npm run slr:scout -- --login' : '';
+    line.push(' ', el('span', { class: 'err' }, `(${d.quotaError}${login})`));
+  }
+  q.replaceChildren(...line);
+  q.hidden = false;
+}
+
 const preloaded = new Set();
 function preload(url) {
   if (!url || preloaded.has(url)) return;
@@ -393,6 +494,7 @@ function render(enterFrom) {
     empty.hidden = false;
     empty.replaceChildren(...(loadError ? ['Could not load the deck: ' + loadError, el('button', { type: 'button', class: 'round small', onclick: reload, title: 'Retry' }, '⟳')]
       : loading ? ['Loading…']
+      : stack === 'slr' ? ['No SLR scenes left to swipe.', el('span', {}, 'npm run slr:scout finds more.')]
       : ['Nothing left to swipe.', el('a', { href: '/' }, 'Back to the report')]));
     return;
   }
@@ -522,14 +624,16 @@ function swipe(dir, dy) {
   const node = topNode();
   if (node) fly(node, dir, dy);
   queue.shift();
-  undoStack.push({ card, dir });
+  undoStack.push({ card, dir, stack });
   count(-1, dir === 'right' ? 1 : 0);
   image = 0;
   render();
-  serial(() => post('/api/swipe', { id: card.id, dir })).catch((e) => {
-    // Not saved: put the card back on top.
-    const i = undoStack.findIndex((u) => u.card.id === card.id);
+  const from = stack;
+  serial(() => post(apiOf(from) + '/swipe', { id: card.id, dir })).catch((e) => {
+    // Not saved: put the card back on top (unless the page moved to another tab meanwhile).
+    const i = undoStack.findIndex((u) => u.card === card);
     if (i >= 0) undoStack.splice(i, 1);
+    if (stack !== from) { toast('Swipe not saved: ' + e.message); return; }
     if (!queue.some((c) => c.id === card.id)) queue.unshift(card);
     count(1, dir === 'right' ? -1 : 0);
     image = 0;
@@ -546,7 +650,7 @@ function skip() {
   const node = topNode();
   if (node) fly(node, 'skip');
   queue.shift();
-  undoStack.push({ card, dir: 'skip' });
+  undoStack.push({ card, dir: 'skip', stack });
   skipped.push(card);
   image = 0;
   if (queue.length <= REFILL_AT) {
@@ -570,6 +674,15 @@ function returnSkipped() {
 function undo() {
   const last = undoStack.pop();
   if (!last) return;
+  if (last.stack !== stack) {
+    // Made on another tab: forget it there; this tab's cards and counters stay.
+    if (last.dir === 'skip') return;
+    serial(() => post(apiOf(last.stack) + '/swipe/undo', { id: last.card.id }))
+      .then(() => toast(`Undone on the ${last.stack === 'slr' ? 'SLR' : last.stack === 'multi' ? 'Multi-axis' : 'Single-axis'} tab: ${last.card.title || '#' + last.card.id}`))
+      .catch((e) => { undoStack.push(last); toast('Undo not saved: ' + e.message); });
+    renderCounter();
+    return;
+  }
   queue = queue.filter((c) => c.id !== last.card.id);
   queue.unshift(last.card);
   image = 0;
@@ -580,7 +693,7 @@ function undo() {
   }
   count(1, last.dir === 'right' ? -1 : 0);
   render(last.dir);
-  serial(() => post('/api/swipe/undo', { id: last.card.id })).catch((e) => {
+  serial(() => post(apiOf(last.stack) + '/swipe/undo', { id: last.card.id })).catch((e) => {
     // The swipe still stands: take the card off again.
     queue = queue.filter((c) => c.id !== last.card.id);
     undoStack.push(last);
@@ -603,7 +716,8 @@ function more() {
   const held = [...queue, ...skipped].map((c) => c.id).join(',');
   serial(async () => {
     const jitter = jitters[stack] == null ? '' : `&jitter=${jitters[stack]}`;
-    const res = await fetch(`/api/deck?limit=${BATCH}&seed=${seed}&stack=${stack}${jitter}&exclude=${held}`, { cache: 'no-store' });
+    const which = stack === 'slr' ? '/api/slr/deck?' : `/api/deck?stack=${stack}&`;
+    const res = await fetch(`${which}limit=${BATCH}&seed=${seed}${jitter}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -615,7 +729,7 @@ function more() {
     since = null;
     exhausted = d.cards.length < BATCH;
     // Swiped cards (a swipe still on its way to the server) don't come back; skipped ones may.
-    const swiped = undoStack.filter((u) => u.dir !== 'skip').map((u) => u.card);
+    const swiped = undoStack.filter((u) => u.dir !== 'skip' && u.stack === stack).map((u) => u.card);
     const have = new Set([...queue, ...skipped, ...swiped].map((c) => c.id));
     const fresh = d.cards.filter((c) => !have.has(c.id));
     const wasEmpty = !queue.length;
@@ -623,6 +737,7 @@ function more() {
     returnSkipped();
     $('problems').hidden = !d.problems.length;
     $('problems').textContent = d.problems.join('\n');
+    renderQuota(d);
     loading = false;
     if (wasEmpty) image = 0;
     loaded = true;
@@ -676,6 +791,8 @@ $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(
 
 function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
+  $('like').title = stack === 'slr' ? 'Want: on the SLR pick list (→)' : 'Want: the scout downloads it (→)';
+  if (stack !== 'slr') renderQuota(null);
 }
 $('stacks').addEventListener('click', (e) => {
   const b = e.target.closest('button');

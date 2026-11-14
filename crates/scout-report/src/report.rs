@@ -5,7 +5,7 @@
 //! Built fresh from the files on every request; a missing file is an empty
 //! section.
 
-use crate::swipes::{self, Dir, Swipes};
+use crate::swipes::{Dir, Store, Swipes};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -93,9 +93,9 @@ pub fn read_json(user_data: &Path, name: &str, problems: &mut Vec<String>) -> Va
     }
 }
 
-/// The deck's swipes; an unreadable file is a line in `problems` and no swipes.
-pub fn read_swipes(user_data: &Path, problems: &mut Vec<String>) -> Swipes {
-    swipes::read(user_data).unwrap_or_else(|e| {
+/// A deck's swipes; an unreadable file is a line in `problems` and no swipes.
+pub fn read_swipes(user_data: &Path, store: Store, problems: &mut Vec<String>) -> Swipes {
+    store.read(user_data).unwrap_or_else(|e| {
         problems.push(e);
         Swipes::default()
     })
@@ -110,7 +110,7 @@ pub fn load(user_data: &Path) -> Report {
     let rejected = read_json(user_data, REJECTED_FILE, &mut problems);
     let config = read_json(user_data, "config.json", &mut problems);
     let links = read_json(user_data, crate::library::LINKS_FILE, &mut problems);
-    let swipes = read_swipes(user_data, &mut problems);
+    let swipes = read_swipes(user_data, crate::swipes::EROSCRIPTS, &mut problems);
     let videos = crate::library::topic_videos(&config, &links, &mut problems);
     let mut report = build(&state, &waiting, &rejected);
     mark_in_library(&mut report, &videos);
@@ -506,7 +506,7 @@ mod tests {
 
         // Posts carry their swipe; a broken swipes file is a problem, not an error.
         std::fs::write(
-            dir.join(swipes::FILE),
+            dir.join(crate::swipes::EROSCRIPTS.file),
             br#"{"version":1,"swipes":{"300":{"dir":"right","at":"x"},"2095":{"dir":"left","at":"y"}}}"#,
         )
         .unwrap();
@@ -522,10 +522,14 @@ mod tests {
                 .get("swipe")
                 .is_none()
         );
-        std::fs::write(dir.join(swipes::FILE), b"[]").unwrap();
+        std::fs::write(dir.join(crate::swipes::EROSCRIPTS.file), b"[]").unwrap();
         let r = load(&dir);
         assert_eq!(post(&r, 300).swipe, None);
-        assert!(r.problems.iter().any(|p| p.starts_with(swipes::FILE)));
+        assert!(
+            r.problems
+                .iter()
+                .any(|p| p.starts_with(crate::swipes::EROSCRIPTS.file))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
