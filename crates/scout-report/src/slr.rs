@@ -8,11 +8,12 @@
 //! per 7 days). Scores, tag scores and the quota come from the scouts; Rust here only deals.
 
 use crate::deck::{self, Deal, TagScore};
+use crate::frames;
 use crate::report::{self, id_of, str_of, strings_of};
 use crate::swipes::{self, Dir, Swipes};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 pub const SCOUT_FILE: &str = "slr-scout.json";
@@ -97,6 +98,8 @@ pub struct SlrCard {
     pub title: Option<String>,
     /// The studio, shown where a post shows its author.
     pub author: Option<String>,
+    /// The scene's https thumbnail, then its preview frames on disk (`/frames/slr/…`,
+    /// crate::frames), at most deck::MAX_IMAGES.
     pub images: Vec<String>,
     pub score: Option<f64>,
     pub score_parts: Value,
@@ -133,7 +136,8 @@ pub struct SlrTag {
 
 /// Read the waiting list (with the state, library and EroScripts swipes `deck::load_pool`
 /// reads), slr-scout.json and the SLR swipes, and deal the cards `deal` asks for (its `stack`
-/// is ignored; its `jitter` defaults to SLR_JITTER).
+/// is ignored; its `jitter` defaults to SLR_JITTER). Scene cards get their frames after the
+/// thumbnail (posts get theirs in `deck::load_pool`).
 pub fn load(user_data: &Path, deal: &Deal) -> SlrDeck {
     let mut problems = Vec::new();
     let (posts, waiting) = deck::load_pool(user_data, deck::Pool::Slr, &mut problems);
@@ -141,6 +145,16 @@ pub fn load(user_data: &Path, deal: &Deal) -> SlrDeck {
     let swipes = report::read_swipes(user_data, swipes::SLR, &mut problems);
     let mut d = build(&scout, &swipes, posts, &deck::slr_scene_ids(&waiting));
     d.deal(deal);
+    let by_id: HashMap<u64, &Value> = scenes(&scout).collect();
+    for card in &mut d.cards {
+        if let SlrDeckCard::Scene(c) = card {
+            let rec = by_id.get(&c.id).copied().unwrap_or(&Value::Null);
+            frames::append(
+                &mut c.images,
+                frames::urls(user_data, frames::Source::Slr, c.id, rec),
+            );
+        }
+    }
     d.problems = problems;
     d
 }

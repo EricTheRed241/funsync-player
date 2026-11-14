@@ -43,6 +43,15 @@ pub const STEM_BYTES: usize = 180;
 
 /// The scene ids swiped right (`{version, swipes: {"<id>": {dir, at}}}`).
 pub fn right_swipes(user_data: &Path) -> Result<Vec<u64>, String> {
+    swipe_ids(user_data, |s| s["dir"] == "right")
+}
+
+/// The scene ids swiped either way (the deck shows neither again).
+pub fn swiped(user_data: &Path) -> Result<Vec<u64>, String> {
+    swipe_ids(user_data, |_| true)
+}
+
+fn swipe_ids(user_data: &Path, keep: impl Fn(&Value) -> bool) -> Result<Vec<u64>, String> {
     let path = user_data.join(SWIPES_FILE);
     let raw = match fs::read_to_string(&path) {
         Ok(raw) => raw,
@@ -55,7 +64,7 @@ pub fn right_swipes(user_data: &Path) -> Result<Vec<u64>, String> {
         .as_object()
         .into_iter()
         .flatten()
-        .filter(|(_, s)| s["dir"] == "right")
+        .filter(|(_, s)| keep(s))
         .filter_map(|(id, _)| id.parse().ok())
         .collect();
     ids.sort_unstable();

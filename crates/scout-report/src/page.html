@@ -330,7 +330,8 @@ function sorted(posts) {
 }
 
 function thumbCell(p) {
-  if (!p.image || !/^https:\/\//.test(p.image)) return el('td', { class: 'thumb muted' }, '—');
+  // The post's image, else (no https one) its first preview frame, served by scout-report.
+  if (!p.image || !/^(https:\/\/|\/frames\/)/.test(p.image)) return el('td', { class: 'thumb muted' }, '—');
   return el('td', { class: 'thumb' }, el('img', {
     src: p.image, loading: 'lazy', alt: '', title: 'Open image',
     onclick: () => openImage(p.image),

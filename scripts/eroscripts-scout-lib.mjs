@@ -930,10 +930,13 @@ export const IMAGES_VERSION = 2;
  */
 export const GALLERY_KEEP = 8;
 
+/** What `--frames` records on a post (scripts/scout-frames.mjs): kept when the post is judged again, as its frames stay on disk. */
+export const FRAME_STATE_KEYS = ['frames', 'framesFailed'];
+
 /**
  * Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending.
  * `info` (postInfo) is stored with it: title, author, dates and images, each kept from the
- * earlier verdict when `info` lacks it.
+ * earlier verdict when `info` lacks it. Its frames (FRAME_STATE_KEYS) are kept too.
  */
 export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION, info = null) {
   const prev = state.topics[id] || {};
@@ -943,6 +946,7 @@ export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VE
     if (v) rec[k] = v;
   }
   if (prev.gone && !info?.title) rec.gone = true;
+  for (const k of FRAME_STATE_KEYS) if (prev[k]) rec[k] = prev[k];
   state.topics[id] = rec;
   if (state.pending) delete state.pending[id];
 }
@@ -1104,7 +1108,7 @@ export function scoredCandidate(c, scoring = {}) {
  * rules), posts left pending, and the waiting list with what `--auto` takes.
  *
  * @param {object} state scan state
- * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, fetchAt?, fetchExit?}|null, now?: number, rules?: number}} [o]
+ * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, framesAt?, framesExit?, fetchAt?, fetchExit?}|null, now?: number, rules?: number}} [o]
  */
 export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new Set(), daily = null, now = Date.now(), rules = RULES_VERSION } = {}) {
   const when = (iso) => {
@@ -1115,7 +1119,10 @@ export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new
   const count = (list) => Object.entries(list.reduce((m, t) => ({ ...m, [t.verdict]: (m[t.verdict] || 0) + 1 }), {}))
     .sort((a, b) => b[1] - a[1]).map(([v, n]) => `${v} ${n}`).join(' · ');
   const lines = [`Last scan: ${when(state.lastScanAt)}`];
-  if (daily) lines.push(`Daily run: scan ${when(daily.scanAt)}, exit ${daily.scanExit}${daily.fetchAt ? `; auto-fetch ${when(daily.fetchAt)}, exit ${daily.fetchExit}` : ''}`);
+  if (daily) {
+    const frames = daily.framesAt ? `; frames ${when(daily.framesAt)}, exit ${daily.framesExit}` : '';
+    lines.push(`Daily run: scan ${when(daily.scanAt)}, exit ${daily.scanExit}${frames}${daily.fetchAt ? `; auto-fetch ${when(daily.fetchAt)}, exit ${daily.fetchExit}` : ''}`);
+  }
   lines.push('Backfill:');
   for (const tag of new Set([...FEED_TAGS, ...Object.keys(state.feeds)])) {
     lines.push(`  ${tag.padEnd(12)} ${feedProgress(state.feeds[tag])}${ALL_FEEDS.includes(tag) ? '' : ' (no longer a feed)'}`);

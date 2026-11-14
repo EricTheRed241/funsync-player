@@ -291,11 +291,26 @@ fn full_run_scores_and_writes_the_scenes() {
     assert!(out.contains("Scripts: 0 from EroScripts, 1 SLR hand-crafted, 3 SLR AI, 0 none."));
     assert!(out.contains("Quota: hand-crafted scripts 2/3, AI scripts 3/3, videos 35/35 left"));
     assert!(!out.contains("forum-secret") && !stderr(&o).contains("forum-secret"));
+    // No fixture lists a trailer: every scene records why it has no frames.
+    assert!(
+        scenes
+            .iter()
+            .all(|s| s["frames"].is_null() && s["framesFailed"]["reason"] == "no free trailer")
+    );
+    assert!(out.contains("Frames: 0 scene(s) got frames, 4 got none."));
+    let failed_at = scenes[0]["framesFailed"]["at"].clone();
 
     // Without the forum or a session: earlier forum matches are kept, the
-    // quota too, fetchedAt as well, and the run exits 3.
+    // quota too, fetchedAt, frames (while a file is on disk) and failures as
+    // well (not tried again within 7 days), and the run exits 3.
     let mut file = read_file(&ud);
     file["scenes"][2]["fetchedAt"] = json!("2026-11-13T10:00:00.000Z");
+    let frames = json!({"at": "2026-11-14T00:00:00.000Z", "source": "slr: 3_1080p.mp4",
+                        "files": ["25.jpg", "50.jpg"]});
+    file["scenes"][1]["frames"] = frames.clone();
+    let frames_dir = ud.join("scout-frames/slr/3");
+    fs::create_dir_all(&frames_dir).unwrap();
+    fs::write(frames_dir.join("50.jpg"), b"jpeg").unwrap();
     fs::write(ud.join("slr-scout.json"), file.to_string()).unwrap();
     fs::remove_file(ud.join("slr-session.json")).unwrap();
     let fixtures = tmp.fixtures(&catalogue());
@@ -313,6 +328,25 @@ fn full_run_scores_and_writes_the_scenes() {
     assert_eq!(file["quotaError"], "no session");
     assert_eq!(file["quota"]["videos"]["remaining"], 35);
     assert!(stderr(&o).contains("EroScripts not searched (--no-forum)"));
+    assert_eq!(file["scenes"][1]["frames"], frames);
+    assert_eq!(file["scenes"][0]["framesFailed"]["at"], failed_at);
+    assert!(stdout(&o).contains("Frames: 0 scene(s) got frames, 0 got none."));
+
+    // --frames 0: no frames pass at all.
+    let o = run(
+        &[
+            "--user-data",
+            ud_s,
+            "--actor",
+            "Test Star",
+            "--no-forum",
+            "--frames",
+            "0",
+        ],
+        Some(&fixtures),
+    );
+    assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
+    assert!(!stdout(&o).contains("Frames:"));
 }
 
 #[test]

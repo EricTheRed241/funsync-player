@@ -321,6 +321,9 @@ function writeSession(file, session) {
  *   option's byte count) and the length (ffprobe through `videoSeconds`,
  *   durationMatches with the main script, else the scene's length) must
  *   agree. Returns the option taken.
+ * - `scene(ref)`: a scene's public details (`/v3/scenes/<id>` data, no
+ *   login; its free trailer encodings give frames: scripts/scout-frames.mjs),
+ *   null when there is no such scene.
  */
 export function createSlr({
   fetch = globalThis.fetch, userData, intervalMs = SLR_INTERVAL_MS, now = () => Date.now(), sleep, log = () => {},
@@ -417,6 +420,7 @@ export function createSlr({
       }
       return { files, missed, down };
     },
+    scene: detail,
     async quota() {
       const limit = (await api('/users/v1/user/overview', { auth: true }))?.data?.limits?.downloadVideo;
       const remaining = Number(limit?.remaining);

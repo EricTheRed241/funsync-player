@@ -231,6 +231,8 @@ export function pacedFetch({
  *   when unknown.
  * - `fresh(file)`: the page read again: `{direct, durationSec}` of the
  *   file's quality, with a new access token.
+ * - `page(url)`: the page read now (parseRule34videoPage), every quality's
+ *   fresh direct link with it (frames: scripts/scout-frames.mjs).
  * - `stream(direct)`: the download response (HTTP 200/206), else an error.
  */
 export function createRule34video(opts = {}) {
@@ -264,6 +266,9 @@ export function createRule34video(opts = {}) {
       const v = variantOf(page, file);
       if (!v) throw new Error(`rule34video: no ${file.height}p any more on ${file.url}`);
       return { direct: v.direct, durationSec: page.durationSec };
+    },
+    async page(url) {
+      return readPage(url);
     },
     async stream(direct) {
       const resp = await get(direct, { headers: RULE34VIDEO_HEADERS });

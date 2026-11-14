@@ -9,7 +9,9 @@
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
 //   npm run eroscripts:scout -- --titles     title, author, dates, images for posts judged before verdicts kept them, and
 //                                            the waiting posts' script previews (length, heat strip)
-//   npm run eroscripts:scout -- --daily      scan, then download the waiting posts swiped right in npm run scout:report
+//   npm run eroscripts:scout -- --daily      scan, frames for posts with few images, then download the waiting posts
+//                                            swiped right in npm run scout:report
+//   npm run eroscripts:scout -- --frames     frames of waiting posts' videos for the swipe deck (scripts/scout-frames.mjs)
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //   SexLikeReal scenes a post links (or, for a post naming SLR without a video, SLR's scene search finds by
@@ -58,6 +60,7 @@ const vrbHost = await import('./vrbangers-host.mjs');
 const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError, browserOptions } = await import('./vrbangers-browser.mjs');
 const { redactUrl } = await import('./vrbangers-lib.mjs');
 const slrHost = await import('./slr-host.mjs');
+const frames = await import('./scout-frames.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
@@ -95,7 +98,7 @@ Download:
   --fetch                download the saved list (multi-axis first) into the EroScripts library folder;
                          skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
-  --ids 1,2,3            only these post ids
+  --ids 1,2,3            only these post ids (also with --frames)
   --auto                 only the posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}),
                          whatever their score or axes
   --passes N             repeat the queue until no failures, at most N times (default 1)
@@ -122,8 +125,18 @@ Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
                          and the paths config.json keeps for them (app must be closed);
                          with --ids, only those posts' scenes
+Frames (for the swipe deck's cards; free reads only):
+  --frames [N]           waiting posts not in the library and not swiped left whose card shows fewer than
+                         ${frames.FRAMES_WANTED} usable images get frames of their first video at 25, 50 and 75 % (one eye for
+                         stereo VR, ≤ ${frames.MAX_FRAME_WIDTH} px wide) in <userData>/${frames.FRAMES_DIR}/eroscripts/<id>/; swiped right
+                         first, then posts without images, then by score; at most N posts (default ${frames.DEFAULT_FRAME_POSTS}).
+                         Hosts: forum, rule34video, pixeldrain (a hotlink-protected file fails), MEGA (stops at
+                         its bandwidth limit), SexLikeReal's free trailer (never an account download),
+                         VRBangers' public scene stills. ffmpeg reads a few MB per frame (≤ ${Math.round(frames.MAX_POST_BYTES / 1048576)} MB a post).
+                         A failed post is tried again after 7 days. Exit 2 when posts are left
 Daily (run once a day by the watchdog, see README):
-  --daily                scan, then --fetch --auto (takes --passes, --wait); writes <userData>/eroscripts-scout-daily.json
+  --daily                scan, then --frames ${frames.DAILY_FRAME_POSTS}, then --fetch --auto (takes --passes, --wait); writes
+                         <userData>/eroscripts-scout-daily.json
 Status:
   --status               print the scan state without going online: backfill per feed (page and oldest last
                          activity reached), verdicts, posts judged under older rules, the waiting list
@@ -145,6 +158,11 @@ function parseArgs(argv) {
     const a = argv[i];
     switch (a) {
       case '--fetch': opts.fetch = true; break;
+      case '--frames': {
+        const n = argv[i + 1];
+        if (n !== undefined && /^\d+$/.test(n)) { opts.frames = Number(n); i++; } else opts.frames = frames.DEFAULT_FRAME_POSTS;
+        break;
+      }
       case '--auto': opts.auto = true; break;
       case '--daily': opts.daily = true; break;
       case '--status': opts.status = true; break;
@@ -182,6 +200,7 @@ function parseArgs(argv) {
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   if (opts.auto && !opts.fetch) throw new Error('--auto goes with --fetch');
   if (opts.rejudge && !opts.rejudge.length) throw new Error('--rejudge needs at least one verdict');
+  if (opts.frames !== undefined && (opts.fetch || opts.daily || opts.add || opts.titles)) throw new Error('--frames runs on its own (--daily includes it)');
   return opts;
 }
 
@@ -1073,6 +1092,77 @@ async function planSlr(queue, { userData, incoming }) {
   return failed || short ? 2 : 0;
 }
 
+// ── Frames ──────────────────────────────────────────────────────────────
+
+/**
+ * `--frames N`: frames for the swipe deck (scripts/scout-frames.mjs). The waiting posts frames.framesQueue
+ * picks (not in the library: lib.notYetHeld and the scout's own sidecars; not swiped left; fewer than
+ * FRAMES_WANTED usable images; no frames or recent failure), at most `opts.frames` of them read, each
+ * recorded in the scan state (`frames` / `framesFailed`) as it's done. A host whose allowance runs out
+ * (MEGA's bandwidth) is skipped for the rest of the run. Exit 2 when posts are left.
+ */
+async function makeFrames(opts, { api, userData, config, incoming }) {
+  const listFile = path.join(userData, 'eroscripts-scout.json');
+  let candidates;
+  try { candidates = JSON.parse(fs.readFileSync(listFile, 'utf8')).candidates || []; } catch {
+    console.log(`No scout list at ${listFile}; no frames to make.`);
+    return 0;
+  }
+  const state = readScoutState(userData);
+  const { wanted, hidden } = readSwipesFile(userData);
+  const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
+  const ownTopics = new Set();
+  fetchedScenes(incoming, userData, ownTopics);
+  const open = new Set(lib.notYetHeld(candidates, { knownTopics, turnedDown, libraryVideos: library.videos }).queue.map((c) => c.id));
+  const queue = frames.framesQueue(candidates.filter((c) => !opts.ids || opts.ids.has(c.id)), { state, wanted, hidden, inLibrary: (c) => ownTopics.has(c.id) || !open.has(c.id) });
+  console.log(`Frames: ${queue.length} waiting posts show fewer than ${frames.FRAMES_WANTED} images; reading at most ${opts.frames}`);
+  const { File } = await import('megajs');
+  const cookie = api._headers().Cookie;
+  const deps = { File, rule34video, slr, forumHeaders: cookie ? { Cookie: cookie } : {} };
+  const pacer = createPacer();
+  const stopped = new Map();
+  const failed = {};
+  const skipped = {};
+  let made = 0; let frameCount = 0; let tried = 0; let left = 0; let bytes = 0;
+  const started = Date.now();
+  const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
+  for (const { c } of queue) {
+    const plan = frames.frameSource(c);
+    if (plan.skip) { skipped[plan.skip] = (skipped[plan.skip] || 0) + 1; continue; }
+    if (tried >= opts.frames || stopped.has(plan.host)) { left++; continue; }
+    tried++;
+    if (plan.forum) await pacer.wait();
+    const dir = frames.postFramesDir(userData, c.id);
+    const rec = state.topics[c.id];
+    const t0 = Date.now();
+    try {
+      const r = await frames.postFrames(c, dir, deps);
+      frames.recordFrames(rec, { source: r.source, files: r.files });
+      made++;
+      frameCount += r.files.length;
+      bytes += r.bytes || 0;
+      if (r.stopHost) stopped.set(plan.host, 'its allowance ran out');
+      console.log(`  ✓ ${c.id} ${r.source}: ${r.files.length} frame${r.files.length > 1 ? 's' : ''}${r.bytes != null ? `, ${mb(r.bytes)}` : ''}, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    } catch (err) {
+      const reason = err instanceof frames.FrameError ? err.reason : `${plan.host}: ${err.message}`;
+      frames.recordFramesFailed(rec, reason);
+      fs.rmSync(dir, { recursive: true, force: true });
+      const key = reason.replace(/\s*\(.*$/, '');
+      failed[key] = (failed[key] || 0) + 1;
+      if (err.stopHost) stopped.set(plan.host, reason);
+      console.log(`  ✗ ${c.id} ${plan.host}: ${reason} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+    }
+    writeScoutState(userData, state);
+  }
+  const list = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ');
+  const nFailed = Object.values(failed).reduce((n, k) => n + k, 0);
+  console.log(`Frames: ${made} posts got ${frameCount} frames (${mb(bytes)} read, ${clock(Date.now() - started)}), ${nFailed} failed${nFailed ? ` (${list(failed)})` : ''}`);
+  if (Object.keys(skipped).length) console.log(`  skipped, no free source: ${list(skipped)}`);
+  for (const [host, why] of stopped) console.log(`  ${host} stopped for this run: ${why}`);
+  if (left) console.log(`  ${left} posts left for the next run`);
+  return left ? 2 : 0;
+}
+
 // ── Retitle ─────────────────────────────────────────────────────────────
 
 /** Rename fetched scenes to `Artist - Title (metadata)` and move config.json's paths with them. */
@@ -1196,10 +1286,12 @@ async function fillTitles({ api, userData }) {
 }
 
 /**
- * `--daily`: a scan (new posts plus the usual backfill), then `--fetch --auto`.
+ * `--daily`: a scan (new posts plus the usual backfill), then `--frames` for
+ * DAILY_FRAME_POSTS posts, then `--fetch --auto`.
  * `<userData>/eroscripts-scout-daily.json` records when each step ran and its
  * exit code; it's written right after the scan, so the watchdog sees the day's
- * run as done while the downloads go on.
+ * run as done while the frames and downloads go on. A frames step that fails
+ * outright doesn't hold up the downloads.
  */
 async function daily(opts, ctx) {
   const file = path.join(ctx.userData, DAILY_FILE);
@@ -1207,14 +1299,24 @@ async function daily(opts, ctx) {
   const scanExit = await exitCodeOf(() => scan(opts, ctx));
   writeAtomic(file, JSON.stringify({ scanAt, scanExit }, null, 1));
   if (scanExit === 3) return 3;
+  console.log('\nDaily: frames for waiting posts with few images');
+  const framesAt = new Date().toISOString();
+  let framesExit;
+  try {
+    framesExit = await exitCodeOf(() => makeFrames({ ...opts, frames: frames.DAILY_FRAME_POSTS }, ctx));
+  } catch (err) {
+    console.error(`frames: ${err.message}`);
+    framesExit = 1;
+  }
+  writeAtomic(file, JSON.stringify({ scanAt, scanExit, framesAt, framesExit }, null, 1));
   console.log('\nDaily: downloading the waiting posts swiped right');
   const fetchExit = await exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx));
-  writeAtomic(file, JSON.stringify({ scanAt, scanExit, fetchAt: new Date().toISOString(), fetchExit }, null, 1));
-  return scanExit || fetchExit;
+  writeAtomic(file, JSON.stringify({ scanAt, scanExit, framesAt, framesExit, fetchAt: new Date().toISOString(), fetchExit }, null, 1));
+  return scanExit || fetchExit || framesExit;
 }
 
 /**
- * One forum run at a time (scan, --add, --fetch, --daily): they all rewrite the
+ * One forum run at a time (scan, --add, --fetch, --frames, --daily): they all rewrite the
  * scan state and the list. Null when this run holds `<userData>/eroscripts-scout.lock`
  * (`<pid>@<host>`, freed at exit), else the holder of the live run that does. A
  * lock left by an ended run (this host: its pid is gone; another host, e.g. a
@@ -1252,6 +1354,7 @@ async function main() {
 
   const ctx = { api, userData, config, incoming };
   if (opts.daily) return daily(opts, ctx);
+  if (opts.frames !== undefined) return exitCodeOf(() => makeFrames(opts, ctx));
   if (opts.add) return exitCodeOf(() => addPicked(opts, ctx));
   if (opts.titles) return exitCodeOf(() => fillTitles(ctx));
   return exitCodeOf(() => (opts.fetch ? fetchAll(opts, ctx) : scan(opts, ctx)));

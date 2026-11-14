@@ -3,12 +3,13 @@
 //! `GET /swipe` (the deck page), `GET /api/deck?limit=N&seed=N&jitter=N&exclude=ids&stack=…`
 //! (the next cards), `GET /api/slr/deck?limit=N&seed=N&jitter=N&exclude=ids&excludeScenes=ids`
 //! (the SLR tab's cards: EroScripts posts with their video on SLR and slr:scout's scenes, and
-//! the quota), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (posts), and the
-//! same under `/api/slr/` (scenes; the only writes: eroscripts-scout-swipes.json and
-//! slr-scout-swipes.json).
+//! the quota), `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview
+//! frames, crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}`
+//! (posts), and the same under `/api/slr/` (scenes; the only writes:
+//! eroscripts-scout-swipes.json and slr-scout-swipes.json).
 
 use crate::swipes::{self, Dir, Store};
-use crate::{deck, report, slr};
+use crate::{deck, frames, report, slr};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -30,13 +31,21 @@ const MAX_BODY: usize = 4 * 1024;
 pub struct Response {
     pub status: u16,
     pub content_type: &'static str,
+    /// `Cache-Control`.
+    pub cache: &'static str,
     pub body: Vec<u8>,
 }
+
+/// Everything but the frames: rebuilt from the files on every request.
+const NO_STORE: &str = "no-store";
+/// A frame changes only when its scout takes it again.
+const FRAME_CACHE: &str = "max-age=300";
 
 fn text(status: u16, body: &str) -> Response {
     Response {
         status,
         content_type: "text/plain; charset=utf-8",
+        cache: NO_STORE,
         body: body.as_bytes().to_vec(),
     }
 }
@@ -45,6 +54,7 @@ fn html(page: &str) -> Response {
     Response {
         status: 200,
         content_type: "text/html; charset=utf-8",
+        cache: NO_STORE,
         body: page.as_bytes().to_vec(),
     }
 }
@@ -54,9 +64,23 @@ fn json_ok<T: Serialize>(value: &T) -> Response {
         Ok(body) => Response {
             status: 200,
             content_type: "application/json",
+            cache: NO_STORE,
             body,
         },
         Err(e) => text(500, &format!("json: {e}\n")),
+    }
+}
+
+/// `GET /frames/…`: the frame file (crate::frames::file_for), else 404.
+fn frame(path: &str, user_data: &Path) -> Response {
+    match frames::file_for(user_data, path).map(std::fs::read) {
+        Some(Ok(body)) => Response {
+            status: 200,
+            content_type: "image/jpeg",
+            cache: FRAME_CACHE,
+            body,
+        },
+        _ => text(404, "Not found\n"),
     }
 }
 
@@ -76,6 +100,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             Ok(d) => json_ok(&slr::load(user_data, &d)),
             Err(e) => text(400, &e),
         },
+        ("GET" | "HEAD", p) if p.starts_with("/frames/") => frame(p, user_data),
         ("POST", "/api/swipe") => swipe(body, user_data, swipes::EROSCRIPTS),
         ("POST", "/api/swipe/undo") => undo(body, user_data, swipes::EROSCRIPTS),
         ("POST", "/api/slr/swipe") => swipe(body, user_data, swipes::SLR),
@@ -318,11 +343,12 @@ fn handle(mut stream: TcpStream, user_data: &Path) -> io::Result<()> {
     };
     write!(
         stream,
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         resp.status,
         reason(resp.status),
         resp.content_type,
-        resp.body.len()
+        resp.body.len(),
+        resp.cache
     )?;
     if method != "HEAD" {
         stream.write_all(&resp.body)?;
@@ -710,6 +736,175 @@ mod tests {
         assert_eq!(post("/api/swipe/undo", br#"{"id":40}"#), 200);
         assert_eq!(post("/api/slr/swipe/undo", br#"{"id":77}"#), 200);
         assert_eq!(cards(&get_json("/api/slr/deck", &dir)), all);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn write_frame(dir: &Path, rel: &str) {
+        let path = dir.join("scout-frames").join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("jpeg {rel}")).unwrap();
+    }
+
+    #[test]
+    fn serves_frame_files_only() {
+        let dir = user_data("frames");
+        write_frame(&dir, "eroscripts/12/25.jpg");
+        write_frame(&dir, "slr/66249/75.jpg");
+        write_frame(&dir, "eroscripts/12/26.jpg");
+        std::fs::write(dir.join("scout-frames/eroscripts/12/x.json"), b"{}").unwrap();
+        for (method, target, body) in [
+            (
+                "GET",
+                "/frames/eroscripts/12/25.jpg",
+                "jpeg eroscripts/12/25.jpg",
+            ),
+            (
+                "HEAD",
+                "/frames/eroscripts/12/25.jpg",
+                "jpeg eroscripts/12/25.jpg",
+            ),
+            (
+                "GET",
+                "/frames/slr/66249/75.jpg?v=2#x",
+                "jpeg slr/66249/75.jpg",
+            ),
+        ] {
+            let r = route(method, target, b"", &dir);
+            assert_eq!(
+                (r.status, r.content_type, r.cache),
+                (200, "image/jpeg", "max-age=300"),
+                "{method} {target}"
+            );
+            assert_eq!(r.body, body.as_bytes());
+        }
+        assert_eq!(route("GET", "/api/report", b"", &dir).cache, "no-store");
+        for target in [
+            "/frames/eroscripts/12/50.jpg",
+            "/frames/eroscripts/12/26.jpg",
+            "/frames/eroscripts/12/x.json",
+            "/frames/eroscripts/12/../12/25.jpg",
+            "/frames/eroscripts/../eroscripts-scout-state.json",
+            "/frames/../eroscripts-scout-state.json",
+            "/frames/x/12/25.jpg",
+            "/frames/slr/12/25.jpg",
+            "/frames/eroscripts/abc/25.jpg",
+            "/frames/eroscripts/012/25.jpg",
+            "/frames/eroscripts/12/25.jpg/",
+            "/frames/eroscripts/12",
+            "/frames/",
+            "/scout-frames/eroscripts/12/25.jpg",
+        ] {
+            let r = route("GET", target, b"", &dir);
+            assert_eq!((r.status, r.cache), (404, "no-store"), "{target}");
+        }
+        for m in ["POST", "PUT", "DELETE"] {
+            assert_eq!(
+                route(m, "/frames/eroscripts/12/25.jpg", b"", &dir).status,
+                404
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cards_list_frames_after_their_images() {
+        let dir = with_waiting("frame-cards");
+        let frames = |files: &[&str]| json!({"at": "2026-11-14T00:00:00.000Z", "source": "MEGA: a.mp4", "files": files});
+        let state = json!({"version": 1, "topics": {
+            // 7: no images, three frames listed, two on disk.
+            "7": {"verdict": "candidate", "images": [], "frames": frames(&["25.jpg", "50.jpg", "75.jpg"])},
+            // 8: four images and two frames: capped at five.
+            "8": {"verdict": "candidate", "image": "https://x/8a.jpg",
+                  "images": ["https://x/8a.jpg", "https://x/8b.jpg", "https://x/8c.jpg", "https://x/8d.jpg"],
+                  "frames": frames(&["25.jpg", "50.jpg"])},
+            // 9: frames on disk but none listed.
+            "9": {"verdict": "candidate", "image": "https://x/9.jpg", "images": ["https://x/9.jpg"]},
+            // 40: a post on SLR: the eroscripts path, by topic id.
+            "40": {"verdict": "candidate", "frames": frames(&["50.jpg"])}
+        }});
+        std::fs::write(dir.join(report::STATE_FILE), state.to_string()).unwrap();
+        for rel in [
+            "eroscripts/7/25.jpg",
+            "eroscripts/7/75.jpg",
+            "eroscripts/8/25.jpg",
+            "eroscripts/8/50.jpg",
+            "eroscripts/9/25.jpg",
+            "eroscripts/40/50.jpg",
+            "slr/77/25.jpg",
+            "slr/77/50.jpg",
+        ] {
+            write_frame(&dir, rel);
+        }
+        let waiting = json!({"candidates": [
+            {"id": 7, "score": 1, "axisType": "multi"}, {"id": 8, "score": 3, "axisType": "multi"},
+            {"id": 9, "score": 2, "axisType": "multi"},
+            {"id": 40, "score": 5, "axisType": "multi", "scenes": [{"video": {"host": "slr", "slrSceneId": 66249}}]}
+        ]});
+        std::fs::write(dir.join(report::WAITING_FILE), waiting.to_string()).unwrap();
+        std::fs::write(
+            dir.join(slr::SCOUT_FILE),
+            json!({"scenes": [
+                {"id": 77, "score": 3, "thumbnail": "https://cdn/77.webp",
+                 "frames": frames(&["25.jpg", "50.jpg", "75.jpg"])},
+                {"id": 78, "score": 2, "frames": frames(&["25.jpg"])}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+
+        let v = get_json("/api/deck", &dir);
+        let images = |v: &Value, i: usize| v["cards"][i]["images"].clone();
+        assert_eq!(ids(&v), [8, 9, 7]);
+        assert_eq!(
+            images(&v, 0),
+            json!([
+                "https://x/8a.jpg",
+                "https://x/8b.jpg",
+                "https://x/8c.jpg",
+                "https://x/8d.jpg",
+                "/frames/eroscripts/8/25.jpg"
+            ])
+        );
+        assert_eq!(images(&v, 1), json!(["https://x/9.jpg"]));
+        assert_eq!(
+            images(&v, 2),
+            json!(["/frames/eroscripts/7/25.jpg", "/frames/eroscripts/7/75.jpg"])
+        );
+
+        let v = get_json("/api/slr/deck", &dir);
+        assert_eq!(v["cards"][0]["id"], 40);
+        assert_eq!(images(&v, 0), json!(["/frames/eroscripts/40/50.jpg"]));
+        assert_eq!(
+            (&v["cards"][1]["id"], &v["cards"][1]["source"]),
+            (&json!(77), &json!("slr"))
+        );
+        assert_eq!(
+            images(&v, 1),
+            json!([
+                "https://cdn/77.webp",
+                "/frames/slr/77/25.jpg",
+                "/frames/slr/77/50.jpg"
+            ])
+        );
+        // 78's frame isn't on disk.
+        assert_eq!(images(&v, 2), json!([]));
+
+        // The report shows a frame for a post without an image.
+        let v = get_json("/api/report", &dir);
+        let image = |id: u64| {
+            v["posts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["id"] == id)
+                .unwrap()["image"]
+                .clone()
+        };
+        assert_eq!(image(7), "/frames/eroscripts/7/25.jpg");
+        assert_eq!(image(8), "https://x/8a.jpg");
+        assert_eq!(image(40), "/frames/eroscripts/40/50.jpg");
+        // Every frame URL a card lists is served.
+        assert_eq!(route("GET", "/frames/slr/77/50.jpg", b"", &dir).status, 200);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
