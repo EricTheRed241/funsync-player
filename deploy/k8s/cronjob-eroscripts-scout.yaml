@@ -12,7 +12,8 @@ metadata:
 spec:
   schedule: "5 0 * * *"
   timeZone: America/Toronto
-  suspend: false
+  # Paused: the job runner (crates/job-runner) runs this job on the Mac.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 43200
   successfulJobsHistoryLimit: 3

@@ -1,0 +1,22 @@
+[package]
+name = "job-runner"
+version = "0.1.0"
+description = "FunSync's scheduled jobs on the Mac (deploy/jobs.json): a scheduler the desktop app starts, plus status / run / pause / resume / logs"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "job_runner"
+path = "src/lib.rs"
+
+[[bin]]
+name = "job-runner"
+path = "src/main.rs"
+
+[dependencies]
+# Shared with the other CLIs: userData default, host-aware lock files,
+# config.json's library sources, ISO timestamps.
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
