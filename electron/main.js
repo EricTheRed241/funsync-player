@@ -5,6 +5,7 @@ const fs = require('fs');
 const log = require('./logger');
 const { setRedactionEnabled } = require('./log-redact');
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState, getHealthDetail } = require('./python-bridge');
+const { startJobRunner, stopJobRunner } = require('./job-runner');
 const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
 const dataBackup = require('./data-backup');
@@ -348,6 +349,10 @@ app.whenReady().then(async () => {
     startHealthMonitor();
   });
 
+  // Scheduled jobs (deploy/jobs.json) run under the app, with its access to
+  // Documents and the library drive.
+  startJobRunner({ appPath: app.getAppPath(), userData: userDataDir, isPackaged: app.isPackaged });
+
   const _tWindow = Date.now();
   createWindow();
   log.info(`[Timing main] createWindow: ${Date.now() - _tWindow}ms`);
@@ -398,6 +403,7 @@ app.on('before-quit', async (event) => {
   }
 
   stopBackend();
+  stopJobRunner();
   // Re-trigger quit; the guard above lets it through this time.
   app.quit();
 });
@@ -406,6 +412,7 @@ app.on('before-quit', async (event) => {
 // before-quit, or the OS sent SIGTERM. stopBackend is idempotent.
 app.on('will-quit', () => {
   stopBackend();
+  stopJobRunner();
 });
 
 // --- Global error handlers ---
