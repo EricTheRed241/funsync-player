@@ -9,9 +9,9 @@
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
 //   npm run eroscripts:scout -- --titles     title, author, dates, images for posts judged before verdicts kept them, and
 //                                            the waiting posts' script previews (length, heat strip)
-//   npm run eroscripts:scout -- --daily      scan, frames for posts with few images, then download the waiting posts
-//                                            swiped right in npm run scout:report
-//   npm run eroscripts:scout -- --frames     frames of waiting posts' videos for the swipe deck (scripts/scout-frames.mjs)
+//   npm run eroscripts:scout -- --daily      scan, frames for unswiped posts with few images, then download the waiting
+//                                            posts swiped right in npm run scout:report
+//   npm run eroscripts:scout -- --frames     frames of unswiped waiting posts' videos for the swipe deck (scripts/scout-frames.mjs)
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //   SexLikeReal scenes a post links (or, for a post naming SLR without a video, SLR's scene search finds by
@@ -28,8 +28,9 @@
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
 // last pass / SLR download quota used up / app running (--retitle) / another
-// scout run going, 3 not logged in / session expired (EroScripts, VRBangers,
-// or SexLikeReal when its scenes were all that was left to do).
+// scout run doing the same kind of work (one lock per kind: scan, downloads,
+// frames; lib.SCOUT_LOCKS), 3 not logged in / session expired (EroScripts,
+// VRBangers, or SexLikeReal when its scenes were all that was left to do).
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -51,9 +52,9 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./eroscripts-scout-lib.mjs');
-const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, ensureLibrarySource, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk } = await import('./discovery-io.mjs');
+const { appRunning, applyMoves, dedupeAfterFetch, downloadFolder, ensureLibrarySource, librarySources, libraryState, libraryVideoCount, readConfig, removeIfEmpty, walk, writeAtomic } = await import('./discovery-io.mjs');
 const { createPacer, parseInterval, RateLimitedError, SessionExpiredError } = await import('./eroscripts-sync-lib.mjs');
-const { defaultUserDataDir, describeHolder, takePidLock } = await import('./host-env.mjs');
+const { defaultUserDataDir, describeHolder, releasePidLock, takePidLock } = await import('./host-env.mjs');
 const live = await import('./scout-live.mjs');
 const streams = await import('./stream-hosts.mjs');
 const vrbHost = await import('./vrbangers-host.mjs');
@@ -126,17 +127,26 @@ Rename:
                          and the paths config.json keeps for them (app must be closed);
                          with --ids, only those posts' scenes
 Frames (for the swipe deck's cards; free reads only):
-  --frames [N]           waiting posts not in the library and not swiped left whose card shows fewer than
+  --frames [N]           waiting posts not in the library and not swiped yet (either way) whose card shows fewer than
                          ${frames.FRAMES_WANTED} usable images get frames of their first video at 25, 50 and 75 % (one eye for
-                         stereo VR, ≤ ${frames.MAX_FRAME_WIDTH} px wide) in <userData>/${frames.FRAMES_DIR}/eroscripts/<id>/; swiped right
-                         first, then posts without images, then by score; at most N posts (default ${frames.DEFAULT_FRAME_POSTS}).
+                         stereo VR, ≤ ${frames.MAX_FRAME_WIDTH} px wide) in <userData>/${frames.FRAMES_DIR}/eroscripts/<id>/; posts
+                         without images first, then by score; at most N posts (default ${frames.DEFAULT_FRAME_POSTS}).
                          Hosts: forum, rule34video, pixeldrain (a hotlink-protected file fails), MEGA (stops at
                          its bandwidth limit), SexLikeReal's free trailer (never an account download),
                          VRBangers' public scene stills. ffmpeg reads a few MB per frame (≤ ${Math.round(frames.MAX_POST_BYTES / 1048576)} MB a post).
+                         Each post is recorded in <userData>/${frames.FRAMES_FILE} (only --frames writes it;
+                         each run first takes in records left on the scan state and frames folders without one).
                          A failed post is tried again after 7 days. Exit 2 when posts are left
 Daily (run once a day by the watchdog, see README):
-  --daily                scan, then --frames ${frames.DAILY_FRAME_POSTS}, then --fetch --auto (takes --passes, --wait); writes
-                         <userData>/eroscripts-scout-daily.json
+  --daily                scan, then --frames ${frames.DAILY_FRAME_POSTS}, then --fetch --auto (takes --passes, --wait), each step
+                         under its own lock (below); a step another run is doing is skipped (exit 2) and the next
+                         goes on; writes <userData>/eroscripts-scout-daily.json
+Run locks (in <userData>, <pid>@<host>; a run whose lock another live run holds exits 2 and names it;
+different kinds go on side by side):
+  ${lib.SCOUT_LOCKS.scan.file.padEnd(29)}scan, --add, --rejudge, --titles (they write the scan state and the list)
+  ${lib.SCOUT_LOCKS.fetch.file.padEnd(29)}--fetch (also --auto, --dry-run), --manual-list, --retitle (the library)
+  ${lib.SCOUT_LOCKS.frames.file.padEnd(29)}--frames (${frames.FRAMES_FILE}, ${frames.FRAMES_DIR}/)
+                         --status takes none. A lock from another host is held until 12 h old
 Status:
   --status               print the scan state without going online: backfill per feed (page and oldest last
                          activity reached), verdicts, posts judged under older rules, the waiting list
@@ -399,20 +409,24 @@ async function planTopic(api, pacer, topicId, files, { vr, libraryVideos, script
 // ── Scan ────────────────────────────────────────────────────────────────
 
 const statePath = (userData) => path.join(userData, 'eroscripts-scout-state.json');
+const listPath = (userData) => path.join(userData, 'eroscripts-scout.json');
 
 function readScoutState(userData) {
   try { return lib.normalizeScoutState(JSON.parse(fs.readFileSync(statePath(userData), 'utf8'))); } catch { return lib.emptyScoutState(); }
 }
 
-/** Write a file through a temporary one, so a reader never sees half of it. */
-function writeAtomic(target, text) {
-  const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, target);
+/**
+ * Save the scan state (atomically: `--frames` reads it while a scan runs). Once the frames file exists, the
+ * `frames` / `framesFailed` records still on state records are dropped: a `--frames` run copied them there.
+ */
+function writeScoutState(userData, state) {
+  if (fs.existsSync(path.join(userData, frames.FRAMES_FILE))) lib.dropFrameRecords(state);
+  writeAtomic(statePath(userData), JSON.stringify(state));
 }
 
-function writeScoutState(userData, state) {
-  writeAtomic(statePath(userData), JSON.stringify(state));
+/** Save the waiting list (atomically: `--fetch` and `--frames` read it while a scan, `--add` or `--titles` writes it). */
+function writeScoutList(userData, saved) {
+  writeAtomic(listPath(userData), JSON.stringify(saved, null, 1));
 }
 
 /** What screening needs: the library, the posts it already links or the user turned down, favourites, scoring. */
@@ -532,12 +546,12 @@ async function scan(opts, { api, userData, config, incoming }) {
     writeScoutState(userData, state);
   }
 
-  const out = path.join(userData, 'eroscripts-scout.json');
+  const out = listPath(userData);
   let previous = [];
   try { previous = JSON.parse(fs.readFileSync(out, 'utf8')).candidates || []; } catch { /* first scan */ }
   const done = fetchedScenes(incoming, userData);
   const candidates = lib.mergeCandidates(previous, fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
-  fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), listed, judged, rejected, candidates }, null, 1));
+  writeScoutList(userData, { generatedAt: new Date().toISOString(), listed, judged, rejected, candidates });
 
   // npm run vrbangers:scout: only the posts with a vrbangers.com video (the saved list keeps all).
   const shown = opts.vrbangers ? candidates.filter(lib.isVrbangersCandidate) : candidates;
@@ -605,12 +619,12 @@ async function addPicked(opts, { api, userData, config, incoming }) {
   } finally {
     writeScoutState(userData, state);
   }
-  const out = path.join(userData, 'eroscripts-scout.json');
+  const out = listPath(userData);
   let saved = { candidates: [] };
   try { saved = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { /* no list yet */ }
   const done = fetchedScenes(incoming, userData);
   const candidates = lib.mergeCandidates(saved.candidates || [], fresh, (id, video) => done.has(lib.fetchedKey(id, video)), turnedDown, scoring, favourites);
-  fs.writeFileSync(out, JSON.stringify({ ...saved, generatedAt: new Date().toISOString(), candidates }, null, 1));
+  writeScoutList(userData, { ...saved, generatedAt: new Date().toISOString(), candidates });
   console.log(`\nAdded ${fresh.length} of ${opts.add.length}.${fresh.length ? ` Download them with: npm run ${opts.vrbangers ? 'vrbangers' : 'eroscripts'}:scout -- --fetch --ids ${fresh.map((c) => c.id).join(',')}` : ''}`);
   return 0;
 }
@@ -808,7 +822,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           continue;
         }
         const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs });
-        fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify(
+        writeAtomic(path.join(dir, 'eroscripts.json'), JSON.stringify(
           lib.sceneSidecar(c, sc.video, path.basename(video), new Date().toISOString()), null, 1));
         let note = '';
         if (!sc.axes.length) {
@@ -913,7 +927,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       fs.mkdirSync(dir, { recursive: true });
       for (const f of s.scripts) fs.renameSync(f.path, path.join(dir, lib.scriptFileName(stem, f.axis)));
       fs.renameSync(s.video.path, video);
-      fs.writeFileSync(path.join(dir, 'eroscripts.json'), JSON.stringify({
+      writeAtomic(path.join(dir, 'eroscripts.json'), JSON.stringify({
         topicId: c.id, url: c.url, title: c.title, author: c.author, tags: c.tags,
         video: sc.video.name, archiveEntry: s.video.name, file: path.basename(video), scenes: c.scenes.length, at: new Date().toISOString(),
       }, null, 1));
@@ -954,7 +968,7 @@ function readSwipesFile(userData) {
  * library as it is now (lib.notYetHeld).
  */
 function savedQueue(opts, { userData, config, incoming }) {
-  const file = path.join(userData, 'eroscripts-scout.json');
+  const file = listPath(userData);
   if (!fs.existsSync(file)) throw new Error(`No scout list at ${file}; run npm run eroscripts:scout first.`);
   const { favourites, scoring } = live.scoutPreferences(config);
   const candidates = JSON.parse(fs.readFileSync(file, 'utf8')).candidates.map((c) => lib.withCurrentFavourite(c, favourites));
@@ -1095,27 +1109,38 @@ async function planSlr(queue, { userData, incoming }) {
 // ── Frames ──────────────────────────────────────────────────────────────
 
 /**
- * `--frames N`: frames for the swipe deck (scripts/scout-frames.mjs). The waiting posts frames.framesQueue
- * picks (not in the library: lib.notYetHeld and the scout's own sidecars; not swiped left; fewer than
- * FRAMES_WANTED usable images; no frames or recent failure), at most `opts.frames` of them read, each
- * recorded in the scan state (`frames` / `framesFailed`) as it's done. A host whose allowance runs out
- * (MEGA's bandwidth) is skipped for the rest of the run. Exit 2 when posts are left.
+ * `--frames N`: frames for the swipe deck (scripts/scout-frames.mjs). First the frames file
+ * (`<userData>/eroscripts-scout-frames.json`) takes in what earlier runs left (frames.migrateFrames:
+ * records still on the scan state, folders on disk without a record). Then the waiting posts
+ * frames.framesQueue picks (not in the library: lib.notYetHeld and the scout's own sidecars; not swiped
+ * either way; fewer than FRAMES_WANTED usable images; no frames or recent failure), at most `opts.frames`
+ * of them read, each recorded in the frames file (`frames` / `framesFailed`) as it's done. The scan state
+ * and the list are only read, so this runs beside a scan or a download (its own lock). A host whose
+ * allowance runs out (MEGA's bandwidth) is skipped for the rest of the run. Exit 2 when posts are left.
  */
 async function makeFrames(opts, { api, userData, config, incoming }) {
-  const listFile = path.join(userData, 'eroscripts-scout.json');
+  const state = readScoutState(userData);
+  const framesFile = frames.readFramesFile(userData);
+  const moved = frames.migrateFrames(framesFile, { state, onDisk: frames.framesOnDisk(userData) });
+  if (moved.fromState || moved.fromDisk) {
+    frames.writeFramesFile(userData, framesFile);
+    console.log(`Frames: ${frames.FRAMES_FILE} took in ${moved.fromState} records from the scan state and ${moved.fromDisk} frames folders without a record`);
+  }
+  const listFile = listPath(userData);
   let candidates;
   try { candidates = JSON.parse(fs.readFileSync(listFile, 'utf8')).candidates || []; } catch {
     console.log(`No scout list at ${listFile}; no frames to make.`);
     return 0;
   }
-  const state = readScoutState(userData);
   const { wanted, hidden } = readSwipesFile(userData);
   const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
   const ownTopics = new Set();
   fetchedScenes(incoming, userData, ownTopics);
   const open = new Set(lib.notYetHeld(candidates, { knownTopics, turnedDown, libraryVideos: library.videos }).queue.map((c) => c.id));
-  const queue = frames.framesQueue(candidates.filter((c) => !opts.ids || opts.ids.has(c.id)), { state, wanted, hidden, inLibrary: (c) => ownTopics.has(c.id) || !open.has(c.id) });
-  console.log(`Frames: ${queue.length} waiting posts show fewer than ${frames.FRAMES_WANTED} images; reading at most ${opts.frames}`);
+  const queue = frames.framesQueue(candidates.filter((c) => !opts.ids || opts.ids.has(c.id)), {
+    state, framesFile, swiped: new Set([...wanted, ...hidden]), inLibrary: (c) => ownTopics.has(c.id) || !open.has(c.id),
+  });
+  console.log(`Frames: ${queue.length} unswiped waiting posts show fewer than ${frames.FRAMES_WANTED} images; reading at most ${opts.frames}`);
   const { File } = await import('megajs');
   const cookie = api._headers().Cookie;
   const deps = { File, rule34video, slr, forumHeaders: cookie ? { Cookie: cookie } : {} };
@@ -1133,11 +1158,10 @@ async function makeFrames(opts, { api, userData, config, incoming }) {
     tried++;
     if (plan.forum) await pacer.wait();
     const dir = frames.postFramesDir(userData, c.id);
-    const rec = state.topics[c.id];
     const t0 = Date.now();
     try {
       const r = await frames.postFrames(c, dir, deps);
-      frames.recordFrames(rec, { source: r.source, files: r.files });
+      frames.recordFrames(framesFile, c.id, { source: r.source, files: r.files });
       made++;
       frameCount += r.files.length;
       bytes += r.bytes || 0;
@@ -1145,14 +1169,14 @@ async function makeFrames(opts, { api, userData, config, incoming }) {
       console.log(`  ✓ ${c.id} ${r.source}: ${r.files.length} frame${r.files.length > 1 ? 's' : ''}${r.bytes != null ? `, ${mb(r.bytes)}` : ''}, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
     } catch (err) {
       const reason = err instanceof frames.FrameError ? err.reason : `${plan.host}: ${err.message}`;
-      frames.recordFramesFailed(rec, reason);
+      frames.recordFramesFailed(framesFile, c.id, reason);
       fs.rmSync(dir, { recursive: true, force: true });
       const key = reason.replace(/\s*\(.*$/, '');
       failed[key] = (failed[key] || 0) + 1;
       if (err.stopHost) stopped.set(plan.host, reason);
       console.log(`  ✗ ${c.id} ${plan.host}: ${reason} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     }
-    writeScoutState(userData, state);
+    frames.writeFramesFile(userData, framesFile);
   }
   const list = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ');
   const nFailed = Object.values(failed).reduce((n, k) => n + k, 0);
@@ -1189,10 +1213,9 @@ function retitle(opts, { userData, incoming }) {
   return applyMoves(moves, { userData, incoming, sidecar: 'eroscripts.json' });
 }
 
-// ── Status, daily run, run lock ─────────────────────────────────────────
+// ── Status, daily run, run locks ────────────────────────────────────────
 
 const DAILY_FILE = 'eroscripts-scout-daily.json';
-const LOCK_FILE = 'eroscripts-scout.lock';
 
 /** `--status`: the scan state, backfill progress and waiting list, offline. */
 function status({ userData, config, incoming }) {
@@ -1231,9 +1254,8 @@ async function exitCodeOf(step) {
 async function fillTitles({ api, userData }) {
   const pacer = createPacer();
   const state = readScoutState(userData);
-  const listFile = path.join(userData, 'eroscripts-scout.json');
   let saved = null;
-  try { saved = JSON.parse(fs.readFileSync(listFile, 'utf8')); } catch { /* no list yet */ }
+  try { saved = JSON.parse(fs.readFileSync(listPath(userData), 'utf8')); } catch { /* no list yet */ }
   const waiting = saved?.candidates || [];
   const ids = lib.topicsMissingInfo(state, waiting.map((c) => c.id));
   // Waiting posts without a script preview (length, heat strip): read with their post, in deck order.
@@ -1249,7 +1271,7 @@ async function fillTitles({ api, userData }) {
   };
   const save = () => {
     writeScoutState(userData, state);
-    if (saved && previews) writeAtomic(listFile, JSON.stringify(saved, null, 1));
+    if (saved && previews) writeScoutList(userData, saved);
   };
   try {
     for (const id of ids) {
@@ -1286,44 +1308,65 @@ async function fillTitles({ api, userData }) {
 }
 
 /**
- * `--daily`: a scan (new posts plus the usual backfill), then `--frames` for
- * DAILY_FRAME_POSTS posts, then `--fetch --auto`.
- * `<userData>/eroscripts-scout-daily.json` records when each step ran and its
- * exit code; it's written right after the scan, so the watchdog sees the day's
- * run as done while the frames and downloads go on. A frames step that fails
- * outright doesn't hold up the downloads.
+ * `--daily`: a scan (new posts plus the usual backfill), then `--frames` for DAILY_FRAME_POSTS posts,
+ * then `--fetch --auto`, each step holding its own run lock (lib.SCOUT_LOCKS) only while it runs. A step
+ * whose lock another run holds is skipped, exit 2 (that run is doing the work), and the next step goes on.
+ * `<userData>/eroscripts-scout-daily.json` records when each step started, its exit code and, for a
+ * skipped step, the busy lock and its holder (`<step>Skipped`); it's written after each step, first right
+ * after the scan, so the watchdog sees the day's run as done while the frames and downloads go on. A
+ * frames step that fails outright doesn't hold up the downloads.
  */
 async function daily(opts, ctx) {
   const file = path.join(ctx.userData, DAILY_FILE);
-  const scanAt = new Date().toISOString();
-  const scanExit = await exitCodeOf(() => scan(opts, ctx));
-  writeAtomic(file, JSON.stringify({ scanAt, scanExit }, null, 1));
+  const record = {};
+  const step = async (key, kind, run) => {
+    record[`${key}At`] = new Date().toISOString();
+    const holder = takeRunLock(ctx.userData, kind);
+    if (holder) {
+      console.log(`Daily: ${lib.lockBusyMessage(kind, describeHolder(holder))}; step skipped`);
+      record[`${key}Exit`] = 2;
+      record[`${key}Skipped`] = `${lib.SCOUT_LOCKS[kind].file} held by ${describeHolder(holder)}`;
+    } else {
+      try { record[`${key}Exit`] = await run(); } finally { freeRunLock(ctx.userData, kind); }
+    }
+    writeAtomic(file, JSON.stringify(record, null, 1));
+    return record[`${key}Exit`];
+  };
+  const scanExit = await step('scan', 'scan', () => exitCodeOf(() => scan(opts, ctx)));
   if (scanExit === 3) return 3;
-  console.log('\nDaily: frames for waiting posts with few images');
-  const framesAt = new Date().toISOString();
-  let framesExit;
-  try {
-    framesExit = await exitCodeOf(() => makeFrames({ ...opts, frames: frames.DAILY_FRAME_POSTS }, ctx));
-  } catch (err) {
-    console.error(`frames: ${err.message}`);
-    framesExit = 1;
-  }
-  writeAtomic(file, JSON.stringify({ scanAt, scanExit, framesAt, framesExit }, null, 1));
+  console.log('\nDaily: frames for unswiped waiting posts with few images');
+  const framesExit = await step('frames', 'frames', async () => {
+    try {
+      return await exitCodeOf(() => makeFrames({ ...opts, frames: frames.DAILY_FRAME_POSTS }, ctx));
+    } catch (err) {
+      console.error(`frames: ${err.message}`);
+      return 1;
+    }
+  });
   console.log('\nDaily: downloading the waiting posts swiped right');
-  const fetchExit = await exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx));
-  writeAtomic(file, JSON.stringify({ scanAt, scanExit, framesAt, framesExit, fetchAt: new Date().toISOString(), fetchExit }, null, 1));
+  const fetchExit = await step('fetch', 'fetch', () => exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx)));
   return scanExit || fetchExit || framesExit;
 }
 
 /**
- * One forum run at a time (scan, --add, --fetch, --frames, --daily): they all rewrite the
- * scan state and the list. Null when this run holds `<userData>/eroscripts-scout.lock`
- * (`<pid>@<host>`, freed at exit), else the holder of the live run that does. A
- * lock left by an ended run (this host: its pid is gone; another host, e.g. a
- * finished pod: older than 12 h) is taken over (scripts/host-env.mjs).
+ * Take the run lock of `kind` (lib.SCOUT_LOCKS: scan, fetch or frames): null when this run holds
+ * `<userData>/<lock file>` (`<pid>@<host>`, freed at exit or by freeRunLock), else the holder of the live
+ * run that does. A lock left by an ended run (this host: its pid is gone; another host, e.g. a finished
+ * pod: older than 12 h) is taken over (scripts/host-env.mjs).
  */
-function takeRunLock(userData) {
-  return takePidLock(path.join(userData, LOCK_FILE));
+function takeRunLock(userData, kind) {
+  return takePidLock(path.join(userData, lib.SCOUT_LOCKS[kind].file));
+}
+
+function freeRunLock(userData, kind) {
+  releasePidLock(path.join(userData, lib.SCOUT_LOCKS[kind].file));
+}
+
+/** Take `kind`'s run lock for the whole run; false, after naming the run that has it, when it's busy. */
+function lockRun(userData, kind) {
+  const holder = takeRunLock(userData, kind);
+  if (holder) console.error(`${lib.lockBusyMessage(kind, describeHolder(holder))}; try again when it ends.`);
+  return !holder;
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
@@ -1335,12 +1378,14 @@ async function main() {
   const config = readConfig(userData);
   const incoming = downloadFolder(config, FOLDER, opts.incoming).path;
   if (opts.status) return status({ userData, config, incoming });
-  if (opts.retitle) return retitle(opts, { userData, incoming });
-  if (opts.manualList) return manualList(opts, { userData, config, incoming });
+  const kind = lib.scoutLockFor(opts);
+  if (opts.retitle || opts.manualList) {
+    if (!lockRun(userData, kind)) return 2;
+    return opts.retitle ? retitle(opts, { userData, incoming }) : manualList(opts, { userData, config, incoming });
+  }
   const session = config.settings?.eroscripts?.session || {};
   if (!session.cookie) { console.error('Not logged in to EroScripts. Log in from the app (EroScripts panel), then re-run.'); return 3; }
-  const holder = takeRunLock(userData);
-  if (holder) { console.error(`Another eroscripts:scout run (${describeHolder(holder)}) is going; try again when it ends.`); return 2; }
+  if (kind && !lockRun(userData, kind)) return 2;
 
   // The API module logs through electron-log; keep the CLI's output clean.
   const log = require('../electron/logger.js');

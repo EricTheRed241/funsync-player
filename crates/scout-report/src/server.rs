@@ -811,18 +811,27 @@ mod tests {
         let dir = with_waiting("frame-cards");
         let frames = |files: &[&str]| json!({"at": "2026-11-14T00:00:00.000Z", "source": "MEGA: a.mp4", "files": files});
         let state = json!({"version": 1, "topics": {
-            // 7: no images, three frames listed, two on disk.
-            "7": {"verdict": "candidate", "images": [], "frames": frames(&["25.jpg", "50.jpg", "75.jpg"])},
-            // 8: four images and two frames: capped at five.
+            "7": {"verdict": "candidate", "images": []},
             "8": {"verdict": "candidate", "image": "https://x/8a.jpg",
-                  "images": ["https://x/8a.jpg", "https://x/8b.jpg", "https://x/8c.jpg", "https://x/8d.jpg"],
-                  "frames": frames(&["25.jpg", "50.jpg"])},
-            // 9: frames on disk but none listed.
-            "9": {"verdict": "candidate", "image": "https://x/9.jpg", "images": ["https://x/9.jpg"]},
-            // 40: a post on SLR: the eroscripts path, by topic id.
-            "40": {"verdict": "candidate", "frames": frames(&["50.jpg"])}
+                  "images": ["https://x/8a.jpg", "https://x/8b.jpg", "https://x/8c.jpg", "https://x/8d.jpg"]},
+            // 9 and 41: frames on disk listed only where --frames kept them before
+            // eroscripts-scout-frames.json: they don't count.
+            "9": {"verdict": "candidate", "image": "https://x/9.jpg", "images": ["https://x/9.jpg"],
+                  "frames": frames(&["25.jpg"])},
+            "40": {"verdict": "candidate"},
+            "41": {"verdict": "candidate", "frames": frames(&["25.jpg"])}
         }});
         std::fs::write(dir.join(report::STATE_FILE), state.to_string()).unwrap();
+        let made = json!({"version": 1, "topics": {
+            // 7: no images, three frames listed, two on disk.
+            "7": {"frames": frames(&["25.jpg", "50.jpg", "75.jpg"])},
+            // 8: four images and two frames: capped at five.
+            "8": {"frames": frames(&["25.jpg", "50.jpg"])},
+            // 40: a post on SLR: the eroscripts path, by topic id.
+            "40": {"frames": frames(&["50.jpg"])},
+            "42": {"framesFailed": {"at": "2026-11-14T00:00:00.000Z", "reason": "pixeldrain: HTTP 403"}}
+        }});
+        std::fs::write(dir.join(frames::EROSCRIPTS_FILE), made.to_string()).unwrap();
         for rel in [
             "eroscripts/7/25.jpg",
             "eroscripts/7/75.jpg",
@@ -830,6 +839,7 @@ mod tests {
             "eroscripts/8/50.jpg",
             "eroscripts/9/25.jpg",
             "eroscripts/40/50.jpg",
+            "eroscripts/41/25.jpg",
             "slr/77/25.jpg",
             "slr/77/50.jpg",
         ] {
@@ -903,6 +913,7 @@ mod tests {
         assert_eq!(image(7), "/frames/eroscripts/7/25.jpg");
         assert_eq!(image(8), "https://x/8a.jpg");
         assert_eq!(image(40), "/frames/eroscripts/40/50.jpg");
+        assert_eq!(image(41), Value::Null);
         // Every frame URL a card lists is served.
         assert_eq!(route("GET", "/frames/slr/77/50.jpg", b"", &dir).status, 200);
         let _ = std::fs::remove_dir_all(&dir);

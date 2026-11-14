@@ -103,8 +103,8 @@ pub fn read_swipes(user_data: &Path, store: Store, problems: &mut Vec<String>) -
     })
 }
 
-/// Read the scout's three files, `config.json`, `eroscripts-links.json` and the swipes from
-/// `user_data` and build the report; a post with no https image shows its first frame.
+/// Read the scout's three files, `config.json`, `eroscripts-links.json`, the swipes and the frames
+/// file from `user_data` and build the report; a post with no https image shows its first frame.
 pub fn load(user_data: &Path) -> Report {
     let mut problems = Vec::new();
     let state = read_json(user_data, STATE_FILE, &mut problems);
@@ -113,6 +113,7 @@ pub fn load(user_data: &Path) -> Report {
     let config = read_json(user_data, "config.json", &mut problems);
     let links = read_json(user_data, crate::library::LINKS_FILE, &mut problems);
     let swipes = read_swipes(user_data, crate::swipes::EROSCRIPTS, &mut problems);
+    let made = read_json(user_data, crate::frames::EROSCRIPTS_FILE, &mut problems);
     let videos = crate::library::topic_videos(&config, &links, &mut problems);
     let mut report = build(&state, &waiting, &rejected);
     mark_in_library(&mut report, &videos);
@@ -122,8 +123,8 @@ pub fn load(user_data: &Path) -> Report {
             .image
             .as_deref()
             .is_some_and(|u| u.starts_with("https://"))
-            && let Some(rec) = state.pointer(&format!("/topics/{}", post.id))
         {
+            let rec = crate::frames::post_record(&made, post.id);
             let frames =
                 crate::frames::urls(user_data, crate::frames::Source::Eroscripts, post.id, rec);
             if let Some(first) = frames.into_iter().next() {

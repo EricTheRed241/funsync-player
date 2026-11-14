@@ -202,7 +202,7 @@ pub struct TagScore {
 }
 
 /// Read the waiting list, the state, the library (`config.json`,
-/// `eroscripts-links.json`) and the swipes, and deal the cards `deal` asks for.
+/// `eroscripts-links.json`), the swipes and the frames file, and deal the cards `deal` asks for.
 pub fn load(user_data: &Path, deal: &Deal) -> Deck {
     let mut problems = Vec::new();
     let (mut deck, _) = load_pool(user_data, Pool::Hosts, &mut problems);
@@ -212,22 +212,26 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
 }
 
 /// Read the files `load` reads and build `pool`'s deck (not dealt; problems go to `problems`),
-/// with the waiting list it came from. Cards get their frames after their images.
+/// with the waiting list it came from. Cards get their frames (the post's record in
+/// frames::EROSCRIPTS_FILE) after their images.
 pub fn load_pool(user_data: &Path, pool: Pool, problems: &mut Vec<String>) -> (Deck, Value) {
     let state = report::read_json(user_data, report::STATE_FILE, problems);
     let waiting = report::read_json(user_data, report::WAITING_FILE, problems);
     let config = report::read_json(user_data, "config.json", problems);
     let links = report::read_json(user_data, crate::library::LINKS_FILE, problems);
     let swipes = report::read_swipes(user_data, crate::swipes::EROSCRIPTS, problems);
+    let made = report::read_json(user_data, frames::EROSCRIPTS_FILE, problems);
     let videos = crate::library::topic_videos(&config, &links, problems);
     let mut deck = build(&state, &waiting, &videos, &swipes, pool);
     for c in &mut deck.cards {
-        let rec = state
-            .pointer(&format!("/topics/{}", c.id))
-            .unwrap_or(&Value::Null);
         frames::append(
             &mut c.images,
-            frames::urls(user_data, frames::Source::Eroscripts, c.id, rec),
+            frames::urls(
+                user_data,
+                frames::Source::Eroscripts,
+                c.id,
+                frames::post_record(&made, c.id),
+            ),
         );
     }
     (deck, waiting)

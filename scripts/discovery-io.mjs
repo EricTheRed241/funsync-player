@@ -47,6 +47,22 @@ export function writeConfig(userData, config) {
 }
 
 /**
+ * Write `text` to `target` through `<target>.<pid>.tmp` renamed over it, so a run reading the file
+ * meanwhile (scout runs of other kinds go on side by side) sees the old copy or the new one, never half
+ * of one. A failed write leaves `target` as it was and no temporary file.
+ */
+export function writeAtomic(target, text) {
+  const tmp = `${target}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, text);
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+/**
  * Remove a folder that holds nothing but `._*` / `.DS_Store` leftovers. exFAT
  * lists names decomposed (NFD) but finds some `._` files only by their
  * composed (NFC) spelling, so both are tried; a folder that won't go stays.
@@ -153,7 +169,7 @@ export function applyMoves(moves, { userData, incoming, sidecar }) {
       continue;
     }
     const file = path.join(m.to, sidecar);
-    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), file: m.video }, null, 1));
+    writeAtomic(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), file: m.video }, null, 1));
     removeIfEmpty(path.dirname(m.from));
     const to = onDiskPath(m.to);
     done.push({ from: m.from, to, files: m.files.map((f) => ({ from: f.from, to: path.basename(onDiskPath(path.join(to, f.to))) })) });

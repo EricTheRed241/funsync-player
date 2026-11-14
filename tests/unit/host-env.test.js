@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   FOREIGN_LOCK_MAX_AGE_MS, assertConfigWritable, configReadonly, defaultUserDataDir, describeHolder,
-  lockHolds, lockText, parseLock, takePidLock,
+  lockHolds, lockText, parseLock, releasePidLock, takePidLock,
 } from '../../scripts/host-env.mjs';
 import { appRunning, ensureLibrarySource, writeConfig } from '../../scripts/discovery-io.mjs';
 
@@ -140,5 +140,19 @@ describe('pid lock files', () => {
     // Unreadable: taken over.
     fs.writeFileSync(file, 'garbage');
     expect(takePidLock(file, { host: 'pod-a', now })).toBe(null);
+  });
+
+  it('releasePidLock frees only a lock this process holds, so a step can hand it on before the run ends', () => {
+    const file = path.join(tempDir(), 'eroscripts-scout-frames.lock');
+    expect(takePidLock(file, { host: 'pod-a' })).toBe(null);
+    releasePidLock(file, { host: 'pod-b' });
+    expect(fs.existsSync(file)).toBe(true);
+    releasePidLock(file, { host: 'pod-a' });
+    expect(fs.existsSync(file)).toBe(false);
+    // Free now: another run takes it; this process's release leaves it alone.
+    fs.writeFileSync(file, '99@pod-a');
+    releasePidLock(file, { host: 'pod-a' });
+    expect(fs.readFileSync(file, 'utf8')).toBe('99@pod-a');
+    releasePidLock(path.join(path.dirname(file), 'missing.lock'));
   });
 });
