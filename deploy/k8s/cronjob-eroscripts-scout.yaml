@@ -1,8 +1,9 @@
 # EroScripts scout, daily (was the watchdog's scout_tick): a scan plus the
 # backfill, then downloads of the waiting posts swiped right in the swipe
-# deck (--fetch --auto). Exit 2 (rate limited, downloads left) counts as done
-# (run-job); a run missed while the Mac was off or logged out starts within
-# 12 h of its time.
+# deck (--fetch --auto), then the SLR scenes swiped right on the SLR tab
+# (slr-scout --fetch), one after the other (deploy/k8s/scout-daily.sh).
+# Exit 2 (rate limited, downloads or quota left) counts as done (run-job); a
+# run missed while the Mac was off or logged out starts within 12 h of its time.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -21,7 +22,8 @@ spec:
       labels: {app.kubernetes.io/part-of: funsync, funsync/job: eroscripts-scout}
     spec:
       backoffLimit: 0
-      activeDeadlineSeconds: 21600
+      # 12 h: SLR VR videos run 5–25 GB each.
+      activeDeadlineSeconds: 43200
       ttlSecondsAfterFinished: 1209600
       template:
         metadata:
@@ -33,13 +35,8 @@ spec:
               image: funsync-runner:current
               imagePullPolicy: Never
               args:
-                - "node"
-                - "scripts/eroscripts-scout.mjs"
-                - "--daily"
-                - "--passes"
-                - "2"
-                - "--wait"
-                - "1h"
+                - "sh"
+                - "deploy/k8s/scout-daily.sh"
               env:
                 - name: TZ
                   value: "America/Toronto"

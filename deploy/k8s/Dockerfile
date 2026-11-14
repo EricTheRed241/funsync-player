@@ -12,9 +12,9 @@ COPY crates crates
 COPY renderer/js/content-preferences.json renderer/js/content-preferences.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release -p pornstar-tags -p age-screen -p video-tags \
+    cargo build --release -p pornstar-tags -p age-screen -p video-tags -p slr-scout \
  && mkdir -p /out \
- && cp target/release/pornstar-tags target/release/age-screen target/release/video-tags /out/
+ && cp target/release/pornstar-tags target/release/age-screen target/release/video-tags target/release/slr-scout /out/
 
 FROM node:26-bookworm-slim
 ARG OMP_URL=https://build.stencil.so/d/omp/20261106-051327-75e7801/omp-linux-arm64

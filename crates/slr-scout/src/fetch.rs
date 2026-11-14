@@ -760,8 +760,14 @@ impl Fetch<'_> {
         if self.fake {
             return Ok(());
         }
-        let script =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/upgrade-multi-axis.mjs");
+        // The repo root is the working directory under `npm run` and in the jobs image
+        // (/app, where the build checkout's path doesn't exist); else this crate's checkout.
+        let local = Path::new("scripts/upgrade-multi-axis.mjs");
+        let script = if local.is_file() {
+            local.to_path_buf()
+        } else {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/upgrade-multi-axis.mjs")
+        };
         let status = Command::new("node")
             .arg(&script)
             .arg(dir)
