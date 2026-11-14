@@ -33,7 +33,7 @@ code=$?
 case $code in
   0) log "done" ;;
   2) log "exit 2 (rate limited or work left): the next run continues"; code=0 ;;
-  3) log "exit 3: not logged in to EroScripts; log in from the app" ;;
+  3) log "exit 3: a login expired (EroScripts: log in from the app; SLR: npm run slr:scout -- --login)" ;;
   *) log "failed with exit $code" ;;
 esac
 exit $code
