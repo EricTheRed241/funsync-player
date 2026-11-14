@@ -2,6 +2,7 @@
 //! quota, read by the `scout:report` swipe page. Written atomically (temp
 //! file + rename; the previous file kept as `slr-scout.json.bak`).
 
+use crate::frames::{Frames, FramesFailed};
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::fs;
@@ -95,6 +96,12 @@ pub struct Scene {
     /// When `--fetch` put the scene in the library (kept across runs).
     #[serde(default)]
     pub fetched_at: Option<String>,
+    /// Preview frames from SLR's free trailer (`frames::take`; kept across runs).
+    #[serde(default)]
+    pub frames: Option<Frames>,
+    /// Why the last frames try made none (tried again after `frames::RETRY_DAYS`).
+    #[serde(default)]
+    pub frames_failed: Option<FramesFailed>,
     #[serde(default)]
     pub script_source: Option<ScriptSource>,
     #[serde(serialize_with = "number")]
@@ -265,6 +272,8 @@ mod tests {
             tag_scores: BTreeMap::from([("creampie".into(), 2.0)]),
             favourite: Some("Miss Lexa".into()),
             fetched_at: None,
+            frames: None,
+            frames_failed: None,
             script_source: Some(ScriptSource::SlrHandcrafted),
             score: 5.12,
             score_parts: BTreeMap::from([
@@ -291,6 +300,10 @@ mod tests {
         assert_eq!(v["tagScores"], json!({"creampie": 2}));
         assert_eq!(v["favourite"], "Miss Lexa");
         assert_eq!(v["fetchedAt"], json!(null));
+        assert_eq!(
+            (&v["frames"], &v["framesFailed"]),
+            (&json!(null), &json!(null))
+        );
         assert_eq!(v["scriptSource"], "slr-handcrafted");
         // A file from before these fields still reads.
         let mut old = v.clone();
@@ -300,20 +313,36 @@ mod tests {
             "favourite",
             "fetchedAt",
             "scriptSource",
+            "frames",
+            "framesFailed",
         ] {
             old.as_object_mut().unwrap().remove(k);
         }
         let old: Scene = serde_json::from_value(old).unwrap();
         assert!(old.tags.is_empty() && old.script_source.is_none());
-        let text = serde_json::to_string(&scene(1)).unwrap();
+        let mut s = scene(1);
+        s.frames = Some(Frames {
+            at: "2026-11-14T00:00:00.000Z".into(),
+            source: "slr: 1_1080p.mp4".into(),
+            files: vec!["25.jpg".into(), "75.jpg".into()],
+        });
+        s.frames_failed = Some(FramesFailed {
+            at: "2026-11-01T00:00:00.000Z".into(),
+            reason: "x".into(),
+        });
+        let text = serde_json::to_string(&s).unwrap();
         assert!(text.contains(r#""scoreParts":{"handmadeScript":4,"popularity":1.12}"#));
         assert!(text.contains(r#""score":5.12"#));
+        assert!(text.contains(
+            r#""frames":{"at":"2026-11-14T00:00:00.000Z","source":"slr: 1_1080p.mp4","files":["25.jpg","75.jpg"]}"#
+        ));
+        assert!(text.contains(r#""framesFailed":{"at":"2026-11-01T00:00:00.000Z","reason":"x"}"#));
         let file = ScoutFile {
             generated_at: "2026-11-13T00:00:00.000Z".into(),
             actors: vec![],
             quota: None,
             quota_error: Some("no session".into()),
-            scenes: vec![scene(1)],
+            scenes: vec![scene(1), s],
         };
         let v = serde_json::to_value(&file).unwrap();
         assert_eq!(v["quota"], json!(null));

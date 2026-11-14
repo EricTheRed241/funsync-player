@@ -6,6 +6,7 @@
 //! the order wanders a little. Tag scores and creampie come from the scout's waiting list
 //! (`tagScores`, `creampie`); Rust never computes them.
 
+use crate::frames;
 use crate::report::{self, id_of, str_of, strings_of};
 use crate::swipes::{Dir, Swipes};
 use serde::{Serialize, Serializer};
@@ -109,7 +110,8 @@ pub struct Card {
     pub url: String,
     pub title: Option<String>,
     pub author: Option<String>,
-    /// Up to MAX_IMAGES https URLs: the state's `images`, else its `image`.
+    /// Up to MAX_IMAGES: the state's https `images` (else its `image`), then the post's preview
+    /// frames on disk (`/frames/eroscripts/…`, crate::frames).
     pub images: Vec<String>,
     pub score: Option<f64>,
     pub vr: bool,
@@ -210,7 +212,7 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
 }
 
 /// Read the files `load` reads and build `pool`'s deck (not dealt; problems go to `problems`),
-/// with the waiting list it came from.
+/// with the waiting list it came from. Cards get their frames after their images.
 pub fn load_pool(user_data: &Path, pool: Pool, problems: &mut Vec<String>) -> (Deck, Value) {
     let state = report::read_json(user_data, report::STATE_FILE, problems);
     let waiting = report::read_json(user_data, report::WAITING_FILE, problems);
@@ -218,7 +220,17 @@ pub fn load_pool(user_data: &Path, pool: Pool, problems: &mut Vec<String>) -> (D
     let links = report::read_json(user_data, crate::library::LINKS_FILE, problems);
     let swipes = report::read_swipes(user_data, crate::swipes::EROSCRIPTS, problems);
     let videos = crate::library::topic_videos(&config, &links, problems);
-    (build(&state, &waiting, &videos, &swipes, pool), waiting)
+    let mut deck = build(&state, &waiting, &videos, &swipes, pool);
+    for c in &mut deck.cards {
+        let rec = state
+            .pointer(&format!("/topics/{}", c.id))
+            .unwrap_or(&Value::Null);
+        frames::append(
+            &mut c.images,
+            frames::urls(user_data, frames::Source::Eroscripts, c.id, rec),
+        );
+    }
+    (deck, waiting)
 }
 
 impl Deck {

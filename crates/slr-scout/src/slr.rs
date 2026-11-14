@@ -2,12 +2,13 @@
 //! scene's details, and turn them into [`Scene`]s (VR, creampie, PMV,
 //! compilation, hand-crafted scripts). Scores are added by `score`.
 
+use crate::frames::{self, Trailer};
 use crate::http::{self, Http, NetError, Pacer, Request};
 use crate::prefs::SlrScout;
 use crate::store::{Actor, Handmade, Scene};
 use crate::text;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -232,6 +233,8 @@ pub fn scene(d: &Value) -> Option<Scene> {
         tag_scores: BTreeMap::new(),
         favourite: None,
         fetched_at: None,
+        frames: None,
+        frames_failed: None,
         script_source: None,
         handmade,
         title,
@@ -252,6 +255,9 @@ pub struct Catalogue {
     /// Wanted performers SLR doesn't know.
     pub unknown: Vec<String>,
     pub scenes: Vec<Scene>,
+    /// Each wanted scene's free trailer, when its details list one (`frames::trailer`; the
+    /// URLs are signed and expire, so they're used in the same run, never stored).
+    pub trailers: HashMap<u64, Trailer>,
 }
 
 /// Walk the catalogue: each performer's scene list (performers SLR doesn't
@@ -314,10 +320,14 @@ pub fn walk(
         if prefs.vr_only { " (VR)" } else { "" }
     );
     let mut scenes = Vec::new();
+    let mut trailers = HashMap::new();
     for (i, l) in to_read.iter().enumerate() {
         match detail(http, pacer, &l.label) {
             Ok(d) => {
                 if let Some(s) = scene(&d).filter(|s| wanted(prefs, s)) {
+                    if let Some(t) = frames::trailer(&d) {
+                        trailers.insert(s.id, t);
+                    }
                     scenes.push(s);
                 }
             }
@@ -334,6 +344,7 @@ pub fn walk(
         actors,
         unknown,
         scenes,
+        trailers,
     })
 }
 

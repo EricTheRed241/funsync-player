@@ -9,7 +9,7 @@ EroScripts deck, record the account's download quota (<userData>/slr-scout.json,
 by the scout:report swipe page), and download the scenes swiped right
 
 Usage:
-  npm run slr:scout [-- --actor <name>]... [--no-forum]
+  npm run slr:scout [-- --actor <name>]... [--no-forum] [--frames <n>]
   npm run slr:scout -- --fetch [--dry-run]
   npm run slr:scout -- --quota
   npm run slr:scout -- --login [--credentials <file>]
@@ -20,6 +20,8 @@ Options:
   --actor <name>        Scout only this performer, as SLR spells her (repeatable)
   --no-forum            Don't search EroScripts for hand-made scripts (matches from the
                         previous run are kept)
+  --frames <n>          Take preview frames for at most n scenes this scan (default 100;
+                        0: none)
   --fetch               Download the scenes swiped right (<userData>/slr-scout-swipes.json)
                         that aren't fetched yet: video and script, into the library
   --dry-run             With --fetch: print the plan (download choice, script, target
@@ -47,6 +49,12 @@ hand-made multi-axis, likes from SLR favourites at slrScout.popularityPer a poin
 the slrScout bonuses (hand-made script, PMV, compilation). scriptSource says where a
 download takes the script from: a free EroScripts post, else SLR's hand-crafted
 script, else its AI script. fetchedAt is kept from the previous file.
+After the scan, preview frames for the swipe deck: for up to --frames scenes (highest
+score first) without frames that aren't downloaded or swiped, three JPEGs at 25, 50 and
+75 % of SLR's free trailer (never the full video: no quota is spent), one eye of stereo
+VR, at most 1280 px wide, in <userData>/scout-frames/slr/<id>/ (ffmpeg seeks, so each
+frame reads a few MB; 500 ms between scenes). frames is kept across runs; a scene that
+got none records framesFailed and is tried again after 7 days.
 The quota (hand-crafted scripts, AI scripts, videos) needs a session; when it can't
 be read, the previous quota is kept and quotaError says why.
 
@@ -74,6 +82,8 @@ pub struct Options {
     pub quota: bool,
     pub login: bool,
     pub credentials: Option<PathBuf>,
+    /// `--frames N`: scenes given preview frames this scan (None: frames::DEFAULT_PER_SCAN).
+    pub frames: Option<usize>,
 }
 
 pub fn parse(args: &[OsString]) -> Result<Options, String> {
@@ -87,7 +97,10 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
             Some((f, v)) if f.starts_with("--") => (f, Some(v)),
             _ => (arg, None),
         };
-        let takes_value = matches!(flag, "--user-data" | "--actor" | "--credentials");
+        let takes_value = matches!(
+            flag,
+            "--user-data" | "--actor" | "--credentials" | "--frames"
+        );
         if inline.is_some() && !takes_value {
             return Err(format!("{flag} takes no value"));
         }
@@ -112,6 +125,13 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 o.actors.push(name);
             }
             "--credentials" => o.credentials = Some(PathBuf::from(value()?)),
+            "--frames" => {
+                let v = value()?;
+                o.frames = Some(
+                    v.parse()
+                        .map_err(|_| format!("--frames takes a whole number, got {v:?}"))?,
+                );
+            }
             "--no-forum" => o.no_forum = true,
             "--fetch" => o.fetch = true,
             "--dry-run" => o.dry_run = true,
@@ -123,14 +143,15 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
     if o.help {
         return Ok(o);
     }
-    let scouting = !o.actors.is_empty() || o.no_forum;
+    let scouting = !o.actors.is_empty() || o.no_forum || o.frames.is_some();
     if (o.quota || o.login) && (scouting || o.fetch) {
         return Err(
-            "--quota and --login don't scout or fetch: drop --actor, --no-forum and --fetch".into(),
+            "--quota and --login don't scout or fetch: drop --actor, --no-forum, --frames and --fetch"
+                .into(),
         );
     }
     if o.fetch && scouting {
-        return Err("--fetch doesn't scout: drop --actor and --no-forum".into());
+        return Err("--fetch doesn't scout: drop --actor, --no-forum and --frames".into());
     }
     if o.dry_run && !o.fetch {
         return Err("--dry-run goes with --fetch".into());
@@ -163,6 +184,9 @@ mod tests {
         assert_eq!(o.user_data, Some(PathBuf::from("/u")));
         assert_eq!(o.actors, ["Miss Lexa", "Lexi Luna"]);
         assert!(o.no_forum && !o.quota && !o.login && !o.fetch);
+        assert_eq!(o.frames, None);
+        assert_eq!(parse(&args(&["--frames", "5"])).unwrap().frames, Some(5));
+        assert_eq!(parse(&args(&["--frames=0"])).unwrap().frames, Some(0));
         assert_eq!(parse(&args(&[])).unwrap(), Options::default());
         assert!(parse(&args(&["--quota"])).unwrap().quota);
         let o = parse(&args(&["--fetch", "--dry-run"])).unwrap();
@@ -186,6 +210,11 @@ mod tests {
             &["--quota", "--fetch"],
             &["--fetch", "--actor", "x"],
             &["--fetch", "--no-forum"],
+            &["--fetch", "--frames", "3"],
+            &["--quota", "--frames", "3"],
+            &["--frames"],
+            &["--frames", "-1"],
+            &["--frames", "x"],
             &["--dry-run"],
             &["--fetch=1"],
             &["--credentials", "/c"],

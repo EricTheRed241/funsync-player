@@ -4,13 +4,15 @@
 //! EroScripts deck scores its candidates plus SLR-only extras, mark where a
 //! download would take each script from, and record the account's remaining
 //! download quota. Writes `<userData>/slr-scout.json`, read by the
-//! `scout:report` swipe page; `--fetch` downloads the scenes swiped right.
+//! `scout:report` swipe page, and preview frames from the scenes' free
+//! trailers (`frames`); `--fetch` downloads the scenes swiped right.
 //! Never writes config.json; the forum is read-only.
 
 pub mod cdp;
 pub mod cli;
 pub mod fetch;
 pub mod forum;
+pub mod frames;
 pub mod http;
 pub mod library;
 pub mod login;
@@ -193,12 +195,13 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         s.script_source = store::script_source(s);
     }
     fetch::keep_fetched(previous.as_ref(), &mut scenes);
+    frames::keep(previous.as_ref(), &mut scenes, &user_data);
     score::sort(&mut scenes);
 
     let now = timefmt::now_iso();
     let result = quota::fetch(http, &user_data, &now);
     let (quota, quota_error) = quota::merge(previous.as_ref(), &result);
-    let file = ScoutFile {
+    let mut file = ScoutFile {
         generated_at: now,
         actors: catalogue.actors,
         quota,
@@ -208,6 +211,51 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
     store::write(&user_data, &file)?;
     summary(&file, &catalogue.unknown, &prefs.slr_scout, out).map_err(io)?;
     quota_line(&file, &result, out).map_err(io)?;
+    let limit = opts.frames.unwrap_or(frames::DEFAULT_PER_SCAN);
+    if limit > 0 {
+        // Scenes the deck doesn't show: swiped either way, or brought by a waiting post.
+        let mut skip = frames::covered(&user_data);
+        skip.extend(fetch::swiped(&user_data).unwrap_or_else(|e| {
+            let _ = writeln!(err, "Warning: {e}; frames for swiped scenes too.");
+            Vec::new()
+        }));
+        writeln!(
+            err,
+            "Preview frames from SLR trailers (at most {limit} scene(s))..."
+        )
+        .map_err(io)?;
+        let gap = if slr_gap.is_zero() {
+            Duration::ZERO
+        } else {
+            frames::GAP
+        };
+        let done = frames::pass(
+            &frames::Ffmpeg,
+            &user_data,
+            &mut file.scenes,
+            &catalogue.trailers,
+            &skip,
+            limit,
+            &mut Pacer::new(gap),
+            std::time::SystemTime::now(),
+            err,
+        );
+        if done.made + done.failed > 0 {
+            store::write(&user_data, &file)?;
+        }
+        writeln!(
+            out,
+            "Frames: {} scene(s) got frames, {} got none{}.",
+            done.made,
+            done.failed,
+            if done.left > 0 {
+                format!(", {} left for later scans", done.left)
+            } else {
+                String::new()
+            }
+        )
+        .map_err(io)?;
+    }
     writeln!(
         out,
         "Wrote {} in {}.",
