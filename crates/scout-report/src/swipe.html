@@ -97,6 +97,7 @@ a.badge { color: var(--fg); }
   -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .by { display: flex; gap: 10px; color: var(--muted); font-size: 13px; }
 .by a { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.by .date { font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* The full post details: only in the wide (side panel) layout. */
 .sect, .facts, .scenes, .info .all-tags { display: none; }
 .sect { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
@@ -269,6 +270,8 @@ function toast(msg) {
 const fmt = (n) => String(Math.round(n * 10) / 10);
 const signed = (n) => (n > 0 ? '+' : '') + fmt(n);
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
+/** "2026-01-02…" → "01-2026". */
+const monthYear = (iso) => { const m = /^(\d{4})-(\d{2})/.exec(iso || ''); return m ? m[2] + '-' + m[1] : ''; };
 const fmtBytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
 
 /** m:ss, or h:mm:ss from an hour. */
@@ -373,6 +376,8 @@ function cardNode(c, isTop) {
   }
   media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
   const slr = isScene(c);
+  // A post's creation date, or an SLR scene's release date.
+  const posted = slr ? c.date : c.created;
   const best = new Set((c.topTags || []).map((t) => t.tag));
   const tagTop = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
   const topTags = slr
@@ -389,7 +394,8 @@ function cardNode(c, isTop) {
       el('div', { class: 'ttl', title: c.title || null }, c.title || '#' + c.id),
       el('div', { class: 'by' },
         c.author ? el('span', {}, (slr ? '' : 'by ') + c.author) : null,
-        el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (slr ? 'SLR ' : '#' + c.id + ' ') + '↗')),
+        el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (slr ? 'SLR ' : '#' + c.id + ' ') + '↗'),
+        monthYear(posted) ? el('span', { class: 'date', title: (slr ? 'Released ' : 'Posted ') + day(posted) }, monthYear(posted)) : null),
       topTags.length ? el('div', { class: 'tags top-tags' }, topTags) : null,
       slr ? slrDetails(c, best) : details(c, best)));
   if (isTop) drag(node);
