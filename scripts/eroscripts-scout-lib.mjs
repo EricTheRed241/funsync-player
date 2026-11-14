@@ -919,7 +919,19 @@ export function needsJudging(state, topic, rules = RULES_VERSION) {
 }
 
 /** What a verdict keeps about its post, for `npm run scout:report`; kept from the earlier verdict when not given. */
-export const POST_INFO_KEYS = ['title', 'author', 'created', 'bumped', 'image', 'images'];
+export const POST_INFO_KEYS = ['title', 'author', 'created', 'bumped', 'image', 'images', 'imagesVersion'];
+
+/**
+ * How post images are picked (postImages in electron/eroscripts-api.js): records with
+ * another `imagesVersion` are read again by `--titles`. 2 (2026-11-13): no linked
+ * buttons, banners, heatmaps or stickers; replies' images too; up to GALLERY_KEEP kept.
+ */
+export const IMAGES_VERSION = 2;
+/**
+ * Images kept per post: more than the deck shows (5), so it can still fill a card after
+ * leaving out uploads that many posts share (signatures, logos; crates/scout-report deck.rs).
+ */
+export const GALLERY_KEEP = 8;
 
 /**
  * Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending.
@@ -941,9 +953,9 @@ export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VE
 /**
  * A post's title, author (the first post's), creation and last-activity dates and
  * image (absolute URL), from what a feed lists (`t`) and its topic payload (`data`,
- * api.getTopicData), whichever has each; `images` (up to 5 absolute URLs, the topic
- * image first: postImages in electron/eroscripts-api.js) only from the payload, `[]`
- * when it has none worth showing, null without a payload.
+ * api.getTopicData), whichever has each; `images` (up to GALLERY_KEEP absolute URLs:
+ * postImages in electron/eroscripts-api.js) and `imagesVersion` only from the payload,
+ * `images` `[]` when it has none worth showing, both null without a payload.
  */
 export function postInfo(t, data = null) {
   const image = t?.image || data?.image_url || null;
@@ -953,20 +965,22 @@ export function postInfo(t, data = null) {
     created: t?.created || data?.created_at || null,
     bumped: t?.bumped || data?.bumped_at || null,
     image: image && !/^https?:\/\//.test(image) ? `https://discuss.eroscripts.com${image}` : image,
-    images: data ? postImages(data) : null,
+    images: data ? postImages(data, GALLERY_KEEP) : null,
+    imagesVersion: data ? IMAGES_VERSION : null,
   };
 }
 
 /**
  * Judged posts `--titles` reads again: those without a title (judged before verdicts kept
- * one) or without `images` (judged before verdicts kept them); posts found gone are left
- * out. The `first` ids (the waiting candidates, in their order) come first, the rest newest first.
+ * one) or without `images` picked the current way (IMAGES_VERSION); posts found gone are
+ * left out. The `first` ids (the waiting candidates, in their order) come first, the rest
+ * newest first.
  *
  * @param {object} state scan state
  * @param {number[]} [first]
  */
 export function topicsMissingInfo(state, first = []) {
-  const missing = (t) => t && !t.gone && (!t.title || !Array.isArray(t.images));
+  const missing = (t) => t && !t.gone && (!t.title || !Array.isArray(t.images) || t.imagesVersion !== IMAGES_VERSION);
   const lead = [...new Set(first)].filter((id) => missing(state.topics[id]));
   const leadSet = new Set(lead);
   const rest = Object.entries(state.topics)
