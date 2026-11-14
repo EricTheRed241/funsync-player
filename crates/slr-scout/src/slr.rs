@@ -7,7 +7,7 @@ use crate::prefs::SlrScout;
 use crate::store::{Actor, Handmade, Scene};
 use crate::text;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -24,40 +24,63 @@ pub fn api_request(url: String) -> Request {
         .header("Accept", "application/json")
 }
 
+/// A GET through the pacer (rate limits respected, see [`http::paced_json`]).
 fn get(http: &dyn Http, pacer: &mut Pacer, url: String) -> Result<Value, NetError> {
-    pacer.wait();
-    http::json(http, &api_request(url))
+    http::paced_json(http, pacer, &api_request(url))
 }
 
-/// The performer named `name` (case-insensitive exact match).
-pub fn find_actor(http: &dyn Http, pacer: &mut Pacer, name: &str) -> Result<Actor, NetError> {
-    let v = get(
-        http,
-        pacer,
-        format!(
-            "{API}/v3/search?query={}&tab=actors",
-            text::url_encode(name)
-        ),
-    )?;
-    let wanted = text::normalise(name);
-    v["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|a| {
-            a["name"]
-                .as_str()
-                .is_some_and(|n| text::normalise(n) == wanted)
-        })
-        .and_then(|a| {
-            Some(Actor {
-                name: a["name"].as_str()?.to_string(),
-                id: a["id"].as_u64()?,
-                label: a["label"].as_str().unwrap_or_default().to_string(),
-                scenes: a["quantities"]["scenes"].as_u64().unwrap_or(0),
+/// A performer to look up: the name and other spellings (`aliases` of
+/// `pornstarTags.pornstars`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Wanted {
+    pub name: String,
+    pub aliases: Vec<String>,
+}
+
+/// The performer SLR knows by `w.name` or one of its aliases (exact match,
+/// any case or punctuation): a search by the name, then by each alias until
+/// one matches. `None` when SLR knows none of them.
+pub fn find_actor(
+    http: &dyn Http,
+    pacer: &mut Pacer,
+    w: &Wanted,
+) -> Result<Option<Actor>, NetError> {
+    let spellings: Vec<String> = std::iter::once(&w.name)
+        .chain(&w.aliases)
+        .map(|n| text::normalise(n))
+        .filter(|n| !n.is_empty())
+        .collect();
+    for query in std::iter::once(&w.name).chain(&w.aliases) {
+        let v = get(
+            http,
+            pacer,
+            format!(
+                "{API}/v3/search?query={}&tab=actors",
+                text::url_encode(query)
+            ),
+        )?;
+        let found = v["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|a| {
+                a["name"]
+                    .as_str()
+                    .is_some_and(|n| spellings.contains(&text::normalise(n)))
             })
-        })
-        .ok_or_else(|| NetError::Failed(format!("SLR knows no performer named \"{name}\"")))
+            .and_then(|a| {
+                Some(Actor {
+                    name: a["name"].as_str()?.to_string(),
+                    id: a["id"].as_u64()?,
+                    label: a["label"].as_str().unwrap_or_default().to_string(),
+                    scenes: a["quantities"]["scenes"].as_u64().unwrap_or(0),
+                })
+            });
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
 }
 
 /// A scene from a listing page.
@@ -185,6 +208,7 @@ pub fn scene(d: &Value) -> Option<Scene> {
             handmade.push(h);
         }
     }
+    let creampie = is_creampie(&categories, &timestamps);
     Some(Scene {
         url: format!("{SITE}/scenes/{label}"),
         id,
@@ -197,13 +221,18 @@ pub fn scene(d: &Value) -> Option<Scene> {
         vr: d["isFlatScreenType"].as_bool() != Some(true),
         fps: d["fps"].as_number().cloned(),
         passthrough: passthrough(&d["passthrough"]),
-        creampie: is_creampie(&categories, &timestamps),
+        creampie,
         ai_script: scripts
             .iter()
             .any(|s| s["scriptAI"].as_bool() == Some(true)),
         pmv: is_pmv(&categories, &title),
         compilation: is_compilation(&categories, &title),
         favorites: d["quantity"]["favorites"].as_u64().unwrap_or(0),
+        tags: crate::score::scene_tags(&categories, creampie),
+        tag_scores: BTreeMap::new(),
+        favourite: None,
+        fetched_at: None,
+        script_source: None,
         handmade,
         title,
         score: 0.0,
@@ -220,32 +249,55 @@ pub fn wanted(prefs: &SlrScout, s: &Scene) -> bool {
 #[derive(Debug)]
 pub struct Catalogue {
     pub actors: Vec<Actor>,
+    /// Wanted performers SLR doesn't know.
+    pub unknown: Vec<String>,
     pub scenes: Vec<Scene>,
 }
 
-/// Walk the catalogue: each performer's scene list, then the details of
-/// every scene the listing doesn't already rule out. Progress goes to `log`.
+/// Walk the catalogue: each performer's scene list (performers SLR doesn't
+/// know are skipped), then the details of every scene the listing doesn't
+/// already rule out, each scene once. A scene whose details can't be read
+/// is skipped with a warning; a rate limit stops the walk. Progress goes to
+/// `log`.
 pub fn walk(
     http: &dyn Http,
     pacer: &mut Pacer,
-    names: &[String],
+    wanted_performers: &[Wanted],
     prefs: &SlrScout,
     log: &mut dyn Write,
 ) -> Result<Catalogue, NetError> {
-    let mut actors = Vec::new();
+    let mut actors: Vec<Actor> = Vec::new();
+    let mut unknown = Vec::new();
     let mut listed: Vec<Listed> = Vec::new();
-    for name in names {
-        let actor = find_actor(http, pacer, name)?;
+    let mut seen = HashSet::new();
+    for (i, w) in wanted_performers.iter().enumerate() {
+        let Some(actor) = find_actor(http, pacer, w)? else {
+            let _ = writeln!(
+                log,
+                "[{}/{}] {}: not on SLR",
+                i + 1,
+                wanted_performers.len(),
+                w.name
+            );
+            unknown.push(w.name.clone());
+            continue;
+        };
+        if actors.iter().any(|a| a.id == actor.id) {
+            continue;
+        }
         let scenes = list_scenes(http, pacer, actor.id)?;
+        let fresh = scenes.iter().filter(|s| !seen.contains(&s.id)).count();
         let _ = writeln!(
             log,
-            "{}: {} scene(s) listed (SLR id {})",
+            "[{}/{}] {}: {} scene(s) listed, {fresh} new (SLR id {})",
+            i + 1,
+            wanted_performers.len(),
             actor.name,
             scenes.len(),
             actor.id
         );
         for s in scenes {
-            if !listed.iter().any(|l| l.id == s.id) {
+            if seen.insert(s.id) {
                 listed.push(s);
             }
         }
@@ -263,15 +315,26 @@ pub fn walk(
     );
     let mut scenes = Vec::new();
     for (i, l) in to_read.iter().enumerate() {
-        let d = detail(http, pacer, &l.label)?;
-        if let Some(s) = scene(&d).filter(|s| wanted(prefs, s)) {
-            scenes.push(s);
+        match detail(http, pacer, &l.label) {
+            Ok(d) => {
+                if let Some(s) = scene(&d).filter(|s| wanted(prefs, s)) {
+                    scenes.push(s);
+                }
+            }
+            Err(NetError::Failed(m)) => {
+                let _ = writeln!(log, "  skipped {}: {m}", l.label);
+            }
+            Err(e) => return Err(e),
         }
-        if (i + 1) % 25 == 0 {
+        if (i + 1) % 50 == 0 {
             let _ = writeln!(log, "  {}/{}", i + 1, to_read.len());
         }
     }
-    Ok(Catalogue { actors, scenes })
+    Ok(Catalogue {
+        actors,
+        unknown,
+        scenes,
+    })
 }
 
 #[cfg(test)]
@@ -285,10 +348,19 @@ mod tests {
     }
 
     fn prefs(vr_only: bool, require_creampie: bool) -> SlrScout {
-        let mut p = crate::prefs::load().unwrap();
+        let mut p = crate::prefs::load().unwrap().slr_scout;
         p.vr_only = vr_only;
         p.require_creampie = require_creampie;
         p
+    }
+
+    fn wanted_list(list: &[(&str, &[&str])]) -> Vec<Wanted> {
+        list.iter()
+            .map(|(name, aliases)| Wanted {
+                name: name.to_string(),
+                aliases: strings(aliases),
+            })
+            .collect()
     }
 
     #[test]
@@ -425,22 +497,57 @@ mod tests {
             200,
             &json!({ "data": b }).to_string(),
         );
+        // A second performer found by her alias, sharing scene 3 and with a
+        // scene whose details fail; a third SLR doesn't know.
+        http.on(
+            "GET",
+            &format!("{API}/v3/search?query=Nobody&tab=actors"),
+            200,
+            r#"{"data": [{"id": 5, "name": "Nobody Else"}]}"#,
+        );
+        http.on(
+            "GET",
+            &format!("{API}/v3/search?query=Lexi&tab=actors"),
+            200,
+            r#"{"data": [{"id": 9, "name": "LEXI", "label": "lexi", "quantities": {"scenes": 2}}]}"#,
+        );
+        http.on(
+            "GET",
+            &format!("{API}/v3/scenes?models=9&perPage=36&page=1"),
+            200,
+            r#"{"data": [{"id": 3, "label": "b-3", "isFlatScreenType": false},
+                         {"id": 4, "label": "gone-4", "isFlatScreenType": false}],
+                "meta": {"pagination": {"totalPages": 1}}}"#,
+        );
+        http.on("GET", &format!("{API}/v3/scenes/gone-4"), 500, "");
+        http.on(
+            "GET",
+            &format!("{API}/v3/search?query=Ghost&tab=actors"),
+            200,
+            r#"{"data": []}"#,
+        );
         let mut log = Vec::new();
         let c = walk(
             &http,
             &mut Pacer::new(Duration::ZERO),
-            &strings(&["miss lexa"]),
-            &prefs(true, true),
+            &wanted_list(&[("miss lexa", &[]), ("Nobody", &["Lexi"]), ("Ghost", &[])]),
+            &prefs(true, false),
             &mut log,
         )
         .unwrap();
-        assert_eq!(c.actors[0].id, 7954);
+        assert_eq!(c.actors.iter().map(|a| a.id).collect::<Vec<_>>(), [7954, 9]);
         assert_eq!(c.actors[0].scenes, 3);
-        assert_eq!(c.scenes.iter().map(|s| s.id).collect::<Vec<_>>(), [1]);
-        // The flat scene's details were never read.
-        assert!(!http.seen.borrow().iter().any(|r| r.url.ends_with("flat-2")));
+        assert_eq!(c.unknown, ["Ghost"]);
+        assert_eq!(c.scenes.iter().map(|s| s.id).collect::<Vec<_>>(), [1, 3]);
+        let log = String::from_utf8(log).unwrap();
+        assert!(log.contains("[2/3] LEXI: 2 scene(s) listed, 1 new"));
+        assert!(log.contains("skipped gone-4"));
+        assert!(log.contains("[3/3] Ghost: not on SLR"));
         {
             let seen = http.seen.borrow();
+            // The flat scene's details were never read; scene 3's once.
+            assert!(!seen.iter().any(|r| r.url.ends_with("flat-2")));
+            assert_eq!(seen.iter().filter(|r| r.url.ends_with("/b-3")).count(), 1);
             assert!(
                 seen[0]
                     .headers
@@ -448,22 +555,27 @@ mod tests {
             );
             assert!(seen[0].headers.contains(&("project".into(), "1".into())));
         }
+        // requireCreampie keeps scene 1 only (3 has a Cowgirl timestamp).
+        let c = walk(
+            &http,
+            &mut Pacer::new(Duration::ZERO),
+            &wanted_list(&[("miss lexa", &[])]),
+            &prefs(true, true),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(c.scenes.iter().map(|s| s.id).collect::<Vec<_>>(), [1]);
 
-        http.on(
-            "GET",
-            &format!("{API}/v3/search?query=nobody&tab=actors"),
-            200,
-            r#"{"data": []}"#,
-        );
+        http.on("GET", &format!("{API}/v3/scenes/b-3"), 429, "");
         assert!(matches!(
             walk(
                 &http,
                 &mut Pacer::new(Duration::ZERO),
-                &strings(&["nobody"]),
+                &wanted_list(&[("miss lexa", &[])]),
                 &prefs(true, true),
-                &mut log
+                &mut Vec::new()
             ),
-            Err(NetError::Failed(_))
+            Err(NetError::RateLimited(_))
         ));
     }
 }

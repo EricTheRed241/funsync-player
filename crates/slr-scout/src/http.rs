@@ -76,6 +76,17 @@ impl Response {
 pub trait Http {
     /// Send a request; `Err` only when no HTTP response came back.
     fn send(&self, req: &Request) -> Result<Response, String>;
+
+    /// GET `req` into the file `dest` (redirects followed; send no secret
+    /// headers here, they would follow the redirect); `Err` unless it ends
+    /// in a 2xx with the whole body written.
+    fn download(&self, req: &Request, dest: &Path) -> Result<(), String> {
+        let res = self.send(req)?;
+        if !(200..300).contains(&res.status) {
+            return Err(format!("HTTP {}", res.status));
+        }
+        fs::write(dest, res.body.as_bytes()).map_err(|e| format!("{}: {e}", dest.display()))
+    }
 }
 
 /// Why a request didn't give what was asked for.
@@ -99,10 +110,19 @@ impl fmt::Display for NetError {
 /// Messages name the URL without its query (it may name a performer, never
 /// a secret, but keeps lines short).
 pub fn json(http: &dyn Http, req: &Request) -> Result<Value, NetError> {
-    let where_ = req.url.split('?').next().unwrap_or(&req.url).to_string();
     let res = http
         .send(req)
-        .map_err(|e| NetError::Failed(format!("{where_}: {e}")))?;
+        .map_err(|e| NetError::Failed(format!("{}: {e}", short(&req.url))))?;
+    parse_json(&res, &req.url)
+}
+
+fn short(url: &str) -> &str {
+    url.split('?').next().unwrap_or(url)
+}
+
+/// A response's 2xx JSON body (see [`json`]).
+pub fn parse_json(res: &Response, url: &str) -> Result<Value, NetError> {
+    let where_ = short(url);
     if res.status == 429 {
         return Err(NetError::RateLimited(format!("{where_}: HTTP 429")));
     }
@@ -113,20 +133,67 @@ pub fn json(http: &dyn Http, req: &Request) -> Result<Value, NetError> {
         .map_err(|e| NetError::Failed(format!("{where_}: not JSON ({e})")))
 }
 
-/// Keeps requests to one host at least `gap` apart.
+/// Retries of a rate-limited request before giving up.
+pub const RATE_LIMIT_RETRIES: u32 = 3;
+
+/// [`json`] through the pacer: waits its turn, holds off when the host says
+/// its rate limit is nearly spent (`x-ratelimit-remaining` /
+/// `x-ratelimit-reset`), and retries a 429 after `Retry-After` (else the
+/// reset, else a minute) up to [`RATE_LIMIT_RETRIES`] times when the pacer
+/// retries (real network only).
+pub fn paced_json(http: &dyn Http, pacer: &mut Pacer, req: &Request) -> Result<Value, NetError> {
+    let mut attempt = 0;
+    loop {
+        pacer.wait();
+        let res = http
+            .send(req)
+            .map_err(|e| NetError::Failed(format!("{}: {e}", short(&req.url))))?;
+        pacer.observe(&res);
+        if res.status == 429 && pacer.retries && attempt < RATE_LIMIT_RETRIES {
+            attempt += 1;
+            let secs = header_secs(&res, "retry-after")
+                .or_else(|| header_secs(&res, "x-ratelimit-reset"))
+                .unwrap_or(60);
+            pacer.hold(Duration::from_secs(secs.min(600) + 1));
+            continue;
+        }
+        return parse_json(&res, &req.url);
+    }
+}
+
+fn header_secs(res: &Response, name: &str) -> Option<u64> {
+    res.header_values(name).next()?.trim().parse().ok()
+}
+
+/// Keeps requests to one host at least `gap` apart, and off it while its
+/// rate limit resets.
 #[derive(Debug)]
 pub struct Pacer {
     gap: Duration,
     last: Option<Instant>,
+    until: Option<Instant>,
+    /// Retry rate-limited requests (a real network: a nonzero gap).
+    pub retries: bool,
 }
 
 impl Pacer {
     pub fn new(gap: Duration) -> Self {
-        Pacer { gap, last: None }
+        Pacer {
+            gap,
+            last: None,
+            until: None,
+            retries: !gap.is_zero(),
+        }
     }
 
-    /// Sleep until `gap` has passed since the previous call.
+    /// Sleep until `gap` has passed since the previous call (and any hold).
     pub fn wait(&mut self) {
+        if let Some(until) = self.until.take() {
+            let now = Instant::now();
+            if until > now {
+                std::thread::sleep(until - now);
+            }
+        }
         if let Some(last) = self.last {
             let since = last.elapsed();
             if since < self.gap {
@@ -134,6 +201,24 @@ impl Pacer {
             }
         }
         self.last = Some(Instant::now());
+    }
+
+    /// No request before `d` from now.
+    pub fn hold(&mut self, d: Duration) {
+        let until = Instant::now() + d;
+        self.until = Some(self.until.map_or(until, |u| u.max(until)));
+    }
+
+    /// Hold off until the reset when the response says at most one request
+    /// is left in the window.
+    pub fn observe(&mut self, res: &Response) {
+        if let (Some(left), Some(reset)) = (
+            header_secs(res, "x-ratelimit-remaining"),
+            header_secs(res, "x-ratelimit-reset"),
+        ) && left <= 1
+        {
+            self.hold(Duration::from_secs(reset.min(600) + 1));
+        }
     }
 }
 
@@ -180,6 +265,46 @@ impl Http for Curl {
             });
         }
         parse_dump(&String::from_utf8_lossy(&out.stdout))
+    }
+
+    /// curl straight into the file, resuming a partial one (`-C -`), with
+    /// retries; the URL goes on stdin like every other value.
+    fn download(&self, req: &Request, dest: &Path) -> Result<(), String> {
+        let mut config = String::new();
+        config.push_str(&format!("url = {}\n", quote(&req.url)));
+        config.push_str(&format!("user-agent = {}\n", quote(USER_AGENT)));
+        config.push_str(&format!("output = {}\n", quote(&dest.to_string_lossy())));
+        for (name, value) in &req.headers {
+            config.push_str(&format!(
+                "header = {}\n",
+                quote(&format!("{name}: {value}"))
+            ));
+        }
+        let mut child = Command::new("curl")
+            .args(["-s", "-S", "-f", "-L", "-C", "-", "--retry", "3"])
+            .args(["--speed-limit", "10240", "--speed-time", "120"])
+            .args(["-K", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("can't run curl: {e}"))?;
+        child
+            .stdin
+            .take()
+            .ok_or("curl: no stdin")?
+            .write_all(config.as_bytes())
+            .map_err(|e| format!("curl: {e}"))?;
+        let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if msg.is_empty() {
+            format!("curl exited with {}", out.status)
+        } else {
+            msg
+        })
     }
 }
 
@@ -388,5 +513,58 @@ mod tests {
         );
         assert!(json(&http, &Request::get("https://h/html")).is_err());
         assert!(json(&http, &Request::get("https://h/none")).is_err());
+    }
+
+    fn response(status: u16, headers: &[(&str, &str)]) -> Response {
+        Response {
+            status,
+            headers: headers
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect(),
+            body: "{}".into(),
+        }
+    }
+
+    #[test]
+    fn holds_off_when_the_rate_limit_is_spent() {
+        let mut p = Pacer::new(Duration::ZERO);
+        p.observe(&response(
+            200,
+            &[("x-ratelimit-remaining", "15"), ("x-ratelimit-reset", "53")],
+        ));
+        assert!(p.until.is_none());
+        p.observe(&response(
+            200,
+            &[("x-ratelimit-remaining", "1"), ("x-ratelimit-reset", "53")],
+        ));
+        let held = p.until.unwrap() - Instant::now();
+        assert!(held > Duration::from_secs(50) && held <= Duration::from_secs(54));
+        // A shorter hold doesn't cut a longer one.
+        p.hold(Duration::from_secs(1));
+        assert!(p.until.unwrap() - Instant::now() > Duration::from_secs(50));
+    }
+
+    #[test]
+    fn retries_a_rate_limited_request_on_a_real_network_only() {
+        let mut http = testing::Canned::default();
+        http.with_headers("GET", "https://h/slow", 429, &[("retry-after", "0")], "");
+        let req = Request::get("https://h/slow");
+        // Canned network (zero gap): no retry.
+        let mut p = Pacer::new(Duration::ZERO);
+        assert!(matches!(
+            paced_json(&http, &mut p, &req),
+            Err(NetError::RateLimited(_))
+        ));
+        assert_eq!(http.seen.borrow().len(), 1);
+        // Retrying: RATE_LIMIT_RETRIES more tries, a second apart.
+        p.retries = true;
+        let started = Instant::now();
+        assert!(matches!(
+            paced_json(&http, &mut p, &req),
+            Err(NetError::RateLimited(_))
+        ));
+        assert_eq!(http.seen.borrow().len(), 2 + RATE_LIMIT_RETRIES as usize);
+        assert!(started.elapsed() >= Duration::from_secs(RATE_LIMIT_RETRIES as u64));
     }
 }

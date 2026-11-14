@@ -43,12 +43,17 @@ puts the card back a few cards later, saving nothing. Undo forgets the swipe or 
 Swipes go to eroscripts-scout-swipes.json (atomically; the previous copy is kept as
 eroscripts-scout-swipes.json.bak).
 
-The SLR tab deals the SexLikeReal scenes in slr-scout.json (npm run slr:scout) with
-their bonuses (hand-made script, PMV, compilation) and shows the account's download
-quota the scout last read: hand-crafted and AI scripts left this month, videos left in
-the 7-day window. Its swipes go to slr-scout-swipes.json (and .bak), by SLR scene id;
-right = wanted, left = hidden. These two swipes files are the only files the CLI
-writes. Stop it with Ctrl-C.
+The SLR tab deals what would download from SexLikeReal, in one order by score (the
+same score as the EroScripts deck): the waiting posts whose video is on SLR (they
+leave the Multi-axis and Single-axis tabs; their swipes go to
+eroscripts-scout-swipes.json, and --fetch --auto downloads them from SLR) and the
+scenes in slr-scout.json (npm run slr:scout) not downloaded yet, with their tags,
+score parts and where the script would come from, less the scenes a waiting post
+brings (the post wins: its script is free). Scene swipes go to slr-scout-swipes.json
+(and .bak), by SLR scene id; right = wanted (npm run slr:scout -- --fetch downloads
+it), left = hidden. The tab shows the account's download quota the scout last read:
+videos left in the 7-day window, hand-crafted and AI scripts left this month. These
+two swipes files are the only files the CLI writes. Stop it with Ctrl-C.
 
 Exit codes: 0 ok, 1 error (2 and 3 are not used).
 ";

@@ -161,6 +161,24 @@ export function rule34videoFiles(pageUrl, page) {
   }));
 }
 
+/** A name without the characters file names can't hold, whitespace collapsed. */
+export const safeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+
+/** Scene stems stay well under the 255-byte name limit with `.generated.twist.funscript`. */
+export const STEM_BYTES = 180;
+
+/** Cut to `max` UTF-8 bytes on a character boundary. */
+export function capBytes(s, max) {
+  let out = '';
+  let n = 0;
+  for (const ch of s) {
+    n += Buffer.byteLength(ch);
+    if (n > max) break;
+    out += ch;
+  }
+  return out.trim();
+}
+
 // ── Length check ────────────────────────────────────────────────────────
 
 /** A script may end this much after the video (rounding, a last action on the final frame). */

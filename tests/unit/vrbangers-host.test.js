@@ -209,7 +209,7 @@ describe('the vrbangers search feed', () => {
   const topic = (id, bumped = '2026-09-01T00:00:00Z') => ({ id, title: `VRBangers - Scene ${id}`, tags: ['vr', 'real'], likes: 1, bumped });
 
   it('is a feed --feeds takes, listed by forum search, with its own backfill cursor', async () => {
-    expect(ALL_FEEDS).toEqual([...FEED_TAGS, 'vrbangers']);
+    expect(ALL_FEEDS).toEqual([...FEED_TAGS, 'vrbangers', 'slr']);
     expect(SEARCH_FEEDS.vrbangers).toBe('vrbangers');
     const { api, calls } = fakeForum({
       0: { topics: [topic(338156), topic(336077)], more: true },

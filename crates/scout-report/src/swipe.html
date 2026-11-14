@@ -80,7 +80,9 @@ a:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
 .b-score { --bc: #2f6fdf; } .b-vr { --bc: #a46ad6; } .b-flat { --bc: #8b8b93; } .b-multi { --bc: #14b8a6; }
 .b-single { --bc: #8b8b93; } .b-videos { --bc: #d08b2c; } .b-cream { --bc: #e0529c; } .b-time { --bc: #6b7280; }
-.b-hand { --bc: #14b8a6; } .b-music { --bc: #d08b2c; } .b-ai { --bc: #8b8b93; }
+.b-hand { --bc: #14b8a6; } .b-music { --bc: #d08b2c; } .b-ai { --bc: #8b8b93; } .b-slr { --bc: #e8743b; }
+.b-fav { --bc: #e0529c; }
+a.badge { color: var(--fg); }
 .quota { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
   font-variant-numeric: tabular-nums; }
 .quota b { color: var(--fg); }
@@ -160,7 +162,7 @@ a:hover { text-decoration: underline; }
 <nav class="stacks" id="stacks" aria-label="Which posts">
   <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
   <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
-  <button type="button" data-stack="slr" title="SexLikeReal scenes from npm run slr:scout">SLR</button>
+  <button type="button" data-stack="slr" title="Downloads from SexLikeReal: EroScripts posts whose video is on SLR, and SLR scenes from npm run slr:scout">SLR</button>
 </nav>
 <div class="quota" id="quota" hidden></div>
 <div class="problems" id="problems" hidden></div>
@@ -189,8 +191,14 @@ let generation = 0;     // bumped by Refresh / Shuffle / a stack change: answers
 // Which stack is dealt (multi, single, slr); remembered on this device. Any other stored value
 // (e.g. a tab that no longer exists) falls back to multi.
 let stack = ['multi', 'single', 'slr'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
-// The SLR tab has its own deck and swipes (/api/slr/…: SexLikeReal scenes from slr:scout).
-const apiOf = (s) => (s === 'slr' ? '/api/slr' : '/api');
+// Where a card's swipe goes: SLR scenes from slr:scout (source "slr") to /api/slr/… and
+// slr-scout-swipes.json; EroScripts posts (no source, or "eroscripts"; on the SLR tab the ones
+// whose video is on SLR) to /api/… and eroscripts-scout-swipes.json.
+const isScene = (c) => c.source === 'slr';
+const apiOf = (c) => (isScene(c) ? '/api/slr' : '/api');
+// A card's identity: posts and SLR scenes have separate id ranges that may overlap.
+const keyOf = (c) => (isScene(c) ? 's' : 'p') + c.id;
+const STACK_NAMES = { multi: 'Multi-axis', single: 'Single-axis', slr: 'SLR' };
 // ⚙ shuffle amplitude per stack, in score points; unset = the server's default (deck.rs
 // MULTI_JITTER / SINGLE_JITTER, slr.rs SLR_JITTER), shown as the placeholder. Remembered on this device.
 const JITTER_DEFAULT = { multi: 4, single: 10, slr: 2 };
@@ -223,7 +231,7 @@ function el(tag, attrs, ...children) {
 }
 
 let queue = [];         // cards not swiped yet; queue[0] is on top
-const undoStack = [];   // {card, dir}, newest last; dir 'skip' never reached the server
+const undoStack = [];   // {card, dir, stack}, newest last; dir 'skip' never reached the server
 let skipped = [];       // skipped cards waiting to go back into the deck
 let remaining = 0;
 let wanted = 0;
@@ -259,6 +267,7 @@ function toast(msg) {
 }
 
 const fmt = (n) => String(Math.round(n * 10) / 10);
+const signed = (n) => (n > 0 ? '+' : '') + fmt(n);
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
 const fmtBytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
 
@@ -272,7 +281,7 @@ function clock(ms) {
 }
 
 function badges(c) {
-  if (c.source === 'slr') return slrBadges(c);
+  if (isScene(c)) return slrBadges(c);
   const out = [el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: c.videos > 1 ? 'Length of the first video' : 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
@@ -285,26 +294,33 @@ function badges(c) {
   }
   if (c.videos > 1) out.push(el('span', { class: 'badge b-videos' }, `${c.videos} videos`));
   if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
+  // On the SLR tab: the post's video comes from SexLikeReal (the user's account).
+  if (c.slrVideo) {
+    out.push(c.slrVideo.url
+      ? el('a', { class: 'badge b-slr', href: c.slrVideo.url, target: '_blank', rel: 'noopener noreferrer', title: 'The video downloads from SexLikeReal' }, 'video: SLR ↗')
+      : el('span', { class: 'badge b-slr', title: 'The video downloads from SexLikeReal' }, 'video: SLR'));
+  }
   return out;
 }
 
-/** An SLR scene: score, length, VR, creampie and the bonuses slr:scout scored (hand-made script, PMV, compilation). */
+// Where an SLR scene's download takes the script from (slr-scout.json `scriptSource`).
+const SCRIPT_SOURCES = { eroscripts: 'EroScripts (free)', 'slr-handcrafted': 'SLR hand-crafted', 'slr-ai': 'SLR AI' };
+const scriptLabel = (s) => 'script: ' + (SCRIPT_SOURCES[s] || s || 'none');
+
+/** An SLR scene: score, length, VR, creampie, where the script comes from, a favourite, PMV, compilation. */
 function slrBadges(c) {
   const parts = c.scoreParts || {};
-  const why = Object.entries(parts).map(([k, v]) => `${k} +${fmt(v)}`).join(', ');
+  const why = Object.entries(parts).map(([k, v]) => `${k} ${signed(v)}`).join(', ');
   const out = [el('span', { class: 'badge b-score', title: why ? 'Score: ' + why : 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
   if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
   const hand = c.handmade || [];
-  if (hand.length) {
-    const free = hand.some((h) => h.source === 'slr' || h.free);
-    out.push(el('span', { class: 'badge b-hand', title: hand.map(handLabel).join('\n') },
-      free ? 'Hand-made script' : 'Hand-made script (paid)'));
-  }
+  const scripts = [...hand.map(handLabel), c.aiScript ? 'SLR AI script' : null].filter(Boolean).join('\n');
+  out.push(el('span', { class: c.scriptSource ? 'badge b-hand' : 'badge b-ai', title: scripts || 'No script found' }, scriptLabel(c.scriptSource)));
+  if (c.favourite) out.push(el('span', { class: 'badge b-fav', title: 'Favourite' }, '♥ ' + c.favourite));
   if (c.pmv) out.push(el('span', { class: 'badge b-music' }, 'PMV'));
   if (c.compilation) out.push(el('span', { class: 'badge b-music' }, 'Compilation'));
-  if (c.aiScript) out.push(el('span', { class: 'badge b-ai', title: 'SLR has an AI script for it' }, 'AI script'));
   return out;
 }
 
@@ -356,14 +372,15 @@ function cardNode(c, isTop) {
     media.append(el('div', { class: 'none' }, 'No image'));
   }
   media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
-  const slr = c.source === 'slr';
+  const slr = isScene(c);
   const best = new Set((c.topTags || []).map((t) => t.tag));
+  const tagTop = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
   const topTags = slr
-    ? (c.handmade || []).map((h) => h.source === 'eroscripts'
+    ? [...tagTop, ...(c.handmade || []).map((h) => h.source === 'eroscripts'
       ? el('a', { class: 'tag', href: 'https://discuss.eroscripts.com/t/' + h.topicId, target: '_blank', rel: 'noopener noreferrer', title: h.title || null },
         `EroScripts #${h.topicId} ` + (h.free ? 'free' : 'paid'))
-      : el('span', { class: 'tag' }, 'SLR hand-crafted' + (h.author ? ' · ' + h.author : '')))
-    : (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
+      : el('span', { class: 'tag' }, 'SLR hand-crafted' + (h.author ? ' · ' + h.author : '')))]
+    : tagTop;
   const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
     media,
     el('div', { class: 'info' },
@@ -374,20 +391,24 @@ function cardNode(c, isTop) {
         c.author ? el('span', {}, (slr ? '' : 'by ') + c.author) : null,
         el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (slr ? 'SLR ' : '#' + c.id + ' ') + '↗')),
       topTags.length ? el('div', { class: 'tags top-tags' }, topTags) : null,
-      slr ? slrDetails(c) : details(c, best)));
+      slr ? slrDetails(c, best) : details(c, best)));
   if (isTop) drag(node);
   return node;
+}
+
+/** Every tag with its tag score (best ones outlined); a null score (an SLR scene the scout didn't score) shows the tag alone. */
+function tagChips(tags, best) {
+  return el('div', { class: 'tags all-tags' }, tags.map((t) => (t.score == null
+    ? el('span', { class: 'tag' }, t.tag)
+    : el('span', { class: best.has(t.tag) ? 'tag best' : 'tag', title: 'Tag score ' + fmt(t.score) }, t.tag + ' ',
+      el('b', { class: t.score < 0 ? 'neg' : t.score > 0 ? null : 'zero' }, signed(t.score))))));
 }
 
 /** The wide layout's extra sections: every tag with its score, the post's facts, and its scenes. */
 function details(c, best) {
   const out = [];
   const tags = c.tags || [];
-  if (tags.length) {
-    out.push(el('div', { class: 'sect' }, 'Tags'), el('div', { class: 'tags all-tags' }, tags.map((t) => el('span',
-      { class: best.has(t.tag) ? 'tag best' : 'tag', title: 'Tag score ' + fmt(t.score) }, t.tag + ' ',
-      el('b', { class: t.score < 0 ? 'neg' : t.score > 0 ? null : 'zero' }, (t.score > 0 ? '+' : '') + fmt(t.score))))));
-  }
+  if (tags.length) out.push(el('div', { class: 'sect' }, 'Tags'), tagChips(tags, best));
   const facts = [
     ['Likes', c.likes],
     ['Hosts', c.hosts && c.hosts.length ? c.hosts.join(', ') : null],
@@ -415,11 +436,13 @@ function details(c, best) {
   return out;
 }
 
-/** The wide layout's sections for an SLR scene: its facts, the score's parts and its hand-made scripts. */
-function slrDetails(c) {
+/** The wide layout's sections for an SLR scene: its facts, tags, the score's parts and its hand-made scripts. */
+function slrDetails(c, best) {
   const out = [];
   const facts = [
+    ['Script', scriptLabel(c.scriptSource).slice('script: '.length)],
     ['Performers', c.actors && c.actors.length ? c.actors.join(', ') : null],
+    ['Favourite', c.favourite],
     ['Studio', c.author],
     ['Released', c.date],
     ['Favourites', c.favorites],
@@ -428,10 +451,12 @@ function slrDetails(c) {
     ['SLR AI script', c.aiScript ? 'yes' : null],
   ].filter(([, v]) => v != null);
   out.push(el('div', { class: 'sect' }, 'Scene'), el('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
+  const tags = c.tags || [];
+  if (tags.length) out.push(el('div', { class: 'sect' }, 'Tags'), tagChips(tags, best));
   const parts = Object.entries(c.scoreParts || {});
   if (parts.length) {
     out.push(el('div', { class: 'sect' }, 'Score'), el('div', { class: 'tags all-tags' },
-      parts.map(([k, v]) => el('span', { class: 'tag' }, k + ' ', el('b', {}, '+' + fmt(v))))));
+      parts.map(([k, v]) => el('span', { class: 'tag' }, k + ' ', el('b', { class: v < 0 ? 'neg' : v > 0 ? null : 'zero' }, signed(v))))));
   }
   const hand = c.handmade || [];
   if (hand.length) {
@@ -446,21 +471,23 @@ function slrDetails(c) {
   return out;
 }
 
-/** The SLR tab's line: the account's downloads left, as slr:scout last read them. */
+/** The SLR tab's line: the account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
 function renderQuota(d) {
   const q = $('quota');
   if (stack !== 'slr' || !d) { q.hidden = true; return; }
-  const parts = [];
-  const left = (x, what) => (x && x.total != null ? [el('b', {}, `${x.remaining} of ${x.total}`), ' ' + what] : null);
+  const left = (x) => (x && x.total != null ? el('b', {}, `${x.remaining} of ${x.total}`) : null);
   const quota = d.quota || {};
-  for (const p of [left(quota.scripts, 'hand-crafted scripts'), left(quota.aiScripts, 'AI scripts')]) if (p) parts.push(p);
   const line = [];
-  if (parts.length) {
-    line.push('Left this month: ', ...parts.flatMap((p, i) => (i ? [' · ', ...p] : p)));
-    if (quota.videos && quota.videos.total != null) line.push(' · videos ', el('b', {}, `${quota.videos.remaining} of ${quota.videos.total}`), ' (7 days)');
+  const videos = left(quota.videos);
+  if (videos) line.push('Videos left ', videos, ' (7 days)');
+  const scripts = [[left(quota.scripts), ' hand-crafted'], [left(quota.aiScripts), ' AI']].filter(([b]) => b);
+  if (scripts.length) {
+    line.push(line.length ? ' · scripts this month ' : 'Scripts this month ', ...scripts.flatMap(([b, what], i) => (i ? [' · ', b, what] : [b, what])));
+  }
+  if (line.length) {
     if (quota.checkedAt) line.push(` · checked ${day(quota.checkedAt)}`);
   } else if (!d.generatedAt) {
-    line.push('No SLR scenes yet: run npm run slr:scout');
+    line.push('No slr:scout run yet: npm run slr:scout');
   } else {
     line.push('Quota not read yet');
   }
@@ -494,7 +521,7 @@ function render(enterFrom) {
     empty.hidden = false;
     empty.replaceChildren(...(loadError ? ['Could not load the deck: ' + loadError, el('button', { type: 'button', class: 'round small', onclick: reload, title: 'Retry' }, '⟳')]
       : loading ? ['Loading…']
-      : stack === 'slr' ? ['No SLR scenes left to swipe.', el('span', {}, 'npm run slr:scout finds more.')]
+      : stack === 'slr' ? ['Nothing on SexLikeReal left to swipe.', el('span', {}, 'npm run slr:scout and npm run eroscripts:scout find more.')]
       : ['Nothing left to swipe.', el('a', { href: '/' }, 'Back to the report')]));
     return;
   }
@@ -629,12 +656,13 @@ function swipe(dir, dy) {
   image = 0;
   render();
   const from = stack;
-  serial(() => post(apiOf(from) + '/swipe', { id: card.id, dir })).catch((e) => {
+  // Each card's own endpoint: a post to /api/swipe, an SLR scene to /api/slr/swipe.
+  serial(() => post(apiOf(card) + '/swipe', { id: card.id, dir })).catch((e) => {
     // Not saved: put the card back on top (unless the page moved to another tab meanwhile).
     const i = undoStack.findIndex((u) => u.card === card);
     if (i >= 0) undoStack.splice(i, 1);
     if (stack !== from) { toast('Swipe not saved: ' + e.message); return; }
-    if (!queue.some((c) => c.id === card.id)) queue.unshift(card);
+    if (!queue.some((c) => keyOf(c) === keyOf(card))) queue.unshift(card);
     count(1, dir === 'right' ? -1 : 0);
     image = 0;
     render();
@@ -677,25 +705,25 @@ function undo() {
   if (last.stack !== stack) {
     // Made on another tab: forget it there; this tab's cards and counters stay.
     if (last.dir === 'skip') return;
-    serial(() => post(apiOf(last.stack) + '/swipe/undo', { id: last.card.id }))
-      .then(() => toast(`Undone on the ${last.stack === 'slr' ? 'SLR' : last.stack === 'multi' ? 'Multi-axis' : 'Single-axis'} tab: ${last.card.title || '#' + last.card.id}`))
+    serial(() => post(apiOf(last.card) + '/swipe/undo', { id: last.card.id }))
+      .then(() => toast(`Undone on the ${STACK_NAMES[last.stack]} tab: ${last.card.title || '#' + last.card.id}`))
       .catch((e) => { undoStack.push(last); toast('Undo not saved: ' + e.message); });
     renderCounter();
     return;
   }
-  queue = queue.filter((c) => c.id !== last.card.id);
+  queue = queue.filter((c) => keyOf(c) !== keyOf(last.card));
   queue.unshift(last.card);
   image = 0;
   if (last.dir === 'skip') {
-    skipped = skipped.filter((c) => c.id !== last.card.id);
+    skipped = skipped.filter((c) => keyOf(c) !== keyOf(last.card));
     render('skip');
     return;
   }
   count(1, last.dir === 'right' ? -1 : 0);
   render(last.dir);
-  serial(() => post(apiOf(last.stack) + '/swipe/undo', { id: last.card.id })).catch((e) => {
+  serial(() => post(apiOf(last.card) + '/swipe/undo', { id: last.card.id })).catch((e) => {
     // The swipe still stands: take the card off again.
-    queue = queue.filter((c) => c.id !== last.card.id);
+    queue = queue.filter((c) => keyOf(c) !== keyOf(last.card));
     undoStack.push(last);
     count(-1, last.dir === 'right' ? 1 : 0);
     image = 0;
@@ -713,11 +741,13 @@ function more() {
   loading = true;
   since = { remaining: 0, wanted: 0 };
   const gen = generation;
-  const held = [...queue, ...skipped].map((c) => c.id).join(',');
+  // The cards this page holds: posts by topic id (exclude), SLR scenes by scene id (excludeScenes).
+  const held = [...queue, ...skipped];
+  const ids = (scenes) => held.filter((c) => isScene(c) === scenes).map((c) => c.id).join(',');
   serial(async () => {
     const jitter = jitters[stack] == null ? '' : `&jitter=${jitters[stack]}`;
-    const which = stack === 'slr' ? '/api/slr/deck?' : `/api/deck?stack=${stack}&`;
-    const res = await fetch(`${which}limit=${BATCH}&seed=${seed}${jitter}&exclude=${held}`, { cache: 'no-store' });
+    const which = stack === 'slr' ? `/api/slr/deck?excludeScenes=${ids(true)}&` : `/api/deck?stack=${stack}&`;
+    const res = await fetch(`${which}limit=${BATCH}&seed=${seed}${jitter}&exclude=${ids(false)}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -730,8 +760,8 @@ function more() {
     exhausted = d.cards.length < BATCH;
     // Swiped cards (a swipe still on its way to the server) don't come back; skipped ones may.
     const swiped = undoStack.filter((u) => u.dir !== 'skip' && u.stack === stack).map((u) => u.card);
-    const have = new Set([...queue, ...skipped, ...swiped].map((c) => c.id));
-    const fresh = d.cards.filter((c) => !have.has(c.id));
+    const have = new Set([...queue, ...skipped, ...swiped].map(keyOf));
+    const fresh = d.cards.filter((c) => !have.has(keyOf(c)));
     const wasEmpty = !queue.length;
     queue.push(...fresh);
     returnSkipped();
@@ -791,7 +821,7 @@ $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(
 
 function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
-  $('like').title = stack === 'slr' ? 'Want: on the SLR pick list (→)' : 'Want: the scout downloads it (→)';
+  $('like').title = stack === 'slr' ? 'Want: the scout downloads it from SexLikeReal (→)' : 'Want: the scout downloads it (→)';
   if (stack !== 'slr') renderQuota(null);
 }
 $('stacks').addEventListener('click', (e) => {

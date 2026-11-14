@@ -119,13 +119,13 @@ fn catalogue() -> Value {
 
 fn forum() -> Value {
     json!({
-        format!("GET {FORUM}/search.json?q=%22Test%20Star%22&page=1"): ok(json!({
+        format!("GET {FORUM}/search.json?q=%22Test%20Star%22%20in%3Atitle&page=1"): ok(json!({
             "topics": [
                 {"id": 273166, "title": "Test Star - Please Creampie Me [SLR]", "category_id": 15,
                  "tags": [{"name": "vr"}, {"name": "multi-axis"}]},
                 {"id": 11, "title": "Test Star request", "category_id": 3}],
             "grouped_search_result": {"more_full_page_results": null}})),
-        format!("GET {FORUM}/search.json?q=teststar&page=1"): ok(json!({
+        format!("GET {FORUM}/search.json?q=teststar%20in%3Atitle&page=1"): ok(json!({
             "topics": [], "grouped_search_result": {}})),
     })
 }
@@ -247,43 +247,56 @@ fn full_run_scores_and_writes_the_scenes() {
     );
     let scenes = file["scenes"].as_array().unwrap();
     let ids: Vec<u64> = scenes.iter().map(|s| s["id"].as_u64().unwrap()).collect();
-    // 1: 4 + 1.12; 2: 4 + 0.3; 3: 2 + 2 (capped); no creampie (4) or flat (5).
-    assert_eq!(ids, [1, 2, 3]);
-    assert_eq!(scenes[0]["score"], 5.12);
+    // 2: VR 3 + likes 0.2 + creampie 2 + hand-made 4 + multi-axis 4;
+    // 3: VR 3 + likes 3 (capped) + creampie 2 + compilation tag 2 + bonus 2;
+    // 1: VR 3 + likes 0.75 + creampie 2 + hand-made 4; 4: VR 3 + likes 3.
+    // The flat scene (5) is left out.
+    assert_eq!(ids, [2, 3, 1, 4]);
+    assert_eq!(scenes[0]["score"], 13.2);
     assert_eq!(
         scenes[0]["scoreParts"],
-        json!({"handmadeScript": 4, "popularity": 1.12})
+        json!({"handmadeScript": 4, "likes": 0.2, "multiAxis": 4, "tag:creampie": 2, "vr": 3})
     );
     assert_eq!(
         scenes[0]["handmade"],
-        json!([{"source": "slr", "author": "kimera"}])
-    );
-    assert_eq!(scenes[0]["url"], format!("{SITE}/scenes/oiled-1"));
-    assert_eq!(scenes[0]["date"], "2026-04-24");
-    assert_eq!(scenes[0]["aiScript"], false);
-    assert_eq!(scenes[1]["score"], 4.3);
-    assert_eq!(
-        scenes[1]["handmade"],
         json!([{"source": "eroscripts", "topicId": 273166,
                 "title": "Test Star - Please Creampie Me [SLR]", "free": false, "multiAxis": true}])
     );
-    assert_eq!(scenes[1]["aiScript"], true);
-    assert_eq!(scenes[2]["compilation"], true);
-    assert_eq!(scenes[2]["score"], 4);
+    // SLR's 3D category means stereoscopic: not the animation tag.
+    assert_eq!(scenes[0]["tags"], json!(["creampie"]));
+    assert_eq!(scenes[0]["tagScores"], json!({"creampie": 2}));
+    // A paid post's script isn't free: SLR's AI script.
+    assert_eq!(scenes[0]["scriptSource"], "slr-ai");
+    assert_eq!(scenes[1]["score"], 12);
+    assert_eq!(scenes[1]["compilation"], true);
+    assert_eq!(scenes[2]["score"], 9.75);
     assert_eq!(
-        scenes[2]["scoreParts"],
-        json!({"compilation": 2, "popularity": 2})
+        scenes[2]["handmade"],
+        json!([{"source": "slr", "author": "kimera"}])
     );
+    assert_eq!(scenes[2]["scriptSource"], "slr-handcrafted");
+    assert_eq!(scenes[2]["url"], format!("{SITE}/scenes/oiled-1"));
+    assert_eq!(scenes[2]["date"], "2026-04-24");
+    assert_eq!(scenes[3]["score"], 6);
+    assert_eq!(scenes[3]["tags"], json!([]));
+    assert!(scenes.iter().all(|s| s["fetchedAt"].is_null()));
+    assert!(scenes.iter().all(|s| s["favourite"].is_null()));
     assert_eq!(file["quota"]["aiScripts"]["remaining"], 3);
     assert_eq!(file["quotaError"], Value::Null);
     let out = stdout(&o);
+    assert!(out.contains("4 scene(s) (VR) from 1 performer(s) on SLR:"));
+    assert!(out.contains("Test Star: 5 on SLR, 4 kept"));
     assert!(out.contains("Please Creampie Me"));
     assert!(out.contains("es#273166 paid"));
+    assert!(out.contains("Scripts: 0 from EroScripts, 1 SLR hand-crafted, 3 SLR AI, 0 none."));
     assert!(out.contains("Quota: hand-crafted scripts 2/3, AI scripts 3/3, videos 35/35 left"));
     assert!(!out.contains("forum-secret") && !stderr(&o).contains("forum-secret"));
 
     // Without the forum or a session: earlier forum matches are kept, the
-    // quota too, and the run exits 3.
+    // quota too, fetchedAt as well, and the run exits 3.
+    let mut file = read_file(&ud);
+    file["scenes"][2]["fetchedAt"] = json!("2026-11-13T10:00:00.000Z");
+    fs::write(ud.join("slr-scout.json"), file.to_string()).unwrap();
     fs::remove_file(ud.join("slr-session.json")).unwrap();
     let fixtures = tmp.fixtures(&catalogue());
     let o = run(
@@ -292,11 +305,40 @@ fn full_run_scores_and_writes_the_scenes() {
     );
     assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
     let file = read_file(&ud);
-    assert_eq!(file["scenes"][1]["handmade"][0]["topicId"], 273166);
-    assert_eq!(file["scenes"].as_array().unwrap().len(), 3);
+    assert_eq!(file["scenes"][0]["handmade"][0]["topicId"], 273166);
+    assert_eq!(file["scenes"][0]["scoreParts"]["multiAxis"], 4);
+    assert_eq!(file["scenes"].as_array().unwrap().len(), 4);
+    assert_eq!(file["scenes"][2]["id"], 1);
+    assert_eq!(file["scenes"][2]["fetchedAt"], "2026-11-13T10:00:00.000Z");
     assert_eq!(file["quotaError"], "no session");
     assert_eq!(file["quota"]["videos"]["remaining"], 35);
     assert!(stderr(&o).contains("EroScripts not searched (--no-forum)"));
+}
+
+#[test]
+fn unknown_performers_are_skipped_and_listed() {
+    let tmp = TempDir::new();
+    let ud = tmp.user_data();
+    let mut fixtures = catalogue();
+    fixtures[format!("GET {API}/v3/search?query=Nobody%20Here&tab=actors")] =
+        ok(json!({"data": [{"id": 1, "name": "Nobody Else"}]}));
+    let fixtures = tmp.fixtures(&fixtures);
+    let o = run(
+        &[
+            "--user-data",
+            ud.to_str().unwrap(),
+            "--actor",
+            "Nobody Here",
+            "--actor",
+            "Test Star",
+            "--no-forum",
+        ],
+        Some(&fixtures),
+    );
+    assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
+    assert!(stdout(&o).contains("Not on SLR (skipped): Nobody Here"));
+    assert!(stderr(&o).contains("[1/2] Nobody Here: not on SLR"));
+    assert_eq!(read_file(&ud)["scenes"].as_array().unwrap().len(), 4);
 }
 
 #[test]
@@ -321,7 +363,7 @@ fn rate_limited_forum_keeps_the_scenes_and_exits_2() {
     write_session(&ud);
     write_config(&ud);
     let mut fixtures = merged(&[catalogue(), quota_ok()]);
-    fixtures[format!("GET {FORUM}/search.json?q=%22Test%20Star%22&page=1")] =
+    fixtures[format!("GET {FORUM}/search.json?q=%22Test%20Star%22%20in%3Atitle&page=1")] =
         json!({"status": 429, "body": ""});
     let fixtures = tmp.fixtures(&fixtures);
     let o = run(
@@ -330,7 +372,265 @@ fn rate_limited_forum_keeps_the_scenes_and_exits_2() {
     );
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
     let file = read_file(&ud);
-    assert_eq!(file["scenes"].as_array().unwrap().len(), 3);
+    assert_eq!(file["scenes"].as_array().unwrap().len(), 4);
     assert_eq!(file["quota"]["scripts"]["remaining"], 2);
     assert!(stderr(&o).contains("rate limited"));
+}
+
+// ── --fetch ─────────────────────────────────────────────────────────────
+
+/// A saved scene (slr-scout.json) for the fetch tests.
+fn saved(id: u64, title: &str, score: f64, extra: Value) -> Value {
+    let mut s = json!({
+        "id": id, "label": format!("s-{id}"), "url": format!("{SITE}/scenes/s-{id}"),
+        "title": title, "studio": "Star VR", "actors": ["Test Star", "Co Star"],
+        "date": "2026-04-24", "durationS": 1629, "thumbnail": null, "vr": true, "fps": 60,
+        "passthrough": false, "creampie": true, "handmade": [], "aiScript": false,
+        "pmv": false, "compilation": false, "favorites": 100, "tags": ["creampie"],
+        "tagScores": {"creampie": 2}, "favourite": null, "fetchedAt": null,
+        "scriptSource": null, "score": score, "scoreParts": {"vr": 3}
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        s[k] = v.clone();
+    }
+    s
+}
+
+/// Six swiped scenes: a free EroScripts post's (11), SLR hand-crafted (12),
+/// no script (13), SLR AI (14), already fetched (15), swiped left (16);
+/// and a right swipe for a scene the file no longer has (99).
+fn fetch_setup(tmp: &TempDir, video_quota: i64, held: usize) -> (PathBuf, PathBuf) {
+    let ud = tmp.user_data();
+    let lib = tmp.0.join("lib");
+    let other = lib.join("Other");
+    let es = lib.join("EroScripts");
+    fs::create_dir_all(&other).unwrap();
+    fs::create_dir_all(es.join("Artist")).unwrap();
+    for i in 0..held {
+        fs::write(es.join(format!("Artist/v{i}.mp4")), "").unwrap();
+    }
+    fs::write(
+        ud.join("config.json"),
+        json!({"settings": {
+            "eroscripts": {"session": {"cookie": "forum-secret"}},
+            "library": {"sources": [
+                {"name": "EroScripts", "path": es, "enabled": true},
+                {"name": "Other", "path": other, "enabled": true}]}}})
+        .to_string(),
+    )
+    .unwrap();
+    write_session(&ud);
+    let free = json!([{"source": "eroscripts", "topicId": 500, "title": "Test Star - A Title",
+                       "free": true, "multiAxis": true}]);
+    let file = json!({
+        "generatedAt": "2026-11-13T00:00:00.000Z", "actors": [], "quota": null, "quotaError": null,
+        "scenes": [
+            saved(11, "A Title", 20.0, json!({"handmade": free, "scriptSource": "eroscripts"})),
+            saved(12, "B Title", 19.0, json!({"handmade": [{"source": "slr", "author": "k"}],
+                                               "scriptSource": "slr-handcrafted"})),
+            saved(13, "C Title", 18.0, json!({})),
+            saved(14, "D Title", 17.0, json!({"aiScript": true, "scriptSource": "slr-ai"})),
+            saved(15, "E Title", 16.0, json!({"fetchedAt": "2026-11-01T00:00:00.000Z"})),
+            saved(16, "F Title", 15.0, json!({})),
+        ]
+    });
+    fs::write(ud.join("slr-scout.json"), file.to_string()).unwrap();
+    let mut swipes = serde_json::Map::new();
+    for id in [11, 12, 13, 14, 15, 99] {
+        swipes.insert(id.to_string(), json!({"dir": "right", "at": "x"}));
+    }
+    swipes.insert("16".into(), json!({"dir": "left", "at": "x"}));
+    fs::write(
+        ud.join("slr-scout-swipes.json"),
+        json!({"version": 1, "swipes": swipes}).to_string(),
+    )
+    .unwrap();
+
+    let detail = |id: u64, scripts: Value| {
+        ok(
+            json!({"data": {"id": id, "label": format!("s-{id}"), "isFlatScreenType": false,
+            "fps": 60, "screenType": 0, "viewAngle": 180, "stereomode": "sbs2l", "scripts": scripts}}),
+        )
+    };
+    let options = ok(json!({"data": {"isVideoPurchased": false, "options": [
+        {"type": "trailer", "height": 1080, "size": 10},
+        {"type": "maxResolution", "height": 4096, "width": 8192, "size": 7_000_000_000u64, "codec": "h265"},
+        {"type": "optimalResolution", "height": 2880, "size": 3_000_000_000u64, "codec": "h265"}]}}));
+    let mut f = quota_ok();
+    f[format!("GET {API}/users/v1/user/overview")] = ok(json!({"data": {"limits": {
+        "downloadScript": {"remaining": 1, "total": 3},
+        "downloadAiScript": {"remaining": 3, "total": 3},
+        "downloadVideo": {"remaining": video_quota, "total": 35}}}}));
+    let more = json!({
+        format!("GET {API}/v3/scenes/s-11"): detail(11, json!([])),
+        format!("GET {API}/v3/scenes/s-12"): detail(12, json!([{"id": 77, "scriptAI": false}])),
+        format!("GET {API}/v3/scenes/s-13"): detail(13, json!([])),
+        format!("GET {API}/v3/scenes/s-14"): detail(14, json!([{"id": 78, "scriptAI": true}])),
+        format!("GET {FORUM}/t/500.json"): ok(json!({"post_stream": {"posts": [{"cooked":
+            "<p><a class=\"attachment\" href=\"/uploads/short-url/main.funscript\">Test Star - A Title.funscript</a> (9 KB)<br>\
+             <a class=\"attachment\" href=\"/uploads/short-url/tw.funscript\">Test Star - A Title.twist.funscript</a>\
+             <a href=\"https://mega.nz/file/x\">video</a></p>"}]}})),
+        format!("GET {FORUM}/uploads/short-url/main.funscript"): {"status": 302,
+            "headers": [["location", "https://cdn.forum.test/main.funscript"]], "body": ""},
+        format!("GET {FORUM}/uploads/short-url/tw.funscript"): {"status": 302,
+            "headers": [["location", "https://cdn.forum.test/tw.funscript"]], "body": ""},
+        "GET https://cdn.forum.test/main.funscript": ok(json!({"actions": [{"at": 0, "pos": 10}]})),
+        "GET https://cdn.forum.test/tw.funscript": ok(json!({"actions": [{"at": 0, "pos": 50}]})),
+        format!("GET {API}/content/v1/videos/11/download-options"): options.clone(),
+        format!("GET {API}/content/v1/videos/12/download-options"): options.clone(),
+        format!("GET {API}/content/v1/videos/14/download-options"): options,
+        format!("GET {API}/content/v1/videos/11/download?type=maxResolution"):
+            ok(json!({"data": {"url": "https://cdn.slr.test/11.mp4", "availableDownloadsCount": 1}})),
+        format!("GET {API}/content/v1/videos/12/download?type=maxResolution"):
+            ok(json!({"data": {"url": "https://cdn.slr.test/12.mp4", "availableDownloadsCount": 0}})),
+        "GET https://cdn.slr.test/11.mp4": {"status": 200, "body": "VIDEO-11"},
+        "GET https://cdn.slr.test/12.mp4": {"status": 200, "body": "VIDEO-12"},
+        format!("GET {API}/content/v1/scripts/77/download"):
+            ok(json!({"data": {"link": "https://cdn.slr.test/77.funscript",
+                               "scriptDownloadLimits": {"availableDownloadsCount": 0}}})),
+        "GET https://cdn.slr.test/77.funscript": ok(json!({"actions": [{"at": 5, "pos": 90}]})),
+    });
+    f.as_object_mut()
+        .unwrap()
+        .extend(more.as_object().unwrap().clone());
+    (ud, tmp.fixtures(&f))
+}
+
+const SCENE_A: &str = "Test Star/Test Star, Co Star - A Title (Star VR)_180_LR";
+const SCENE_B: &str = "Test Star/Test Star, Co Star - B Title (Star VR)_180_LR";
+
+#[test]
+fn fetch_dry_run_prints_the_plan_and_downloads_nothing() {
+    let tmp = TempDir::new();
+    let (ud, fixtures) = fetch_setup(&tmp, 35, 3);
+    let before = fs::read_to_string(ud.join("slr-scout.json")).unwrap();
+    let o = run(
+        &["--user-data", ud.to_str().unwrap(), "--fetch", "--dry-run"],
+        Some(&fixtures),
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let out = stdout(&o);
+    assert!(out.contains(
+        "6 scene(s) swiped right: 4 to fetch, 1 already fetched, 1 no longer in slr-scout.json."
+    ));
+    let other = tmp.0.join("lib/Other");
+    assert!(out.contains(&format!(
+        "video: maxResolution 4096p 6.52 GB h265 → {}",
+        other
+            .join(SCENE_A)
+            .join("Test Star, Co Star - A Title (Star VR)_180_LR.mp4")
+            .display()
+    )));
+    assert!(out.contains("script: EroScripts #500 \"Test Star - A Title.funscript\" + twist"));
+    assert!(out.contains("script: SLR hand-crafted script #77"));
+    assert!(out.contains("#13 C Title\n  skipped: no script source"));
+    assert!(out.contains("script: SLR AI script #78"));
+    assert!(out.contains("Dry run: nothing downloaded."));
+    assert!(!out.contains("forum-secret"));
+    // Nothing written: no scene folder, the file as it was.
+    assert!(!other.join("Test Star").exists());
+    assert!(!tmp.0.join("lib/_staging").exists());
+    assert_eq!(
+        fs::read_to_string(ud.join("slr-scout.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn fetch_downloads_until_the_video_quota_runs_out() {
+    let tmp = TempDir::new();
+    let (ud, fixtures) = fetch_setup(&tmp, 2, 3);
+    let o = run(
+        &["--user-data", ud.to_str().unwrap(), "--fetch"],
+        Some(&fixtures),
+    );
+    let out = stdout(&o);
+    // 11 and 12 fetched (SLR says no video download is left after 12), so
+    // the run stops at 13 before any request.
+    assert_eq!(o.status.code(), Some(2), "{out}\n{}", stderr(&o));
+    assert!(out.contains("#13 C Title\n  stopped: the weekly video download quota is used up"));
+    assert!(!out.contains("#14"));
+    assert!(out.contains("Fetched 2, 0 failed, 0 skipped."));
+    let other = tmp.0.join("lib/Other");
+    let a = other.join(SCENE_A);
+    let stem = "Test Star, Co Star - A Title (Star VR)_180_LR";
+    assert_eq!(
+        fs::read_to_string(a.join(format!("{stem}.mp4"))).unwrap(),
+        "VIDEO-11"
+    );
+    assert!(
+        fs::read_to_string(a.join(format!("{stem}.funscript")))
+            .unwrap()
+            .contains("\"pos\":10")
+    );
+    assert!(a.join(format!("{stem}.twist.funscript")).exists());
+    let sidecar: Value =
+        serde_json::from_str(&fs::read_to_string(a.join("slr.json")).unwrap()).unwrap();
+    assert_eq!(sidecar["sceneId"], 11);
+    assert_eq!(sidecar["url"], format!("{SITE}/scenes/s-11"));
+    assert_eq!(sidecar["performers"], json!(["Test Star", "Co Star"]));
+    assert_eq!(sidecar["studio"], "Star VR");
+    assert_eq!(sidecar["scriptSource"], "eroscripts");
+    assert_eq!(sidecar["script"]["topicId"], 500);
+    assert_eq!(sidecar["video"]["type"], "maxResolution");
+    let b = other.join(SCENE_B);
+    let stem_b = "Test Star, Co Star - B Title (Star VR)_180_LR";
+    assert!(
+        fs::read_to_string(b.join(format!("{stem_b}.funscript")))
+            .unwrap()
+            .contains("\"pos\":90")
+    );
+    let sidecar: Value =
+        serde_json::from_str(&fs::read_to_string(b.join("slr.json")).unwrap()).unwrap();
+    assert_eq!(sidecar["scriptSource"], "slr-handcrafted");
+    assert_eq!(sidecar["script"]["scriptId"], 77);
+    // Nothing left in staging; fetchedAt set for the two only.
+    let staging: Vec<_> = fs::read_dir(tmp.0.join("lib/_staging"))
+        .unwrap()
+        .flatten()
+        .collect();
+    assert!(staging.is_empty());
+    let file = read_file(&ud);
+    let fetched: Vec<u64> = file["scenes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| !s["fetchedAt"].is_null())
+        .map(|s| s["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(fetched, [11, 12, 15]);
+    assert!(!stdout(&o).contains("forum-secret") && !stderr(&o).contains("forum-secret"));
+
+    // A second run has nothing new but 13 and 14; 14 is still over quota.
+    let o = run(
+        &["--user-data", ud.to_str().unwrap(), "--fetch"],
+        Some(&fixtures),
+    );
+    assert!(stdout(&o).contains("6 scene(s) swiped right: 2 to fetch, 3 already fetched"));
+}
+
+#[test]
+fn fetch_stops_at_the_library_cap_and_without_a_session() {
+    let tmp = TempDir::new();
+    let cap = 1000; // libraryMaxVideos
+    let (ud, fixtures) = fetch_setup(&tmp, 35, cap);
+    let o = run(
+        &["--user-data", ud.to_str().unwrap(), "--fetch", "--dry-run"],
+        Some(&fixtures),
+    );
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stdout(&o).contains("Library holds 1000 videos, the cap is 1000"));
+    assert!(!stdout(&o).contains("#11"));
+
+    fs::remove_file(ud.join("slr-session.json")).unwrap();
+    let o = run(
+        &["--user-data", ud.to_str().unwrap(), "--fetch"],
+        Some(&fixtures),
+    );
+    assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
+    assert!(
+        stdout(&o).contains(
+            "Nothing fetched: SLR no session; sign in with npm run slr:scout -- --login."
+        )
+    );
 }

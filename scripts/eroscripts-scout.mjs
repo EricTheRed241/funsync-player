@@ -12,6 +12,8 @@
 //   npm run eroscripts:scout -- --daily      scan, then download the waiting posts swiped right in npm run scout:report
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
+//   SexLikeReal scenes a post links (or, for a post naming SLR without a video, SLR's scene search finds by
+//   title and script length) come from the user's SLR account (scripts/slr-host.mjs; npm run slr:scout -- --login)
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (no sex rule, the
 // ranking decides; monster, feet and 2D hentai posts
@@ -23,8 +25,9 @@
 // config.json is written (to add the source) only while the app is closed.
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
-// last pass / app running (--retitle) / another scout run going, 3 not logged
-// in / session expired.
+// last pass / SLR download quota used up / app running (--retitle) / another
+// scout run going, 3 not logged in / session expired (EroScripts, VRBangers,
+// or SexLikeReal when its scenes were all that was left to do).
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -54,6 +57,7 @@ const streams = await import('./stream-hosts.mjs');
 const vrbHost = await import('./vrbangers-host.mjs');
 const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError, browserOptions } = await import('./vrbangers-browser.mjs');
 const { redactUrl } = await import('./vrbangers-lib.mjs');
+const slrHost = await import('./slr-host.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
@@ -62,6 +66,8 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const rule34video = streams.createRule34video();
 // Set in main (it needs the data folder and the credentials file): vrbangers.com reads, and Chrome for --fetch.
 let vrbangers = null;
+// Set in main (it needs the data folder, which holds the SLR session): sexlikereal.com reads and downloads.
+let slr = null;
 const FOLDER = 'EroScripts';
 const DOWNLOADS = path.join(os.homedir(), 'Downloads');
 
@@ -101,10 +107,16 @@ Download:
                          vrbangers.com scenes come from the paid account through headless Google Chrome (logged in
                          once per pass; ≤ 8K, the planned file); with --dry-run the signed link is resolved and
                          probed for 1 byte instead
+                         SexLikeReal scenes come from the SLR account (<userData>/slr-session.json, saved by
+                         npm run slr:scout -- --login): one of its video downloads each (35 per rolling 7 days;
+                         none left: SLR scenes wait, exit 2), the encode within the caps, never the trailer;
+                         not logged in: SLR scenes are skipped (exit 3 when nothing else was done). With
+                         --dry-run: the quota, the download type, its size and the target folder, no download
   --vrb-credentials <f>  VRBangers account file (default: $FUNSYNC_VRB_CREDENTIALS, else ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
 By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
-                         their pages and instructions (with --ids: only those posts); no login needed
+                         their pages and instructions (with --ids: only those posts); no login needed.
+                         SexLikeReal videos are listed as "${slrHost.SLR_ACCOUNT_DOWNLOAD}" (--fetch takes them)
   --manual-dir <dir>     where files downloaded by hand are saved (default ~/Downloads/for-fs)
 Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
@@ -205,12 +217,15 @@ async function pixeldrainFiles(kind, id) {
 
 /**
  * Every script and video a post offers: author's forum uploads first, then MEGA, pixeldrain, rule34video pages
- * (one pseudo file per quality) and VRBangers scenes (one pseudo file each, the best quality within the VR caps:
- * a vrbangers.com/video link, a `VRBANGERS_<folder>…` file name, else the parts of a title naming VRBangers).
- * `hostDown`: a rule34video page couldn't be read for a reason other than being gone (403, 429, 5xx, timeout),
- * so a post without a video now may have one once the site answers again.
+ * (one pseudo file per quality), VRBangers scenes (one pseudo file each, the best quality within the VR caps:
+ * a vrbangers.com/video link, a `VRBANGERS_<folder>…` file name, else the parts of a title naming VRBangers)
+ * and SexLikeReal scenes (one pseudo file each: a sexlikereal.com/scenes link, else, for a post without a video
+ * that names SLR, SLR's scene search on its title, a hit counting only when its length fits a main script read
+ * now into `cache`).
+ * `hostDown`: a rule34video page or SLR couldn't be read for a reason other than being gone (403, 429, 5xx,
+ * timeout), so a post without a video now may have one once the site answers again.
  */
-async function topicFiles(api, pacer, topicId, cooked, title) {
+async function topicFiles(api, pacer, topicId, cooked, title, tags = [], cache = new Map()) {
   await pacer.wait();
   const att = await api.getTopicAttachments(topicId);
   if (att.rateLimited) throw new RateLimitedError();
@@ -243,9 +258,28 @@ async function topicFiles(api, pacer, topicId, cooked, title) {
       if (lead.from !== 'title') process.stderr.write(`! ${topicId} vrbangers ${lead.from} ${lead.folder || lead.slugs[0]}: ${why}\n`);
     }
   }
+  const slrLeads = slrHost.slrLeads({ hrefs, title, tags, text: cooked.replace(/<[^>]+>/g, ' '), hasVideo: files.some((f) => lib.isVideoName(f.name)) });
+  if (slrLeads.length) {
+    const scriptLengths = slrLeads.some((l) => l.from === 'search') ? await mainScriptLengths(api, pacer, files, cache) : [];
+    const { files: scenes, missed, down } = await slr.filesFor(slrLeads, { scriptLengths, title });
+    if (scenes.length) hosts.add(slrHost.SLR_HOST);
+    if (down) { hostDown = true; hosts.add('slr (unreadable)'); }
+    files.push(...scenes);
+    for (const { lead, why } of missed) process.stderr.write(`! ${topicId} slr ${lead.from === 'link' ? lead.url : 'search'}: ${why}\n`);
+  }
   const byName = new Map();
   for (const f of files) if (!byName.has(f.name)) byName.set(f.name, f);
   return { files: [...byName.values()], hosts: [...hosts], hostDown };
+}
+
+/** Length (ms) of each main script among a post's files (at most 4 read, through `cache`), to check SLR search hits against. */
+async function mainScriptLengths(api, pacer, files, cache) {
+  const out = [];
+  for (const f of files.filter((x) => lib.scriptParts(x.name)?.axis === '').slice(0, 4)) {
+    const ms = lib.scriptDurationMs(await parsedScript(api, pacer, f, cache));
+    if (ms) out.push(ms);
+  }
+  return out;
 }
 
 /** A script file's contents (forum, MEGA or pixeldrain), or null when it can't be read; forum errors become exceptions. */
@@ -317,13 +351,13 @@ async function addScenePreviews(api, pacer, scenes, cache = new Map()) {
 
 /**
  * A post's scenes (lib.planWithStreams): its scripts paired with its video
- * files; a scene with a streaming page (rule34video, vrbangers.com) is
- * checked by the length of its main script (read now); a rule34video one
- * gets the chosen quality's size (a vrbangers.com page gives it). Scenes get
- * their script preview for the swipe deck (addScenePreviews).
+ * files; a scene with a streaming page (rule34video, vrbangers.com,
+ * sexlikereal.com) is checked by the length of its main script (read now,
+ * or already in `scripts`); a rule34video one gets the chosen quality's
+ * size (a vrbangers.com page gives it; an SLR scene's comes at --fetch).
+ * Scenes get their script preview for the swipe deck (addScenePreviews).
  */
-async function planTopic(api, pacer, topicId, files, { vr, libraryVideos }) {
-  const scripts = new Map();
+async function planTopic(api, pacer, topicId, files, { vr, libraryVideos, scripts = new Map() }) {
   const scriptMs = async (f) => lib.scriptDurationMs(await parsedScript(api, pacer, f, scripts)) || null;
   const plan = await lib.planWithStreams({
     scripts: files.filter((f) => /\.funscript$/i.test(f.name)),
@@ -452,16 +486,17 @@ async function scan(opts, { api, userData, config, incoming }) {
       const first = lib.judgeFirstPost(t, text);
       if (!first.ok) { verdict(first.reason); continue; }
       let files, hosts, hostDown;
-      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, t.id, cooked, t.title)); } catch (err) {
+      const scripts = new Map();
+      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, t.id, cooked, t.title, t.tags, scripts)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         process.stderr.write(`! ${t.id} ${err.message}\n`);
         continue;
       }
-      const plan = await planTopic(api, pacer, t.id, files, { vr: s.vr, libraryVideos: library.videos });
+      const plan = await planTopic(api, pacer, t.id, files, { vr: s.vr, libraryVideos: library.videos, scripts });
       // Scripts and videos packed in archives: the post's archives are scenes (unpacked at --fetch).
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
-      // rule34video refused or failed (not 404): no verdict, so the post stays pending and the next run reads it again.
-      if (!scenes.length && hostDown) { process.stderr.write(`! ${t.id} rule34video unreachable: left for the next run\n`); continue; }
+      // A video host (rule34video, SexLikeReal) refused or failed (not 404): no verdict, so the post stays pending and the next run reads it again.
+      if (!scenes.length && hostDown) { process.stderr.write(`! ${t.id} ${hosts.filter((h) => h.endsWith('(unreadable)')).join(', ') || 'video host unreachable'}: left for the next run\n`); continue; }
       if (!scenes.length) { verdict(plan.inLibrary > 0 ? 'in-library' : 'no-video'); continue; }
       const author = op.username;
       const creator = lib.canonicalArtist(author);
@@ -529,14 +564,15 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       const first = lib.judgeFirstPost(t, cooked.replace(/<[^>]+>/g, ' '));
       if (!first.ok) { console.log(`✗ ${id} ${t.title}: ${first.reason}`); continue; }
       let files, hosts, hostDown;
-      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, id, cooked, t.title)); } catch (err) {
+      const scripts = new Map();
+      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, id, cooked, t.title, t.tags, scripts)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         console.log(`✗ ${id} ${t.title}: ${err.message}`);
         continue;
       }
-      const plan = await planTopic(api, pacer, id, files, { vr: s.vr, libraryVideos: library.videos });
+      const plan = await planTopic(api, pacer, id, files, { vr: s.vr, libraryVideos: library.videos, scripts });
       const scenes = plan.scenes.length ? plan.scenes : lib.archiveScenes(files);
-      if (!scenes.length) { console.log(`✗ ${id} ${t.title}: ${hostDown ? 'rule34video unreachable, try again later' : plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
+      if (!scenes.length) { console.log(`✗ ${id} ${t.title}: ${hostDown ? `${hosts.filter((h) => h.endsWith('(unreadable)')).join(', ') || 'video host unreachable'}, try again later` : plan.inLibrary > 0 ? 'in-library' : 'no-video'}`); continue; }
       const author = op.username;
       const creator = lib.canonicalArtist(author);
       const artistInLibrary = s.artist || (library.creators.has(creator.toLowerCase()) ? creator : null);
@@ -605,7 +641,8 @@ function videoSeconds(file) {
  * the main script (`scriptMs`, else the page's length) before and after
  * the download (streams.durationMatches; ffprobe afterwards). A vrbangers.com
  * scene's signed link is read right now (logged-in Chrome), and the host
- * checks size and length itself (vrbangers-host.mjs download).
+ * checks size and length itself (vrbangers-host.mjs download); so does a
+ * SexLikeReal scene's (slr-host.mjs download: quota, download type, a fresh link).
  */
 async function download(api, file, dest, staging, local = [], { scriptMs = null } = {}) {
   if (fs.existsSync(dest)) return 'have';
@@ -646,11 +683,14 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else if (file.host === vrbHost.VRBANGERS_HOST) {
       await vrbangers.download(file, tmp, { scriptMs, videoSeconds });
+    } else if (file.host === slrHost.SLR_HOST) {
+      await slr.download(file, tmp, { scriptMs, videoSeconds });
     } else {
       throw new Error(`unknown host ${file.host}`);
     }
     const size = fs.statSync(tmp).size;
-    if (file.size && size !== file.size && (byHand || file.host !== vrbHost.VRBANGERS_HOST)) throw new Error(`size ${size} ≠ ${file.size}`);
+    const selfChecked = file.host === vrbHost.VRBANGERS_HOST || file.host === slrHost.SLR_HOST;
+    if (file.size && size !== file.size && (byHand || !selfChecked)) throw new Error(`size ${size} ≠ ${file.size}`);
     if (file.host === streams.RULE34VIDEO_HOST) {
       const want = scriptMs || (file.duration ? file.duration * 1000 : null);
       const got = videoSeconds(tmp);
@@ -690,7 +730,11 @@ function fetchedScenes(incoming, userData, topics = null) {
   return done;
 }
 
-/** One pass over the queue; downloads at most `room` videos (the library cap). */
+/**
+ * One pass over the queue; downloads at most `room` videos (the library cap). SexLikeReal scenes need the
+ * account: once it isn't logged in (`slrStop: 'login'`) or has no video download left (`'quota'`), the
+ * pass's later SLR scenes are skipped (`slrSkipped`) and the rest goes on.
+ */
 async function fetchPass(queue, { api, userData, incoming, staging, room, manualDir }) {
   const done = fetchedScenes(incoming, userData);
   // Files saved by hand: posts with one go first, and the folders are read
@@ -701,6 +745,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
   const byHand = (c) => c.scenes.some((sc) => [sc.video, ...sc.scripts].some((f) => lib.findLocalCopy(f, saved)));
   const order = [...queue].sort((a, b) => byHand(b) - byHand(a));
   let ok = 0; let failed = 0; let generated = 0; let short = 0; let capped = false;
+  let slrStop = null; let slrSkipped = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of order) {
     if (capped) break;
@@ -708,6 +753,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       const local = readLocal();
       if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
       if (ok >= room) { capped = true; break; }
+      if (slrStop && sc.video.host === slrHost.SLR_HOST) { slrSkipped++; continue; }
       if (sc.packed) {
         try {
           const r = await fetchPacked(c, sc, { api, userData, incoming, staging, local, now });
@@ -726,6 +772,8 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       // post's files and the current length rule don't apply to it.
       if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in the library from another post; left as is`); continue; }
       try {
+        // The account first (session, a download left), so a scene it can't fetch leaves no scripts behind.
+        if (sc.video.host === slrHost.SLR_HOST && !lib.findLocalCopy(sc.video, local)) await slr.ready();
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging, local);
         let lengthMs = null;
         try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
@@ -754,12 +802,19 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       } catch (err) {
         // Not logged in to vrbangers.com: every later VRBangers scene would fail the same way.
         if (err instanceof LoginError) throw err;
+        // Not logged in to SexLikeReal, or no download left: the pass's other SLR scenes wait, the rest goes on.
+        if (err instanceof slrHost.SlrLoginError || err instanceof slrHost.SlrQuotaError) {
+          slrStop = err instanceof slrHost.SlrQuotaError ? 'quota' : 'login';
+          slrSkipped++;
+          console.log(`${now()} – ${creator}/${stem}: ${err.message}; SexLikeReal scenes skipped from here`);
+          continue;
+        }
         console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
         failed++;
       }
     }
   }
-  return { ok, failed, generated, short, capped };
+  return { ok, failed, generated, short, capped, slrStop, slrSkipped };
 }
 
 /**
@@ -909,7 +964,8 @@ function manualList(opts, { userData, config, incoming }) {
   fs.mkdirSync(opts.manualDir, { recursive: true });
   const out = path.join(DOWNLOADS, 'download-for-fs.txt');
   fs.writeFileSync(out, lib.manualListText(posts, { folder: opts.manualDir }));
-  console.log(`${out}: ${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files to download by hand into ${opts.manualDir}`);
+  const account = posts.reduce((n, p) => n + p.account.length, 0);
+  console.log(`${out}: ${posts.length} posts, ${posts.reduce((n, p) => n + p.files.length, 0)} files to download by hand into ${opts.manualDir}${account ? `; ${account} SexLikeReal videos --fetch takes with the account` : ''}`);
   return 0;
 }
 
@@ -919,29 +975,37 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   console.log(`Queue: ${queue.length} posts, ${queue.reduce((n, c) => n + c.scenes.length, 0)} videos, ${gb.toFixed(1)} GB → ${incoming}`);
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.axisType.padEnd(6)} ${c.id} ${c.title}`);
-    return probeVrbangers(queue, { userData, incoming });
+    const vrb = await probeVrbangers(queue, { userData, incoming });
+    return Math.max(vrb, await planSlr(queue, { userData, incoming }));
   }
   ensureLibrarySource(userData, { name: FOLDER, path: incoming });
   const staging = path.join(path.dirname(incoming), '_staging');
+  let last = null;
+  let did = false;
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     const held = libraryVideoCount(readConfig(userData));
     if (held >= prefs.LIBRARY_MAX_VIDEOS) {
       console.log(`Library holds ${held} videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Delete scenes or raise the cap.`);
-      break;
+      return 2;
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
     // Chrome (vrbangers.com) starts with the pass's first VRBangers scene and is closed when the pass ends, failed or not.
     const r = await vrbangers.run(() => fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir }));
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
+    const slrWaiting = r.slrSkipped ? `; ${r.slrSkipped} SexLikeReal scene${r.slrSkipped > 1 ? 's' : ''} waiting (${r.slrStop === 'quota' ? 'no video download left on the account' : 'not logged in to SexLikeReal'})` : '';
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${slrWaiting}`);
     if (r.ok) dedupeAfterFetch(userData);
-    if (r.capped) break;
-    if (!r.failed) return 0;
+    last = r;
+    did ||= r.ok + r.failed + r.short > 0;
+    if (r.capped || !r.failed) break;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min for host quotas`);
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));
     }
   }
-  return 2;
+  if (last.capped || last.failed) return 2;
+  // SexLikeReal scenes left: not logged in is 3 when they were all there was to do; no download left is work left.
+  if (last.slrStop === 'login') return did ? 2 : 3;
+  return last.slrStop ? 2 : 0;
 }
 
 /**
@@ -973,6 +1037,40 @@ async function probeVrbangers(queue, { userData, incoming }) {
     }
   });
   return failed ? 2 : 0;
+}
+
+/**
+ * `--fetch --dry-run`: the SexLikeReal account's video downloads left and,
+ * for each waiting SLR scene, the download it would take (type, size, read
+ * from the scene's download options with the account) and where it goes. No
+ * download link is asked for: that request uses up one of the downloads.
+ * Not logged in: 3; scenes that don't fit the quota or the caps: 2.
+ */
+async function planSlr(queue, { userData, incoming }) {
+  const done = fetchedScenes(incoming, userData);
+  const scenes = queue.flatMap((c) => c.scenes.filter((sc) => sc.video.host === slrHost.SLR_HOST && !done.has(lib.fetchedKey(c.id, sc.video.name))).map((sc) => ({ c, sc })));
+  if (!scenes.length) return 0;
+  console.log(`sexlikereal.com: planning ${scenes.length} download${scenes.length > 1 ? 's' : ''} (download options only; no download link asked for, nothing used up)`);
+  let quota;
+  try { quota = await slr.quota(); } catch (err) {
+    if (err instanceof slrHost.SlrLoginError) { console.log(`  ${err.message}`); return 3; }
+    throw err;
+  }
+  const short = Math.max(0, scenes.length - Math.max(0, quota.remaining));
+  console.log(`  ${quota.remaining} of ${quota.total ?? '?'} video downloads left (rolling 7 days)${short ? `; ${short} scene${short > 1 ? 's' : ''} would wait` : ''}`);
+  let failed = 0;
+  for (const { c, sc } of scenes) {
+    const { creator, stem } = lib.sceneNameOf(c, sc);
+    const target = path.join(incoming, creator, stem, stem + path.extname(sc.video.name).toLowerCase());
+    try {
+      const pick = await slr.plan(sc.video);
+      console.log(`  ${c.id} ${sc.video.url}\n    ${pick.type}: ${pick.width ? `${pick.width}×` : ''}${pick.height} ${pick.codec || ''}, ${pick.size ? `${(pick.size / 1e9).toFixed(2)} GB` : 'size unknown'}\n    → ${target}`);
+    } catch (err) {
+      console.log(`  ${c.id} ${creator}/${stem}: ✗ ${err.message}`);
+      failed++;
+    }
+  }
+  return failed || short ? 2 : 0;
 }
 
 // ── Retitle ─────────────────────────────────────────────────────────────
@@ -1150,6 +1248,7 @@ async function main() {
   const api = new EroScriptsAPI();
   api.restoreSession(session.cookie, session.username);
   vrbangers = vrbHost.createVrbangers({ userData, credentialsFile: opts.vrbCredentials, log: (m) => process.stderr.write(`  vrbangers.com: ${m}\n`) });
+  slr = slrHost.createSlr({ userData, log: (m) => process.stderr.write(`  sexlikereal.com: ${m}\n`) });
 
   const ctx = { api, userData, config, incoming };
   if (opts.daily) return daily(opts, ctx);
