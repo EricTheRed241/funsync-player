@@ -1,0 +1,44 @@
+{
+  "_comment": "FunSync's scheduled jobs, run on this Mac by job-runner (crates/job-runner), which the desktop app starts. schedule: cron (minute hour day-of-month month day-of-week) in the Mac's local time. catchUp: how late a run missed while the app was closed may still start. timeout: the run is stopped after this. steps run one after the other from the repo root; the job's exit code is the first that isn't 0 or 2, else 2 when a step left work, else 0. paused: not scheduled until `npm run jobs -- resume <job>`.",
+  "jobs": [
+    {
+      "name": "eroscripts-scout",
+      "schedule": "5 0 * * *",
+      "catchUp": "12h",
+      "timeout": "12h",
+      "steps": [
+        ["npm", "run", "-s", "eroscripts:scout", "--", "--daily", "--passes", "2", "--wait", "1h"],
+        ["npm", "run", "-s", "slr:scout", "--", "--fetch"]
+      ]
+    },
+    {
+      "name": "pornstar-tags",
+      "schedule": "0 19 * * *",
+      "catchUp": "20h",
+      "timeout": "30m",
+      "steps": [["npm", "run", "-s", "pornstar:tags", "--", "--apply"]]
+    },
+    {
+      "name": "age-screen",
+      "schedule": "0 12 * * *",
+      "catchUp": "20h",
+      "timeout": "4h",
+      "steps": [["npm", "run", "-s", "age:screen", "--", "--weekly"]]
+    },
+    {
+      "name": "eroscripts-sync",
+      "schedule": "0 3 */3 * *",
+      "catchUp": "48h",
+      "timeout": "4h",
+      "steps": [["npm", "run", "-s", "eroscripts:sync"]]
+    },
+    {
+      "name": "faptap-scout",
+      "schedule": "30 0 * * *",
+      "catchUp": "12h",
+      "timeout": "6h",
+      "paused": true,
+      "steps": [["npm", "run", "-s", "faptap:scout"]]
+    }
+  ]
+}
