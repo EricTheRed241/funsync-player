@@ -1,9 +1,10 @@
 //! Preview frames the scouts took from the videos (25, 50 and 75 % in), so posts and scenes
 //! without pictures still show some: `<userData>/scout-frames/eroscripts/<topic id>/` (by
-//! eroscripts:scout, listed in the state record's `frames.files`) and
-//! `<userData>/scout-frames/slr/<scene id>/` (by slr:scout, in the scene's `frames.files` in
-//! slr-scout.json). Served at `/frames/<source>/<id>/<25|50|75>.jpg`, that exact shape only;
-//! a card lists the files of its record that are on disk after its own images.
+//! eroscripts:scout, listed in the post's record of `eroscripts-scout-frames.json`,
+//! EROSCRIPTS_FILE) and `<userData>/scout-frames/slr/<scene id>/` (by slr:scout, in the
+//! scene's `frames.files` in slr-scout.json). Served at `/frames/<source>/<id>/<25|50|75>.jpg`,
+//! that exact shape only; a card lists the files of its record that are on disk after its own
+//! images.
 
 use crate::deck::MAX_IMAGES;
 use serde_json::Value;
@@ -12,6 +13,16 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = "scout-frames";
 /// The only file names a frames folder holds.
 pub const NAMES: [&str; 3] = ["25.jpg", "50.jpg", "75.jpg"];
+/// eroscripts:scout's frames file in userData, written by `--frames` only (scripts/scout-frames.mjs
+/// FRAMES_FILE): `{"version": 1, "topics": {"<id>": {"frames": {at, source, files}} |
+/// {"framesFailed": {at, reason}}}}`.
+pub const EROSCRIPTS_FILE: &str = "eroscripts-scout-frames.json";
+
+/// Post `id`'s record in the parsed eroscripts frames file (`Null` when the file or the record is missing).
+pub fn post_record(file: &Value, id: u64) -> &Value {
+    file.pointer(&format!("/topics/{id}"))
+        .unwrap_or(&Value::Null)
+}
 
 /// Whose frames: an EroScripts post's (by topic id) or an SLR scene's (by scene id).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

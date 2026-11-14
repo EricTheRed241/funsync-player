@@ -62,18 +62,16 @@ export function lockHolds(holder, { ageMs, host = os.hostname(), alive = pidAliv
 }
 
 /**
- * Take `file` (`<pid>@<host>`, freed at exit). Null when taken, else the
- * holder (`{pid, host}`) of the live run that has it. A lock whose run has
- * ended, or that is unreadable, is taken over.
+ * Take `file` (`<pid>@<host>`, freed at exit or by releasePidLock). Null when
+ * taken, else the holder (`{pid, host}`) of the live run that has it. A lock
+ * whose run has ended, or that is unreadable, is taken over.
  */
 export function takePidLock(file, { host = os.hostname(), now = Date.now, alive = pidAlive } = {}) {
   const mine = lockText(process.pid, host);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       fs.writeFileSync(file, mine, { flag: 'wx' });
-      process.on('exit', () => {
-        try { if (fs.readFileSync(file, 'utf8') === mine) fs.rmSync(file); } catch { /* already gone */ }
-      });
+      process.on('exit', () => releasePidLock(file, { host }));
       return null;
     } catch (err) {
       if (err.code !== 'EEXIST') throw err;
@@ -88,6 +86,11 @@ export function takePidLock(file, { host = os.hostname(), now = Date.now, alive 
     fs.rmSync(file, { force: true });
   }
   throw new Error(`Could not take ${file}`);
+}
+
+/** Free `file` when this process holds it (takePidLock), before the run ends; another holder's is left alone. */
+export function releasePidLock(file, { host = os.hostname() } = {}) {
+  try { if (fs.readFileSync(file, 'utf8') === lockText(process.pid, host)) fs.rmSync(file); } catch { /* already gone */ }
 }
 
 /** `pid 12` or `pid 12 on <host>`, for messages. */

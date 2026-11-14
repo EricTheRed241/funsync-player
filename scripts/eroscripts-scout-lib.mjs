@@ -930,13 +930,24 @@ export const IMAGES_VERSION = 2;
  */
 export const GALLERY_KEEP = 8;
 
-/** What `--frames` records on a post (scripts/scout-frames.mjs): kept when the post is judged again, as its frames stay on disk. */
+/**
+ * What `--frames` recorded on the scan state's records until 2026-11-14; since then they live in its own
+ * file (scripts/scout-frames.mjs FRAMES_FILE), and each `--frames` run copies any still here into it.
+ */
 export const FRAME_STATE_KEYS = ['frames', 'framesFailed'];
+
+/**
+ * Drop FRAME_STATE_KEYS from every record of `state` (in place), before it's saved once the frames file
+ * exists (a `--frames` run has copied them there).
+ */
+export function dropFrameRecords(state) {
+  for (const rec of Object.values(state.topics || {})) for (const k of FRAME_STATE_KEYS) delete rec?.[k];
+}
 
 /**
  * Remember the verdict on post `id` (`candidate` or a reject reason); it's no longer pending.
  * `info` (postInfo) is stored with it: title, author, dates and images, each kept from the
- * earlier verdict when `info` lacks it. Its frames (FRAME_STATE_KEYS) are kept too.
+ * earlier verdict when `info` lacks it.
  */
 export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VERSION, info = null) {
   const prev = state.topics[id] || {};
@@ -946,7 +957,6 @@ export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VE
     if (v) rec[k] = v;
   }
   if (prev.gone && !info?.title) rec.gone = true;
-  for (const k of FRAME_STATE_KEYS) if (prev[k]) rec[k] = prev[k];
   state.topics[id] = rec;
   if (state.pending) delete state.pending[id];
 }
@@ -1103,12 +1113,45 @@ export function scoredCandidate(c, scoring = {}) {
 }
 
 /**
+ * The scout's run locks in userData (`<pid>@<host>`, scripts/host-env.mjs takePidLock), one per kind of
+ * work, so runs that write different files go on side by side and two of the same kind never do:
+ * `scan` (a scan, `--add`, `--rejudge`, `--titles`: the scan state and the list), `fetch` (`--fetch`,
+ * `--manual-list`, `--retitle`: the library, the rejected file, Downloads) and `frames` (`--frames`: the
+ * frames file and folders). `--daily` takes each step's lock around that step only; `--status` none.
+ */
+export const SCOUT_LOCKS = Object.freeze({
+  scan: { file: 'eroscripts-scout.lock', work: 'a scan (scan, --add, --rejudge, --titles)' },
+  fetch: { file: 'eroscripts-scout-fetch.lock', work: 'downloads (--fetch, --manual-list, --retitle)' },
+  frames: { file: 'eroscripts-scout-frames.lock', work: 'frames (--frames)' },
+});
+
+/**
+ * The SCOUT_LOCKS key a run takes, from its options, in the order the CLI picks what to run (the first
+ * of `--retitle` / `--manual-list`, `--daily`, `--frames`, `--add`, `--titles`, `--fetch`, else a scan);
+ * null for `--help`, `--status` and `--daily` (it locks each step).
+ */
+export function scoutLockFor(opts) {
+  if (opts.help || opts.status) return null;
+  if (opts.retitle || opts.manualList) return 'fetch';
+  if (opts.daily) return null;
+  if (opts.frames !== undefined) return 'frames';
+  if (opts.add || opts.titles || !opts.fetch) return 'scan';
+  return 'fetch';
+}
+
+/** Why a run (or a `--daily` step) can't start: the work another run is doing, its lock file and its holder (`pid 12 on mac`). */
+export function lockBusyMessage(kind, holder) {
+  const lock = SCOUT_LOCKS[kind];
+  return `Another eroscripts:scout run is doing ${lock.work}: ${lock.file} is held by ${holder}`;
+}
+
+/**
  * `--status`: what the scan state says, as lines: last scan and daily run,
  * each feed's backfill progress, verdicts (and how many predate the current
  * rules), posts left pending, and the waiting list with what `--auto` takes.
  *
  * @param {object} state scan state
- * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, framesAt?, framesExit?, fetchAt?, fetchExit?}|null, now?: number, rules?: number}} [o]
+ * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, scanSkipped?, framesAt?, framesExit?, framesSkipped?, fetchAt?, fetchExit?, fetchSkipped?}|null, now?: number, rules?: number}} [o]
  */
 export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new Set(), daily = null, now = Date.now(), rules = RULES_VERSION } = {}) {
   const when = (iso) => {
@@ -1120,8 +1163,9 @@ export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new
     .sort((a, b) => b[1] - a[1]).map(([v, n]) => `${v} ${n}`).join(' · ');
   const lines = [`Last scan: ${when(state.lastScanAt)}`];
   if (daily) {
-    const frames = daily.framesAt ? `; frames ${when(daily.framesAt)}, exit ${daily.framesExit}` : '';
-    lines.push(`Daily run: scan ${when(daily.scanAt)}, exit ${daily.scanExit}${frames}${daily.fetchAt ? `; auto-fetch ${when(daily.fetchAt)}, exit ${daily.fetchExit}` : ''}`);
+    const step = (key, label) => `${label} ${when(daily[`${key}At`])}, exit ${daily[`${key}Exit`]}${daily[`${key}Skipped`] ? ` (skipped: ${daily[`${key}Skipped`]})` : ''}`;
+    const steps = [step('scan', 'scan'), daily.framesAt && step('frames', 'frames'), daily.fetchAt && step('fetch', 'auto-fetch')];
+    lines.push(`Daily run: ${steps.filter(Boolean).join('; ')}`);
   }
   lines.push('Backfill:');
   for (const tag of new Set([...FEED_TAGS, ...Object.keys(state.feeds)])) {

@@ -44,9 +44,10 @@ Swipes go to eroscripts-scout-swipes.json (atomically; the previous copy is kept
 eroscripts-scout-swipes.json.bak).
 
 A card's pictures are the post's images, then the preview frames the scouts took at
-25, 50 and 75 % of a video (<userData>/scout-frames/eroscripts/<topic id>/ and
-scout-frames/slr/<scene id>/, listed in the post's or scene's frames record), at most
-five; the report shows a post's first frame when it has no image. They're served at
+25, 50 and 75 % of a video (<userData>/scout-frames/eroscripts/<topic id>/, listed in
+the post's record of eroscripts-scout-frames.json, and scout-frames/slr/<scene id>/,
+in the scene's frames record in slr-scout.json), at most five; the report shows a
+post's first frame when it has no image. They're served at
 /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg and nowhere else.
 
 The SLR tab deals what would download from SexLikeReal, in one order by score (the

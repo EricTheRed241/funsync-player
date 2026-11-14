@@ -1,8 +1,9 @@
-// Frames for the swipe deck (npm run scout:report): a waiting post whose card
-// shows fewer than FRAMES_WANTED usable images gets up to three JPEG frames
-// of its video, taken at 25, 50 and 75 % of its length, in
-// `<userData>/scout-frames/eroscripts/<topicId>/{25,50,75}.jpg` (the deck
-// serves them as `/frames/eroscripts/<id>/<n>.jpg`). Run by
+// Frames for the swipe deck (npm run scout:report): a waiting post nobody
+// swiped yet whose card shows fewer than FRAMES_WANTED usable images gets up
+// to three JPEG frames of its video, taken at 25, 50 and 75 % of its length,
+// in `<userData>/scout-frames/eroscripts/<topicId>/{25,50,75}.jpg` (the deck
+// serves them as `/frames/eroscripts/<id>/<n>.jpg`), recorded in
+// `<userData>/eroscripts-scout-frames.json` (FRAMES_FILE). Run by
 // `npm run eroscripts:scout -- --frames [N]` and `--daily`
 // (scripts/eroscripts-scout.mjs).
 //
@@ -198,34 +199,35 @@ export function usableImages(rec, counts) {
   return out;
 }
 
-/** True when a failed try (`framesFailed`) is recent enough not to try again. */
+/** True when a failed try (a frames file record's `framesFailed`) is recent enough not to try again. */
 export function recentlyFailed(rec, now = Date.now()) {
   const at = Date.parse(rec?.framesFailed?.at);
   return Number.isFinite(at) && now - at < FAILED_RETRY_MS;
 }
 
 /**
- * The waiting posts that need frames, in the order `--frames` takes them: on the list, a state record,
- * not in the library (`inLibrary(c)`), not swiped left (`hidden`), fewer than FRAMES_WANTED usable
- * images, no `frames` yet and no failed try in the last FAILED_RETRY_MS. Swiped right first, then posts
- * without any image, then by score (best first), then newest.
+ * The waiting posts that need frames, in the order `--frames` takes them: on the list, a state record (its
+ * images), not in the library (`inLibrary(c)`), not swiped at all (`swiped`: right or left; user,
+ * 2026-11-14), fewer than FRAMES_WANTED usable images, and in the frames file (`framesFile`, FRAMES_FILE)
+ * no `frames` and no failed try in the last FAILED_RETRY_MS. Posts without any image first, then by score
+ * (best first), then newest.
  *
  * @param {object[]} candidates the saved list's candidates
- * @param {{state: object, wanted?: Set<number>, hidden?: Set<number>, inLibrary?: (c: object) => boolean, now?: number}} o
+ * @param {{state: object, framesFile?: {topics: object}, swiped?: Set<number>, inLibrary?: (c: object) => boolean, now?: number}} o
  * @returns {{c: object, images: number}[]}
  */
-export function framesQueue(candidates, { state, wanted = new Set(), hidden = new Set(), inLibrary = () => false, now = Date.now() }) {
+export function framesQueue(candidates, { state, framesFile = emptyFramesFile(), swiped = new Set(), inLibrary = () => false, now = Date.now() }) {
   const counts = imageCounts(state);
   const out = [];
   for (const c of candidates) {
     const rec = state?.topics?.[c.id];
-    if (!rec || hidden.has(c.id) || rec.frames || recentlyFailed(rec, now) || inLibrary(c)) continue;
+    const made = framesFile?.topics?.[c.id];
+    if (!rec || swiped.has(c.id) || made?.frames || recentlyFailed(made, now) || inLibrary(c)) continue;
     const images = usableImages(rec, counts).length;
     if (images < FRAMES_WANTED) out.push({ c, images });
   }
   const score = (x) => (Number.isFinite(x.c.score) ? x.c.score : -Infinity);
-  return out.sort((a, b) => (wanted.has(b.c.id) - wanted.has(a.c.id))
-    || ((a.images === 0 ? 0 : 1) - (b.images === 0 ? 0 : 1))
+  return out.sort((a, b) => ((a.images === 0 ? 0 : 1) - (b.images === 0 ? 0 : 1))
     || (score(b) - score(a))
     || (b.c.id - a.c.id));
 }
@@ -325,17 +327,97 @@ export function vrbangersPageImages(html, slug) {
   return scene ? vrbangersGallery(scene) : [];
 }
 
-// ── State ───────────────────────────────────────────────────────────────
+// ── The frames file ─────────────────────────────────────────────────────
 
-/** Frames made for a post: `rec.frames = {at, source: '<host>: <video>', files}`; an earlier failure is forgotten. */
-export function recordFrames(rec, { source, files, now = Date.now() }) {
-  rec.frames = { at: new Date(now).toISOString(), source, files: [...files] };
-  delete rec.framesFailed;
+/**
+ * What `--frames` did per post, in userData: `{version: 1, topics: {"<id>": {frames: {at, source, files}} |
+ * {framesFailed: {at, reason}}}}`. Written (atomically) only by `--frames`, which holds its own run lock,
+ * so it runs beside a scan or a download; read by npm run scout:report (crates/scout-report frames.rs).
+ * Until 2026-11-14 these records sat on the scan state's records (migrateFrames brings them over).
+ */
+export const FRAMES_FILE = 'eroscripts-scout-frames.json';
+
+export function emptyFramesFile() {
+  return { version: 1, topics: {} };
 }
 
-/** A failed try: `rec.framesFailed = {at, reason}`; not tried again for FAILED_RETRY_MS. */
-export function recordFramesFailed(rec, reason, now = Date.now()) {
-  rec.framesFailed = { at: new Date(now).toISOString(), reason: String(reason) };
+/** The frames file parsed (`raw`), or an empty one when it's missing or foreign. */
+export function normalizeFramesFile(raw) {
+  const topics = raw?.version === 1 ? raw.topics : null;
+  return topics && typeof topics === 'object' && !Array.isArray(topics) ? { version: 1, topics } : emptyFramesFile();
+}
+
+/** `<userData>/eroscripts-scout-frames.json`, empty when there is none (or it can't be read). */
+export function readFramesFile(userData) {
+  try { return normalizeFramesFile(JSON.parse(fs.readFileSync(path.join(userData, FRAMES_FILE), 'utf8'))); } catch { return emptyFramesFile(); }
+}
+
+/** Save the frames file through a temporary one, so npm run scout:report never reads half of it. */
+export function writeFramesFile(userData, file) {
+  const target = path.join(userData, FRAMES_FILE);
+  const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(file));
+  fs.renameSync(tmp, target);
+}
+
+/** Frames made for post `id`: its record becomes `{frames: {at, source: '<host>: <video>', files}}` (an earlier failure is forgotten). */
+export function recordFrames(file, id, { source, files, now = Date.now() }) {
+  file.topics[id] = { frames: { at: new Date(now).toISOString(), source, files: [...files] } };
+}
+
+/** A failed try on post `id`: its record becomes `{framesFailed: {at, reason}}`; not tried again for FAILED_RETRY_MS. */
+export function recordFramesFailed(file, id, reason, now = Date.now()) {
+  file.topics[id] = { framesFailed: { at: new Date(now).toISOString(), reason: String(reason) } };
+}
+
+/**
+ * The frames folders under `<userData>/scout-frames/eroscripts/` that hold frames: `[{id, files, at}]`, `files`
+ * the FRAME_POINTS frames present (in that order), `at` the newest one's time.
+ */
+export function framesOnDisk(userData) {
+  const root = path.join(userData, FRAMES_DIR, 'eroscripts');
+  let names = [];
+  try { names = fs.readdirSync(root); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    if (!/^[1-9]\d*$/.test(name)) continue;
+    const files = [];
+    let newest = 0;
+    for (const f of FRAME_POINTS.map((p) => `${p}.jpg`)) {
+      try {
+        const st = fs.statSync(path.join(root, name, f));
+        if (st.isFile() && st.size > 0) { files.push(f); newest = Math.max(newest, st.mtimeMs); }
+      } catch { /* not there */ }
+    }
+    if (files.length) out.push({ id: Number(name), files, at: new Date(newest).toISOString() });
+  }
+  return out;
+}
+
+/**
+ * Bring what earlier runs made into the frames file (`file`, changed in place; every `--frames` run starts
+ * with this): `frames` / `framesFailed` still on the scan state's records (`state`, only read; a record with
+ * both keeps its frames), then every frames folder on disk (`onDisk`, framesOnDisk) as frames from source "".
+ * Only posts the file has no record of get one.
+ *
+ * @returns {{fromState: number, fromDisk: number}} records added from each
+ */
+export function migrateFrames(file, { state = null, onDisk = [] } = {}) {
+  let fromState = 0;
+  let fromDisk = 0;
+  for (const [id, rec] of Object.entries(state?.topics || {})) {
+    if (file.topics[id]) continue;
+    if (rec?.frames) file.topics[id] = { frames: rec.frames };
+    else if (rec?.framesFailed) file.topics[id] = { framesFailed: rec.framesFailed };
+    else continue;
+    fromState++;
+  }
+  for (const { id, files, at } of onDisk) {
+    if (file.topics[id] || !files.length) continue;
+    file.topics[id] = { frames: { at, source: '', files: [...files] } };
+    fromDisk++;
+  }
+  return { fromState, fromDisk };
 }
 
 /** A post's frames folder: `<userData>/scout-frames/eroscripts/<topicId>`. */

@@ -5,9 +5,10 @@
  */
 // Frames for the swipe deck (scripts/scout-frames.mjs, npm run eroscripts:scout -- --frames):
 // the one-eye crop per video name, the frame times, which free source each host gives (never
-// SLR's account download or VRBangers' paid video), which waiting posts get frames and in what
-// order, how the state records them, the ffmpeg arguments (fake runner), and real ffmpeg runs
-// on a generated test video through the local range proxy. No network: hosts are fakes.
+// SLR's account download or VRBangers' paid video), which waiting posts get frames (unswiped
+// only) and in what order, the frames file (records, migration from the scan state and from
+// folders on disk), the ffmpeg arguments (fake runner), and real ffmpeg runs on a generated
+// test video through the local range proxy. No network: hosts are fakes.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,9 +20,9 @@ import {
   imageCounts, framesQueue, frameSource, frameScene, pickVariant, minHeightFor, slrTrailer, vrbangersGallery, vrbangersPageImages,
   recordFrames, recordFramesFailed, recentlyFailed, postFramesDir, grabFrames, grabImages, startRangeProxy, httpSource, megaSource,
   readerFailure, postFrames, FrameError, FRAME_POINTS, FAILED_RETRY_MS, MAX_FRAME_WIDTH, SHARED_IMAGE_POSTS, FRAMES_WANTED,
-  jpegSize, isBlankFrame,
+  jpegSize, isBlankFrame, FRAMES_FILE, emptyFramesFile, normalizeFramesFile, readFramesFile, writeFramesFile, framesOnDisk, migrateFrames,
 } from '../../scripts/scout-frames.mjs';
-import { markTopic, emptyScoutState } from '../../scripts/eroscripts-scout-lib.mjs';
+import { markTopic, emptyScoutState, dropFrameRecords } from '../../scripts/eroscripts-scout-lib.mjs';
 
 const temps = [];
 const tempDir = () => {
@@ -229,11 +230,21 @@ describe('which posts get frames', () => {
       4: { images: [] },
       5: { images: [up(sha('f')), up(sha('f')), 'http://insecure/x.jpg'] },
       6: { image: up(sha('g')) },
-      7: { images: [], frames: { at: '2026-11-01T00:00:00Z', source: 'mega: 7.mp4', files: ['25.jpg'] } },
-      8: { images: [], framesFailed: { at: new Date(NOW - FAILED_RETRY_MS + 3600_000).toISOString(), reason: 'pixeldrain: HTTP 403' } },
-      9: { images: [], framesFailed: { at: new Date(NOW - FAILED_RETRY_MS - 1).toISOString(), reason: 'mega: bandwidth limit' } },
+      // Where --frames kept its records before the frames file: ignored now.
+      7: { images: [], framesFailed: { at: new Date(NOW).toISOString(), reason: 'old place' } },
+      8: { images: [] },
+      9: { images: [] },
       10: { images: [] },
       11: { images: [] },
+      13: { images: [] },
+    },
+  });
+  const framesFile = () => ({
+    version: 1,
+    topics: {
+      7: { frames: { at: '2026-11-01T00:00:00Z', source: 'mega: 7.mp4', files: ['25.jpg'] } },
+      8: { framesFailed: { at: new Date(NOW - FAILED_RETRY_MS + 3600_000).toISOString(), reason: 'pixeldrain: HTTP 403' } },
+      9: { framesFailed: { at: new Date(NOW - FAILED_RETRY_MS - 1).toISOString(), reason: 'mega: bandwidth limit' } },
     },
   });
 
@@ -249,20 +260,32 @@ describe('which posts get frames', () => {
     expect(imageKey('https://cdn/x/notasha.png')).toBe('https://cdn/x/notasha.png');
   });
 
-  it('picks posts with fewer than 3 images, no frames, no recent failure, not hidden or in the library', () => {
+  it('picks unswiped posts with fewer than 3 images, no frames, no recent failure, not in the library', () => {
     expect(FRAMES_WANTED).toBe(3);
-    const candidates = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((id) => cand(id, id));
-    const q = framesQueue(candidates, { state: state(), hidden: new Set([10]), inLibrary: (c) => c.id === 11, now: NOW });
+    const candidates = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((id) => cand(id, id));
+    const q = framesQueue(candidates, { state: state(), framesFile: framesFile(), swiped: new Set([10, 13]), inLibrary: (c) => c.id === 11, now: NOW });
     const ids = q.map((x) => x.c.id);
-    // 3: 3 usable images; 7: has frames; 8: failed within 7 days; 10: swiped left; 11: in the library; 12: no state record.
+    // 3: 3 usable images; 7: has frames; 8: failed within 7 days; 10, 13: swiped (left or right); 11: in the library; 12: no state record.
     expect(ids.sort((a, b) => a - b)).toEqual([1, 2, 4, 5, 6, 9]);
   });
 
-  it('order: swiped right, then no images at all, then score, then newest', () => {
+  it('a post swiped either way gets none; one not swiped does', () => {
+    const candidates = [cand(4, 1), cand(8, 1), cand(10, 1)];
+    const swiped = new Set([4, 10]);
+    expect(framesQueue(candidates, { state: state(), swiped, now: NOW }).map((x) => x.c.id)).toEqual([8]);
+  });
+
+  it('only the frames file counts what was done, not the scan state', () => {
+    // Without a frames file, 7's state record (the old place) doesn't keep it out, and 8 and 9 have no failure.
+    const q = framesQueue([cand(7, 1), cand(8, 1), cand(9, 1)], { state: state(), now: NOW });
+    expect(q.map((x) => x.c.id).sort((a, b) => a - b)).toEqual([7, 8, 9]);
+  });
+
+  it('order: no images at all first, then score, then newest; a swipe right no longer goes first', () => {
     const candidates = [cand(1, 50), cand(2, 1), cand(4, 10), cand(5, 99), cand(6, 99), cand(9, 10)];
-    const q = framesQueue(candidates, { state: state(), wanted: new Set([2]), now: NOW });
-    // 2 swiped right; then no images (1, 4, 9: score 50, 10, 10 → 9 newer than 4); then 5 and 6 (score 99, newest first).
-    expect(q.map((x) => x.c.id)).toEqual([2, 1, 9, 4, 6, 5]);
+    const q = framesQueue(candidates, { state: state(), framesFile: framesFile(), now: NOW });
+    // No images (1, 4, 9: score 50, 10, 10 → 9 newer than 4); then 5, 6 and 2 (score 99, 99, 1; newest first).
+    expect(q.map((x) => x.c.id)).toEqual([1, 9, 4, 6, 5, 2]);
     expect(q.find((x) => x.c.id === 5).images).toBe(1);
   });
 
@@ -272,25 +295,88 @@ describe('which posts get frames', () => {
   });
 });
 
-describe('state records', () => {
-  it('frames and a failure, the 7-day retry window', () => {
-    const rec = {};
-    const t = Date.parse('2026-11-14T00:00:00Z');
-    recordFramesFailed(rec, 'pixeldrain: HTTP 403', t);
-    expect(rec.framesFailed).toEqual({ at: '2026-11-14T00:00:00.000Z', reason: 'pixeldrain: HTTP 403' });
-    expect(recentlyFailed(rec, t + FAILED_RETRY_MS - 1)).toBe(true);
-    expect(recentlyFailed(rec, t + FAILED_RETRY_MS)).toBe(false);
-    recordFrames(rec, { source: 'mega: x.mp4', files: ['25.jpg', '75.jpg'], now: t + 1000 });
-    expect(rec).toEqual({ frames: { at: '2026-11-14T00:00:01.000Z', source: 'mega: x.mp4', files: ['25.jpg', '75.jpg'] } });
+describe('the frames file', () => {
+  const t = Date.parse('2026-11-14T00:00:00Z');
+
+  it('a post holds frames or a failure, never both; the 7-day retry window', () => {
+    const file = emptyFramesFile();
+    recordFramesFailed(file, 5, 'pixeldrain: HTTP 403', t);
+    expect(file.topics[5]).toEqual({ framesFailed: { at: '2026-11-14T00:00:00.000Z', reason: 'pixeldrain: HTTP 403' } });
+    expect(recentlyFailed(file.topics[5], t + FAILED_RETRY_MS - 1)).toBe(true);
+    expect(recentlyFailed(file.topics[5], t + FAILED_RETRY_MS)).toBe(false);
+    recordFrames(file, 5, { source: 'mega: x.mp4', files: ['25.jpg', '75.jpg'], now: t + 1000 });
+    expect(file).toEqual({ version: 1, topics: { 5: { frames: { at: '2026-11-14T00:00:01.000Z', source: 'mega: x.mp4', files: ['25.jpg', '75.jpg'] } } } });
+    recordFramesFailed(file, 5, 'mega: gone', t + 2000);
+    expect(file.topics[5]).toEqual({ framesFailed: { at: '2026-11-14T00:00:02.000Z', reason: 'mega: gone' } });
   });
-  it('a new verdict keeps the frames', () => {
+
+  it('is read back as written (atomically, no temporary file left); missing or foreign reads as empty', () => {
+    const ud = tempDir();
+    expect(FRAMES_FILE).toBe('eroscripts-scout-frames.json');
+    expect(readFramesFile(ud)).toEqual(emptyFramesFile());
+    const file = emptyFramesFile();
+    recordFrames(file, 7, { source: 'forum: a.mp4', files: ['50.jpg'], now: t });
+    writeFramesFile(ud, file);
+    expect(readFramesFile(ud)).toEqual(file);
+    expect(fs.readdirSync(ud)).toEqual([FRAMES_FILE]);
+    for (const raw of [null, { version: 2, topics: {} }, { version: 1, topics: [] }, { version: 1 }]) expect(normalizeFramesFile(raw)).toEqual(emptyFramesFile());
+    fs.writeFileSync(path.join(ud, FRAMES_FILE), '{not json');
+    expect(readFramesFile(ud)).toEqual(emptyFramesFile());
+  });
+
+  it('takes in the scan state\'s old records, then folders on disk without a record; the state stays as it was', () => {
+    const ud = tempDir();
+    const put = (id, names) => {
+      const dir = postFramesDir(ud, id);
+      fs.mkdirSync(dir, { recursive: true });
+      for (const n of names) fs.writeFileSync(path.join(dir, n), 'jpeg');
+    };
+    put(1, ['25.jpg', '50.jpg', '75.jpg']); // also recorded in the state: the state's record wins
+    put(4, ['75.jpg', '25.jpg', '50.jpg.123.tmp', 'x.jpg']); // only on disk: its frames, in point order
+    put(5, []); // an empty folder: nothing
+    put(6, ['50.jpg']); // the file already has a record
+    fs.mkdirSync(path.join(ud, 'scout-frames', 'eroscripts', 'notes'), { recursive: true });
+    fs.writeFileSync(path.join(ud, 'scout-frames', 'eroscripts', '._7'), 'x');
+    const onDisk = framesOnDisk(ud);
+    expect(onDisk.map((d) => [d.id, d.files])).toEqual(expect.arrayContaining([[1, ['25.jpg', '50.jpg', '75.jpg']], [4, ['25.jpg', '75.jpg']], [6, ['50.jpg']]]));
+    expect(onDisk).toHaveLength(3);
+    expect(Number.isFinite(Date.parse(onDisk[0].at))).toBe(true);
+
+    const state = emptyScoutState();
+    state.topics[1] = { verdict: 'candidate', frames: { at: 'a', source: 'mega: 1.mp4', files: ['25.jpg', '50.jpg', '75.jpg'] } };
+    state.topics[2] = { verdict: 'candidate', framesFailed: { at: 'b', reason: 'pixeldrain: HTTP 403' } };
+    state.topics[3] = { verdict: 'candidate', frames: { at: 'c', source: 's', files: ['25.jpg'] }, framesFailed: { at: 'd', reason: 'r' } };
+    state.topics[6] = { verdict: 'candidate', framesFailed: { at: 'e', reason: 'old' } };
+    state.topics[8] = { verdict: 'no-video' };
+    const before = JSON.stringify(state);
+    const file = emptyFramesFile();
+    file.topics[6] = { frames: { at: 'f', source: 'forum: 6.mp4', files: ['50.jpg'] } };
+
+    expect(migrateFrames(file, { state, onDisk })).toEqual({ fromState: 3, fromDisk: 1 });
+    expect(file.topics).toEqual({
+      1: { frames: { at: 'a', source: 'mega: 1.mp4', files: ['25.jpg', '50.jpg', '75.jpg'] } },
+      2: { framesFailed: { at: 'b', reason: 'pixeldrain: HTTP 403' } },
+      3: { frames: { at: 'c', source: 's', files: ['25.jpg'] } },
+      4: { frames: { at: onDisk.find((d) => d.id === 4).at, source: '', files: ['25.jpg', '75.jpg'] } },
+      6: { frames: { at: 'f', source: 'forum: 6.mp4', files: ['50.jpg'] } },
+    });
+    expect(JSON.stringify(state)).toBe(before);
+    // A second run finds nothing new.
+    expect(migrateFrames(file, { state, onDisk })).toEqual({ fromState: 0, fromDisk: 0 });
+  });
+
+  it('a new verdict no longer carries frames, and a saved state drops the old copies', () => {
     const state = emptyScoutState();
     state.topics[5] = { verdict: 'candidate', rules: 1, at: 'x', title: 'T', frames: { at: 'a', source: 's', files: ['25.jpg'] }, framesFailed: { at: 'b', reason: 'r' } };
+    state.topics[6] = { verdict: 'candidate', rules: 1, at: 'x', title: 'U', framesFailed: { at: 'b', reason: 'r' } };
     markTopic(state, 5, 'candidate');
-    expect(state.topics[5].frames).toEqual({ at: 'a', source: 's', files: ['25.jpg'] });
-    expect(state.topics[5].framesFailed).toEqual({ at: 'b', reason: 'r' });
+    expect(state.topics[5]).not.toHaveProperty('frames');
+    expect(state.topics[5]).not.toHaveProperty('framesFailed');
     expect(state.topics[5].title).toBe('T');
+    dropFrameRecords(state);
+    expect(state.topics[6]).toEqual({ verdict: 'candidate', rules: 1, at: 'x', title: 'U' });
   });
+
   it('frames folder per post', () => {
     expect(postFramesDir('/ud', 348348)).toBe(path.join('/ud', 'scout-frames', 'eroscripts', '348348'));
   });
