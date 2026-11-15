@@ -26,9 +26,8 @@
     "scout:report": "cargo run -q --release -p scout-report --",
     "slr:scout": "cargo run -q --release -p slr-scout --",
     "jobs": "cargo run -q --release -p job-runner --",
-    "k8s": "bash deploy/k8s/k8s.sh",
-    "app:autostart": "bash deploy/macos/app-autostart.sh",
-    "omp:broker": "bash deploy/macos/omp-broker.sh"
+    "library:thumbs": "cargo run -q --release -p library-thumbs --",
+    "app:autostart": "bash deploy/macos/app-autostart.sh"
   },
   "keywords": [
     "video-player",

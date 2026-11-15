@@ -6,8 +6,8 @@
 // npm run eroscripts:scout's run locks, one per kind of work (lib.SCOUT_LOCKS): which lock each
 // run takes, and the CLI itself against a temp userData whose other locks are held by a live pid
 // (this test process): --frames goes on beside a scan and a download and takes in the old frame
-// records, two frames runs exclude each other, --daily skips a busy step and records it, and the
-// download lock covers --retitle. No network: fetch throws, and nothing here needs it.
+// records, two frames runs exclude each other, --daily skips a busy step, records it and makes no
+// frames, and the download lock covers --retitle. No network: fetch throws, and nothing here needs it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +19,7 @@ import { FRAMES_FILE } from '../../scripts/scout-frames.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = path.join(repo, 'scripts', 'eroscripts-scout.mjs');
-const live = `${process.pid}@${os.hostname()}`;
+const live = String(process.pid);
 
 const temps = [];
 afterEach(() => { while (temps.length) fs.rmSync(temps.pop(), { recursive: true, force: true }); });
@@ -46,7 +46,7 @@ describe('which lock a run takes', () => {
   });
 
   it('the message names the work, the lock file and the holder', () => {
-    expect(lockBusyMessage('fetch', 'pid 12 on mac')).toBe('Another eroscripts:scout run is doing downloads (--fetch, --manual-list, --retitle): eroscripts-scout-fetch.lock is held by pid 12 on mac');
+    expect(lockBusyMessage('fetch', 'pid 12')).toBe('Another eroscripts:scout run is doing downloads (--fetch, --manual-list, --retitle): eroscripts-scout-fetch.lock is held by pid 12');
   });
 });
 
@@ -124,12 +124,12 @@ describe('eroscripts:scout with other runs going', () => {
     hold(ud, 'frames');
     const r = run(ud, '--frames', '3');
     expect(r.code).toBe(2);
-    expect(r.err).toContain(`Another eroscripts:scout run is doing frames (--frames): eroscripts-scout-frames.lock is held by pid ${process.pid} on ${os.hostname()}`);
+    expect(r.err).toContain(`Another eroscripts:scout run is doing frames (--frames): eroscripts-scout-frames.lock is held by pid ${process.pid}`);
     expect(fs.existsSync(path.join(ud, FRAMES_FILE))).toBe(false);
     expect(fs.readFileSync(path.join(ud, SCOUT_LOCKS.frames.file), 'utf8')).toBe(live);
   }, 60_000);
 
-  it('--daily skips the steps whose lock another run holds, records them (exit 2), and still makes frames', () => {
+  it('--daily skips the steps whose lock another run holds, records them (exit 2), and makes no frames', () => {
     const ud = userData();
     hold(ud, 'scan');
     hold(ud, 'fetch');
@@ -137,21 +137,18 @@ describe('eroscripts:scout with other runs going', () => {
     expect(r.code).toBe(2);
     expect(r.out).toContain('Daily: Another eroscripts:scout run is doing a scan (scan, --add, --rejudge, --titles): eroscripts-scout.lock is held by');
     expect(r.out).toContain('Daily: Another eroscripts:scout run is doing downloads (--fetch, --manual-list, --retitle): eroscripts-scout-fetch.lock is held by');
-    expect(r.out).toMatch(/Frames: 1 unswiped waiting posts/);
+    expect(r.out).not.toMatch(/Frames:/);
     const daily = read(ud, 'eroscripts-scout-daily.json');
-    expect(daily).toMatchObject({
-      scanExit: 2, scanSkipped: `eroscripts-scout.lock held by pid ${process.pid} on ${os.hostname()}`,
-      framesExit: 0,
-      fetchExit: 2, fetchSkipped: `eroscripts-scout-fetch.lock held by pid ${process.pid} on ${os.hostname()}`,
+    expect(daily).toEqual({
+      scanAt: daily.scanAt, scanExit: 2, scanSkipped: `eroscripts-scout.lock held by pid ${process.pid}`,
+      fetchAt: daily.fetchAt, fetchExit: 2, fetchSkipped: `eroscripts-scout-fetch.lock held by pid ${process.pid}`,
     });
-    for (const k of ['scanAt', 'framesAt', 'fetchAt']) expect(Number.isFinite(Date.parse(daily[k]))).toBe(true);
-    expect(daily).not.toHaveProperty('framesSkipped');
-    expect(Object.keys(read(ud, FRAMES_FILE).topics).sort()).toEqual(['201', '202', '203']);
-    expect(fs.existsSync(path.join(ud, SCOUT_LOCKS.frames.file))).toBe(false);
+    for (const k of ['scanAt', 'fetchAt']) expect(Number.isFinite(Date.parse(daily[k]))).toBe(true);
+    expect(fs.existsSync(path.join(ud, FRAMES_FILE))).toBe(false);
     // --status shows the skipped steps.
     const s = run(ud, '--status');
     expect(s.code).toBe(0);
-    expect(s.out).toMatch(/Daily run: scan .*, exit 2 \(skipped: eroscripts-scout\.lock held by pid \d+ on .*\); frames .*, exit 0; auto-fetch .*, exit 2 \(skipped: eroscripts-scout-fetch\.lock/);
+    expect(s.out).toMatch(/Daily run: scan .*, exit 2 \(skipped: eroscripts-scout\.lock held by pid \d+\); auto-fetch .*, exit 2 \(skipped: eroscripts-scout-fetch\.lock/);
   }, 60_000);
 
   it('--retitle waits for a download run (the library lock), not for a frames run', () => {

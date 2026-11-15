@@ -132,8 +132,7 @@ fn env() -> Env {
 /// environment.
 fn command() -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_pornstar-tags"));
-    c.env_remove("FUNSYNC_USER_DATA")
-        .env_remove("FUNSYNC_BACKEND_URL");
+    c.env_remove("FUNSYNC_USER_DATA");
     c
 }
 
@@ -329,11 +328,16 @@ fn help_errors_and_missing_sources() {
 }
 
 #[test]
-fn env_vars_set_the_user_data_and_backend() {
+fn env_var_sets_the_user_data_and_config_port_the_backend() {
     let env = env();
-    // A backend answering one request; config.json's port (1) is unused.
+    // A backend answering one request, on config.json's port.
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
+    let port = listener.local_addr().unwrap().port();
+    let config_path = env.user_data.join("config.json");
+    let mut config: Value =
+        serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["settings"]["backend"]["port"] = json!(port);
+    fs::write(&config_path, config.to_string()).unwrap();
     let server = std::thread::spawn(move || {
         let (mut conn, _) = listener.accept().unwrap();
         let mut first = String::new();
@@ -346,7 +350,6 @@ fn env_vars_set_the_user_data_and_backend() {
         command()
             .arg("--apply")
             .env("FUNSYNC_USER_DATA", &env.user_data)
-            .env("FUNSYNC_BACKEND_URL", &url)
             .output()
             .unwrap(),
     );

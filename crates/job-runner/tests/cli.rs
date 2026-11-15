@@ -46,13 +46,13 @@ fn setup(tmp: &Path, library: bool, jobs: &str) -> (PathBuf, PathBuf) {
     (user_data, jobs_file)
 }
 
-fn job(name: &str, timeout: &str, steps: &[&str], paused: bool) -> String {
+fn job(name: &str, timeout: &str, steps: &[&str]) -> String {
     let steps: Vec<String> = steps
         .iter()
         .map(|s| serde_json::to_string(&["sh", "-c", s]).unwrap())
         .collect();
     format!(
-        r#"{{"name":"{name}","schedule":"0 3 * * *","catchUp":"1h","timeout":"{timeout}","paused":{paused},"steps":[{}]}}"#,
+        r#"{{"name":"{name}","timeout":"{timeout}","steps":[{}]}}"#,
         steps.join(",")
     )
 }
@@ -83,7 +83,7 @@ fn runs_every_step_and_reports_work_left() {
     let (ud, jobs) = setup(
         &tmp.0,
         true,
-        &job("j", "1h", &["echo first; exit 2", &second], false),
+        &job("j", "1h", &["echo first; exit 2", &second]),
     );
     let out = cli(&ud, &jobs, &["run", "j"]);
     assert_eq!(
@@ -95,7 +95,7 @@ fn runs_every_step_and_reports_work_left() {
     assert!(marker.exists(), "a step leaving work doesn't stop the next");
     let st = state(&ud, "j");
     assert_eq!(st["last"]["result"], "work left");
-    assert_eq!(st["last"]["trigger"], "manual");
+    assert_eq!(st["last"]["trigger"], "terminal");
     let log = fs::read_to_string(st["last"]["log"].as_str().unwrap()).unwrap();
     assert!(log.contains("first\n") && log.contains("second\n"), "{log}");
     assert!(
@@ -107,7 +107,7 @@ fn runs_every_step_and_reports_work_left() {
 #[test]
 fn a_failing_step_decides_the_exit_code() {
     let tmp = TempDir::new();
-    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &["exit 3", "exit 2"], false));
+    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &["exit 3", "exit 2"]));
     assert_eq!(cli(&ud, &jobs, &["run", "j"]).status.code(), Some(3));
     assert_eq!(state(&ud, "j")["last"]["result"], "login expired");
 }
@@ -119,12 +119,7 @@ fn never_runs_against_a_missing_library() {
     let (ud, jobs) = setup(
         &tmp.0,
         false,
-        &job(
-            "j",
-            "1h",
-            &[&format!("touch '{}'", marker.display())],
-            false,
-        ),
+        &job("j", "1h", &[&format!("touch '{}'", marker.display())]),
     );
     let out = cli(&ud, &jobs, &["run", "j"]);
     assert_eq!(out.status.code(), Some(1));
@@ -137,7 +132,7 @@ fn never_runs_against_a_missing_library() {
 #[test]
 fn a_running_job_isnt_started_twice() {
     let tmp = TempDir::new();
-    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &["exit 0"], false));
+    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &["exit 0"]));
     fs::create_dir_all(ud.join("job-runner")).unwrap();
     // Held by this (live) test process.
     fs::write(ud.join("job-runner/j.lock"), std::process::id().to_string()).unwrap();
@@ -151,7 +146,7 @@ fn a_run_past_its_timeout_is_stopped() {
     let tmp = TempDir::new();
     let marker = tmp.0.join("after");
     let steps = ["sleep 30", &format!("touch '{}'", marker.display())];
-    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1s", &steps, false));
+    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1s", &steps));
     let t = Instant::now();
     let out = cli(&ud, &jobs, &["run", "j"]);
     assert!(
@@ -165,34 +160,11 @@ fn a_run_past_its_timeout_is_stopped() {
 }
 
 #[test]
-fn resume_all_leaves_jobs_paused_by_default() {
-    let tmp = TempDir::new();
-    let jobs_json = [
-        job("a", "1h", &["true"], false),
-        job("b", "1h", &["true"], true),
-    ]
-    .join(",");
-    let (ud, jobs) = setup(&tmp.0, true, &jobs_json);
-    assert_eq!(cli(&ud, &jobs, &["pause", "all"]).status.code(), Some(0));
-    assert_eq!(cli(&ud, &jobs, &["resume", "all"]).status.code(), Some(0));
-    let control: Value =
-        serde_json::from_str(&fs::read_to_string(ud.join("job-runner/control.json")).unwrap())
-            .unwrap();
-    assert_eq!(control["paused"]["a"], false);
-    assert_eq!(control["paused"]["b"], true);
-    assert_eq!(cli(&ud, &jobs, &["resume", "b"]).status.code(), Some(0));
-    let control: Value =
-        serde_json::from_str(&fs::read_to_string(ud.join("job-runner/control.json")).unwrap())
-            .unwrap();
-    assert_eq!(control["paused"]["b"], false);
-}
-
-#[test]
-fn start_has_the_scheduler_run_a_paused_job() {
+fn start_has_the_scheduler_run_the_job() {
     let tmp = TempDir::new();
     let marker = tmp.0.join("ran");
     let step = format!("touch '{}'", marker.display());
-    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &[&step], true));
+    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &[&step]));
     // No scheduler: nothing would pick the request up.
     assert_eq!(cli(&ud, &jobs, &["start", "j"]).status.code(), Some(1));
 
@@ -222,7 +194,8 @@ fn start_has_the_scheduler_run_a_paused_job() {
     let ran = wait_for(&marker, 30);
     let _ = serve.kill();
     let _ = serve.wait();
-    assert!(ran, "the scheduler ran the requested (paused) job");
+    assert!(ran, "the scheduler ran the requested job");
+    assert_eq!(state(&ud, "j")["last"]["trigger"], "requested");
     assert!(
         !ud.join("job-runner/requests/j").exists(),
         "the request is used up"

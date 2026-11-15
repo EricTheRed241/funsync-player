@@ -1,8 +1,8 @@
 //! One run of a job: its lock, the library check, the steps (with the job's
 //! timeout), the log and the state.
 
-use crate::cron;
 use crate::jobs::Job;
+use crate::localtime;
 use crate::state::{self, Run};
 use std::fs::{self, File};
 use std::io::{self, IsTerminal, Read, Write};
@@ -19,9 +19,10 @@ const KILL_GRACE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Trigger {
-    /// Started by the scheduler for this scheduled time.
-    Schedule(i64),
-    Manual,
+    /// Started by the scheduler on a `start` request (an Orca automation).
+    Requested,
+    /// `run` in a terminal.
+    Terminal,
 }
 
 pub fn now() -> i64 {
@@ -38,15 +39,9 @@ pub fn holder(user_data: &Path, job: &str) -> Option<LockHolder> {
 /// Who holds the lock file at `path` now, if anyone.
 pub fn holder_at(path: &Path) -> Option<LockHolder> {
     let holder = LockHolder::parse(&fs::read_to_string(path).ok()?)?;
-    let age = fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .unwrap_or(Duration::ZERO);
-    holder
-        .holds(age, &host::hostname(), host::pid_alive)
-        .then_some(holder)
+    holder.holds(host::pid_alive).then_some(holder)
 }
+
 /// The job's exit code from its steps': the first that isn't 0 or 2 (an
 /// error, 3 = a login expired), else 2 when a step left work, else 0.
 pub fn combine(codes: &[i32]) -> i32 {
@@ -92,12 +87,6 @@ pub fn run(user_data: &Path, job: &Job, trigger: Trigger, out: &mut dyn Write) -
     };
     let started = now();
     let mut st = state::read(user_data, &job.name);
-    // A manual run stands in for the schedule's latest run too.
-    let due = match trigger {
-        Trigger::Schedule(due) => Some(due),
-        Trigger::Manual => job.schedule.prev(started, job.catch_up, cron::local),
-    };
-    st.last_due = st.last_due.max(due);
 
     let log_path = match new_log(user_data, &job.name, started) {
         Ok(p) => p,
@@ -114,15 +103,16 @@ pub fn run(user_data: &Path, job: &Job, trigger: Trigger, out: &mut dyn Write) -
         }
     };
     let say = |out: &mut dyn Write, line: String| {
-        let line = format!("[job-runner {}] {line}\n", cron::fmt_local(now()));
+        let line = format!("[job-runner {}] {line}\n", localtime::fmt_local(now()));
         let _ = out.write_all(line.as_bytes());
         let _ = log.lock().unwrap().write_all(line.as_bytes());
     };
+    let trigger_name = match trigger {
+        Trigger::Requested => "requested",
+        Trigger::Terminal => "terminal",
+    };
     st.last = Some(Run {
-        trigger: match trigger {
-            Trigger::Schedule(_) => "schedule".into(),
-            Trigger::Manual => "manual".into(),
-        },
+        trigger: trigger_name.into(),
         started,
         ended: None,
         exit: None,
@@ -130,13 +120,7 @@ pub fn run(user_data: &Path, job: &Job, trigger: Trigger, out: &mut dyn Write) -
         log: log_path.display().to_string(),
     });
     let _ = state::write(user_data, &job.name, &st);
-    match trigger {
-        Trigger::Schedule(due) => say(
-            out,
-            format!("{} (scheduled {})", job.name, cron::fmt_local(due)),
-        ),
-        Trigger::Manual => say(out, format!("{} (manual)", job.name)),
-    }
+    say(out, format!("{} ({trigger_name})", job.name));
 
     let (code, result) = match missing_sources(user_data) {
         Err(e) => {
@@ -177,10 +161,10 @@ fn run_steps(
     say: &dyn Fn(&mut dyn Write, String),
     out: &mut dyn Write,
 ) -> (i32, &'static str) {
-    // Scheduled runs own their process group, so a timeout stops the whole
+    // Requested runs own their process group, so a timeout stops the whole
     // step (npm, node, the binaries it starts). A run in a terminal stays in
     // the terminal's group, so Ctrl-C reaches the step.
-    let own_group = matches!(trigger, Trigger::Schedule(_)) || !io::stdout().is_terminal();
+    let own_group = trigger == Trigger::Requested || !io::stdout().is_terminal();
     let deadline = started + job.timeout;
     let mut codes = Vec::new();
     for step in &job.steps {
@@ -325,11 +309,10 @@ fn signal(pid: i32, sig: i32) {
 fn new_log(user_data: &Path, job: &str, at: i64) -> Result<PathBuf, String> {
     let dir = state::log_dir(user_data, job);
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let c = cron::local(at);
-    let secs = at.rem_euclid(60);
+    let c = localtime::local(at);
     let stem = format!(
-        "{:04}{:02}{:02}-{:02}{:02}{secs:02}",
-        c.year, c.month, c.day, c.hour, c.minute
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        c.year, c.month, c.day, c.hour, c.minute, c.second
     );
     let mut path = dir.join(format!("{stem}.log"));
     let mut n = 2;

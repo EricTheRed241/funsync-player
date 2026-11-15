@@ -145,10 +145,9 @@ pub fn is_due(last_run: Option<&str>, now_ms: i64, interval_days: f64) -> bool {
     (now_ms - last) as f64 >= interval_days * 86_400_000.0
 }
 
-/// Take `age-screen.lock` (`<pid>@<host>`, removed on drop). A lock whose
-/// run has ended (this host: its pid is gone; another host: older than
-/// `FOREIGN_LOCK_MAX_AGE`) or that is unreadable is stale and taken over;
-/// a live one is an error.
+/// Take `age-screen.lock` (`<pid>`, removed on drop). A lock whose pid is
+/// gone or that is unreadable is stale and taken over; a live one is an
+/// error.
 pub fn lock(user_data: &Path) -> Result<PidLock, String> {
     let path = user_data.join(LOCK_NAME);
     host::take_lock(&path).map_err(|e| match e {
@@ -163,7 +162,6 @@ pub fn lock(user_data: &Path) -> Result<PidLock, String> {
 mod tests {
     use super::*;
     use std::process::Command;
-    use std::time::{Duration, SystemTime};
     use video_tags::host::LockHolder;
 
     fn temp(name: &str) -> PathBuf {
@@ -190,11 +188,11 @@ mod tests {
     fn a_stale_lock_is_taken_over_and_a_live_one_refused() {
         let dir = temp("lock");
         let lock_path = dir.join(LOCK_NAME);
-        // A pid that has exited, in the old format (no host): this host's.
+        // A pid that has exited, in the old `<pid>@<host>` format.
         let mut child = Command::new("true").spawn().unwrap();
         let dead = child.id();
         child.wait().unwrap();
-        fs::write(&lock_path, dead.to_string()).unwrap();
+        fs::write(&lock_path, format!("{dead}@some-other-host")).unwrap();
         let held = lock(&dir).unwrap();
         assert_eq!(
             fs::read_to_string(&lock_path).unwrap(),
@@ -207,21 +205,17 @@ mod tests {
         // Garbage in the file counts as stale.
         fs::write(&lock_path, "not a pid").unwrap();
         drop(lock(&dir).unwrap());
-        // Another host's (a pod's, the Mac's): its pid is never checked here;
-        // held for 12 hours, then stale.
-        fs::write(&lock_path, format!("{dead}@some-other-host")).unwrap();
+        // A live pid (this one) in the old format: refused, named by pid.
+        fs::write(
+            &lock_path,
+            format!("{}@some-other-host", std::process::id()),
+        )
+        .unwrap();
         let err = lock(&dir).unwrap_err();
         assert!(
-            err.contains(&format!("pid {dead} on some-other-host")),
+            err.contains(&format!("pid {}", std::process::id())),
             "{err}"
         );
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&lock_path)
-            .unwrap()
-            .set_modified(SystemTime::now() - Duration::from_secs(13 * 3600))
-            .unwrap();
-        drop(lock(&dir).unwrap());
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -6,7 +6,6 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -22,18 +21,15 @@ export const readConfig = (userData) => JSON.parse(fs.readFileSync(configPath(us
 
 /**
  * The app holds Chromium's SingletonLock (`<host>-<pid>`) in userData while it
- * runs. A lock from another host (the Mac, seen from a pod) counts as held: its
- * pid can't be checked here. FUNSYNC_CONFIG_READONLY: always running, so every
- * "only while the app is closed" write is skipped.
+ * runs; it counts as running while that pid lives. FUNSYNC_CONFIG_READONLY:
+ * always running, so every "only while the app is closed" write is skipped.
  */
-export function appRunning(userData, { env = process.env, host = os.hostname(), alive = pidAlive } = {}) {
+export function appRunning(userData, { env = process.env, alive = pidAlive } = {}) {
   if (configReadonly(env)) return true;
   let target;
   try { target = fs.readlinkSync(path.join(userData, 'SingletonLock')); } catch { return false; }
-  const dash = target.lastIndexOf('-');
-  const pid = Number(target.slice(dash + 1));
+  const pid = Number(target.slice(target.lastIndexOf('-') + 1));
   if (!pid) return true;
-  if (target.slice(0, Math.max(dash, 0)) !== host) return true;
   return alive(pid);
 }
 

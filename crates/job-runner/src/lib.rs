@@ -1,9 +1,10 @@
-//! `npm run jobs -- <command>`: FunSync's scheduled jobs on this Mac
-//! (`deploy/jobs.json`), run by a scheduler the desktop app starts.
+//! `npm run jobs -- <command>`: FunSync's jobs on this Mac (`deploy/jobs.json`),
+//! run by a scheduler the desktop app starts. Orca automations decide when,
+//! with `start`.
 
-pub mod cron;
 pub mod exec;
 pub mod jobs;
+pub mod localtime;
 pub mod serve;
 pub mod state;
 
@@ -13,21 +14,21 @@ use std::path::{Path, PathBuf};
 
 pub const USAGE: &str = "\
 Usage: npm run jobs -- <command> [options]
-FunSync's scheduled jobs on this Mac (deploy/jobs.json). The desktop app runs
-the scheduler, so jobs get the app's access to Documents and the library drive.
-  status               every job: schedule, paused, running or its last run, next run
-  run <job>            run a job now in this terminal and wait for it (exit code: the job's)
+FunSync's jobs on this Mac (deploy/jobs.json). Orca automations start them; the
+desktop app runs the scheduler that does, so jobs get the app's access to
+Documents and the library drive.
+  status               every job: running or its last run
   start <job>          have the app's scheduler run a job now (it starts within 20 s,
-                       outside this terminal, paused or not; exit 1 when the scheduler isn't running)
-  pause <job|all>      stop scheduling a job (a run in progress finishes)
-  resume <job|all>     schedule it again (all: the jobs not paused by default)
+                       outside this terminal; exit 2 when it's already running,
+                       1 when the scheduler isn't running)
+  run <job>            run a job now in this terminal and wait for it (exit code: the job's)
   logs <job>           print the job's latest log
   serve                the scheduler (the desktop app starts it; one per data folder)
 Options:
   --user-data <dir>    app data folder (default: $FUNSYNC_USER_DATA, else the desktop app's)
   --jobs <file>        job definitions instead of the built-in deploy/jobs.json
 Exit codes: 0 done, 1 error, 2 work left or already running, 3 a login expired.
-Files: <userData>/job-runner/ (state, locks, control.json, logs/<job>/).
+Files: <userData>/job-runner/ (state, locks, requests/, logs/<job>/).
 ";
 
 struct Options {
@@ -35,14 +36,14 @@ struct Options {
     target: Option<String>,
     user_data: Option<PathBuf>,
     jobs_file: Option<PathBuf>,
-    due: Option<i64>,
+    requested: bool,
 }
 
 fn parse(args: &[OsString]) -> Result<Option<Options>, String> {
     let mut positional: Vec<String> = Vec::new();
     let mut user_data = None;
     let mut jobs_file = None;
-    let mut due = None;
+    let mut requested = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let a = a.to_string_lossy();
@@ -55,15 +56,8 @@ fn parse(args: &[OsString]) -> Result<Option<Options>, String> {
             "-h" | "--help" => return Ok(None),
             "--user-data" => user_data = Some(PathBuf::from(value("--user-data")?)),
             "--jobs" => jobs_file = Some(PathBuf::from(value("--jobs")?)),
-            // Set by the scheduler: the scheduled time this run is for.
-            "--due" => {
-                let v = value("--due")?;
-                due = Some(
-                    v.to_string_lossy()
-                        .parse()
-                        .map_err(|_| "--due takes Unix seconds".to_string())?,
-                );
-            }
+            // Set by the scheduler on the runs it starts.
+            "--requested" => requested = true,
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             s => positional.push(s.to_string()),
         }
@@ -81,7 +75,7 @@ fn parse(args: &[OsString]) -> Result<Option<Options>, String> {
         target,
         user_data,
         jobs_file,
-        due,
+        requested,
     }))
 }
 
@@ -137,9 +131,10 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             Ok(0)
         }
         "run" => find(&opts.target).map(|job| {
-            let trigger = match opts.due {
-                Some(due) => exec::Trigger::Schedule(due),
-                None => exec::Trigger::Manual,
+            let trigger = if opts.requested {
+                exec::Trigger::Requested
+            } else {
+                exec::Trigger::Terminal
             };
             exec::run(&user_data, job, trigger, out)
         }),
@@ -152,10 +147,13 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 return Ok(2);
             }
             state::write_request(&user_data, &job.name)?;
-            let _ = writeln!(out, "{}: start requested; the scheduler starts it within 20 s.", job.name);
+            let _ = writeln!(
+                out,
+                "{}: start requested; the scheduler starts it within 20 s.",
+                job.name
+            );
             Ok(0)
         }),
-        "pause" | "resume" => set_paused(&user_data, &jobs, &opts, out),
         "logs" => find(&opts.target).and_then(|job| {
             let path = state::latest_log(&user_data, &job.name)
                 .ok_or_else(|| format!("{} has no log yet", job.name))?;
@@ -182,47 +180,14 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     }
 }
 
-fn set_paused(
-    user_data: &Path,
-    jobs: &[jobs::Job],
-    opts: &Options,
-    out: &mut dyn Write,
-) -> Result<i32, String> {
-    let pause = opts.command == "pause";
-    let target = opts.target.as_deref().ok_or("name a job, or all")?;
-    let list: Vec<&jobs::Job> = if target == "all" {
-        // Resuming all leaves the jobs that are paused by default alone.
-        jobs.iter()
-            .filter(|j| pause || !j.paused_by_default)
-            .collect()
-    } else {
-        vec![
-            jobs.iter()
-                .find(|j| j.name == target)
-                .ok_or_else(|| format!("unknown job {target}"))?,
-        ]
-    };
-    let mut control = state::read_control(user_data);
-    for job in list {
-        control.paused.insert(job.name.clone(), pause);
-        let _ = writeln!(
-            out,
-            "{}: {}",
-            job.name,
-            if pause { "paused" } else { "scheduled" }
-        );
-    }
-    state::write_control(user_data, &control)?;
-    Ok(0)
-}
-
 fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
-    let control = state::read_control(user_data);
-    let now = exec::now();
     let serving = exec::holder_at(&state::dir(user_data).join("serve.lock"));
     let _ = match serving {
         Some(h) => writeln!(out, "Scheduler: running ({h})"),
-        None => writeln!(out, "Scheduler: not running (the desktop app starts it)"),
+        None => writeln!(
+            out,
+            "Scheduler: not running (the desktop app starts it); `start` won't work"
+        ),
     };
     match exec::missing_sources(user_data) {
         Ok(missing) if !missing.is_empty() => {
@@ -235,27 +200,21 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
         Ok(_) => {}
     }
     let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "{:<18} {:<13} {:<26} {:<44} next",
-        "job", "schedule", "now", "last run"
-    );
+    let _ = writeln!(out, "{:<18} {:<34} last run", "job", "now");
     for job in jobs {
-        let paused = control.is_paused(&job.name, job.paused_by_default);
         let st = state::read(user_data, &job.name);
-        let now_col = match exec::holder(user_data, &job.name) {
+        let holder = exec::holder(user_data, &job.name);
+        let now_col = match &holder {
             Some(h) => {
                 let since = st
                     .last
                     .as_ref()
-                    .map(|r| cron::fmt_local(r.started))
+                    .map(|r| localtime::fmt_local(r.started))
                     .unwrap_or_default();
                 format!("running since {since} ({})", h.pid)
             }
-            None if paused => "paused".into(),
             None => "idle".into(),
         };
-        let held = exec::holder(user_data, &job.name).is_some();
         let last = match &st.last {
             Some(r) => {
                 let took = r
@@ -264,32 +223,20 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
                     .unwrap_or_default();
                 let exit = r.exit.map(|c| format!(" (exit {c})")).unwrap_or_default();
                 // A run whose process died (killed, power cut) never wrote its end.
-                let result = if r.ended.is_none() && !held {
+                let result = if r.ended.is_none() && holder.is_none() {
                     "interrupted"
                 } else {
                     r.result.as_str()
                 };
                 format!(
                     "{} {}{took}: {result}{exit}",
-                    cron::fmt_local(r.started),
+                    localtime::fmt_local(r.started),
                     r.trigger,
                 )
             }
             None => "never".into(),
         };
-        let next = if paused {
-            "-".into()
-        } else {
-            job.schedule
-                .next(now, cron::local)
-                .map(cron::fmt_local)
-                .unwrap_or_default()
-        };
-        let _ = writeln!(
-            out,
-            "{:<18} {:<13} {:<26} {:<44} {next}",
-            job.name, job.schedule_text, now_col, last
-        );
+        let _ = writeln!(out, "{:<18} {:<34} {last}", job.name, now_col);
     }
 }
 

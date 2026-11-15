@@ -93,7 +93,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         return Ok(0);
     }
 
-    let backend = Backend::new(&backend::url(opts.backend.as_deref()))?;
+    let backend = Backend::new(&backend::url(opts.backend.as_deref(), &user_data))?;
     let videos = match backend.videos() {
         Ok(v) => v,
         Err(BackendError::Down(m)) => {

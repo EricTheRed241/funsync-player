@@ -14,7 +14,6 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub const CREDENTIALS_ENV: &str = "FUNSYNC_SLR_CREDENTIALS";
-pub const CHROME_ENV: &str = "FUNSYNC_CHROME_PATH";
 pub const CHROME_PATH: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 /// Chrome's profile for the login, in userData.
 pub const PROFILE_DIR: &str = "slr-chrome";
@@ -120,13 +119,9 @@ pub fn login(
     fs::create_dir_all(&profile).map_err(|e| format!("{}: {e}", profile.display()))?;
     let port_file = profile.join("DevToolsActivePort");
     let _ = fs::remove_file(&port_file);
-    let chrome_path = std::env::var(CHROME_ENV)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| CHROME_PATH.to_string());
     let _ = writeln!(log, "Opening Chrome to sign in to SLR...");
     let _chrome = Chrome(
-        Command::new(&chrome_path)
+        Command::new(CHROME_PATH)
             .arg(format!("--user-data-dir={}", profile.display()))
             .args([
                 "--remote-debugging-port=0",
@@ -139,7 +134,7 @@ pub fn login(
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("can't start Chrome ({chrome_path}): {e}"))?,
+            .map_err(|e| format!("can't start Chrome ({CHROME_PATH}): {e}"))?,
     );
     let started = Instant::now();
     let url = loop {

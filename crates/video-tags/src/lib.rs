@@ -166,7 +166,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
                 .map(|c| c.backend_port)
                 .unwrap_or(config::DEFAULT_BACKEND_PORT),
         };
-        match rescan::request_rescan(&host::backend_url(port), rescan::TIMEOUT) {
+        match rescan::request_rescan(&format!("http://127.0.0.1:{port}"), rescan::TIMEOUT) {
             Ok(status) => writeln!(out, "Rescan requested from the app ({status}).").map_err(io)?,
             Err(e) => writeln!(
                 out,

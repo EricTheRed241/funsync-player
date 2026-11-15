@@ -165,13 +165,9 @@ describe('library:reorganize CLI', () => {
     for (const f of ['EroScripts', 'FapTap', 'Other']) expect(fs.existsSync(path.join(gvp, f)), f).toBe(false);
   });
 
-  it('refuses while the app holds its lock: a live pid on this host, or any lock from another host', () => {
+  it('refuses while the app holds its lock (a live pid)', () => {
     const lock = path.join(userData, 'SingletonLock');
     fs.symlinkSync(`${os.hostname()}-${process.pid}`, lock);
-    expect(run().status).toBe(2);
-    fs.rmSync(lock);
-    // The Mac's lock seen from a pod: its pid can't be checked there.
-    fs.symlinkSync('some-other-host-1', lock);
     expect(run().status).toBe(2);
     expect(fs.existsSync(path.join(gvp, 'Multi-Axis/Misiv/One/One.mp4'))).toBe(true);
   });

@@ -1,5 +1,5 @@
 //! Ask the running app to rescan (`POST /api/remote/request-rescan` on its
-//! backend, [`crate::host::backend_url`]; the desktop polls the counter and
+//! backend, `http://127.0.0.1:<port>`; the desktop polls the counter and
 //! rescans, merging the new file). Raw HTTP/1.1 over a TcpStream: one
 //! request needs no HTTP crate.
 

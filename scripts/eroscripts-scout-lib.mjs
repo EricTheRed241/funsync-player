@@ -1113,7 +1113,7 @@ export function scoredCandidate(c, scoring = {}) {
 }
 
 /**
- * The scout's run locks in userData (`<pid>@<host>`, scripts/host-env.mjs takePidLock), one per kind of
+ * The scout's run locks in userData (`<pid>`, scripts/host-env.mjs takePidLock), one per kind of
  * work, so runs that write different files go on side by side and two of the same kind never do:
  * `scan` (a scan, `--add`, `--rejudge`, `--titles`: the scan state and the list), `fetch` (`--fetch`,
  * `--manual-list`, `--retitle`: the library, the rejected file, Downloads) and `frames` (`--frames`: the
@@ -1139,7 +1139,7 @@ export function scoutLockFor(opts) {
   return 'fetch';
 }
 
-/** Why a run (or a `--daily` step) can't start: the work another run is doing, its lock file and its holder (`pid 12 on mac`). */
+/** Why a run (or a `--daily` step) can't start: the work another run is doing, its lock file and its holder (`pid 12`). */
 export function lockBusyMessage(kind, holder) {
   const lock = SCOUT_LOCKS[kind];
   return `Another eroscripts:scout run is doing ${lock.work}: ${lock.file} is held by ${holder}`;
@@ -1151,7 +1151,7 @@ export function lockBusyMessage(kind, holder) {
  * rules), posts left pending, and the waiting list with what `--auto` takes.
  *
  * @param {object} state scan state
- * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, scanSkipped?, framesAt?, framesExit?, framesSkipped?, fetchAt?, fetchExit?, fetchSkipped?}|null, now?: number, rules?: number}} [o]
+ * @param {{candidates?: object[], scoring?: object, wanted?: Set<number>, daily?: {scanAt, scanExit, scanSkipped?, fetchAt?, fetchExit?, fetchSkipped?}|null, now?: number, rules?: number}} [o]
  */
 export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new Set(), daily = null, now = Date.now(), rules = RULES_VERSION } = {}) {
   const when = (iso) => {
@@ -1164,7 +1164,7 @@ export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new
   const lines = [`Last scan: ${when(state.lastScanAt)}`];
   if (daily) {
     const step = (key, label) => `${label} ${when(daily[`${key}At`])}, exit ${daily[`${key}Exit`]}${daily[`${key}Skipped`] ? ` (skipped: ${daily[`${key}Skipped`]})` : ''}`;
-    const steps = [step('scan', 'scan'), daily.framesAt && step('frames', 'frames'), daily.fetchAt && step('fetch', 'auto-fetch')];
+    const steps = [step('scan', 'scan'), daily.fetchAt && step('fetch', 'auto-fetch')];
     lines.push(`Daily run: ${steps.filter(Boolean).join('; ')}`);
   }
   lines.push('Backfill:');

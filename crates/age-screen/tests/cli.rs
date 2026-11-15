@@ -133,8 +133,7 @@ fn height(image: &Path) -> u32 {
 /// environment.
 fn command() -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_age-screen"));
-    c.env_remove("FUNSYNC_USER_DATA")
-        .env_remove("FUNSYNC_BACKEND_URL");
+    c.env_remove("FUNSYNC_USER_DATA");
     c
 }
 
@@ -406,7 +405,7 @@ fn backend_down_exits_2_and_help_works() {
 }
 
 #[test]
-fn env_vars_set_the_defaults_and_flags_win() {
+fn config_port_env_user_data_and_flags() {
     let tmp = TempDir::new();
     let (url, posts) = fake_backend(json!([]), json!({}));
     let dead = format!(
@@ -418,11 +417,26 @@ fn env_vars_set_the_defaults_and_flags_win() {
             .port()
     );
 
-    // FUNSYNC_BACKEND_URL is the backend when --backend isn't given.
+    // Without --backend: 127.0.0.1 on config.json's port.
+    let port: u16 = url
+        .rsplit(':')
+        .next()
+        .unwrap()
+        .trim_end_matches('/')
+        .parse()
+        .unwrap();
+    fs::write(
+        tmp.0.join("config.json"),
+        json!({ "settings": {
+            "library": { "sources": [{ "path": "/V" }] },
+            "backend": { "port": port },
+        } })
+        .to_string(),
+    )
+    .unwrap();
     let o = command()
         .args(["--run", "--user-data"])
         .arg(&tmp.0)
-        .env("FUNSYNC_BACKEND_URL", format!("{url}/"))
         .output()
         .unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
@@ -433,7 +447,6 @@ fn env_vars_set_the_defaults_and_flags_win() {
     let o = command()
         .args(["--run", "--backend", &dead, "--user-data"])
         .arg(&tmp.0)
-        .env("FUNSYNC_BACKEND_URL", &url)
         .output()
         .unwrap();
     assert_eq!(o.status.code(), Some(2), "{}", text(&o));

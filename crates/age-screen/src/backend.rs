@@ -1,5 +1,5 @@
-//! The running app's backend (`--backend`, else `FUNSYNC_BACKEND_URL`, else
-//! `http://127.0.0.1:5123`): the video list and VR flags it serves, and the
+//! The running app's backend (`--backend`, else `http://127.0.0.1:<port>` with
+//! the port from config.json): the video list and VR flags it serves, and the
 //! remote edits (rating, playlist) the desktop applies. Raw HTTP/1.1 over a
 //! TcpStream: a few requests need no HTTP crate.
 //!
@@ -12,14 +12,19 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
 use std::time::{Duration, Instant};
-use video_tags::host::{self, HttpBase};
+use video_tags::host::HttpBase;
 
-/// The backend URL: `--backend`, else `FUNSYNC_BACKEND_URL`, else the app's
-/// default port on this machine.
-pub fn url(flag: Option<&str>) -> String {
-    flag.map(str::to_string)
-        .unwrap_or_else(|| host::backend_url(video_tags::config::DEFAULT_BACKEND_PORT))
+/// The backend URL: `--backend`, else this machine on the app's port from
+/// `config.json` (the default port when it can't be read).
+pub fn url(flag: Option<&str>, user_data: &Path) -> String {
+    flag.map(str::to_string).unwrap_or_else(|| {
+        let port = video_tags::config::read(user_data)
+            .map(|c| c.backend_port)
+            .unwrap_or(video_tags::config::DEFAULT_BACKEND_PORT);
+        format!("http://127.0.0.1:{port}")
+    })
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -320,9 +325,13 @@ mod tests {
     }
 
     #[test]
-    fn the_backend_flag_wins() {
-        // The env var and default are covered end to end (tests/cli.rs).
-        assert_eq!(url(Some("http://10.0.0.2:5200")), "http://10.0.0.2:5200");
+    fn the_backend_flag_wins_else_the_config_port() {
+        let none = Path::new("/no/such/userData");
+        assert_eq!(
+            url(Some("http://10.0.0.2:5200"), none),
+            "http://10.0.0.2:5200"
+        );
+        assert_eq!(url(None, none), "http://127.0.0.1:5123");
     }
 
     #[test]
