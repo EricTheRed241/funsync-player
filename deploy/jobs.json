@@ -1,11 +1,12 @@
 {
-  "_comment": "FunSync's scheduled jobs, run on this Mac by job-runner (crates/job-runner), which the desktop app starts. schedule: cron (minute hour day-of-month month day-of-week) in the Mac's local time. catchUp: how late a run missed while the app was closed may still start. timeout: the run is stopped after this. steps run one after the other from the repo root; the job's exit code is the first that isn't 0 or 2, else 2 when a step left work, else 0. paused: not scheduled until `npm run jobs -- resume <job>`.",
+  "_comment": "FunSync's scheduled jobs, run on this Mac by job-runner (crates/job-runner), which the desktop app starts. schedule: cron (minute hour day-of-month month day-of-week) in the Mac's local time. catchUp: how late a run missed while the app was closed may still start. timeout: the run is stopped after this. steps run one after the other from the repo root; the job's exit code is the first that isn't 0 or 2, else 2 when a step left work, else 0. paused: not scheduled until `npm run jobs -- resume <job>`. eroscripts-scout is paused here because the Orca automation \"EroScripts scout (daily)\" fires it (`npm run jobs -- run eroscripts-scout`, 00:05); its schedule stays for reference.",
   "jobs": [
     {
       "name": "eroscripts-scout",
       "schedule": "5 0 * * *",
       "catchUp": "12h",
       "timeout": "12h",
+      "paused": true,
       "steps": [
         ["npm", "run", "-s", "eroscripts:scout", "--", "--daily", "--passes", "2", "--wait", "1h"],
         ["npm", "run", "-s", "slr:scout", "--", "--fetch"]
