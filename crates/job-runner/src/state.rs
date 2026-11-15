@@ -1,16 +1,13 @@
 //! Files under `<userData>/job-runner/`:
-//! - `<job>.json`: the job's last run and the last scheduled time it handled,
-//!   written only by the process holding `<job>.lock` (the run).
-//! - `<job>.lock`: held while the job runs (`<pid>@<host>`).
-//! - `control.json`: `{"paused": {"<job>": true|false}}`, written by
-//!   pause / resume; a job not listed follows its `paused` default.
-//! - `logs/<job>/<YYYYMMDD-HHMMSS>.log`: one per run, the last 20 kept.
+//! - `<job>.json`: the job's last run, written only by the process holding
+//!   `<job>.lock` (the run).
+//! - `<job>.lock`: held while the job runs (its pid).
 //! - `requests/<job>`: `job-runner start <job>` asks the scheduler to run the
 //!   job now; the scheduler removes it when it handles it.
+//! - `logs/<job>/<YYYYMMDD-HHMMSS>.log`: one per run, the last 20 kept.
 //! - `serve.lock`: the scheduler (one per data folder).
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -46,19 +43,14 @@ pub fn take_request(user_data: &Path, job: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct JobState {
-    /// The last scheduled time (Unix seconds) a run was started for.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_due: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last: Option<Run>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Run {
-    /// `schedule` or `manual`.
+    /// `requested` (through the scheduler) or `terminal` (`run` in a terminal).
     pub trigger: String,
     pub started: i64,
     /// None while it runs.
@@ -82,30 +74,6 @@ pub fn read(user_data: &Path, job: &str) -> JobState {
 pub fn write(user_data: &Path, job: &str, state: &JobState) -> Result<(), String> {
     let text = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
     write_atomic(&dir(user_data).join(format!("{job}.json")), &text)
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Control {
-    #[serde(default)]
-    pub paused: BTreeMap<String, bool>,
-}
-
-pub fn read_control(user_data: &Path) -> Control {
-    fs::read_to_string(dir(user_data).join("control.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-pub fn write_control(user_data: &Path, control: &Control) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(control).map_err(|e| e.to_string())?;
-    write_atomic(&dir(user_data).join("control.json"), &text)
-}
-
-impl Control {
-    pub fn is_paused(&self, job: &str, by_default: bool) -> bool {
-        self.paused.get(job).copied().unwrap_or(by_default)
-    }
 }
 
 fn write_atomic(path: &Path, text: &str) -> Result<(), String> {

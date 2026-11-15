@@ -1,0 +1,20 @@
+[package]
+name = "library-thumbs"
+version = "0.1.0"
+description = "Ask the running app's backend for every library video's thumbnail, so missing ones are generated and cached ahead of time"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "library_thumbs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "library-thumbs"
+path = "src/main.rs"
+
+[dependencies]
+# Shared with the other CLIs: userData default, config.json (backend port).
+video-tags = { path = "../video-tags" }
+serde_json = "1"

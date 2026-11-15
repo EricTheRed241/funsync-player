@@ -27,7 +27,7 @@ Options:
   --dry-run             With --fetch: print the plan (download choice, script, target
                         path); no download request is sent
   --quota               Only refresh the download quota in the existing file
-  --login               Sign in to SLR in a visible Chrome window ($FUNSYNC_CHROME_PATH,
+  --login               Sign in to SLR in a visible Chrome window (Google Chrome,
                         profile <userData>/slr-chrome), save the session to
                         <userData>/slr-session.json (mode 0600), then refresh the quota
   --credentials <file>  For --login: \"username: …\" and \"password: …\" lines

@@ -52,8 +52,6 @@ export const FRAMES_WANTED = 3;
 export const SHARED_IMAGE_POSTS = 3;
 /** `--frames` without a number: posts per run. */
 export const DEFAULT_FRAME_POSTS = 100;
-/** Posts `--daily` makes frames for, after its scan. */
-export const DAILY_FRAME_POSTS = 50;
 /** Lowest stream quality taken for frames: flat videos, and stereo VR (each eye gets half the width or height). */
 export const MIN_FLAT_HEIGHT = 480;
 export const MIN_STEREO_HEIGHT = 720;

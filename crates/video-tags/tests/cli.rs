@@ -77,8 +77,7 @@ fn video(dir: &Path, name: &str) -> PathBuf {
 /// environment.
 fn command() -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_video-tags"));
-    c.env_remove("FUNSYNC_USER_DATA")
-        .env_remove("FUNSYNC_BACKEND_URL");
+    c.env_remove("FUNSYNC_USER_DATA");
     c
 }
 
@@ -389,7 +388,7 @@ fn fake_backend() -> (String, std::thread::JoinHandle<String>) {
 }
 
 #[test]
-fn env_vars_set_the_user_data_and_backend_and_flags_win() {
+fn env_var_sets_the_user_data_the_config_port_the_backend_and_flags_win() {
     let env = env();
     let a = video(&env.library.join("Artist").join("Scene"), "a.mp4");
     let p = proposals(
@@ -397,12 +396,21 @@ fn env_vars_set_the_user_data_and_backend_and_flags_win() {
         serde_json::json!({ "by": "tagger", "videos": { s(&a): { "tags": ["pov"], "confidence": 0.9 } } }),
     );
     // No --user-data: FUNSYNC_USER_DATA; the rescan goes to
-    // FUNSYNC_BACKEND_URL instead of 127.0.0.1:<config port>.
+    // 127.0.0.1:<config port>.
     let (url, server) = fake_backend();
+    let port: u16 = url.rsplit(':').next().unwrap().parse().unwrap();
+    let config = serde_json::json!({ "settings": {
+        "library": { "sources": [{ "id": "1", "name": "Other", "path": env.library, "enabled": true }] },
+        "backend": { "port": port },
+    } });
+    fs::write(
+        env.user_data.join("config.json"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
     let o = command()
         .args(["--proposals", &p, "--apply"])
         .env("FUNSYNC_USER_DATA", &env.user_data)
-        .env("FUNSYNC_BACKEND_URL", &url)
         .output()
         .unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));

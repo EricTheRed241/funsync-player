@@ -1,8 +1,5 @@
-//! What changes when a CLI runs somewhere other than the Mac that runs the
-//! app (a Kubernetes pod with userData and the library mounted at the same
-//! paths): the userData folder and the app's backend URL come from the
-//! environment, and lock files record the host that wrote them, since a pid
-//! means something only on that host. Shared by every Rust CLI.
+//! Shared by every Rust CLI: the userData folder (`FUNSYNC_USER_DATA`, else
+//! the app's), the backend's HTTP base, and pid lock files.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -10,14 +7,9 @@ use std::fs;
 use std::io::{self, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 
 /// The userData folder when no `--user-data` is given.
 pub const USER_DATA_ENV: &str = "FUNSYNC_USER_DATA";
-/// Base URL of the running app's backend (`http://host:port`); flags win.
-pub const BACKEND_URL_ENV: &str = "FUNSYNC_BACKEND_URL";
-/// A lock written on another host counts as held until it is this old.
-pub const FOREIGN_LOCK_MAX_AGE: Duration = Duration::from_secs(12 * 3600);
 
 /// `FUNSYNC_USER_DATA`, else Electron's userData folder for the app
 /// (`app.getPath('userData')`).
@@ -40,18 +32,6 @@ fn user_data_from(env: Option<OsString>) -> Option<PathBuf> {
             .or_else(|| Some(home()?.join(".config")))?
     };
     Some(base.join("funsync-player"))
-}
-
-/// The app's backend: `FUNSYNC_BACKEND_URL`, else `http://127.0.0.1:<port>`.
-pub fn backend_url(port: u16) -> String {
-    backend_url_from(std::env::var(BACKEND_URL_ENV).ok(), port)
-}
-
-fn backend_url_from(env: Option<String>, port: u16) -> String {
-    match env.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-        Some(url) => url.trim_end_matches('/').to_string(),
-        None => format!("http://127.0.0.1:{port}"),
-    }
 }
 
 /// `http://host[:port][/]`, split into the `Host` header and the
@@ -95,30 +75,8 @@ impl HttpBase {
     }
 }
 
-/// This machine's host name (`gethostname`, as Node's `os.hostname()`); in a
-/// pod, the pod's name.
-pub fn hostname() -> String {
-    #[cfg(unix)]
-    {
-        unsafe extern "C" {
-            fn gethostname(name: *mut std::ffi::c_char, len: usize) -> std::ffi::c_int;
-        }
-        let mut buf = [0u8; 256];
-        // SAFETY: `buf` is writable for `buf.len()` bytes; gethostname writes
-        // at most that many.
-        if unsafe { gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0 {
-            let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-            return String::from_utf8_lossy(&buf[..end]).into_owned();
-        }
-    }
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_default()
-}
-
-/// Whether a process with this pid runs on this host (`kill(pid, 0)`, which
-/// needs no `kill` binary: a slim container image has none). Another user's
-/// process (EPERM) runs too.
+/// Whether a process with this pid runs on this machine (`kill(pid, 0)`).
+/// Another user's process (EPERM) runs too.
 pub fn pid_alive(pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
@@ -147,64 +105,47 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Who holds a lock file: `<pid>@<host>`, or a bare `<pid>` (written before
-/// hosts were recorded; read as this host's).
+/// Who holds a lock file: a bare `<pid>`. Files from older versions hold
+/// `<pid>@<host>`; the host is ignored.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockHolder {
     pub pid: u32,
-    pub host: Option<String>,
 }
 
 impl LockHolder {
-    /// This process on this host.
+    /// This process.
     pub fn me() -> Self {
         LockHolder {
             pid: std::process::id(),
-            host: Some(hostname()),
         }
     }
 
     pub fn parse(text: &str) -> Option<Self> {
         let text = text.trim();
-        let (pid, host) = match text.split_once('@') {
-            Some((pid, host)) => (pid, Some(host.to_string())),
-            None => (text, None),
-        };
+        let pid = text.split_once('@').map_or(text, |(pid, _)| pid);
         Some(LockHolder {
             pid: pid.parse().ok()?,
-            host,
         })
     }
 
     /// The lock file's contents.
     pub fn to_text(&self) -> String {
-        match &self.host {
-            Some(host) => format!("{}@{host}", self.pid),
-            None => self.pid.to_string(),
-        }
+        self.pid.to_string()
     }
 
-    /// Whether the lock still holds, `age` after it was written: on this
-    /// host while its pid runs; on another host (whose pids can't be checked
-    /// from here) until [`FOREIGN_LOCK_MAX_AGE`].
-    pub fn holds(&self, age: Duration, this_host: &str, alive: impl Fn(u32) -> bool) -> bool {
-        match &self.host {
-            Some(host) if host != this_host => age < FOREIGN_LOCK_MAX_AGE,
-            _ => alive(self.pid),
-        }
+    /// Whether the lock still holds: while its pid runs.
+    pub fn holds(&self, alive: impl Fn(u32) -> bool) -> bool {
+        alive(self.pid)
     }
 }
 
 impl fmt::Display for LockHolder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.host {
-            Some(host) => write!(f, "pid {} on {host}", self.pid),
-            None => write!(f, "pid {}", self.pid),
-        }
+        write!(f, "pid {}", self.pid)
     }
 }
 
-/// A lock file holding `<pid>@<host>`; removed on drop.
+/// A lock file holding `<pid>`; removed on drop.
 #[derive(Debug)]
 pub struct PidLock {
     path: PathBuf,
@@ -227,7 +168,6 @@ pub enum LockError {
 /// [`LockHolder::holds`]) or is unreadable is stale and taken over.
 pub fn take_lock(path: &Path) -> Result<PidLock, LockError> {
     let me = LockHolder::me();
-    let this_host = me.host.clone().unwrap_or_default();
     for _ in 0..3 {
         match fs::OpenOptions::new()
             .write(true)
@@ -245,13 +185,8 @@ pub fn take_lock(path: &Path) -> Result<PidLock, LockError> {
                 let holder = fs::read_to_string(path)
                     .ok()
                     .and_then(|s| LockHolder::parse(&s));
-                let age = fs::metadata(path)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| SystemTime::now().duration_since(t).ok())
-                    .unwrap_or(Duration::ZERO);
                 match holder {
-                    Some(h) if h.holds(age, &this_host, pid_alive) => {
+                    Some(h) if h.holds(pid_alive) => {
                         return Err(LockError::Held(h));
                     }
                     _ => {
@@ -272,8 +207,8 @@ mod tests {
     #[test]
     fn user_data_env_wins_over_the_app_default() {
         assert_eq!(
-            user_data_from(Some("/pod/userData".into())),
-            Some(PathBuf::from("/pod/userData"))
+            user_data_from(Some("/tmp/userData".into())),
+            Some(PathBuf::from("/tmp/userData"))
         );
         let default = user_data_from(None);
         assert!(default.is_some_and(|d| d.ends_with("funsync-player")));
@@ -281,25 +216,12 @@ mod tests {
     }
 
     #[test]
-    fn backend_url_env_wins_over_the_local_port() {
-        assert_eq!(backend_url_from(None, 5200), "http://127.0.0.1:5200");
-        assert_eq!(
-            backend_url_from(Some("http://funsync-app:5123/".into()), 5200),
-            "http://funsync-app:5123"
-        );
-        assert_eq!(
-            backend_url_from(Some("  ".into()), 5123),
-            "http://127.0.0.1:5123"
-        );
-    }
-
-    #[test]
     fn parses_http_bases() {
         assert_eq!(
-            HttpBase::parse("http://host.docker.internal:5123/"),
+            HttpBase::parse("http://localhost:5123/"),
             Ok(HttpBase {
-                host: "host.docker.internal:5123".into(),
-                authority: "host.docker.internal:5123".into()
+                host: "localhost:5123".into(),
+                authority: "localhost:5123".into()
             })
         );
         assert_eq!(HttpBase::parse("http://app").unwrap().authority, "app:80");
@@ -316,40 +238,23 @@ mod tests {
 
     #[test]
     fn reads_new_and_old_lock_formats() {
-        let h = LockHolder::parse("42@funsync-scout-29123-abcde\n").unwrap();
-        assert_eq!(h.pid, 42);
-        assert_eq!(h.host.as_deref(), Some("funsync-scout-29123-abcde"));
-        assert_eq!(h.to_text(), "42@funsync-scout-29123-abcde");
+        assert_eq!(LockHolder::parse("42\n"), Some(LockHolder { pid: 42 }));
         assert_eq!(
-            LockHolder::parse("42"),
-            Some(LockHolder {
-                pid: 42,
-                host: None
-            })
+            LockHolder::parse("42@mac-mini.local"),
+            Some(LockHolder { pid: 42 })
         );
         assert_eq!(LockHolder::parse("not a pid"), None);
         assert_eq!(LockHolder::parse("@host"), None);
-        assert_eq!(
-            LockHolder::me().to_text(),
-            format!("{}@{}", std::process::id(), hostname())
-        );
+        assert_eq!(LockHolder { pid: 42 }.to_text(), "42");
+        assert_eq!(LockHolder { pid: 42 }.to_string(), "pid 42");
+        assert_eq!(LockHolder::me().to_text(), std::process::id().to_string());
     }
 
     #[test]
-    fn a_foreign_lock_holds_by_age_and_a_local_one_by_pid() {
-        let hour = Duration::from_secs(3600);
-        let never = |_| panic!("a foreign pid is never checked here");
-        let foreign = LockHolder::parse("42@mac-mini").unwrap();
-        assert!(foreign.holds(Duration::ZERO, "pod-1", never));
-        assert!(foreign.holds(12 * hour - Duration::from_secs(1), "pod-1", never));
-        assert!(!foreign.holds(12 * hour, "pod-1", never));
-        let local = LockHolder::parse("42@pod-1").unwrap();
-        assert!(local.holds(100 * hour, "pod-1", |pid| pid == 42));
-        assert!(!local.holds(Duration::ZERO, "pod-1", |_| false));
-        // The old format is this host's: its pid decides.
-        let old = LockHolder::parse("42").unwrap();
-        assert!(old.holds(100 * hour, "pod-1", |_| true));
-        assert!(!old.holds(Duration::ZERO, "pod-1", |_| false));
+    fn a_lock_holds_while_its_pid_runs() {
+        let h = LockHolder::parse("42@another-host").unwrap();
+        assert!(h.holds(|pid| pid == 42));
+        assert!(!h.holds(|_| false));
     }
 
     #[test]
@@ -373,35 +278,31 @@ mod tests {
         dir
     }
 
-    /// Set a file's mtime `age` ago.
-    fn age_file(path: &Path, age: Duration) {
-        let f = fs::OpenOptions::new().write(true).open(path).unwrap();
-        f.set_modified(SystemTime::now() - age).unwrap();
-    }
-
     #[test]
-    fn take_lock_respects_foreign_locks_until_they_expire() {
+    fn take_lock_takes_over_ended_runs_and_refuses_live_ones() {
         let dir = temp("lock");
         let path = dir.join("x.lock");
-        // Another host's lock, an hour old: held, left in place.
-        fs::write(&path, "1@another-host-than-this-one").unwrap();
-        age_file(&path, Duration::from_secs(3600));
-        assert_eq!(
-            take_lock(&path).unwrap_err(),
-            LockError::Held(LockHolder::parse("1@another-host-than-this-one").unwrap())
-        );
-        assert!(path.exists());
-        // 13 hours old: expired, taken over.
-        age_file(&path, Duration::from_secs(13 * 3600));
+        // An old-format lock of a process that has ended: taken over.
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let dead = child.id();
+        child.wait().unwrap();
+        fs::write(&path, format!("{dead}@another-host")).unwrap();
         let held = take_lock(&path).unwrap();
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             LockHolder::me().to_text()
         );
-        // Held by this live process on this host: refused.
+        // Held by this live process: refused.
         assert!(matches!(take_lock(&path), Err(LockError::Held(h)) if h == LockHolder::me()));
         drop(held);
         assert!(!path.exists());
+        // pid 1 runs: its lock is refused and left in place.
+        fs::write(&path, "1").unwrap();
+        assert_eq!(
+            take_lock(&path).unwrap_err(),
+            LockError::Held(LockHolder { pid: 1 })
+        );
+        assert!(path.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

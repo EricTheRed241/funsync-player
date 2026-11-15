@@ -806,7 +806,7 @@ impl Fetch<'_> {
         let port = video_tags::config::from_json(self.user_data, config)
             .map(|c| c.backend_port)
             .unwrap_or(video_tags::config::DEFAULT_BACKEND_PORT);
-        let base = video_tags::host::backend_url(port);
+        let base = format!("http://127.0.0.1:{port}");
         match video_tags::rescan::request_rescan(&base, video_tags::rescan::TIMEOUT) {
             Ok(_) => writeln!(out, "Asked the app to rescan ({base}).").map_err(io),
             Err(e) => writeln!(

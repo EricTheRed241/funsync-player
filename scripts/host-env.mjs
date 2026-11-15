@@ -1,12 +1,9 @@
-// What changes when a CLI runs somewhere other than the Mac that runs the
-// app (a Kubernetes pod with userData and the library mounted at the same
-// paths): `FUNSYNC_USER_DATA` names the userData folder,
-// `FUNSYNC_CONFIG_READONLY=1` keeps a CLI from ever writing config.json, and
-// lock files record the host that wrote them, since a pid means something
-// only on that host. No renderer imports: any CLI can load it.
+// What the CLIs share about where they run: `FUNSYNC_USER_DATA` names the
+// userData folder, `FUNSYNC_CONFIG_READONLY=1` keeps a CLI from ever writing
+// config.json, and pid lock files keep two runs of one kind apart. No
+// renderer imports: any CLI can load it.
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -20,9 +17,6 @@ export function defaultUserDataDir(platform = process.platform, env = process.en
   return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'funsync-player');
 }
 
-/** A lock written on another host counts as held until it is this old. */
-export const FOREIGN_LOCK_MAX_AGE_MS = 12 * 3600_000;
-
 /** `FUNSYNC_CONFIG_READONLY=1`: never write config.json; the app counts as running. */
 export const configReadonly = (env = process.env) => ['1', 'true', 'yes'].includes(String(env.FUNSYNC_CONFIG_READONLY || '').trim().toLowerCase());
 
@@ -31,67 +25,56 @@ export function assertConfigWritable(env = process.env) {
   if (configReadonly(env)) throw new Error('FUNSYNC_CONFIG_READONLY is set: config.json is not written.');
 }
 
-/** Whether a process with this pid runs on this host. */
+/** Whether a process with this pid runs on this machine. */
 export function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
 }
 
 /**
- * A lock file's holder: `<pid>@<host>`, or a bare `<pid>` (written before
- * hosts were recorded; read as this host's, `host: null`). Null when unreadable.
+ * A lock file's holder (`{pid}`): a bare `<pid>`; files from older versions
+ * hold `<pid>@<host>`, whose host is ignored. Null when unreadable.
  */
 export function parseLock(text) {
   const s = String(text ?? '').trim();
   const at = s.indexOf('@');
   const pid = Number(at < 0 ? s : s.slice(0, at));
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  return { pid, host: at < 0 ? null : s.slice(at + 1) };
+  return { pid };
 }
 
 /** The lock file's contents for this process. */
-export const lockText = (pid = process.pid, host = os.hostname()) => `${pid}@${host}`;
+export const lockText = (pid = process.pid) => String(pid);
+
+/** Whether a lock still holds: while its pid runs. */
+export const lockHolds = (holder, { alive = pidAlive } = {}) => alive(holder.pid);
 
 /**
- * Whether a lock still holds, `ageMs` after it was written: on this host while
- * its pid runs; on another host (whose pids can't be checked from here) until
- * FOREIGN_LOCK_MAX_AGE_MS.
+ * Take `file` (`<pid>`, freed at exit or by releasePidLock). Null when taken,
+ * else the holder (`{pid}`) of the live run that has it. A lock whose pid is
+ * gone, or that is unreadable, is taken over.
  */
-export function lockHolds(holder, { ageMs, host = os.hostname(), alive = pidAlive }) {
-  if (holder.host != null && holder.host !== host) return ageMs < FOREIGN_LOCK_MAX_AGE_MS;
-  return alive(holder.pid);
-}
-
-/**
- * Take `file` (`<pid>@<host>`, freed at exit or by releasePidLock). Null when
- * taken, else the holder (`{pid, host}`) of the live run that has it. A lock
- * whose run has ended, or that is unreadable, is taken over.
- */
-export function takePidLock(file, { host = os.hostname(), now = Date.now, alive = pidAlive } = {}) {
-  const mine = lockText(process.pid, host);
+export function takePidLock(file, { alive = pidAlive } = {}) {
+  const mine = lockText();
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       fs.writeFileSync(file, mine, { flag: 'wx' });
-      process.on('exit', () => releasePidLock(file, { host }));
+      process.on('exit', () => releasePidLock(file));
       return null;
     } catch (err) {
       if (err.code !== 'EEXIST') throw err;
     }
     let holder = null;
-    let ageMs = 0;
-    try {
-      holder = parseLock(fs.readFileSync(file, 'utf8'));
-      ageMs = now() - fs.statSync(file).mtimeMs;
-    } catch { /* gone meanwhile */ }
-    if (holder && lockHolds(holder, { ageMs, host, alive })) return holder;
+    try { holder = parseLock(fs.readFileSync(file, 'utf8')); } catch { /* gone meanwhile */ }
+    if (holder && lockHolds(holder, { alive })) return holder;
     fs.rmSync(file, { force: true });
   }
   throw new Error(`Could not take ${file}`);
 }
 
 /** Free `file` when this process holds it (takePidLock), before the run ends; another holder's is left alone. */
-export function releasePidLock(file, { host = os.hostname() } = {}) {
-  try { if (fs.readFileSync(file, 'utf8') === lockText(process.pid, host)) fs.rmSync(file); } catch { /* already gone */ }
+export function releasePidLock(file) {
+  try { if (fs.readFileSync(file, 'utf8') === lockText()) fs.rmSync(file); } catch { /* already gone */ }
 }
 
-/** `pid 12` or `pid 12 on <host>`, for messages. */
-export const describeHolder = ({ pid, host }) => (host ? `pid ${pid} on ${host}` : `pid ${pid}`);
+/** `pid 12`, for messages. */
+export const describeHolder = ({ pid }) => `pid ${pid}`;

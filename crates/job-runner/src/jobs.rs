@@ -1,7 +1,6 @@
 //! The job definitions (`deploy/jobs.json`, built in; `--jobs <file>`
-//! replaces them).
+//! replaces them). When a job runs is up to its Orca automation.
 
-use crate::cron::Schedule;
 use serde::Deserialize;
 
 pub const BUILT_IN: &str = include_str!("../../../deploy/jobs.json");
@@ -9,26 +8,16 @@ pub const BUILT_IN: &str = include_str!("../../../deploy/jobs.json");
 #[derive(Debug, Clone)]
 pub struct Job {
     pub name: String,
-    pub schedule_text: String,
-    pub schedule: Schedule,
-    /// Seconds: how late a missed run may still start.
-    pub catch_up: i64,
     /// Seconds: a run still going after this is stopped.
     pub timeout: i64,
-    /// Paused unless `resume` was given for it.
-    pub paused_by_default: bool,
     pub steps: Vec<Vec<String>>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct RawJob {
     name: String,
-    schedule: String,
-    catch_up: String,
     timeout: String,
-    #[serde(default)]
-    paused: bool,
     steps: Vec<Vec<String>>,
 }
 
@@ -53,11 +42,7 @@ pub fn parse(text: &str) -> Result<Vec<Job>, String> {
             return Err(err("needs steps, each a command".into()));
         }
         jobs.push(Job {
-            schedule: Schedule::parse(&raw.schedule).map_err(err)?,
-            schedule_text: raw.schedule,
-            catch_up: duration(&raw.catch_up).map_err(err)?,
             timeout: duration(&raw.timeout).map_err(err)?,
-            paused_by_default: raw.paused,
             steps: raw.steps,
             name,
         });
@@ -89,16 +74,8 @@ mod tests {
     fn the_built_in_jobs_parse() {
         let jobs = parse(BUILT_IN).unwrap();
         let scout = jobs.iter().find(|j| j.name == "eroscripts-scout").unwrap();
-        assert_eq!(
-            (scout.catch_up, scout.timeout, scout.steps.len()),
-            (12 * 3600, 12 * 3600, 2)
-        );
-        assert!(
-            jobs.iter()
-                .find(|j| j.name == "faptap-scout")
-                .unwrap()
-                .paused_by_default
-        );
+        assert_eq!((scout.timeout, scout.steps.len()), (12 * 3600, 2));
+        assert!(jobs.iter().any(|j| j.name == "thumbnails"));
     }
 
     #[test]
@@ -112,11 +89,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_duplicates_and_empty_steps() {
+    fn rejects_duplicates_bad_names_and_empty_steps() {
         let job = |name: &str, steps: &str| {
-            format!(
-                r#"{{"name":"{name}","schedule":"0 1 * * *","catchUp":"1h","timeout":"1h","steps":{steps}}}"#
-            )
+            format!(r#"{{"name":"{name}","timeout":"1h","steps":{steps}}}"#)
         };
         let file = |jobs: &[String]| format!(r#"{{"jobs":[{}]}}"#, jobs.join(","));
         assert!(

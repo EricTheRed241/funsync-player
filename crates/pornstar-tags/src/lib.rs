@@ -135,7 +135,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write) -> Result<i32, String> {
         )
         .map_err(io)?;
     } else {
-        let backend = video_tags::host::backend_url(app.backend_port);
+        let backend = format!("http://127.0.0.1:{}", app.backend_port);
         match rescan::request_rescan(&backend, rescan::TIMEOUT) {
             Ok(status) => writeln!(out, "Rescan requested from the app ({status}).").map_err(io)?,
             Err(e) => writeln!(

@@ -24,7 +24,7 @@ Options:
   --dry-run            Show what would change, write nothing (the default)
   --apply              Write the file (atomically; the previous one is kept as
                        video-tags.json.bak), then ask the running app to rescan
-                       ($FUNSYNC_BACKEND_URL, else 127.0.0.1 on the app's backend port)
+                       (127.0.0.1 on the app's backend port from config.json)
   --no-rescan          Don't ask the app to rescan after --apply
   -h, --help           This text
 

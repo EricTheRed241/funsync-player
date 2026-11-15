@@ -9,7 +9,7 @@
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
 //   npm run eroscripts:scout -- --titles     title, author, dates, images for posts judged before verdicts kept them, and
 //                                            the waiting posts' script previews (length, heat strip)
-//   npm run eroscripts:scout -- --daily      scan, frames for unswiped posts with few images, then download the waiting
+//   npm run eroscripts:scout -- --daily      scan, then download the waiting
 //                                            posts swiped right in npm run scout:report
 //   npm run eroscripts:scout -- --frames     frames of unswiped waiting posts' videos for the swipe deck (scripts/scout-frames.mjs)
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
@@ -58,7 +58,7 @@ const { defaultUserDataDir, describeHolder, releasePidLock, takePidLock } = awai
 const live = await import('./scout-live.mjs');
 const streams = await import('./stream-hosts.mjs');
 const vrbHost = await import('./vrbangers-host.mjs');
-const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError, browserOptions } = await import('./vrbangers-browser.mjs');
+const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError } = await import('./vrbangers-browser.mjs');
 const { redactUrl } = await import('./vrbangers-lib.mjs');
 const slrHost = await import('./slr-host.mjs');
 const frames = await import('./scout-frames.mjs');
@@ -116,7 +116,7 @@ Download:
                          none left: SLR scenes wait, exit 2), the encode within the caps, never the trailer;
                          not logged in: SLR scenes are skipped (exit 3 when nothing else was done). With
                          --dry-run: the quota, the download type, its size and the target folder, no download
-  --vrb-credentials <f>  VRBangers account file (default: $FUNSYNC_VRB_CREDENTIALS, else ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
+  --vrb-credentials <f>  VRBangers account file (default: ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
 By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
                          their pages and instructions (with --ids: only those posts); no login needed.
@@ -137,16 +137,16 @@ Frames (for the swipe deck's cards; free reads only):
                          Each post is recorded in <userData>/${frames.FRAMES_FILE} (only --frames writes it;
                          each run first takes in records left on the scan state and frames folders without one).
                          A failed post is tried again after 7 days. Exit 2 when posts are left
-Daily (run once a day by the watchdog, see README):
-  --daily                scan, then --frames ${frames.DAILY_FRAME_POSTS}, then --fetch --auto (takes --passes, --wait), each step
-                         under its own lock (below); a step another run is doing is skipped (exit 2) and the next
-                         goes on; writes <userData>/eroscripts-scout-daily.json
-Run locks (in <userData>, <pid>@<host>; a run whose lock another live run holds exits 2 and names it;
+Daily (run once a day):
+  --daily                scan, then --fetch --auto (takes --passes, --wait), each step under its own lock
+                         (below); a step another run is doing is skipped (exit 2) and the next goes on; writes
+                         <userData>/eroscripts-scout-daily.json. Frames are a separate run (--frames)
+Run locks (in <userData>, holding the pid; a run whose lock another live run holds exits 2 and names it;
 different kinds go on side by side):
   ${lib.SCOUT_LOCKS.scan.file.padEnd(29)}scan, --add, --rejudge, --titles (they write the scan state and the list)
   ${lib.SCOUT_LOCKS.fetch.file.padEnd(29)}--fetch (also --auto, --dry-run), --manual-list, --retitle (the library)
   ${lib.SCOUT_LOCKS.frames.file.padEnd(29)}--frames (${frames.FRAMES_FILE}, ${frames.FRAMES_DIR}/)
-                         --status takes none. A lock from another host is held until 12 h old
+                         --status takes none. A lock whose pid has ended is taken over
 Status:
   --status               print the scan state without going online: backfill per feed (page and oldest last
                          activity reached), verdicts, posts judged under older rules, the waiting list
@@ -159,7 +159,7 @@ Both:
   --incoming <dir>       download folder (default: the EroScripts library source, else <library parent>/EroScripts)`;
 
 function parseArgs(argv) {
-  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs'), vrbCredentials: browserOptions().credentialsFile };
+  const opts = { pages: 6, animPages: 3, backfill: 2, top: 40, passes: 1, wait: 3600, fetch: false, dryRun: false, full: false, manualDir: path.join(DOWNLOADS, 'for-fs'), vrbCredentials: VRB_CREDENTIALS };
   const value = (i, flag) => {
     if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`);
     return argv[i + 1];
@@ -210,7 +210,7 @@ function parseArgs(argv) {
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   if (opts.auto && !opts.fetch) throw new Error('--auto goes with --fetch');
   if (opts.rejudge && !opts.rejudge.length) throw new Error('--rejudge needs at least one verdict');
-  if (opts.frames !== undefined && (opts.fetch || opts.daily || opts.add || opts.titles)) throw new Error('--frames runs on its own (--daily includes it)');
+  if (opts.frames !== undefined && (opts.fetch || opts.daily || opts.add || opts.titles)) throw new Error('--frames runs on its own');
   return opts;
 }
 
@@ -1308,13 +1308,12 @@ async function fillTitles({ api, userData }) {
 }
 
 /**
- * `--daily`: a scan (new posts plus the usual backfill), then `--frames` for DAILY_FRAME_POSTS posts,
- * then `--fetch --auto`, each step holding its own run lock (lib.SCOUT_LOCKS) only while it runs. A step
- * whose lock another run holds is skipped, exit 2 (that run is doing the work), and the next step goes on.
- * `<userData>/eroscripts-scout-daily.json` records when each step started, its exit code and, for a
- * skipped step, the busy lock and its holder (`<step>Skipped`); it's written after each step, first right
- * after the scan, so the watchdog sees the day's run as done while the frames and downloads go on. A
- * frames step that fails outright doesn't hold up the downloads.
+ * `--daily`: a scan (new posts plus the usual backfill), then `--fetch --auto`, each step holding its own
+ * run lock (lib.SCOUT_LOCKS) only while it runs. A step whose lock another run holds is skipped, exit 2
+ * (that run is doing the work), and the next step goes on. `<userData>/eroscripts-scout-daily.json`
+ * records when each step started, its exit code and, for a skipped step, the busy lock and its holder
+ * (`<step>Skipped`); it's written after each step, first right after the scan, so the day's run shows as
+ * done while the downloads go on. Frames are a separate run (`--frames`).
  */
 async function daily(opts, ctx) {
   const file = path.join(ctx.userData, DAILY_FILE);
@@ -1334,25 +1333,15 @@ async function daily(opts, ctx) {
   };
   const scanExit = await step('scan', 'scan', () => exitCodeOf(() => scan(opts, ctx)));
   if (scanExit === 3) return 3;
-  console.log('\nDaily: frames for unswiped waiting posts with few images');
-  const framesExit = await step('frames', 'frames', async () => {
-    try {
-      return await exitCodeOf(() => makeFrames({ ...opts, frames: frames.DAILY_FRAME_POSTS }, ctx));
-    } catch (err) {
-      console.error(`frames: ${err.message}`);
-      return 1;
-    }
-  });
   console.log('\nDaily: downloading the waiting posts swiped right');
   const fetchExit = await step('fetch', 'fetch', () => exitCodeOf(() => fetchAll({ ...opts, fetch: true, auto: true }, ctx)));
-  return scanExit || fetchExit || framesExit;
+  return scanExit || fetchExit;
 }
 
 /**
  * Take the run lock of `kind` (lib.SCOUT_LOCKS: scan, fetch or frames): null when this run holds
- * `<userData>/<lock file>` (`<pid>@<host>`, freed at exit or by freeRunLock), else the holder of the live
- * run that does. A lock left by an ended run (this host: its pid is gone; another host, e.g. a finished
- * pod: older than 12 h) is taken over (scripts/host-env.mjs).
+ * `<userData>/<lock file>` (`<pid>`, freed at exit or by freeRunLock), else the holder of the live run
+ * that does. A lock whose pid has ended is taken over (scripts/host-env.mjs).
  */
 function takeRunLock(userData, kind) {
   return takePidLock(path.join(userData, lib.SCOUT_LOCKS[kind].file));
