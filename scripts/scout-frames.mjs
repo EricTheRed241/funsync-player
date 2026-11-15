@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { isVideoName } from './eroscripts-scout-lib.mjs';
 import { RULE34VIDEO_HEADERS, RULE34VIDEO_HOST } from './stream-hosts.mjs';
 import { SLR_HOST, SLR_UA } from './slr-host.mjs';
@@ -664,7 +664,32 @@ export async function megaSource({ url, remote, File }) {
   };
   const node = root.directory ? find(root) : root;
   if (!node) throw new FrameError(`mega: ${remote} is gone`);
-  return { size: node.size, open: (start, end) => node.download({ ...MEGA_RANGE_OPTIONS, start, end }) };
+  return { size: node.size, open: (start, end) => megaRange(node, start, end) };
+}
+
+/**
+ * One range of a MEGA file as a stream of exactly bytes `start`–`end`. MEGA decrypts in 16-byte blocks: asked
+ * for a start inside a block, megajs pipes its decrypt stream into a skip stream and hands back only that, so
+ * once the reader stops, a chunk still in flight is written to the ended decrypt stream, whose "write after
+ * end" error nobody listens to and which ends the process (a `--frames` run, 2026-11-15). So the download
+ * starts at the block, this stream drops the bytes before `start`, and megajs's stream always has a listener.
+ */
+export function megaRange(node, start, end) {
+  const from = start - (start % 16);
+  const download = node.download({ ...MEGA_RANGE_OPTIONS, start: from, end });
+  let skip = start - from;
+  const out = new Transform({
+    transform(chunk, _enc, done) {
+      if (skip >= chunk.length) { skip -= chunk.length; done(); return; }
+      const rest = skip ? chunk.subarray(skip) : chunk;
+      skip = 0;
+      done(null, rest);
+    },
+  });
+  // Errors after the reader stopped are the abort's own; before, they're the reader's.
+  download.on('error', (err) => out.destroy(err));
+  out.on('close', () => download.destroy?.());
+  return download.pipe(out);
 }
 
 /** A reader's error as a failure reason: MEGA's bandwidth limit stops MEGA for the run. */

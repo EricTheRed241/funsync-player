@@ -13,12 +13,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeAll, describe, it, expect } from 'vitest';
 import {
   stereoLayout, layoutFromSize, frameFilter, frameTimes, frameArgs, imageArgs, probeArgs, parseProbe, imageKey, usableImages,
   imageCounts, framesQueue, frameSource, frameScene, pickVariant, minHeightFor, slrTrailer, vrbangersGallery, vrbangersPageImages,
-  recordFrames, recordFramesFailed, recentlyFailed, postFramesDir, grabFrames, grabImages, startRangeProxy, httpSource, megaSource,
+  recordFrames, recordFramesFailed, recentlyFailed, postFramesDir, grabFrames, grabImages, startRangeProxy, httpSource, megaSource, megaRange,
   readerFailure, postFrames, FrameError, FRAME_POINTS, FAILED_RETRY_MS, MAX_FRAME_WIDTH, SHARED_IMAGE_POSTS, FRAMES_WANTED,
   jpegSize, isBlankFrame, FRAMES_FILE, emptyFramesFile, normalizeFramesFile, readFramesFile, writeFramesFile, framesOnDisk, migrateFrames,
 } from '../../scripts/scout-frames.mjs';
@@ -633,5 +633,32 @@ describe.skipIf(!hasFfmpeg)('real ffmpeg on a generated video', () => {
     }
     await expect(megaSource({ url: 'u', remote: 'gone.mp4', File: { fromURL: () => ({ directory: true, children: [], loadAttributes: async () => {} }) } }))
       .rejects.toMatchObject({ reason: 'mega: gone.mp4 is gone' });
+  });
+});
+
+describe('megaRange', () => {
+  const data = Buffer.from(Array.from({ length: 200 }, (_, i) => i));
+  const drain = async (s) => { const parts = []; for await (const c of s) parts.push(c); return Buffer.concat(parts); };
+
+  it('downloads from the 16-byte block start and serves exactly the range asked for', async () => {
+    const asked = [];
+    const node = { download: ({ start, end }) => { asked.push([start, end]); return Readable.from([data.subarray(start, 40), data.subarray(40, end + 1)]); } };
+    expect(await drain(megaRange(node, 37, 120))).toEqual(data.subarray(37, 121));
+    expect(await drain(megaRange(node, 32, 63))).toEqual(data.subarray(32, 64));
+    expect(asked).toEqual([[32, 120], [32, 63]]);
+  });
+
+  it("passes the download's errors to the reader, and an error after the reader stopped ends nothing", async () => {
+    const download = new PassThrough();
+    const out = megaRange({ download: () => download }, 5, 100);
+    const failed = new Promise((resolve) => out.on('error', resolve));
+    download.emit('error', new Error('bandwidth limit'));
+    expect((await failed).message).toBe('bandwidth limit');
+
+    // megajs writing a late chunk into its ended stream: with no listener this throws (and ends the process).
+    const late = new PassThrough();
+    const stopped = megaRange({ download: () => late }, 5, 100);
+    stopped.destroy();
+    expect(() => late.emit('error', new Error('write after end'))).not.toThrow();
   });
 });
