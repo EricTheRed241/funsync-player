@@ -1,7 +1,9 @@
 //! The scheduler the desktop app starts (`job-runner serve`): every 20 s it
-//! starts the jobs that are due as `job-runner run <job> --due <time>`, each
-//! in its own process group, so a run carries on when the app (and with it
-//! the scheduler) quits or restarts. Started from the app, the runs get the
+//! starts the jobs that are due, and those asked for with `job-runner start`
+//! (`requests/<job>`), as `job-runner run <job> [--due <time>]`, each in its
+//! own process group, so a run carries on when the app (and with it the
+//! scheduler) quits or restarts, or when whatever asked for it goes away (an
+//! Orca automation's agent session). Started from the app, the runs get the
 //! app's macOS permissions (Documents, the library drive).
 
 use crate::cron;
@@ -74,14 +76,14 @@ pub fn serve(user_data: &Path, jobs: &[Job], jobs_file: Option<&Path>, out: &mut
     let names: Vec<&str> = jobs.iter().map(|j| j.name.as_str()).collect();
     let _ = writeln!(out, "Scheduling {}.", names.join(", "));
     let parent = parent_id();
-    let mut started: HashMap<String, (i64, Child)> = HashMap::new();
+    let mut started: HashMap<String, Child> = HashMap::new();
     loop {
         // The app quit or crashed: stop scheduling (runs carry on).
         if parent_id() != parent {
             let _ = writeln!(out, "The app is gone; the scheduler stops.");
             return 0;
         }
-        started.retain(|name, (_, child)| match child.try_wait() {
+        started.retain(|name, child| match child.try_wait() {
             Ok(None) => true,
             Ok(Some(status)) => {
                 let code = status.code().unwrap_or(1);
@@ -95,18 +97,32 @@ pub fn serve(user_data: &Path, jobs: &[Job], jobs_file: Option<&Path>, out: &mut
         for job in jobs {
             let running =
                 started.contains_key(&job.name) || exec::holder(user_data, &job.name).is_some();
-            let paused = control.is_paused(&job.name, job.paused_by_default);
-            let last_due = state::read(user_data, &job.name).last_due;
-            let Some(due) = due_to_start(job, last_due, now, paused, running) else {
-                continue;
+            // `job-runner start <job>` (an Orca automation, a terminal): run it now, paused or not.
+            let requested = state::take_request(user_data, &job.name);
+            let due = if requested {
+                if running {
+                    let _ = writeln!(
+                        out,
+                        "{}: start requested, but it's already running",
+                        job.name
+                    );
+                    continue;
+                }
+                None
+            } else {
+                let paused = control.is_paused(&job.name, job.paused_by_default);
+                let last_due = state::read(user_data, &job.name).last_due;
+                match due_to_start(job, last_due, now, paused, running) {
+                    Some(due) => Some(due),
+                    None => continue,
+                }
             };
             let mut cmd = Command::new(&exe);
-            cmd.arg("run")
-                .arg(&job.name)
-                .arg("--due")
-                .arg(due.to_string())
-                .arg("--user-data")
-                .arg(user_data);
+            cmd.arg("run").arg(&job.name);
+            if let Some(due) = due {
+                cmd.arg("--due").arg(due.to_string());
+            }
+            cmd.arg("--user-data").arg(user_data);
             if let Some(f) = jobs_file {
                 cmd.arg("--jobs").arg(f);
             }
@@ -116,13 +132,12 @@ pub fn serve(user_data: &Path, jobs: &[Job], jobs_file: Option<&Path>, out: &mut
                 .process_group(0);
             match cmd.spawn() {
                 Ok(child) => {
-                    let _ = writeln!(
-                        out,
-                        "{}: starting (scheduled {})",
-                        job.name,
-                        cron::fmt_local(due)
-                    );
-                    started.insert(job.name.clone(), (due, child));
+                    let why = match due {
+                        Some(due) => format!("scheduled {}", cron::fmt_local(due)),
+                        None => "requested".into(),
+                    };
+                    let _ = writeln!(out, "{}: starting ({why})", job.name);
+                    started.insert(job.name.clone(), child);
                 }
                 Err(e) => {
                     let _ = writeln!(out, "{}: can't start: {e}", job.name);

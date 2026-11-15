@@ -5,6 +5,8 @@
 //! - `control.json`: `{"paused": {"<job>": true|false}}`, written by
 //!   pause / resume; a job not listed follows its `paused` default.
 //! - `logs/<job>/<YYYYMMDD-HHMMSS>.log`: one per run, the last 20 kept.
+//! - `requests/<job>`: `job-runner start <job>` asks the scheduler to run the
+//!   job now; the scheduler removes it when it handles it.
 //! - `serve.lock`: the scheduler (one per data folder).
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +26,23 @@ pub fn lock_path(user_data: &Path, job: &str) -> PathBuf {
 
 pub fn log_dir(user_data: &Path, job: &str) -> PathBuf {
     dir(user_data).join("logs").join(job)
+}
+
+fn request_path(user_data: &Path, job: &str) -> PathBuf {
+    dir(user_data).join("requests").join(job)
+}
+
+/// Ask the scheduler to start `job` on its next tick.
+pub fn write_request(user_data: &Path, job: &str) -> Result<(), String> {
+    let path = request_path(user_data, job);
+    let parent = path.parent().expect("requests/<job> has a parent");
+    fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    fs::write(&path, "").map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Whether `job` was requested; the request is consumed.
+pub fn take_request(user_data: &Path, job: &str) -> bool {
+    fs::remove_file(request_path(user_data, job)).is_ok()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -16,7 +16,9 @@ Usage: npm run jobs -- <command> [options]
 FunSync's scheduled jobs on this Mac (deploy/jobs.json). The desktop app runs
 the scheduler, so jobs get the app's access to Documents and the library drive.
   status               every job: schedule, paused, running or its last run, next run
-  run <job>            run a job now and wait for it (exit code: the job's)
+  run <job>            run a job now in this terminal and wait for it (exit code: the job's)
+  start <job>          have the app's scheduler run a job now (it starts within 20 s,
+                       outside this terminal, paused or not; exit 1 when the scheduler isn't running)
   pause <job|all>      stop scheduling a job (a run in progress finishes)
   resume <job|all>     schedule it again (all: the jobs not paused by default)
   logs <job>           print the job's latest log
@@ -141,6 +143,18 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             };
             exec::run(&user_data, job, trigger, out)
         }),
+        "start" => find(&opts.target).and_then(|job| {
+            if exec::holder_at(&state::dir(&user_data).join("serve.lock")).is_none() {
+                return Err("The scheduler isn't running (the desktop app starts it); `run` runs a job here instead.".into());
+            }
+            if let Some(h) = exec::holder(&user_data, &job.name) {
+                let _ = writeln!(out, "{} is already running ({h}).", job.name);
+                return Ok(2);
+            }
+            state::write_request(&user_data, &job.name)?;
+            let _ = writeln!(out, "{}: start requested; the scheduler starts it within 20 s.", job.name);
+            Ok(0)
+        }),
         "pause" | "resume" => set_paused(&user_data, &jobs, &opts, out),
         "logs" => find(&opts.target).and_then(|job| {
             let path = state::latest_log(&user_data, &job.name)
@@ -241,6 +255,7 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
             None if paused => "paused".into(),
             None => "idle".into(),
         };
+        let held = exec::holder(user_data, &job.name).is_some();
         let last = match &st.last {
             Some(r) => {
                 let took = r
@@ -248,11 +263,16 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
                     .map(|e| format!(", {}", minutes(e - r.started)))
                     .unwrap_or_default();
                 let exit = r.exit.map(|c| format!(" (exit {c})")).unwrap_or_default();
+                // A run whose process died (killed, power cut) never wrote its end.
+                let result = if r.ended.is_none() && !held {
+                    "interrupted"
+                } else {
+                    r.result.as_str()
+                };
                 format!(
-                    "{} {}{took}: {}{exit}",
+                    "{} {}{took}: {result}{exit}",
                     cron::fmt_local(r.started),
                     r.trigger,
-                    r.result
                 )
             }
             None => "never".into(),

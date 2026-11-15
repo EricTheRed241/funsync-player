@@ -186,3 +186,45 @@ fn resume_all_leaves_jobs_paused_by_default() {
             .unwrap();
     assert_eq!(control["paused"]["b"], false);
 }
+
+#[test]
+fn start_has_the_scheduler_run_a_paused_job() {
+    let tmp = TempDir::new();
+    let marker = tmp.0.join("ran");
+    let step = format!("touch '{}'", marker.display());
+    let (ud, jobs) = setup(&tmp.0, true, &job("j", "1h", &[&step], true));
+    // No scheduler: nothing would pick the request up.
+    assert_eq!(cli(&ud, &jobs, &["start", "j"]).status.code(), Some(1));
+
+    let mut serve = Command::new(env!("CARGO_BIN_EXE_job-runner"))
+        .args(["serve", "--user-data"])
+        .arg(&ud)
+        .arg("--jobs")
+        .arg(&jobs)
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let wait_for = |what: &Path, secs: u64| {
+        let until = Instant::now() + Duration::from_secs(secs);
+        while !what.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        what.exists()
+    };
+    assert!(wait_for(&ud.join("job-runner/serve.lock"), 10));
+    let out = cli(&ud, &jobs, &["start", "j"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ran = wait_for(&marker, 30);
+    let _ = serve.kill();
+    let _ = serve.wait();
+    assert!(ran, "the scheduler ran the requested (paused) job");
+    assert!(
+        !ud.join("job-runner/requests/j").exists(),
+        "the request is used up"
+    );
+}
