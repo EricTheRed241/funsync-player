@@ -21,8 +21,11 @@ Options:
   -h, --help           This text
 
 The page is http://127.0.0.1:<port>/, bound to the loopback interface only; with
---lan it also answers on the Mac's network address, which the banner prints. It has
-no login: anyone on the network can read it, and swipe, while it runs. Every load of
+--lan it also answers on the Mac's network address, which the banner prints. With an
+access PIN set (npm run access:pin -- set <pin>, <userData>/access-pin.json, reread
+on every request) other devices first get the /login page; a login lasts 30 days and
+also unlocks the app's backend on the same address. Without a PIN anyone on the network
+can read it, and swipe, while it runs; this Mac never needs the PIN. Every load of
 /api/report rereads eroscripts-scout-state.json (verdicts, feed coverage), eroscripts-scout.json
 (the waiting list) and eroscripts-scout-rejected.json (scenes turned down); a missing
 file shows as an empty section.

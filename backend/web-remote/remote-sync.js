@@ -19,6 +19,9 @@
 //  - Reconnect on transient network drops with capped backoff (the
 //    desktop side has its own 3s grace before stopping devices).
 //  - Server kick (`kicked` payload): closes cleanly and surfaces a UI hook.
+//  - Close code 4401 (access PIN login expired): goes to the login page.
+
+import { PIN_REQUIRED_CLOSE_CODE, redirectToLogin } from './login-redirect.js';
 
 const STATE_THROTTLE_MS = 250;
 const RECONNECT_MAX_MS = 10000;
@@ -116,9 +119,10 @@ export class RemoteSyncClient {
       this._onServerMessage(msg);
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (evt) => {
       this._detachVideoHandlers();
       this._ws = null;
+      if (evt?.code === PIN_REQUIRED_CLOSE_CODE) { redirectToLogin(); return; }
       this._scheduleReconnect();
     });
 

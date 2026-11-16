@@ -39,6 +39,20 @@ Whether a video is VR follows the desktop first (VR Format panel
 projection, then the manual toggle), then the filename, then the frame
 shape (`detect_vr_format_for_video`); `GET /api/media/vr-flags` reports
 that decision per video.
+
+Access PIN (`routes.access`, `services.access_pin`): with a PIN set, a
+headset on the LAN logs in the way XBVR's `HeresphereAuthFilter` /
+`restfulAuthFilter` expect. HereSphere sends `username` / `password` in the
+JSON body of every library and scene POST, DeoVR sends `login` / `password`
+as form fields; any username is accepted, the password is the PIN (or the
+request carries a valid cookie / `k`). Without them the library and scene
+routes answer 200 with a single empty section, 'Login Required' (`access: 0`
+/ `authorized: "0"`, the player shows its login prompt) or 'Login Failed'
+(`-1`: wrong password, or too many wrong ones). Once in, every media,
+thumbnail, script, subtitle and event URL handed out carries `k=<token>`, so
+the player's plain GETs pass the gate; the scene URLs in the listings stay
+bare (the players send the login with them, and they are the headset's
+identity for a scene).
 """
 
 import asyncio
@@ -47,14 +61,17 @@ import logging
 import os
 import re
 import time
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
+from routes.access import HeadsetAccess, headset_access
 from routes.media import get_categories, get_chip_tags, get_playlists, get_preference_score, get_preference_scores, get_queue, get_ratings, get_video_categories, get_video_registry, get_vr_projection, get_watched, _path_to_id, record_vr_activity, thumb_url
 from routes.remote_sync import submit_library_edit
 from services import library_edits, stereo_detect, video_info, vr_sections
+from services.access_pin import with_key
 from services.network import get_local_ip
 
 router = APIRouter()
@@ -688,6 +705,56 @@ async def _apply_heresphere_update(request: Request, path):
             return
 
 
+# === Access PIN login (routes/access.py) ===
+
+def _body_field(raw: bytes, content_type: str, name: str) -> str | None:
+    """`name` from a JSON object or form-urlencoded body; None if absent."""
+    if not raw:
+        return None
+    if 'json' in content_type:
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            return None
+        value = body.get(name) if isinstance(body, dict) else None
+    else:
+        value = parse_qs(raw.decode('utf-8', 'replace')).get(name, [None])[0]
+    return value if isinstance(value, str) else None
+
+
+async def _heresphere_access(request: Request) -> HeadsetAccess:
+    # HereSphere's body is JSON whatever its Content-Type says.
+    return headset_access(request, _body_field(await request.body(), 'json', 'password'))
+
+
+async def _deovr_access(request: Request) -> HeadsetAccess:
+    raw = await request.body()
+    return headset_access(request, _body_field(raw, request.headers.get('content-type', ''), 'password'))
+
+
+def _heresphere_login_response(access: HeadsetAccess) -> JSONResponse:
+    return JSONResponse(
+        content={'access': access.state, 'library': [{'name': access.message, 'list': []}]},
+        headers={'Access-Control-Allow-Origin': '*', 'HereSphere-JSON-Version': '1'},
+    )
+
+
+def _deovr_json(payload) -> Response:
+    # DeoVR requires Content-Length (chunked encoding breaks its JSON parser)
+    body = json.dumps(payload, ensure_ascii=False)
+    return Response(
+        content=body,
+        media_type='application/json',
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'Content-Length': str(len(body.encode('utf-8'))),
+        },
+    )
+
+
+def _deovr_login_response(access: HeadsetAccess) -> Response:
+    return _deovr_json({'scenes': [{'name': access.message, 'list': []}], 'authorized': str(access.state)})
+
 
 # === DeoVR API ===
 
@@ -709,6 +776,9 @@ async def deovr_library(request: Request):
       ?filter=flat  — only flat (non-VR) videos
       ?filter=scripted — only videos with funscripts
     """
+    access = await _deovr_access(request)
+    if access.state != 1:
+        return _deovr_login_response(access)
     registry = get_video_registry()
     base_url = _get_base_url(request)
     entries = []
@@ -716,7 +786,7 @@ async def deovr_library(request: Request):
         item = {
             'title': os.path.splitext(video.get('name', ''))[0],
             'videoLength': _get_duration(video),
-            'thumbnailUrl': thumb_url(vid_id, video, base_url),
+            'thumbnailUrl': with_key(thumb_url(vid_id, video, base_url), access.token),
             'video_url': f'{base_url}/deovr/{vid_id}',
         }
         entries.append((item, video, is_3d))
@@ -728,22 +798,16 @@ async def deovr_library(request: Request):
         scores=get_preference_scores(),
     )
     scenes = [{'name': name, 'list': items} for name, items in sections]
-
-    # DeoVR requires Content-Length (chunked encoding breaks its JSON parser)
-    body = json.dumps({'scenes': scenes, 'authorized': '0'}, ensure_ascii=False)
-    return Response(
-        content=body,
-        media_type='application/json',
-        headers={
-            'Access-Control-Allow-Origin': '*',
-            'Content-Length': str(len(body.encode('utf-8'))),
-        },
-    )
+    # '1' only after a PIN login (as XBVR); without a PIN it stays '0'.
+    return _deovr_json({'scenes': scenes, 'authorized': '1' if access.token else '0'})
 
 
 @router.api_route("/deovr/{video_id}", methods=["GET", "POST"])
 async def deovr_scene(video_id: str, request: Request):
     """DeoVR scene detail — full metadata for one video."""
+    access = await _deovr_access(request)
+    if access.state != 1:
+        return _deovr_login_response(access)
     registry = get_video_registry()
     video = registry.get(video_id)
     if not video:
@@ -781,7 +845,7 @@ async def deovr_scene(video_id: str, request: Request):
             'height': height,
             'width': width,
             'size': file_size,
-            'url': f'{base_url}/api/media/stream/{video_id}',
+            'url': with_key(f'{base_url}/api/media/stream/{video_id}', access.token),
         }],
     }]
 
@@ -792,7 +856,7 @@ async def deovr_scene(video_id: str, request: Request):
         fs_name = os.path.basename(fs_path)
         fleshlight.append({
             'title': fs_name,
-            'url': f'{base_url}/api/media/script/{video_id}',
+            'url': with_key(f'{base_url}/api/media/script/{video_id}', access.token),
         })
 
     # Auto-generate chapter timestamps every 5 minutes for navigation
@@ -815,7 +879,7 @@ async def deovr_scene(video_id: str, request: Request):
         'screenType': screen_type,
         'stereoMode': stereo_mode,
         'videoLength': duration,
-        'thumbnailUrl': thumb_url(video_id, video, base_url),
+        'thumbnailUrl': with_key(thumb_url(video_id, video, base_url), access.token),
         'encodings': encodings,
         'fleshlight': fleshlight,
         'timeStamps': timestamps,
@@ -831,15 +895,7 @@ async def deovr_scene(video_id: str, request: Request):
         'fullAccess': True,
     }
 
-    body = json.dumps(scene, ensure_ascii=False)
-    return Response(
-        content=body,
-        media_type='application/json',
-        headers={
-            'Access-Control-Allow-Origin': '*',
-            'Content-Length': str(len(body.encode('utf-8'))),
-        },
-    )
+    return _deovr_json(scene)
 
 
 # === HereSphere API ===
@@ -859,6 +915,9 @@ async def heresphere_library(request: Request):
       ?filter=flat  — only flat (non-VR) videos
       ?filter=scripted — only videos with funscripts
     """
+    access = await _heresphere_access(request)
+    if access.state != 1:
+        return _heresphere_login_response(access)
     registry = get_video_registry()
     base_url = _get_base_url(request)
     entries = [
@@ -888,6 +947,9 @@ async def heresphere_library(request: Request):
 @router.api_route("/heresphere/{video_id}", methods=["GET", "POST"])
 async def heresphere_scene(video_id: str, request: Request):
     """HereSphere scene detail."""
+    access = await _heresphere_access(request)
+    if access.state != 1:
+        return _heresphere_login_response(access)
     registry = get_video_registry()
     video = registry.get(video_id)
     if not video:
@@ -951,7 +1013,7 @@ async def heresphere_scene(video_id: str, request: Request):
             'height': height,
             'width': width,
             'size': file_size,
-            'url': f'{base_url}/api/media/stream/{video_id}',
+            'url': with_key(f'{base_url}/api/media/stream/{video_id}', access.token),
         }],
     }]
 
@@ -962,7 +1024,7 @@ async def heresphere_scene(video_id: str, request: Request):
         fs_name = os.path.basename(fs_path)
         scripts.append({
             'name': fs_name,
-            'url': f'{base_url}/api/media/script/{video_id}',
+            'url': with_key(f'{base_url}/api/media/script/{video_id}', access.token),
         })
 
     # Tags: studio, scripted, filter tags, then Queue:Up next (adding /
@@ -998,7 +1060,7 @@ async def heresphere_scene(video_id: str, request: Request):
         subtitles.append({
             'name': sub_name,
             'language': 'English',
-            'url': f'{base_url}/api/media/subtitle/{video_id}',
+            'url': with_key(f'{base_url}/api/media/subtitle/{video_id}', access.token),
         })
 
     stereo_hs = 'sbs' if stereo_mode == 'sbs' else 'tb' if stereo_mode == 'tb' else 'mono'
@@ -1007,7 +1069,7 @@ async def heresphere_scene(video_id: str, request: Request):
         'access': 1,
         'title': title,
         'description': '',
-        'thumbnailImage': thumb_url(video_id, video, base_url),
+        'thumbnailImage': with_key(thumb_url(video_id, video, base_url), access.token),
         'dateReleased': '',
         'dateAdded': '',
         'duration': duration * 1000,  # HereSphere uses milliseconds
@@ -1025,7 +1087,7 @@ async def heresphere_scene(video_id: str, request: Request):
         'writeRating': True,
         'writeTags': True,
         'writeHSP': False,
-        'eventServer': f'{base_url}/heresphere/events/{video_id}',
+        'eventServer': with_key(f'{base_url}/heresphere/events/{video_id}', access.token),
     }
 
     return JSONResponse(

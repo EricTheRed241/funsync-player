@@ -10,6 +10,8 @@
 //
 // Browser objects are injected so the logic runs under vitest with fakes.
 
+import { PIN_REQUIRED_CLOSE_CODE, redirectToLogin } from './login-redirect.js';
+
 export const RELAY_PATH = '/api/remote/tcode-relay';
 export const DEFAULT_BAUD = 115200;
 export const RECONNECT_MS = 3000;
@@ -207,10 +209,11 @@ export class SerialRelaySink {
     ws.addEventListener('message', (evt) => {
       if (this._ws === ws) this._onRelayMessage(evt.data);
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (evt) => {
       if (this._ws !== ws) return;
       this._ws = null;
       this._relay = 'off';
+      if (evt?.code === PIN_REQUIRED_CLOSE_CODE) { redirectToLogin(this._location); return; }
       this._scheduleRetry();
       this._emit();
     });

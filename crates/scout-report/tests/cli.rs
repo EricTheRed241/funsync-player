@@ -201,6 +201,35 @@ fn empty_user_data_serves_an_empty_report() {
 }
 
 #[test]
+fn with_a_pin_this_mac_still_gets_in_and_logins_set_the_cookie() {
+    let tmp = TempDir::new("pin");
+    fs::write(
+        tmp.0.join("access-pin.json"),
+        format!(
+            r#"{{"version":1,"pin":"2468","secret":"{}","changedAt":"2026-11-16T10:00:00.000Z"}}"#,
+            "ab".repeat(32)
+        ),
+    )
+    .unwrap();
+    let (_server, port) = start(&tmp.0);
+    assert_eq!(get(port, "/api/report").0, 200);
+    assert_eq!(get(port, "/").0, 200);
+    let (status, head, _) = request(port, "POST", "/login", Some(b"pin=2468&next=%2Fswipe"));
+    assert_eq!(status, 303);
+    assert!(head.starts_with("HTTP/1.1 303 See Other\r\n"), "{head}");
+    assert!(head.contains("\r\nLocation: /swipe\r\n"), "{head}");
+    let cookie = head
+        .lines()
+        .find_map(|l| l.strip_prefix("Set-Cookie: funsync_access=v1."))
+        .unwrap_or_else(|| panic!("no cookie in {head}"));
+    assert!(cookie.ends_with("; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"));
+    let (status, head, body) = request(port, "POST", "/login", Some(b"pin=1111&next=%2F"));
+    assert_eq!(status, 401);
+    assert!(head.starts_with("HTTP/1.1 401 Unauthorized\r\n"), "{head}");
+    assert!(String::from_utf8_lossy(&body).contains("Wrong PIN"));
+}
+
+#[test]
 fn swipes_through_the_deck() {
     let tmp = TempDir::new("swipe");
     let ud = tmp.0.join("userData");

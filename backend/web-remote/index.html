@@ -8,7 +8,8 @@
   <meta name="apple-mobile-web-app-title" content="FunSync">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>FunSync Remote</title>
-  <link rel="manifest" href="./manifest.json">
+  <!-- use-credentials: browsers fetch the manifest without cookies otherwise, and the access PIN gate would refuse it -->
+  <link rel="manifest" href="./manifest.json" crossorigin="use-credentials">
   <link rel="icon" type="image/png" sizes="256x256" href="./icons/icon-256.png">
   <link rel="apple-touch-icon" href="./icons/icon-256.png">
   <link rel="stylesheet" href="./style.css">

@@ -102,12 +102,13 @@ const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve()
 
 function makeSink({ protocol = 'http:', stored, serial = new FakeSerial() } = {}) {
   const storage = memoryStorage(stored);
+  const location = { protocol, host: '192.168.2.220:5123' };
   const timers = [];
   const states = [];
   const sink = new SerialRelaySink({
     serial,
     WebSocketImpl: FakeSocket,
-    location: { protocol, host: '192.168.2.220:5123' },
+    location,
     storage,
     // Like the browser's timers: called as a method of another object they
     // throw "Illegal invocation" (window.setTimeout stored on the sink).
@@ -121,7 +122,7 @@ function makeSink({ protocol = 'http:', stored, serial = new FakeSerial() } = {}
     },
     onState: (s) => states.push(s),
   });
-  return { sink, serial, storage, timers, states };
+  return { sink, serial, storage, timers, states, location };
 }
 
 const lastSocket = () => FakeSocket.instances[FakeSocket.instances.length - 1];
@@ -333,6 +334,18 @@ describe('auto-recover', () => {
     lastSocket().open();
     expect(sink.state.relay).toBe('open');
     expect(lastSocket().sent).toEqual([expect.objectContaining({ type: 'port', open: true })]);
+  });
+
+  it('goes to the login page instead of reconnecting when the PIN login ran out', async () => {
+    const { sink, serial, timers, location } = makeSink();
+    serial.next = new FakePort();
+    await sink.connect();
+    lastSocket().open();
+    lastSocket().closed = true;
+    lastSocket().fire('close', { code: 4401 });
+    expect(sink.state.relay).toBe('off');
+    expect(timers).toHaveLength(0);
+    expect(location.href).toBe('/login?next=%2Fremote%2F');
   });
 
   it('stops reconnecting when kicked and releases the device', async () => {
