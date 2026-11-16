@@ -5,6 +5,7 @@
 //! the scene sidecars and EroScripts links, so this file is the durable
 //! store. The CLI never writes config.json or the library.
 
+pub mod access;
 pub mod cli;
 pub mod config;
 pub mod host;

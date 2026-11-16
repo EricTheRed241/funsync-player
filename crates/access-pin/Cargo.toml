@@ -1,0 +1,22 @@
+[package]
+name = "access-pin"
+version = "0.1.0"
+description = "Set, clear or show the access PIN every FunSync site on the home network asks other devices for: <userData>/access-pin.json"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "access_pin"
+path = "src/lib.rs"
+
+[[bin]]
+name = "access-pin"
+path = "src/main.rs"
+
+[dependencies]
+# The PIN file format (video_tags::access), the userData default and timestamps.
+video-tags = { path = "../video-tags" }
+
+[dev-dependencies]
+serde_json = "1"

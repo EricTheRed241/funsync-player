@@ -36,6 +36,10 @@ import {
   artistsPending, foldArtist, createFavouriteStar, updateFavouriteStar, sortArtists, ARTIST_SORTS,
 } from './artists.js';
 import { SerialRelaySink, looksLikeDesktopChromium } from './serial-relay.js';
+import { installLoginRedirect } from './login-redirect.js';
+
+// Access PIN: a 401 from the backend means this device must log in again.
+installLoginRedirect();
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /

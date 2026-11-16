@@ -27,6 +27,7 @@
     "slr:scout": "cargo run -q --release -p slr-scout --",
     "jobs": "cargo run -q --release -p job-runner --",
     "library:thumbs": "cargo run -q --release -p library-thumbs --",
+    "access:pin": "cargo run -q --release -p access-pin --",
     "app:autostart": "bash deploy/macos/app-autostart.sh"
   },
   "keywords": [

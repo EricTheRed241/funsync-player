@@ -9,11 +9,13 @@
 //! files it writes are the decks' swipes,
 //! `eroscripts-scout-swipes.json` (which the scout reads) and
 //! `slr-scout-swipes.json` (the previous copy of each kept as `.bak`). Bound to
-//! 127.0.0.1, or to every interface with `--lan`.
+//! 127.0.0.1, or to every interface with `--lan`; other devices need the access
+//! PIN when one is set (`access-pin.json`, crate::gate).
 
 pub mod cli;
 pub mod deck;
 pub mod frames;
+pub mod gate;
 pub mod library;
 pub mod report;
 pub mod server;

@@ -6,8 +6,10 @@
 //! the quota), `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview
 //! frames, crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}`
 //! (posts), and the same under `/api/slr/` (scenes; the only writes:
-//! eroscripts-scout-swipes.json and slr-scout-swipes.json).
+//! eroscripts-scout-swipes.json and slr-scout-swipes.json). In front of them all,
+//! crate::gate: the access PIN, and `/login` and `/logout`.
 
+use crate::gate::{self, Gate};
 use crate::swipes::{self, Dir, Store};
 use crate::{deck, frames, report, slr};
 use serde::Serialize;
@@ -34,6 +36,8 @@ pub struct Response {
     /// `Cache-Control`.
     pub cache: &'static str,
     pub body: Vec<u8>,
+    /// Extra headers (`Location`, `Set-Cookie`, `Retry-After`).
+    pub headers: Vec<(&'static str, String)>,
 }
 
 /// Everything but the frames: rebuilt from the files on every request.
@@ -41,21 +45,23 @@ const NO_STORE: &str = "no-store";
 /// A frame changes only when its scout takes it again.
 const FRAME_CACHE: &str = "max-age=300";
 
-fn text(status: u16, body: &str) -> Response {
+pub(crate) fn text(status: u16, body: &str) -> Response {
     Response {
         status,
         content_type: "text/plain; charset=utf-8",
         cache: NO_STORE,
         body: body.as_bytes().to_vec(),
+        headers: Vec::new(),
     }
 }
 
-fn html(page: &str) -> Response {
+pub(crate) fn html(page: &str) -> Response {
     Response {
         status: 200,
         content_type: "text/html; charset=utf-8",
         cache: NO_STORE,
         body: page.as_bytes().to_vec(),
+        headers: Vec::new(),
     }
 }
 
@@ -66,8 +72,16 @@ fn json_ok<T: Serialize>(value: &T) -> Response {
             content_type: "application/json",
             cache: NO_STORE,
             body,
+            headers: Vec::new(),
         },
         Err(e) => text(500, &format!("json: {e}\n")),
+    }
+}
+
+pub(crate) fn json(status: u16, value: &Value) -> Response {
+    Response {
+        status,
+        ..json_ok(value)
     }
 }
 
@@ -79,6 +93,7 @@ fn frame(path: &str, user_data: &Path) -> Response {
             content_type: "image/jpeg",
             cache: FRAME_CACHE,
             body,
+            headers: Vec::new(),
         },
         _ => text(404, "Not found\n"),
     }
@@ -235,9 +250,13 @@ fn undo(body: &[u8], user_data: &Path, store: Store) -> Response {
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        303 => "See Other",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
         413 => "Content Too Large",
+        429 => "Too Many Requests",
+        503 => "Service Unavailable",
         _ => "Internal Server Error",
     }
 }
@@ -300,8 +319,9 @@ pub fn lan_address() -> Option<Ipv4Addr> {
 
 /// Serve requests one after another, forever.
 pub fn serve(listener: &TcpListener, user_data: &Path, err: &mut dyn Write) {
+    let mut gate = Gate::default();
     for stream in listener.incoming() {
-        let result = stream.and_then(|s| handle(s, user_data));
+        let result = stream.and_then(|s| handle(s, user_data, &mut gate, err));
         if let Err(e) = result {
             // A client that went away or timed out; keep serving.
             let _ = writeln!(err, "scout-report: {e}");
@@ -309,8 +329,14 @@ pub fn serve(listener: &TcpListener, user_data: &Path, err: &mut dyn Write) {
     }
 }
 
-/// Read the request (head, then body) and write the response.
-fn handle(mut stream: TcpStream, user_data: &Path) -> io::Result<()> {
+/// Read the request (head, then body), pass it through the gate and write the response.
+fn handle(
+    mut stream: TcpStream,
+    user_data: &Path,
+    gate: &mut Gate,
+    err: &mut dyn Write,
+) -> io::Result<()> {
+    let client = stream.peer_addr()?.ip();
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
     let mut raw = Vec::new();
@@ -337,13 +363,28 @@ fn handle(mut stream: TcpStream, user_data: &Path) -> io::Result<()> {
         text(400, "Bad request\n")
     } else {
         match read_body(&head, rest, &mut stream) {
-            Ok(body) => route(method, target, &body, user_data),
+            Ok(body) => {
+                let (cookie, accept) = cookie_and_accept(&head);
+                let req = gate::Request {
+                    method,
+                    target,
+                    body: &body,
+                    client,
+                    cookie: &cookie,
+                    accept: &accept,
+                };
+                gate.respond(&req, user_data, video_tags::access::now_secs(), err)
+            }
             Err(resp) => resp,
         }
     };
+    let mut extra = String::new();
+    for (name, value) in &resp.headers {
+        extra.push_str(&format!("{name}: {value}\r\n"));
+    }
     write!(
         stream,
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: {}\r\n{extra}X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         resp.status,
         reason(resp.status),
         resp.content_type,
@@ -362,6 +403,26 @@ fn handle(mut stream: TcpStream, user_data: &Path) -> io::Result<()> {
         let _ = io::copy(&mut (&mut stream).take(1 << 20), &mut io::sink());
     }
     Ok(())
+}
+
+/// Every `Cookie` header joined with `; `, and the `Accept` header.
+fn cookie_and_accept(head: &str) -> (String, String) {
+    let (mut cookie, mut accept) = (String::new(), String::new());
+    for line in head.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("cookie") {
+            if !cookie.is_empty() {
+                cookie.push_str("; ");
+            }
+            cookie.push_str(value.trim());
+        } else if name.eq_ignore_ascii_case("accept") && accept.is_empty() {
+            accept = value.trim().to_string();
+        }
+    }
+    (cookie, accept)
 }
 
 #[cfg(test)]

@@ -19,7 +19,8 @@ from routes.tcode_relay import router as tcode_relay_router
 from routes.locale import router as locale_router, set_user_data_dir
 from routes.status import router as status_router
 from routes.device import router as device_router
-from services import library_edits, stereo_detect, video_info
+from routes.access import router as access_router, AccessGate
+from services import access_pin, library_edits, stereo_detect, video_info
 import access_log
 
 
@@ -57,6 +58,9 @@ app.include_router(locale_router, prefix="/api/remote", tags=["locale"])
 app.include_router(status_router, prefix="/api", tags=["status"])
 # Local-only device dashboard at /device/ (routes/device.py).
 app.include_router(device_router, tags=["device"])
+# Access PIN (routes/access.py): /login, /logout, and the gate in front of
+# everything else for other devices once a PIN is set.
+app.include_router(access_router, tags=["access"])
 
 # Web remote SPA served at /remote/ — static files live in backend/web-remote/.
 _remote_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web-remote")
@@ -78,6 +82,9 @@ async def _remote_no_stale_cache(request, call_next):
     if path == "/remote" or path.startswith("/remote/") or path.startswith("/locales/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+# Added last, so it runs first: nothing else answers a locked-out device.
+app.add_middleware(AccessGate)
 
 # Locale bundles for the web-remote i18n module, at <project>/renderer/locales/
 # (two dirs up from backend/main.py). Web-remote fetches `/locales/<lang>.json`
@@ -128,6 +135,7 @@ if __name__ == "__main__":
 
     if args.user_data_dir:
         set_user_data_dir(args.user_data_dir)
+        access_pin.set_user_data_dir(args.user_data_dir)
         video_info.set_cache_dir(args.user_data_dir)
         stereo_detect.set_cache_dir(args.user_data_dir)
         # Phone / headset edits waiting for the desktop survive a restart.
