@@ -1,0 +1,25 @@
+[package]
+name = "pmvhaven-scout"
+version = "0.1.0"
+description = "Find PMVHaven videos that have a funscript, score them, and download the ones swiped right: <userData>/pmvhaven-scout.json"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "pmvhaven_scout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pmvhaven-scout"
+path = "src/main.rs"
+
+[dependencies]
+# The SLR scout's library: curl client and pacer, shared preferences,
+# screening, scoring (candidateScore), library walk and scene naming.
+slr-scout = { path = "../slr-scout" }
+# userData default (env var), host-aware lock files, atomic write,
+# timestamps, config.json, rescan request.
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
