@@ -25,6 +25,8 @@
     "pornstar:tags": "cargo run -q --release -p pornstar-tags --",
     "scout:report": "cargo run -q --release -p scout-report --",
     "slr:scout": "cargo run -q --release -p slr-scout --",
+    "creators:scout": "cargo run -q --release -p creator-scout --",
+    "creators:site": "cargo run -q --release -p creator-report --",
     "jobs": "cargo run -q --release -p job-runner --",
     "library:thumbs": "cargo run -q --release -p library-thumbs --",
     "access:pin": "cargo run -q --release -p access-pin --",

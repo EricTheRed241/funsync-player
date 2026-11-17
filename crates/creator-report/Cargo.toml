@@ -1,0 +1,23 @@
+[package]
+name = "creator-report"
+version = "0.1.0"
+description = "Swipe through the content creators creator-scout found (yes / no) and through their downloadable posts (want / hide), on a localhost-only webpage"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "creator_report"
+path = "src/lib.rs"
+
+[[bin]]
+name = "creator-report"
+path = "src/main.rs"
+
+[dependencies]
+# The access-PIN gate, the login page, the HTTP plumbing, the flags and the deck's shuffle.
+scout-report = { path = "../scout-report" }
+# The userData default, timestamps and atomic JSON writes.
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

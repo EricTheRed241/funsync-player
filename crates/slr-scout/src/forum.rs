@@ -205,7 +205,9 @@ pub fn script_axis(name: &str) -> Option<(String, Option<&'static str>)> {
     Some((stem.to_string(), None))
 }
 
-fn decode_entities(s: &str) -> String {
+/// HTML entities (named basics and numeric) decoded. Shared with
+/// crates/creator-scout.
+pub fn decode_entities(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(at) = rest.find('&') {
