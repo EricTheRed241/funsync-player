@@ -6,12 +6,13 @@
 //! the quota), `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview
 //! frames, crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}`
 //! (posts), and the same under `/api/slr/` (scenes; the only writes:
-//! eroscripts-scout-swipes.json and slr-scout-swipes.json). In front of them all,
+//! eroscripts-scout-swipes.json and slr-scout-swipes.json). `GET /creators` and
+//! `GET /api/creators`: the Content creators tab (crate::creators). In front of them all,
 //! crate::gate: the access PIN, and `/login` and `/logout`.
 
 use crate::gate::{self, Gate};
 use crate::swipes::{self, Dir, Store};
-use crate::{deck, frames, report, slr};
+use crate::{creators, deck, frames, report, slr};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -23,6 +24,8 @@ use std::time::Duration;
 pub const PAGE: &str = include_str!("page.html");
 /// The swipe deck page, likewise self-contained.
 pub const SWIPE_PAGE: &str = include_str!("swipe.html");
+/// The Content creators tab (crate::creators), likewise self-contained.
+pub const CREATORS_PAGE: &str = include_str!("creators.html");
 
 /// Longest request head read before giving up on a request.
 const MAX_HEAD: usize = 16 * 1024;
@@ -106,6 +109,15 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
     match (method, path) {
         ("GET" | "HEAD", "/") => html(PAGE),
         ("GET" | "HEAD", "/swipe") => html(SWIPE_PAGE),
+        ("GET" | "HEAD", "/creators") => html(CREATORS_PAGE),
+        ("GET" | "HEAD", "/api/creators") => match creators::load(user_data) {
+            Ok(Some(c)) => json_ok(&c),
+            Ok(None) => json(
+                404,
+                &json!({"creators": [], "missing": true, "file": creators::FILE}),
+            ),
+            Err(e) => json(500, &json!({"error": e})),
+        },
         ("GET" | "HEAD", "/api/report") => json_ok(&report::load(user_data)),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
             Ok(d) => json_ok(&deck::load(user_data, &d)),
@@ -1042,5 +1054,40 @@ mod tests {
         assert!(l.local_addr().unwrap().ip().is_loopback());
         let l = bind(0, true).unwrap();
         assert!(l.local_addr().unwrap().ip().is_unspecified());
+    }
+
+    #[test]
+    fn creators_page_and_api() {
+        let dir = user_data("creators");
+        let r = route("GET", "/creators", b"", &dir);
+        assert_eq!(
+            (r.status, r.content_type),
+            (200, "text/html; charset=utf-8")
+        );
+        assert_eq!(r.body, CREATORS_PAGE.as_bytes());
+
+        let r = route("GET", "/api/creators", b"", &dir);
+        assert_eq!(r.status, 404);
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["missing"], true);
+        assert_eq!(v["creators"], json!([]));
+
+        std::fs::write(dir.join(creators::FILE), "{oops").unwrap();
+        let r = route("GET", "/api/creators", b"", &dir);
+        assert_eq!(r.status, 500);
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert!(v["error"].as_str().unwrap().contains(creators::FILE));
+
+        std::fs::write(
+            dir.join(creators::FILE),
+            r#"{"version":1,"updatedAt":"2026-11-17T21:00:00Z","creators":[{"name":"A","faptap":[{"id":"2122637633308856321"}]}]}"#,
+        )
+        .unwrap();
+        let v = get_json("/api/creators", &dir);
+        assert_eq!(v["creators"][0]["name"], "A");
+        assert_eq!(v["creators"][0]["faptap"][0]["id"], "2122637633308856321");
+        assert_eq!(v["creators"][0]["instagram"], Value::Null);
+        assert!(v.get("missing").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
