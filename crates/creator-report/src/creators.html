@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='1.5' width='24' height='29' rx='5' fill='%23a46ad6'/%3E%3Ccircle cx='16' cy='12.5' r='5' fill='%23fff'/%3E%3Cpath d='M7.5 26c1.2-4.6 4.6-7 8.5-7s7.3 2.4 8.5 7z' fill='%23fff'/%3E%3C/svg%3E">
+<title>Creators</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --panel: #ffffff;
+  --accent: #2f6fdf; --row: #f2f2f5; --warn-bg: #fff4d6; --warn-fg: #6b4e00;
+  --like: #3aa655; --nope: #e05252; --undo: #d08b2c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181b; --fg: #e6e6e9; --muted: #9a9aa3; --line: #34353b; --panel: #1f2024;
+    --accent: #7aa7ff; --row: #2a2b31; --warn-bg: #3d3214; --warn-fg: #ffd98a;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; overscroll-behavior: none;
+  background: var(--bg); color: var(--fg); font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-size: 13px; padding: 1px 6px; border-radius: 5px; background: var(--row); }
+.bar { position: relative; display: flex; align-items: baseline; gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 6px; width: min(100%, 560px); margin: 0 auto; }
+.bar h1 { font-size: 18px; margin: 0; }
+.counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
+  line-height: 1; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+.bar button.pill { font-size: 13px; font-weight: 600; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px;
+  align-self: center; color: var(--like); }
+.stacks { display: flex; gap: 0; width: min(100% - 32px, 528px); margin: 0 auto 8px; border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; }
+.stacks button { flex: 1; background: none; border: none; border-radius: 0; padding: 6px 4px; font: inherit; font-size: 13px;
+  color: var(--muted); cursor: pointer; touch-action: manipulation; }
+.stacks button + button { border-left: 1px solid var(--line); }
+.stacks button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); font-weight: 600; }
+.summary { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
+  font-variant-numeric: tabular-nums; }
+.summary b { color: var(--fg); }
+.problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
+  margin: 0 auto 6px; width: min(100% - 20px, 540px); white-space: pre-wrap; font-size: 13px; }
+.deck { position: relative; flex: 1; min-height: 0; width: min(100% - 20px, 540px); margin: 4px auto 0; }
+.card { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  transition: transform .3s ease, opacity .3s ease; will-change: transform; }
+.card.top { z-index: 2; cursor: grab; }
+.card.top:active { cursor: grabbing; }
+.card.next { z-index: 1; transform: scale(.95) translateY(12px); pointer-events: none; }
+.card.fly { z-index: 3; pointer-events: none; transition: transform .35s ease-in, opacity .35s ease-in; opacity: 0; }
+.card.drag { transition: none; }
+.media { position: relative; flex: 1; min-height: 0; background: #000; }
+.media img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; -webkit-user-drag: none; }
+.media .none { height: 100%; display: flex; align-items: center; justify-content: center; color: #9a9aa3; }
+.media.broken img { visibility: hidden; }
+.media.broken::after { content: 'Picture unavailable'; position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: #9a9aa3; }
+.media.loading::before { content: ''; position: absolute; z-index: 1; top: 50%; left: 50%; width: 40px; height: 40px;
+  margin: -20px 0 0 -20px; border-radius: 50%; border: 4px solid rgba(255,255,255,.25); border-top-color: #fff;
+  opacity: 0; animation: spin .8s linear infinite, appear .2s ease-out .3s forwards; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes appear { to { opacity: 1; } }
+.dots { position: absolute; top: 8px; left: 10px; right: 10px; display: flex; gap: 4px; }
+.dots span { flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,.35); box-shadow: 0 0 2px rgba(0,0,0,.5); }
+.dots span.on { background: #fff; }
+.src { position: absolute; left: 10px; bottom: 10px; z-index: 1; padding: 2px 9px; border-radius: 999px; font-size: 12px;
+  font-weight: 600; color: #fff; background: rgba(0,0,0,.55); }
+a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
+.stamp { position: absolute; top: 30px; padding: 2px 12px; border: 4px solid; border-radius: 8px; font-weight: 800;
+  font-size: 28px; letter-spacing: .06em; opacity: 0; background: rgba(0,0,0,.25); }
+.stamp.want { left: 18px; color: var(--like); transform: rotate(-14deg); }
+.stamp.hide { right: 18px; color: var(--nope); transform: rotate(14deg); }
+.info { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 5px; }
+.badges, .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
+.b-score { --bc: #2f6fdf; } .b-time { --bc: #6b7280; } .b-cream { --bc: #e0529c; } .b-multi { --bc: #14b8a6; }
+.b-es { --bc: #d08b2c; } .b-paid { --bc: #8b8b93; } .b-ft { --bc: #a46ad6; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
+.tags.one-line { flex-wrap: nowrap; overflow: hidden; }
+.ttl { font-weight: 650; font-size: 16px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.aka { color: var(--muted); font-size: 12px; margin-top: -3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.social { display: flex; align-items: baseline; gap: 8px; font-size: 13px; min-width: 0; white-space: nowrap; }
+.social .net { flex: none; width: 22px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.social a { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.social .n { font-variant-numeric: tabular-nums; }
+.social .when { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.social .when.none { font-style: italic; }
+.tops { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.tops li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.tops .k { flex: none; width: 22px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.tops a, .tops span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--fg); }
+.tops .s { margin-left: auto; flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.by { display: flex; gap: 10px; color: var(--muted); font-size: 13px; min-width: 0; }
+.by .who { color: var(--fg); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.by .hosts { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.by a { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.by .date { font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Desktop and landscape tablets: the picture large on the left, the details beside it. */
+@media (min-width: 900px) {
+  .bar { width: min(100%, 1280px); }
+  .stacks, .summary { width: min(100% - 32px, 1248px); }
+  .problems, .deck { width: min(100% - 32px, 1248px); }
+  .card { flex-direction: row; }
+  .media { flex: 1 1 auto; min-width: 0; min-height: auto; }
+  .info { flex: 0 0 clamp(340px, 34%, 460px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+    padding: 16px 18px; gap: 9px; border-left: 1px solid var(--line); }
+  .info .ttl { font-size: 19px; -webkit-line-clamp: 4; }
+  .tags.one-line { flex-wrap: wrap; }
+  .tops a, .tops span.t { white-space: normal; }
+}
+.empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--muted); text-align: center; padding: 20px; }
+.empty b { color: var(--fg); font-size: 17px; }
+.empty button.linkish { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+  font: inherit; color: var(--accent); cursor: pointer; }
+.actions { display: flex; justify-content: center; align-items: center; gap: 24px;
+  padding: 12px 0 calc(10px + env(safe-area-inset-bottom)); }
+.round { width: 64px; height: 64px; border-radius: 50%; font-size: 28px; line-height: 1; cursor: pointer; padding: 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: 0 2px 10px rgba(0,0,0,.14);
+  touch-action: manipulation; }
+.round.small { width: 48px; height: 48px; font-size: 22px; }
+.round:disabled { opacity: .4; cursor: default; }
+.round.nope { color: var(--nope); } .round.like { color: var(--like); } .round.undo { color: var(--undo); }
+.round.skip { color: var(--accent); }
+.hint { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+@media (hover: none) { .hint { display: none; } }
+.toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: var(--warn-bg); color: var(--warn-fg); padding: 8px 14px; border-radius: 8px; z-index: 40;
+  box-shadow: 0 2px 10px rgba(0,0,0,.2); max-width: 90vw; }
+/* The Yes list: a sheet over the deck. */
+.sheet { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.45); }
+.sheet .panel { width: min(100%, 560px); max-height: 82dvh; display: flex; flex-direction: column;
+  background: var(--panel); border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,.25);
+  padding-bottom: env(safe-area-inset-bottom); }
+@media (min-width: 600px) { .sheet { align-items: center; } .sheet .panel { border-radius: 16px; } }
+.sheet header { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px 8px; border-bottom: 1px solid var(--line); }
+.sheet h2 { margin: 0; font-size: 17px; }
+.sheet header .note { color: var(--muted); font-size: 12px; margin-right: auto; }
+.sheet header button { background: none; border: none; font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; }
+.sheet ul { list-style: none; margin: 0; padding: 6px 0; overflow-y: auto; overscroll-behavior: contain; }
+.sheet li { display: flex; align-items: center; gap: 12px; padding: 8px 16px; }
+.sheet li + li { border-top: 1px solid var(--line); }
+.sheet img, .sheet .noimg { flex: none; width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: var(--row); }
+.sheet .who { flex: 1; min-width: 0; }
+.sheet .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet .mt { color: var(--muted); font-size: 12px; }
+.sheet li.changed .nm { text-decoration: line-through; color: var(--muted); }
+.sheet li button { flex: none; font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 8px; cursor: pointer;
+  background: none; border: 1px solid var(--nope); color: var(--nope); touch-action: manipulation; }
+.sheet li.changed button { border-color: var(--like); color: var(--like); }
+.sheet .blank { color: var(--muted); padding: 18px 16px; text-align: center; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1 id="title">Creators</h1>
+  <span class="counter" id="counter">Loading…</span>
+  <button type="button" class="pill" id="yes-open" title="The creators you swiped yes; change one to no here" aria-haspopup="dialog">Yes list</button>
+  <button type="button" id="refresh" title="Refresh: load the deck again (skipped cards come back)" aria-label="Refresh">↻</button>
+  <button type="button" id="shuffle" title="Shuffle: deal the creators in a new order (each moves at most 2 score points)" aria-label="Shuffle">⇄</button>
+</header>
+<nav class="stacks" id="tabs" aria-label="Which deck">
+  <button type="button" data-tab="creators" title="Content creators: yes or no">Creators</button>
+  <button type="button" data-tab="posts" title="Downloadable posts of the creators you said yes to: want or hide">Posts</button>
+</nav>
+<div class="summary" id="summary" hidden></div>
+<div class="problems" id="problems" hidden></div>
+<main class="deck" id="deck">
+  <div class="empty" id="empty">Loading…</div>
+</main>
+<div class="actions">
+  <button type="button" class="round nope" id="nope" aria-label="No">✕</button>
+  <button type="button" class="round small undo" id="undo" title="Undo (Backspace)" aria-label="Undo">↺</button>
+  <button type="button" class="round small skip" id="skip" title="Skip: it comes back later in the deck (↓)" aria-label="Skip">↷</button>
+  <button type="button" class="round like" id="like" aria-label="Yes">♥</button>
+</div>
+<div class="hint" id="hint"></div>
+<div class="toast" id="toast" hidden></div>
+<div class="sheet" id="yes-sheet" role="dialog" aria-modal="true" aria-labelledby="yes-title" hidden>
+  <div class="panel">
+    <header>
+      <h2 id="yes-title">Swiped yes</h2>
+      <span class="note">Their posts fill the Posts tab</span>
+      <button type="button" id="yes-close" aria-label="Close">✕</button>
+    </header>
+    <ul id="yes-list"><li class="blank">Loading…</li></ul>
+  </div>
+</div>
+
+<script>
+'use strict';
+const BATCH = 20;
+const REFILL_AT = 5;
+// The creators deal's shuffle: the server shifts every score by up to ±2 for this seed;
+// Shuffle (or a page reload) deals a new order. The posts deck is strictly by score.
+const newSeed = () => Math.floor(Math.random() * 2 ** 32);
+let seed = newSeed();
+let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
+let tab = location.pathname === '/posts' ? 'posts' : 'creators';
+
+// Each tab's deck: its URL, API, words, a card's identity, and what a swipe sends.
+const TABS = {
+  creators: {
+    path: '/', api: '/api/creators', title: 'Creators', yes: 'YES', no: 'NO',
+    key: (c) => 'c:' + c.slug,
+    name: (c) => c.name,
+    swipe: (c, dir) => ({ slug: c.slug, choice: dir === 'right' ? 'yes' : 'no' }),
+    undo: (c) => ({ slug: c.slug }),
+    likeTitle: 'Yes: their posts come to the Posts tab (→)',
+    nopeTitle: 'No (←)',
+    hint: '← no · → yes · ↓ or drag up skip · Backspace undo · Space next picture · tap the picture\'s sides to browse',
+  },
+  posts: {
+    path: '/posts', api: '/api/posts', title: 'Posts', yes: 'WANT', no: 'HIDE',
+    key: (c) => 'p:' + c.key,
+    name: (c) => c.title || c.key,
+    swipe: (c, dir) => ({ key: c.key, creator: c.creator, choice: dir === 'right' ? 'want' : 'hide' }),
+    undo: (c) => ({ key: c.key }),
+    likeTitle: 'Want: downloads at the next daily run (→)',
+    nopeTitle: 'Hide (←)',
+    hint: '← hide · → want (downloads at the next daily run) · ↓ skip · Backspace undo · Space next picture',
+  },
+};
+const SOURCES = { instagram: 'Instagram', eroscripts: 'EroScripts', faptap: 'FapTap' };
+const KIND_SHORT = { eroscripts: 'ES', faptap: 'FT' };
+
+const $ = (id) => document.getElementById(id);
+const deckEl = $('deck');
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    n.append(c instanceof Node ? c : String(c));
+  }
+  return n;
+}
+const ext = (href, ...children) => el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, ...children);
+
+let queue = [];         // cards not swiped yet; queue[0] is on top
+const undoStack = [];   // {card, dir, tab}, newest last; dir 'skip' never reached the server
+let skipped = [];       // skipped cards waiting to go back into the deck
+let remaining = 0;
+let liked = 0;          // creators swiped yes, or posts wanted
+let image = 0;          // the top card's picture
+let loading = false;
+let exhausted = false;  // the server has no card beyond the queue
+let loadError = null;
+let loaded = false;
+let missing = false;    // creators.json doesn't exist yet
+let since = null;       // counter changes since the deck request in flight was sent
+let summary = null;     // the last /api/summary
+
+// Swipes, undos and deck fetches reach the server in order.
+let chain = Promise.resolve();
+function serial(fn) {
+  const p = chain.then(fn);
+  chain = p.catch(() => {});
+  return p;
+}
+
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+  return res.json();
+}
+
+let toastTimer = 0;
+function toast(msg, ms) {
+  $('toast').textContent = msg;
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, ms || 5000);
+}
+
+const fmt = (n) => String(Math.round(n * 10) / 10);
+const day = (iso) => (iso ? iso.slice(0, 10) : '');
+const monthYear = (iso) => { const m = /^(\d{4})-(\d{2})/.exec(iso || ''); return m ? m[2] + '-' + m[1] : ''; };
+const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+
+/** m:ss, or h:mm:ss from an hour. */
+function clock(secs) {
+  const s = Math.round(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+/** Followers as given ("5M") or a number shortened (9225 → 9.2K). */
+function followers(v) {
+  if (v == null || v === '') return null;
+  if (typeof v !== 'number') return String(v);
+  if (v >= 1e6) return fmt(v / 1e6) + 'M';
+  if (v >= 1e4) return Math.round(v / 1e3) + 'K';
+  if (v >= 1e3) return fmt(v / 1e3) + 'K';
+  return String(v);
+}
+
+const scoreBadge = (s) => el('span', { class: 'badge b-score', title: 'Score' }, s == null ? '★ –' : '★ ' + fmt(s));
+
+function social(net, href, label, count, when, whenNone, whenTitle) {
+  return el('div', { class: 'social' },
+    el('span', { class: 'net' }, net),
+    ext(href, label),
+    count ? el('span', { class: 'n' }, count + ' followers') : null,
+    when ? el('span', { class: 'when', title: whenTitle + ' ' + when }, whenTitle.toLowerCase() + ' ' + day(when))
+      : el('span', { class: 'when none' }, whenNone));
+}
+
+function creatorInfo(c) {
+  const n = c.counts || {};
+  const badges = [scoreBadge(c.score)];
+  if (n.eroscriptsFree) badges.push(el('span', { class: 'badge b-es', title: 'Free EroScripts posts with a downloadable video' }, `EroScripts ${n.eroscriptsFree} free`));
+  if (n.eroscriptsPaid) badges.push(el('span', { class: 'badge b-paid', title: 'Paid EroScripts posts' }, `${n.eroscriptsPaid} paid`));
+  if (n.faptap) badges.push(el('span', { class: 'badge b-ft', title: 'FapTap videos' }, `FapTap ${n.faptap}`));
+  const ig = c.instagram;
+  const tw = c.twitch;
+  const tops = c.topPosts || [];
+  return [
+    el('div', { class: 'ttl', title: c.name }, c.name),
+    c.aliases && c.aliases.length ? el('div', { class: 'aka' }, 'aka ' + c.aliases.join(', ')) : null,
+    el('div', { class: 'badges' }, badges),
+    ig && ig.handle ? social('IG', 'https://www.instagram.com/' + encodeURIComponent(ig.handle) + '/', '@' + ig.handle,
+      followers(ig.followers), ig.lastPostAt, 'no login yet', 'Last post') : null,
+    tw && tw.handle ? social('TW', 'https://www.twitch.tv/' + encodeURIComponent(tw.handle), tw.handle,
+      followers(tw.followers), tw.lastLive, 'never live', 'Last live') : null,
+    tops.length ? el('ol', { class: 'tops' }, tops.map((p) => el('li', {},
+      el('span', { class: 'k', title: SOURCES[p.kind] || p.kind }, KIND_SHORT[p.kind] || ''),
+      p.url ? ext(p.url, p.title || '(untitled)') : el('span', { class: 't' }, p.title || '(untitled)'),
+      el('span', { class: 's' }, p.score == null ? '' : '★ ' + fmt(p.score))))) : null,
+  ];
+}
+
+function postInfo(c) {
+  const badges = [scoreBadge(c.score)];
+  if (c.durationS) badges.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.durationS)));
+  badges.push(el('span', { class: 'badge ' + (c.kind === 'faptap' ? 'b-ft' : 'b-es') }, SOURCES[c.kind] || c.kind));
+  if (c.creampie) badges.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
+  if (c.multiAxis) badges.push(el('span', { class: 'badge b-multi' }, 'Multi-axis'));
+  const link = c.kind === 'eroscripts' ? '#' + c.id + ' ↗' : (SOURCES[c.kind] || 'Open') + ' ↗';
+  return [
+    el('div', { class: 'badges' }, badges),
+    el('div', { class: 'ttl', title: c.title || null }, c.title || c.key),
+    el('div', { class: 'by' },
+      el('span', { class: 'who' }, c.creatorName),
+      c.hosts && c.hosts.length ? el('span', { class: 'hosts', title: 'Video on' }, c.hosts.join(', ')) : null,
+      c.url ? ext(c.url, link) : null,
+      monthYear(c.createdAt) ? el('span', { class: 'date', title: 'Posted ' + day(c.createdAt) }, monthYear(c.createdAt)) : null),
+    c.tags && c.tags.length ? el('div', { class: 'tags one-line' }, c.tags.map((t) => el('span', { class: 'tag' }, t))) : null,
+  ];
+}
+
+/** The chip naming where the shown picture comes from (a link to it there, when known). */
+function sourceChip(p) {
+  if (!p) return null;
+  const label = SOURCES[p.source] || p.source || '';
+  if (!label) return null;
+  return p.link ? el('a', { class: 'src', href: p.link, target: '_blank', rel: 'noopener noreferrer' }, label + ' ↗')
+    : el('span', { class: 'src' }, label);
+}
+
+function cardNode(c, isTop) {
+  const pics = c.pictures || [];
+  const at = isTop ? image : 0;
+  const media = el('div', { class: 'media' });
+  if (pics.length) {
+    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: pics[at].src });
+    img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
+    img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
+    if (!img.complete) media.classList.add('loading');
+    media.append(img);
+    if (pics.length > 1) {
+      media.append(el('div', { class: 'dots' }, pics.map((_, i) => el('span', { class: i === at ? 'on' : null }))));
+    }
+    const chip = sourceChip(pics[at]);
+    if (chip) media.append(chip);
+  } else {
+    media.append(el('div', { class: 'none' }, 'No picture'));
+  }
+  const t = TABS[c._tab];
+  media.append(el('div', { class: 'stamp want' }, t.yes), el('div', { class: 'stamp hide' }, t.no));
+  const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
+    media,
+    el('div', { class: 'info' }, c._tab === 'posts' ? postInfo(c) : creatorInfo(c)));
+  if (isTop) drag(node);
+  return node;
+}
+
+const preloaded = new Set();
+function preload(url) {
+  if (!url || preloaded.has(url)) return;
+  preloaded.add(url);
+  new Image().src = url;
+}
+const picSrc = (c, i) => ((c && c.pictures) || [])[i]?.src;
+
+function renderCounter() {
+  const word = tab === 'posts' ? 'wanted' : 'yes';
+  $('counter').textContent = loaded ? `${remaining} left · ${liked} ${word}` : 'Loading…';
+  $('undo').disabled = !undoStack.length;
+  $('nope').disabled = $('like').disabled = $('skip').disabled = !queue.length;
+}
+
+function emptyState() {
+  if (loadError) return ['Could not load the deck: ' + loadError, el('button', { type: 'button', class: 'round small', onclick: reload, title: 'Retry' }, '⟳')];
+  if (loading || !loaded) return ['Loading…'];
+  if (missing) {
+    return [el('b', {}, 'No creators yet'),
+      el('span', {}, 'Run ', el('code', {}, 'npm run creators:scout -- --daily'), ' to find them; they show up here when it\'s done.')];
+  }
+  if (tab === 'creators') {
+    return [el('b', {}, 'No creators left to swipe'), el('span', {}, 'New ones come with the next daily run.'),
+      el('button', { type: 'button', class: 'linkish', onclick: openYes }, 'See the Yes list')];
+  }
+  if (summary && !summary.creators.yes) {
+    return [el('b', {}, 'No posts yet'), el('span', {}, 'Swipe creators right (yes) on the Creators tab; their downloadable posts show up here.')];
+  }
+  return [el('b', {}, 'No posts left to swipe'), el('span', {}, 'New ones come with the next daily run.')];
+}
+
+/** Redraw the top two cards (a card flying off stays until its animation ends). */
+function render(enterFrom) {
+  for (const n of deckEl.querySelectorAll('.card:not(.fly)')) n.remove();
+  renderCounter();
+  const empty = $('empty');
+  if (!queue.length) {
+    empty.hidden = false;
+    empty.replaceChildren(...emptyState());
+    return;
+  }
+  empty.hidden = true;
+  if (queue[1]) deckEl.append(cardNode(queue[1], false));
+  const top = cardNode(queue[0], true);
+  if (enterFrom) {
+    top.classList.add('drag');
+    top.style.transform = enterFrom === 'skip' ? 'translateY(-120%)'
+      : `translateX(${enterFrom === 'right' ? '' : '-'}120%) rotate(${enterFrom === 'right' ? 20 : -20}deg)`;
+  }
+  deckEl.append(top);
+  if (enterFrom) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      top.classList.remove('drag');
+      top.style.transform = '';
+    }));
+  }
+  preload(picSrc(queue[0], image + 1));
+  if (queue[1]) preload(picSrc(queue[1], 0));
+}
+
+function topNode() {
+  return deckEl.querySelector('.card.top:not(.fly)');
+}
+
+function showImage(i) {
+  const c = queue[0];
+  const pics = (c && c.pictures) || [];
+  if (pics.length < 2) return;
+  image = (i + pics.length) % pics.length;
+  const node = topNode();
+  if (!node) return;
+  const media = node.querySelector('.media');
+  const img = media.querySelector('img');
+  img.src = pics[image].src;
+  media.classList.remove('broken');
+  media.classList.toggle('loading', !img.complete);
+  node.querySelectorAll('.dots span').forEach((d, j) => d.classList.toggle('on', j === image));
+  const old = media.querySelector('.src');
+  const chip = sourceChip(pics[image]);
+  if (old && chip) old.replaceWith(chip); else if (old) old.remove(); else if (chip) media.append(chip);
+  preload(pics[(image + 1) % pics.length].src);
+}
+
+function threshold() {
+  return Math.min(140, deckEl.clientWidth * 0.28);
+}
+
+function setStamps(node, t) {
+  node.querySelector('.stamp.want').style.opacity = Math.max(0, t);
+  node.querySelector('.stamp.hide').style.opacity = Math.max(0, -t);
+}
+
+/** Pointer drag with tilt; past the threshold it commits, a tap on the picture browses it. */
+function drag(node) {
+  let start = null;
+  let dx = 0;
+  let dy = 0;
+  let moved = false;
+  node.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('a, button')) return;
+    const panel = e.target.closest('.info');
+    if (panel && e.clientX >= panel.getBoundingClientRect().left + panel.clientLeft + panel.clientWidth) return;
+    start = { x: e.clientX, y: e.clientY };
+    dx = dy = 0;
+    moved = false;
+    node.setPointerCapture(e.pointerId);
+    node.classList.add('drag');
+  });
+  node.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    dx = e.clientX - start.x;
+    dy = e.clientY - start.y;
+    if (!moved && Math.hypot(dx, dy) < 8) return;
+    moved = true;
+    node.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx * 0.06}deg)`;
+    setStamps(node, Math.max(-1, Math.min(1, dx / threshold())));
+  });
+  const end = (e) => {
+    if (!start) return;
+    start = null;
+    node.classList.remove('drag');
+    if (!moved) {
+      const r = node.querySelector('.media').getBoundingClientRect();
+      if (e.type === 'pointerup' && e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left && e.clientX <= r.right) {
+        showImage(image + (e.clientX < r.left + r.width / 2 ? -1 : 1));
+      }
+      return;
+    }
+    if (Math.abs(dx) > threshold()) {
+      swipe(dx > 0 ? 'right' : 'left', dy * 0.3);
+    } else if (-dy > threshold()) {
+      skip();
+    } else {
+      node.style.transform = '';
+      setStamps(node, 0);
+    }
+  };
+  node.addEventListener('pointerup', end);
+  node.addEventListener('pointercancel', end);
+}
+
+function fly(node, dir, dy) {
+  node.classList.remove('drag');
+  node.classList.add('fly');
+  if (dir === 'skip') {
+    node.style.transform = `translateY(${-1.2 * window.innerHeight}px)`;
+  } else {
+    const sign = dir === 'right' ? 1 : -1;
+    setStamps(node, sign);
+    node.style.transform = `translate(${sign * 1.4 * window.innerWidth}px, ${dy || 0}px) rotate(${sign * 30}deg)`;
+  }
+  setTimeout(() => node.remove(), 400);
+}
+
+/** Change the counters; a deck request in flight hears of it too. */
+function count(dRemaining, dLiked) {
+  remaining = Math.max(0, remaining + dRemaining);
+  liked = Math.max(0, liked + dLiked);
+  if (since) {
+    since.remaining += dRemaining;
+    since.liked += dLiked;
+  }
+}
+
+function swipe(dir, dy) {
+  const card = queue[0];
+  if (!card) return;
+  const node = topNode();
+  if (node) fly(node, dir, dy);
+  queue.shift();
+  undoStack.push({ card, dir, tab: card._tab });
+  count(-1, dir === 'right' ? 1 : 0);
+  image = 0;
+  render();
+  const t = TABS[card._tab];
+  serial(() => post(t.api + '/swipe', t.swipe(card, dir))).then(() => {
+    if (card._tab === 'posts' && dir === 'right') toast('Wanted: downloads at the next daily run', 2500);
+    loadSummary();
+  }).catch((e) => {
+    // Not saved: put the card back on top (unless the page moved to the other tab meanwhile).
+    const i = undoStack.findIndex((u) => u.card === card);
+    if (i >= 0) undoStack.splice(i, 1);
+    if (tab !== card._tab) { toast('Swipe not saved: ' + e.message); renderCounter(); return; }
+    if (!queue.some((c) => t.key(c) === t.key(card))) queue.unshift(card);
+    count(1, dir === 'right' ? -1 : 0);
+    image = 0;
+    render();
+    toast('Swipe not saved: ' + e.message);
+  });
+  if (queue.length <= REFILL_AT) more();
+}
+
+/** Put the top card aside; it goes back into the deck a few cards on (returnSkipped). Nothing is saved. */
+function skip() {
+  const card = queue[0];
+  if (!card) return;
+  const node = topNode();
+  if (node) fly(node, 'skip');
+  queue.shift();
+  undoStack.push({ card, dir: 'skip', tab: card._tab });
+  skipped.push(card);
+  image = 0;
+  if (queue.length <= REFILL_AT) {
+    if (exhausted) returnSkipped(); else more();
+  }
+  render();
+}
+
+/** Shuffle the skipped cards back in, each after the next REFILL_AT cards (or anywhere when fewer are left). */
+function returnSkipped() {
+  for (const card of skipped) {
+    const from = Math.min(REFILL_AT, queue.length);
+    queue.splice(from + Math.floor(Math.random() * (queue.length - from + 1)), 0, card);
+  }
+  skipped = [];
+}
+
+function undo() {
+  const last = undoStack.pop();
+  if (!last) return;
+  const t = TABS[last.tab];
+  if (last.tab !== tab) {
+    // Made on the other tab: forget it there; this tab's cards and counters stay.
+    if (last.dir === 'skip') { renderCounter(); return; }
+    serial(() => post(t.api + '/swipe/undo', t.undo(last.card)))
+      .then(() => { toast(`Undone on the ${t.title} tab: ${t.name(last.card)}`); loadSummary(); })
+      .catch((e) => { undoStack.push(last); toast('Undo not saved: ' + e.message); renderCounter(); });
+    renderCounter();
+    return;
+  }
+  queue = queue.filter((c) => t.key(c) !== t.key(last.card));
+  queue.unshift(last.card);
+  image = 0;
+  if (last.dir === 'skip') {
+    skipped = skipped.filter((c) => t.key(c) !== t.key(last.card));
+    render('skip');
+    return;
+  }
+  count(1, last.dir === 'right' ? -1 : 0);
+  render(last.dir);
+  serial(() => post(t.api + '/swipe/undo', t.undo(last.card))).then(loadSummary).catch((e) => {
+    // The swipe still stands: take the card off again.
+    queue = queue.filter((c) => t.key(c) !== t.key(last.card));
+    undoStack.push(last);
+    count(-1, last.dir === 'right' ? 1 : 0);
+    image = 0;
+    render();
+    toast('Undo not saved: ' + e.message);
+  });
+}
+
+/**
+ * Fetch the next cards in this deal's order. The server leaves out everything swiped;
+ * `offset` skips the cards this page already holds (on screen or skipped), which are the
+ * deck's first ones once the swipes before this request have landed.
+ */
+function more() {
+  if (loading || exhausted) return;
+  loading = true;
+  since = { remaining: 0, liked: 0 };
+  const gen = generation;
+  const from = tab;
+  serial(async () => {
+    const offset = queue.length + skipped.length;
+    const seedPart = from === 'creators' ? `seed=${seed}&` : '';
+    const res = await fetch(`${TABS[from].api}/deck?${seedPart}offset=${offset}&limit=${BATCH}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+    return res.json();
+  }).then((d) => {
+    if (gen !== generation) return;
+    loadError = null;
+    remaining = Math.max(0, d.remaining + since.remaining);
+    liked = Math.max(0, (from === 'posts' ? d.wanted : d.yes) + since.liked);
+    since = null;
+    missing = d.missing;
+    exhausted = d.cards.length < BATCH;
+    for (const c of d.cards) c._tab = from;
+    const t = TABS[from];
+    const swiped = undoStack.filter((u) => u.dir !== 'skip' && u.tab === from).map((u) => u.card);
+    const have = new Set([...queue, ...skipped, ...swiped].map(t.key));
+    const fresh = d.cards.filter((c) => !have.has(t.key(c)));
+    const wasEmpty = !queue.length;
+    queue.push(...fresh);
+    returnSkipped();
+    $('problems').hidden = !d.problems.length;
+    $('problems').textContent = d.problems.join('\n');
+    loading = false;
+    loaded = true;
+    if (wasEmpty) {
+      image = 0;
+      render();
+    } else {
+      if (queue[1] && !deckEl.querySelector('.card.next:not(.fly)')) {
+        deckEl.append(cardNode(queue[1], false));
+        preload(picSrc(queue[1], 0));
+      }
+      renderCounter();
+    }
+  }).catch((e) => {
+    if (gen !== generation) return;
+    loading = false;
+    since = null;
+    loadError = e.message;
+    if (!queue.length) {
+      returnSkipped();
+      render();
+    }
+    if (queue.length) toast('Could not load more cards: ' + e.message);
+  });
+}
+
+function reload() {
+  exhausted = false;
+  loadError = null;
+  more();
+  render();
+  loadSummary();
+}
+
+/** Deal the deck again from the server (skipped cards back in their place); `newOrder` also picks a new seed. */
+function restart(newOrder) {
+  generation++;
+  if (newOrder) seed = newSeed();
+  queue = [];
+  skipped = [];
+  image = 0;
+  loading = false;
+  loaded = false;
+  since = null;
+  reload();
+}
+
+/** The line under the tabs: this tab's counts from /api/summary, and when creators.json was written. */
+function renderSummary() {
+  const s = $('summary');
+  if (!summary || summary.missing) { s.hidden = true; return; }
+  const c = summary.creators;
+  const p = summary.posts;
+  const b = (n) => el('b', {}, String(n));
+  const line = tab === 'creators'
+    ? [b(c.total), ' creators · ', b(c.yes), ' yes · ', b(c.no), ' no · ', b(c.unswiped), ' to swipe']
+    : [b(p.wanted), ' wanted · ', b(p.pendingDownload), ' to download · ', b(p.inLibrary), ' in library'];
+  if (tab === 'posts' && p.hidden) line.push(' · ', b(p.hidden), ' hidden');
+  if (summary.updatedAt) {
+    const hours = Math.max(0, (Date.now() - new Date(summary.updatedAt)) / 3600e3);
+    const ago = hours < 1 ? 'under an hour ago' : hours < 48 ? `${Math.round(hours)} h ago` : `${Math.round(hours / 24)} days ago`;
+    line.push(el('span', { title: 'creators.json written ' + summary.updatedAt }, ` · updated ${ago}`));
+  }
+  s.replaceChildren(...line);
+  s.hidden = false;
+  $('yes-open').textContent = c.yes ? `Yes list (${c.yes})` : 'Yes list';
+}
+
+let summaryGen = 0;
+function loadSummary() {
+  const gen = ++summaryGen;
+  fetch('/api/summary', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!d || gen !== summaryGen) return;
+      summary = d;
+      renderSummary();
+      if (!queue.length && loaded && !loading) render();
+    })
+    .catch(() => {});
+}
+
+function showTab() {
+  const t = TABS[tab];
+  for (const b of $('tabs').querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === tab);
+  $('title').textContent = t.title;
+  document.title = tab === 'creators' ? 'Creators' : t.title + ' · Creators';
+  $('like').title = t.likeTitle;
+  $('nope').title = t.nopeTitle;
+  $('like').setAttribute('aria-label', tab === 'posts' ? 'Want' : 'Yes');
+  $('nope').setAttribute('aria-label', tab === 'posts' ? 'Hide' : 'No');
+  $('hint').textContent = t.hint;
+  $('shuffle').hidden = tab !== 'creators';
+  $('yes-open').hidden = tab !== 'creators';
+  renderSummary();
+}
+
+function switchTab(next) {
+  if (next === tab) return;
+  tab = next;
+  if (location.pathname !== TABS[tab].path) history.pushState(null, '', TABS[tab].path);
+  showTab();
+  restart(false);
+}
+$('tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  b.blur();
+  switchTab(b.dataset.tab);
+});
+window.addEventListener('popstate', () => switchTab(location.pathname === '/posts' ? 'posts' : 'creators'));
+
+// The Yes list: the creators swiped yes; "Change to no" takes their posts off the Posts deck.
+function yesRow(y) {
+  const meta = el('div', { class: 'mt' });
+  const button = el('button', { type: 'button' });
+  const row = el('li', {},
+    y.picture ? el('img', { src: y.picture, alt: '', loading: 'lazy' }) : el('div', { class: 'noimg' }),
+    el('div', { class: 'who' }, el('div', { class: 'nm' }, y.name), meta),
+    button);
+  const show = (isYes) => {
+    row.classList.toggle('changed', !isYes);
+    meta.textContent = isYes
+      ? [plural(y.unswiped, 'post') + ' to swipe', y.wanted ? y.wanted + ' wanted' : null, 'yes since ' + day(y.at)].filter(Boolean).join(' · ')
+      : 'Changed to no: their posts left the Posts deck';
+    button.textContent = isYes ? 'Change to no' : 'Back to yes';
+    button.dataset.yes = isYes ? '1' : '';
+  };
+  show(true);
+  button.addEventListener('click', () => {
+    const toYes = !button.dataset.yes;
+    button.disabled = true;
+    serial(() => post('/api/creators/swipe', { slug: y.slug, choice: toYes ? 'yes' : 'no' }))
+      .then(() => {
+        show(toYes);
+        if (tab === 'creators') { liked = Math.max(0, liked + (toYes ? 1 : -1)); renderCounter(); }
+        loadSummary();
+      })
+      .catch((e) => toast('Not saved: ' + e.message))
+      .finally(() => { button.disabled = false; });
+  });
+  return row;
+}
+
+function openYes() {
+  $('yes-sheet').hidden = false;
+  $('yes-list').replaceChildren(el('li', { class: 'blank' }, 'Loading…'));
+  fetch('/api/creators/yes', { cache: 'no-store' })
+    .then(async (r) => { if (!r.ok) throw new Error((await r.text()).trim() || r.status); return r.json(); })
+    .then((d) => {
+      $('yes-list').replaceChildren(...(d.creators.length ? d.creators.map(yesRow)
+        : [el('li', { class: 'blank' }, 'Nobody yet: swipe a creator right to say yes.')]));
+    })
+    .catch((e) => $('yes-list').replaceChildren(el('li', { class: 'blank' }, 'Could not load the list: ' + e.message)));
+}
+function closeYes() {
+  $('yes-sheet').hidden = true;
+}
+$('yes-open').addEventListener('click', (e) => { e.currentTarget.blur(); openYes(); });
+$('yes-close').addEventListener('click', closeYes);
+$('yes-sheet').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeYes(); });
+
+$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); restart(false); });
+$('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
+// Buttons drop focus so Space keeps meaning "next picture".
+$('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });
+$('like').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('right'); });
+$('undo').addEventListener('click', (e) => { e.currentTarget.blur(); undo(); });
+$('skip').addEventListener('click', (e) => { e.currentTarget.blur(); skip(); });
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!$('yes-sheet').hidden) {
+    if (e.key === 'Escape') { closeYes(); e.preventDefault(); }
+    return;
+  }
+  if (e.target.closest && e.target.closest('input, select, textarea')) return;
+  if (e.key === 'ArrowLeft') swipe('left');
+  else if (e.key === 'ArrowRight') swipe('right');
+  else if (e.key === 'ArrowDown') skip();
+  else if (e.key === 'Backspace') undo();
+  else if (e.key === ' ') showImage(image + 1);
+  else return;
+  e.preventDefault();
+});
+
+showTab();
+reload();
+</script>
+</body>
+</html>

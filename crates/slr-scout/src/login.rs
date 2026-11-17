@@ -9,6 +9,7 @@ use crate::slr::SITE;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -95,7 +96,7 @@ pub fn devtools_url(port_file: &str) -> Option<String> {
 }
 
 /// Kills Chrome when dropped.
-struct Chrome(Child);
+pub struct Chrome(Child);
 
 impl Drop for Chrome {
     fn drop(&mut self) {
@@ -104,23 +105,22 @@ impl Drop for Chrome {
     }
 }
 
-fn js(s: &str) -> String {
-    serde_json::to_string(s).unwrap_or_default()
+/// A visible Chrome on its own profile, driven over DevTools: one page
+/// (`session` is its CDP session id). Chrome is killed when dropped.
+pub struct Browser {
+    pub cdp: Cdp<TcpStream>,
+    pub session: String,
+    pub chrome: Chrome,
 }
 
-/// Sign in with a visible Chrome and return the new session.
-pub fn login(
-    user_data: &Path,
-    creds: &Credentials,
-    now_iso: &str,
-    log: &mut dyn Write,
-) -> Result<Session, String> {
-    let profile = user_data.join(PROFILE_DIR);
-    fs::create_dir_all(&profile).map_err(|e| format!("{}: {e}", profile.display()))?;
+/// Start Chrome on the profile folder `profile` (created when missing) with
+/// a DevTools port, and attach to a blank page. Shared with
+/// crates/creator-scout (Instagram login).
+pub fn open_chrome(profile: &Path) -> Result<Browser, String> {
+    fs::create_dir_all(profile).map_err(|e| format!("{}: {e}", profile.display()))?;
     let port_file = profile.join("DevToolsActivePort");
     let _ = fs::remove_file(&port_file);
-    let _ = writeln!(log, "Opening Chrome to sign in to SLR...");
-    let _chrome = Chrome(
+    let chrome = Chrome(
         Command::new(CHROME_PATH)
             .arg(format!("--user-data-dir={}", profile.display()))
             .args([
@@ -164,6 +164,30 @@ pub fn login(
         .as_str()
         .ok_or("no session id")?
         .to_string();
+    Ok(Browser {
+        cdp,
+        session,
+        chrome,
+    })
+}
+
+fn js(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_default()
+}
+
+/// Sign in with a visible Chrome and return the new session.
+pub fn login(
+    user_data: &Path,
+    creds: &Credentials,
+    now_iso: &str,
+    log: &mut dyn Write,
+) -> Result<Session, String> {
+    let _ = writeln!(log, "Opening Chrome to sign in to SLR...");
+    let Browser {
+        mut cdp,
+        session,
+        chrome: _chrome,
+    } = open_chrome(&user_data.join(PROFILE_DIR))?;
     let s = session.as_str();
     let cookies = |cdp: &mut Cdp<_>| cdp.call("Network.getAllCookies", json!({}), Some(s));
 

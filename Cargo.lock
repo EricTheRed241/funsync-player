@@ -56,6 +56,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "creator-report"
+version = "0.1.0"
+dependencies = [
+ "scout-report",
+ "serde",
+ "serde_json",
+ "video-tags",
+]
+
+[[package]]
+name = "creator-scout"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "slr-scout",
+ "video-tags",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

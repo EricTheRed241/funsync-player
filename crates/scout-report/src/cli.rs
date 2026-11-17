@@ -89,7 +89,15 @@ impl Default for Options {
 }
 
 pub fn parse(args: &[OsString]) -> Result<Options, String> {
-    let mut o = Options::default();
+    parse_with_port(args, DEFAULT_PORT)
+}
+
+/// The same flags for a site whose port defaults to `default_port` (creator-report).
+pub fn parse_with_port(args: &[OsString], default_port: u16) -> Result<Options, String> {
+    let mut o = Options {
+        port: default_port,
+        ..Options::default()
+    };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let arg = arg

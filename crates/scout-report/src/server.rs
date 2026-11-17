@@ -6,13 +6,12 @@
 //! the quota), `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview
 //! frames, crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}`
 //! (posts), and the same under `/api/slr/` (scenes; the only writes:
-//! eroscripts-scout-swipes.json and slr-scout-swipes.json). `GET /creators` and
-//! `GET /api/creators`: the Content creators tab (crate::creators). In front of them all,
+//! eroscripts-scout-swipes.json and slr-scout-swipes.json). In front of them all,
 //! crate::gate: the access PIN, and `/login` and `/logout`.
 
 use crate::gate::{self, Gate};
 use crate::swipes::{self, Dir, Store};
-use crate::{creators, deck, frames, report, slr};
+use crate::{deck, frames, report, slr};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -24,8 +23,10 @@ use std::time::Duration;
 pub const PAGE: &str = include_str!("page.html");
 /// The swipe deck page, likewise self-contained.
 pub const SWIPE_PAGE: &str = include_str!("swipe.html");
-/// The Content creators tab (crate::creators), likewise self-contained.
-pub const CREATORS_PAGE: &str = include_str!("creators.html");
+
+/// This site's name (log lines) and its pages, for the gate.
+pub const NAME: &str = "scout-report";
+pub const PAGES: &[&str] = &["/", "/swipe"];
 
 /// Longest request head read before giving up on a request.
 const MAX_HEAD: usize = 16 * 1024;
@@ -48,7 +49,7 @@ const NO_STORE: &str = "no-store";
 /// A frame changes only when its scout takes it again.
 const FRAME_CACHE: &str = "max-age=300";
 
-pub(crate) fn text(status: u16, body: &str) -> Response {
+pub fn text(status: u16, body: &str) -> Response {
     Response {
         status,
         content_type: "text/plain; charset=utf-8",
@@ -58,7 +59,7 @@ pub(crate) fn text(status: u16, body: &str) -> Response {
     }
 }
 
-pub(crate) fn html(page: &str) -> Response {
+pub fn html(page: &str) -> Response {
     Response {
         status: 200,
         content_type: "text/html; charset=utf-8",
@@ -68,7 +69,7 @@ pub(crate) fn html(page: &str) -> Response {
     }
 }
 
-fn json_ok<T: Serialize>(value: &T) -> Response {
+pub fn json_ok<T: Serialize>(value: &T) -> Response {
     match serde_json::to_vec(value) {
         Ok(body) => Response {
             status: 200,
@@ -81,7 +82,7 @@ fn json_ok<T: Serialize>(value: &T) -> Response {
     }
 }
 
-pub(crate) fn json(status: u16, value: &Value) -> Response {
+pub fn json(status: u16, value: &Value) -> Response {
     Response {
         status,
         ..json_ok(value)
@@ -109,15 +110,6 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
     match (method, path) {
         ("GET" | "HEAD", "/") => html(PAGE),
         ("GET" | "HEAD", "/swipe") => html(SWIPE_PAGE),
-        ("GET" | "HEAD", "/creators") => html(CREATORS_PAGE),
-        ("GET" | "HEAD", "/api/creators") => match creators::load(user_data) {
-            Ok(Some(c)) => json_ok(&c),
-            Ok(None) => json(
-                404,
-                &json!({"creators": [], "missing": true, "file": creators::FILE}),
-            ),
-            Err(e) => json(500, &json!({"error": e})),
-        },
         ("GET" | "HEAD", "/api/report") => json_ok(&report::load(user_data)),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
             Ok(d) => json_ok(&deck::load(user_data, &d)),
@@ -329,14 +321,27 @@ pub fn lan_address() -> Option<Ipv4Addr> {
     }
 }
 
-/// Serve requests one after another, forever.
+/// Serve scout-report's routes behind its gate, forever.
 pub fn serve(listener: &TcpListener, user_data: &Path, err: &mut dyn Write) {
-    let mut gate = Gate::default();
+    serve_site(listener, user_data, Gate::new(NAME, PAGES), err, |r| {
+        route(r.method, r.target, r.body, user_data)
+    });
+}
+
+/// Serve requests one after another, forever: each through `gate`, then `route`.
+/// Connection problems are logged under the gate's site name.
+pub fn serve_site(
+    listener: &TcpListener,
+    user_data: &Path,
+    mut gate: Gate,
+    err: &mut dyn Write,
+    mut route: impl FnMut(&gate::Request) -> Response,
+) {
     for stream in listener.incoming() {
-        let result = stream.and_then(|s| handle(s, user_data, &mut gate, err));
+        let result = stream.and_then(|s| handle(s, user_data, &mut gate, err, &mut route));
         if let Err(e) = result {
             // A client that went away or timed out; keep serving.
-            let _ = writeln!(err, "scout-report: {e}");
+            let _ = writeln!(err, "{}: {e}", gate.name());
         }
     }
 }
@@ -347,6 +352,7 @@ fn handle(
     user_data: &Path,
     gate: &mut Gate,
     err: &mut dyn Write,
+    route: &mut impl FnMut(&gate::Request) -> Response,
 ) -> io::Result<()> {
     let client = stream.peer_addr()?.ip();
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -385,7 +391,7 @@ fn handle(
                     cookie: &cookie,
                     accept: &accept,
                 };
-                gate.respond(&req, user_data, video_tags::access::now_secs(), err)
+                gate.respond(&req, user_data, video_tags::access::now_secs(), err, route)
             }
             Err(resp) => resp,
         }
@@ -1054,40 +1060,5 @@ mod tests {
         assert!(l.local_addr().unwrap().ip().is_loopback());
         let l = bind(0, true).unwrap();
         assert!(l.local_addr().unwrap().ip().is_unspecified());
-    }
-
-    #[test]
-    fn creators_page_and_api() {
-        let dir = user_data("creators");
-        let r = route("GET", "/creators", b"", &dir);
-        assert_eq!(
-            (r.status, r.content_type),
-            (200, "text/html; charset=utf-8")
-        );
-        assert_eq!(r.body, CREATORS_PAGE.as_bytes());
-
-        let r = route("GET", "/api/creators", b"", &dir);
-        assert_eq!(r.status, 404);
-        let v: Value = serde_json::from_slice(&r.body).unwrap();
-        assert_eq!(v["missing"], true);
-        assert_eq!(v["creators"], json!([]));
-
-        std::fs::write(dir.join(creators::FILE), "{oops").unwrap();
-        let r = route("GET", "/api/creators", b"", &dir);
-        assert_eq!(r.status, 500);
-        let v: Value = serde_json::from_slice(&r.body).unwrap();
-        assert!(v["error"].as_str().unwrap().contains(creators::FILE));
-
-        std::fs::write(
-            dir.join(creators::FILE),
-            r#"{"version":1,"updatedAt":"2026-11-17T21:00:00Z","creators":[{"name":"A","faptap":[{"id":"2122637633308856321"}]}]}"#,
-        )
-        .unwrap();
-        let v = get_json("/api/creators", &dir);
-        assert_eq!(v["creators"][0]["name"], "A");
-        assert_eq!(v["creators"][0]["faptap"][0]["id"], "2122637633308856321");
-        assert_eq!(v["creators"][0]["instagram"], Value::Null);
-        assert!(v.get("missing").is_none());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -49,9 +49,6 @@ a:hover { text-decoration: underline; }
   color: var(--muted); cursor: pointer; touch-action: manipulation; }
 .stacks button + button { border-left: 1px solid var(--line); }
 .stacks button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); font-weight: 600; }
-.stacks a { flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px 4px; font-size: 13px;
-  color: var(--muted); border-left: 1px solid var(--line); text-decoration: none; touch-action: manipulation; }
-.stacks a:hover { color: var(--fg); }
 .problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
   margin: 0 auto 6px; width: min(100% - 20px, 540px); white-space: pre-wrap; font-size: 13px; }
 .deck { position: relative; flex: 1; min-height: 0; width: min(100% - 20px, 540px); margin: 4px auto 0; }
@@ -173,7 +170,6 @@ a.badge { color: var(--fg); }
   <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
   <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
   <button type="button" data-stack="slr" title="Downloads from SexLikeReal: EroScripts posts whose video is on SLR, and SLR scenes from npm run slr:scout">SLR</button>
-  <a href="/creators" title="Instagram and Twitch creators with EroScripts posts or FapTap videos">Content creators</a>
 </nav>
 <div class="scanned" id="scanned" hidden></div>
 <div class="quota" id="quota" hidden></div>

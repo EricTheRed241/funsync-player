@@ -1,0 +1,25 @@
+[package]
+name = "creator-scout"
+version = "0.1.0"
+description = "Find independent content creators (Instagram / Twitch) behind EroScripts script posts and FapTap videos, collect their pictures and posts, fetch the wanted ones: <userData>/creators.json"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "creator_scout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "creator-scout"
+path = "src/main.rs"
+
+[dependencies]
+# userData default (FUNSYNC_USER_DATA), pid locks, atomic JSON writes, timestamps.
+video-tags = { path = "../video-tags" }
+# curl client and its test fake, the forum cookie, the post score
+# (candidateScore), the shared preferences, library sources, title text, and
+# Chrome over DevTools for --login.
+slr-scout = { path = "../slr-scout" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
