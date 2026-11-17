@@ -179,11 +179,17 @@ fn discover_fixtures() -> Value {
         <p><img src="https://cdn.es/optimized/cover.jpeg" alt="cover"></p>"#;
     let mut detail = topic(400_000, "Sweetie Fox - Morning");
     detail["post_stream"] = json!({"posts": [{"cooked": cooked}]});
+    // The seed's post, read for its details (picture, hosts) after the import.
+    let mut seeded = topic(345_187, "StormiSkies - Riding Dildo");
+    seeded["post_stream"] = json!({"posts": [{"cooked": r#"<p><a href="https://pixeldrain.com/u/xyz">video</a></p>
+        <p><img src="https://cdn.es/optimized/stormi.jpeg" alt="stormi"></p>"#}]});
     json!({
         format!("GET {FORUM}/tags/intersection/real/non-vr.json?page=0"): {"body": {"topic_list": {"topics": [
             topic(400_001, "[Brazzers] Studio scene"), topic(400_000, "Sweetie Fox - Morning"),
             topic(345_187, "StormiSkies - Riding Dildo")]}}},
         format!("GET {FORUM}/t/400000.json"): {"body": detail},
+        format!("GET {FORUM}/t/345187.json"): {"body": seeded},
+        "GET https://cdn.es/optimized/stormi.jpeg": {"body": "JPEG-STORMI"},
         "GET https://cdn.es/optimized/cover.jpeg": {"body": "JPEG-ES"},
         format!("GET {FAPTAP}/api/videos?limit=42&page=1&order_by=created_at.desc"):
             {"body": {"data": {"total": 1, "videos": [video("9001", "Sweetie Fox riding")]}}},
