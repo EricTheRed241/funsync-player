@@ -633,6 +633,13 @@ fn fetch_downloads_until_the_video_quota_runs_out() {
         .map(|s| s["id"].as_u64().unwrap())
         .collect();
     assert_eq!(fetched, [11, 12, 15]);
+    // The quota left after the downloads is saved for the SLR tab: SLR's own video
+    // count after 12, the one hand-crafted script spent on 12, no AI script.
+    let quota = &file["quota"];
+    assert_eq!(quota["videos"]["remaining"], 0);
+    assert_eq!(quota["scripts"]["remaining"], 0);
+    assert_eq!(quota["aiScripts"]["remaining"], 3);
+    assert!(quota["checkedAt"].as_str().unwrap() > "2026-11-17");
     assert!(!stdout(&o).contains("forum-secret") && !stderr(&o).contains("forum-secret"));
 
     // A second run has nothing new but 13 and 14; 14 is still over quota.

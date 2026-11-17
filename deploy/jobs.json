@@ -5,8 +5,8 @@
       "name": "eroscripts-scout",
       "timeout": "12h",
       "steps": [
-        ["npm", "run", "-s", "eroscripts:scout", "--", "--daily", "--passes", "2", "--wait", "1h"],
-        ["npm", "run", "-s", "slr:scout", "--", "--fetch"]
+        ["npm", "run", "-s", "slr:scout", "--", "--fetch"],
+        ["npm", "run", "-s", "eroscripts:scout", "--", "--daily", "--passes", "2", "--wait", "1h"]
       ]
     },
     {

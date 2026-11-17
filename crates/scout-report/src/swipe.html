@@ -67,6 +67,12 @@ a:hover { text-decoration: underline; }
 .media.broken img { visibility: hidden; }
 .media.broken::after { content: 'Image unavailable'; position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: #9a9aa3; }
+/* An image still on its way: a spinner over the card (after a moment, so quick ones don't flash it). */
+.media.loading::before { content: ''; position: absolute; z-index: 1; top: 50%; left: 50%; width: 40px; height: 40px;
+  margin: -20px 0 0 -20px; border-radius: 50%; border: 4px solid rgba(255,255,255,.25); border-top-color: #fff;
+  opacity: 0; animation: spin .8s linear infinite, appear .2s ease-out .3s forwards; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes appear { to { opacity: 1; } }
 .dots { position: absolute; top: 8px; left: 10px; right: 10px; display: flex; gap: 4px; }
 .dots span { flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,.35); box-shadow: 0 0 2px rgba(0,0,0,.5); }
 .dots span.on { background: #fff; }
@@ -83,7 +89,7 @@ a:hover { text-decoration: underline; }
 .b-hand { --bc: #14b8a6; } .b-music { --bc: #d08b2c; } .b-ai { --bc: #8b8b93; } .b-slr { --bc: #e8743b; }
 .b-fav { --bc: #e0529c; }
 a.badge { color: var(--fg); }
-.quota { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
+.scanned, .quota { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
   font-variant-numeric: tabular-nums; }
 .quota b { color: var(--fg); }
 .quota .err { color: var(--nope); }
@@ -112,7 +118,7 @@ a.badge { color: var(--fg); }
 /* Desktop and landscape tablets: the image large on the left, every detail in a scrolling panel beside it. */
 @media (min-width: 900px) {
   .bar { width: min(100%, 1280px); }
-  .stacks, .quota { width: min(100% - 32px, 1248px); }
+  .stacks, .scanned, .quota { width: min(100% - 32px, 1248px); }
   .problems, .deck { width: min(100% - 32px, 1248px); }
   .card { flex-direction: row; }
   .media { flex: 1 1 auto; min-width: 0; min-height: auto; }
@@ -165,6 +171,7 @@ a.badge { color: var(--fg); }
   <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
   <button type="button" data-stack="slr" title="Downloads from SexLikeReal: EroScripts posts whose video is on SLR, and SLR scenes from npm run slr:scout">SLR</button>
 </nav>
+<div class="scanned" id="scanned" hidden></div>
 <div class="quota" id="quota" hidden></div>
 <div class="problems" id="problems" hidden></div>
 <main class="deck" id="deck">
@@ -365,8 +372,9 @@ function cardNode(c, isTop) {
   const media = el('div', { class: 'media' });
   if (imgs.length) {
     const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: imgs[isTop ? image : 0] });
-    img.addEventListener('error', () => media.classList.add('broken'));
-    img.addEventListener('load', () => media.classList.remove('broken'));
+    img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
+    img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
+    if (!img.complete) media.classList.add('loading');
     media.append(img);
     if (imgs.length > 1) {
       media.append(el('div', { class: 'dots' }, imgs.map((_, i) => el('span', { class: i === (isTop ? image : 0) ? 'on' : null }))));
@@ -477,6 +485,20 @@ function slrDetails(c, best) {
   return out;
 }
 
+/** When the shown stack's scout last looked: the EroScripts scan, or slr:scout's run on the SLR tab. */
+function renderScanned(d) {
+  const s = $('scanned');
+  const at = d && (stack === 'slr' ? d.generatedAt : d.lastScanAt);
+  if (!at) { s.hidden = true; return; }
+  const t = new Date(at);
+  const hours = Math.max(0, (Date.now() - t) / 3600e3);
+  const ago = hours < 1 ? 'under an hour ago' : hours < 48 ? `${Math.round(hours)} h ago` : `${Math.round(hours / 24)} days ago`;
+  const when = t.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  s.textContent = `Last scanned: ${when} (${ago})`;
+  s.title = stack === 'slr' ? 'When npm run slr:scout last ran' : 'When the EroScripts scout last scanned the forum';
+  s.hidden = false;
+}
+
 /** The SLR tab's line: the account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
 function renderQuota(d) {
   const q = $('quota');
@@ -563,7 +585,11 @@ function showImage(i) {
   image = (i + imgs.length) % imgs.length;
   const node = topNode();
   if (!node) return;
-  node.querySelector('.media img').src = imgs[image];
+  const media = node.querySelector('.media');
+  const img = media.querySelector('img');
+  img.src = imgs[image];
+  media.classList.remove('broken');
+  media.classList.toggle('loading', !img.complete);
   node.querySelectorAll('.dots span').forEach((d, j) => d.classList.toggle('on', j === image));
   preload(imgs[(image + 1) % imgs.length]);
 }
@@ -774,6 +800,7 @@ function more() {
     $('problems').hidden = !d.problems.length;
     $('problems').textContent = d.problems.join('\n');
     renderQuota(d);
+    renderScanned(d);
     loading = false;
     if (wasEmpty) image = 0;
     loaded = true;
@@ -829,6 +856,7 @@ function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
   $('like').title = stack === 'slr' ? 'Want: the scout downloads it from SexLikeReal (→)' : 'Want: the scout downloads it (→)';
   if (stack !== 'slr') renderQuota(null);
+  renderScanned(null);
 }
 $('stacks').addEventListener('click', (e) => {
   const b = e.target.closest('button');

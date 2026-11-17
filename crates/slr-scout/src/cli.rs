@@ -64,7 +64,8 @@ video caps (maxResolution, else optimalResolution; never the trailer) into
 (<Studio>)<VR suffix>/ with the script and an slr.json sidecar; generated twist / roll /
 pitch (scripts/upgrade-multi-axis.mjs); fetchedAt in slr-scout.json; at the end the app
 is asked to rescan. A scene without a script to take is skipped. It stops at the
-weekly video quota and at the library cap (libraryMaxVideos).
+weekly video quota and at the library cap (libraryMaxVideos). The quota it reads at
+the start, and what's left after each download, go into slr-scout.json's quota.
 
 Exit codes: 0 ok, 1 error, 2 rate limited (HTTP 429), or --fetch stopped by a quota or
 the library cap with work left, 3 not logged in (no or expired SLR session; a scout run

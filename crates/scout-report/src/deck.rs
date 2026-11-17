@@ -97,6 +97,8 @@ pub struct Deck {
     /// Right swipes still on the waiting list and not in the library: what the next
     /// `--fetch --auto` downloads (it takes nothing else).
     pub wanted: usize,
+    /// When the EroScripts scout last scanned the forum (`lastScanAt` in its state file).
+    pub last_scan_at: Option<String>,
     /// Files that exist but couldn't be read or parsed.
     pub problems: Vec<String>,
     /// The first `limit` cards, in deck order.
@@ -347,6 +349,10 @@ pub fn build(
     Deck {
         remaining: cards.len(),
         wanted,
+        last_scan_at: state
+            .get("lastScanAt")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         problems: Vec::new(),
         cards,
     }
