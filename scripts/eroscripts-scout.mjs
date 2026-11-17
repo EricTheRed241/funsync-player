@@ -68,6 +68,8 @@ const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // One per run: every rule34video request goes through its pacing (≥ 400 ms apart, 60 s after a 429).
 const rule34video = streams.createRule34video();
+// One per run: pmvhaven.com API reads and downloads, ≥ 1 s apart.
+const pmvhaven = streams.createPmvhaven();
 // Set in main (it needs the data folder and the credentials file): vrbangers.com reads, and Chrome for --fetch.
 let vrbangers = null;
 // Set in main (it needs the data folder, which holds the SLR session): sexlikereal.com reads and downloads.
@@ -106,8 +108,9 @@ Download:
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
                          Files saved by hand (any host) are taken from --manual-dir or ~/Downloads first.
-                         Videos on rule34video.com are read from their pages (paced, ≥ 400 ms apart) and must
-                         fit the main script's length (checked again with ffprobe; needs ffprobe on PATH).
+                         Videos on rule34video.com are read from their pages (paced, ≥ 400 ms apart), those on
+                         pmvhaven.com from its API (≥ 1 s apart); both must fit the main script's length (checked
+                         again with ffprobe; needs ffprobe on PATH).
                          vrbangers.com scenes come from the paid account through headless Google Chrome (logged in
                          once per pass; ≤ 8K, the planned file); with --dry-run the signed link is resolved and
                          probed for 1 byte instead
@@ -131,7 +134,7 @@ Frames (for the swipe deck's cards; free reads only):
                          ${frames.FRAMES_WANTED} usable images get frames of their first video at 25, 50 and 75 % (one eye for
                          stereo VR, ≤ ${frames.MAX_FRAME_WIDTH} px wide) in <userData>/${frames.FRAMES_DIR}/eroscripts/<id>/; posts
                          without images first, then by score; at most N posts (default ${frames.DEFAULT_FRAME_POSTS}).
-                         Hosts: forum, rule34video, pixeldrain (a hotlink-protected file fails), MEGA (stops at
+                         Hosts: forum, rule34video, pmvhaven, pixeldrain (a hotlink-protected file fails), MEGA (stops at
                          its bandwidth limit), SexLikeReal's free trailer (never an account download),
                          VRBangers' public scene stills. ffmpeg reads a few MB per frame (≤ ${Math.round(frames.MAX_POST_BYTES / 1048576)} MB a post).
                          Each post is recorded in <userData>/${frames.FRAMES_FILE} (only --frames writes it;
@@ -246,12 +249,12 @@ async function pixeldrainFiles(kind, id) {
 
 /**
  * Every script and video a post offers: author's forum uploads first, then MEGA, pixeldrain, rule34video pages
- * (one pseudo file per quality), VRBangers scenes (one pseudo file each, the best quality within the VR caps:
+ * (one pseudo file per quality), pmvhaven pages (one pseudo file each), VRBangers scenes (one pseudo file each, the best quality within the VR caps:
  * a vrbangers.com/video link, a `VRBANGERS_<folder>…` file name, else the parts of a title naming VRBangers)
  * and SexLikeReal scenes (one pseudo file each: a sexlikereal.com/scenes link, else, for a post without a video
  * that names SLR, SLR's scene search on its title, a hit counting only when its length fits a main script read
  * now into `cache`).
- * `hostDown`: a rule34video page or SLR couldn't be read for a reason other than being gone (403, 429, 5xx,
+ * `hostDown`: a rule34video or pmvhaven page or SLR couldn't be read for a reason other than being gone (403, 429, 5xx,
  * timeout), so a post without a video now may have one once the site answers again.
  */
 async function topicFiles(api, pacer, topicId, cooked, title, tags = [], cache = new Map()) {
@@ -268,14 +271,18 @@ async function topicFiles(api, pacer, topicId, cooked, title, tags = [], cache =
   for (const m of cooked.matchAll(/https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/(u|l)\/([A-Za-z0-9]+)/g)) {
     try { files.push(...await pixeldrainFiles(m[1], m[2])); } catch { hosts.add('pixeldrain (unreadable)'); }
   }
-  const r34 = streams.rule34videoLinks(hrefs);
-  if (r34.length) hosts.add(streams.RULE34VIDEO_HOST);
   let hostDown = false;
-  for (const u of r34) {
-    try { files.push(...await rule34video.files(u)); } catch (err) {
-      hosts.add('rule34video (unreadable)');
-      if (err.status !== 404 && err.status !== 410) hostDown = true;
-      process.stderr.write(`! ${topicId} ${err.message}\n`);
+  for (const [host, site, pages] of [
+    [streams.RULE34VIDEO_HOST, rule34video, streams.rule34videoLinks(hrefs)],
+    [streams.PMVHAVEN_HOST, pmvhaven, streams.pmvhavenLinks(hrefs)],
+  ]) {
+    if (pages.length) hosts.add(host);
+    for (const u of pages) {
+      try { files.push(...await site.files(u)); } catch (err) {
+        hosts.add(`${host} (unreadable)`);
+        if (err.status !== 404 && err.status !== 410) hostDown = true;
+        process.stderr.write(`! ${topicId} ${err.message}\n`);
+      }
     }
   }
   const leads = vrbHost.vrbangersLeads({ hrefs, names: files.map((f) => f.name), title });
@@ -380,10 +387,10 @@ async function addScenePreviews(api, pacer, scenes, cache = new Map()) {
 
 /**
  * A post's scenes (lib.planWithStreams): its scripts paired with its video
- * files; a scene with a streaming page (rule34video, vrbangers.com,
+ * files; a scene with a streaming page (rule34video, pmvhaven, vrbangers.com,
  * sexlikereal.com) is checked by the length of its main script (read now,
  * or already in `scripts`); a rule34video one gets the chosen quality's
- * size (a vrbangers.com page gives it; an SLR scene's comes at --fetch).
+ * size, a pmvhaven one too when its API didn't give it (a vrbangers.com page gives it; an SLR scene's comes at --fetch).
  * Scenes get their script preview for the swipe deck (addScenePreviews).
  */
 async function planTopic(api, pacer, topicId, files, { vr, libraryVideos, scripts = new Map() }) {
@@ -396,10 +403,12 @@ async function planTopic(api, pacer, topicId, files, { vr, libraryVideos, script
   for (const d of plan.dropped) {
     process.stderr.write(`! ${topicId} ${d.url}: video ${clock(d.durationSec * 1000)}, script ${clock(d.scriptMs)}; not this scene's video\n`);
   }
+  const sized = { [streams.RULE34VIDEO_HOST]: rule34video, [streams.PMVHAVEN_HOST]: pmvhaven };
   for (const sc of plan.scenes) {
-    if (sc.video.host !== streams.RULE34VIDEO_HOST) continue;
+    const site = sized[sc.video.host];
+    if (!site || sc.video.size > 0) continue;
     let size = 0;
-    try { size = await rule34video.probeSize(sc.video); } catch { /* size unknown */ }
+    try { size = await site.probeSize(sc.video); } catch { /* size unknown */ }
     sc.video = { ...sc.video, size };
   }
   await addScenePreviews(api, pacer, plan.scenes, scripts);
@@ -670,9 +679,10 @@ function videoSeconds(file) {
  * starts from scratch, so a failed one deletes its `.part` rather than leave
  * it behind. A copy the user saved by hand (`local`, see localDownloads) is
  * used instead of the network and removed from Downloads once it's in place.
- * A rule34video page is read again for a fresh link, and the video must fit
+ * A rule34video page (or a pmvhaven video, through its API) is read again for a fresh link, and the video must fit
  * the main script (`scriptMs`, else the page's length) before and after
- * the download (streams.durationMatches; ffprobe afterwards). A vrbangers.com
+ * the download (streams.durationMatches; ffprobe afterwards); a pmvhaven file must also have the size its API
+ * gives now. A vrbangers.com
  * scene's signed link is read right now (logged-in Chrome), and the host
  * checks size and length itself (vrbangers-host.mjs download); so does a
  * SexLikeReal scene's (slr-host.mjs download: quota, download type, a fresh link).
@@ -683,6 +693,8 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = path.join(staging, `${path.basename(dest)}.part`);
   const byHand = lib.findLocalCopy(file, local);
+  const streamed = { [streams.RULE34VIDEO_HOST]: rule34video, [streams.PMVHAVEN_HOST]: pmvhaven }[file.host];
+  let wantSize = file.size;
   activePart = tmp;
   try {
     if (byHand) {
@@ -707,12 +719,13 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
       const resp = await fetch(file.url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}${resp.status === 403 ? ' (download it by hand: --manual-list)' : ''}`);
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
-    } else if (file.host === streams.RULE34VIDEO_HOST) {
-      const { direct, durationSec } = await rule34video.fresh(file);
-      if (scriptMs && durationSec && !streams.durationMatches(durationSec, scriptMs)) {
-        throw new Error(`rule34video: video ${clock(durationSec * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
+    } else if (streamed) {
+      const now = await streamed.fresh(file);
+      if (file.host === streams.PMVHAVEN_HOST) wantSize = now.size;
+      if (scriptMs && now.durationSec && !streams.durationMatches(now.durationSec, scriptMs)) {
+        throw new Error(`${file.host}: video ${clock(now.durationSec * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
       }
-      const resp = await rule34video.stream(direct);
+      const resp = await streamed.stream(now.direct);
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else if (file.host === vrbHost.VRBANGERS_HOST) {
       await vrbangers.download(file, tmp, { scriptMs, videoSeconds });
@@ -723,12 +736,12 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
     }
     const size = fs.statSync(tmp).size;
     const selfChecked = file.host === vrbHost.VRBANGERS_HOST || file.host === slrHost.SLR_HOST;
-    if (file.size && size !== file.size && (byHand || !selfChecked)) throw new Error(`size ${size} ≠ ${file.size}`);
-    if (file.host === streams.RULE34VIDEO_HOST) {
+    if (wantSize && size !== wantSize && (byHand || !selfChecked)) throw new Error(`size ${size} ≠ ${wantSize}`);
+    if (streamed && !byHand) {
       const want = scriptMs || (file.duration ? file.duration * 1000 : null);
       const got = videoSeconds(tmp);
-      if (!got) throw new Error('rule34video: the download isn\'t a readable video (ffprobe)');
-      if (want && !streams.durationMatches(got, want)) throw new Error(`rule34video: downloaded video ${clock(got * 1000)}, script ${clock(want)}; not this scene's video`);
+      if (!got) throw new Error(`${file.host}: the download isn't a readable video (ffprobe)`);
+      if (want && !streams.durationMatches(got, want)) throw new Error(`${file.host}: downloaded video ${clock(got * 1000)}, script ${clock(want)}; not this scene's video`);
     }
     fs.renameSync(tmp, dest);
   } catch (err) {
@@ -1143,7 +1156,7 @@ async function makeFrames(opts, { api, userData, config, incoming }) {
   console.log(`Frames: ${queue.length} unswiped waiting posts show fewer than ${frames.FRAMES_WANTED} images; reading at most ${opts.frames}`);
   const { File } = await import('megajs');
   const cookie = api._headers().Cookie;
-  const deps = { File, rule34video, slr, forumHeaders: cookie ? { Cookie: cookie } : {} };
+  const deps = { File, rule34video, pmvhaven, slr, forumHeaders: cookie ? { Cookie: cookie } : {} };
   const pacer = createPacer();
   const stopped = new Map();
   const failed = {};

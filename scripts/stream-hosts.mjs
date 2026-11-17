@@ -1,15 +1,19 @@
 // Videos a post links on a streaming site instead of uploading the file
-// (docs/download-hosts/video-sites.md). rule34video.com for now: plain Node
-// fetch reads its pages, and the player's flashvars hold a direct mp4 per
-// quality, up to 4K. Used by npm run eroscripts:scout
-// (scripts/eroscripts-scout.mjs): the scan turns each linked video page into
-// one pseudo video file per quality, which the post's scripts pair with like
-// any other video file; --fetch reads the page again right before the
-// download (its links carry an access token) and streams the chosen quality.
+// (docs/download-hosts/video-sites.md): rule34video.com and pmvhaven.com.
+// Used by npm run eroscripts:scout (scripts/eroscripts-scout.mjs): the scan
+// turns each linked video page into pseudo video files, which the post's
+// scripts pair with like any other video file; --fetch reads the site again
+// right before the download and streams the file.
 //
-// rule34video answers 429 above ~3 requests/s: requests go at least
-// RULE34VIDEO_INTERVAL_MS apart, and a 429 waits RATE_LIMIT_BACKOFF_MS before
-// trying again.
+// rule34video: plain Node fetch reads its pages, and the player's flashvars
+// hold a direct mp4 per quality, up to 4K, one pseudo file per quality. Its
+// links carry an access token, hence the fresh read. It answers 429 above ~3
+// requests/s: requests go at least RULE34VIDEO_INTERVAL_MS apart, and a 429
+// waits RATE_LIMIT_BACKOFF_MS before trying again.
+//
+// pmvhaven.com: its open JSON API (`/api/videos/<id>`) gives each video's
+// public mp4 (one quality), length, size and frame size, so a page is one
+// pseudo file; requests go PMVHAVEN_INTERVAL_MS apart.
 
 import { createPacer } from './eroscripts-sync-lib.mjs';
 import { NAME_NOISE_TOKEN } from '../renderer/js/content-preferences.js';
@@ -275,6 +279,130 @@ export function createRule34video(opts = {}) {
       if (!resp.ok || !resp.body) {
         await resp.body?.cancel?.().catch(() => {});
         throw new Error(`rule34video: HTTP ${resp.status}`);
+      }
+      return resp;
+    },
+  };
+}
+
+// ── PMVHaven ────────────────────────────────────────────────────────────
+
+export const PMVHAVEN_HOST = 'pmvhaven';
+export const PMVHAVEN_ORIGIN = 'https://pmvhaven.com';
+export const PMVHAVEN_HEADERS = Object.freeze({ 'User-Agent': RULE34VIDEO_UA, Accept: 'application/json' });
+/** Least time between two pmvhaven.com requests (its API is behind Cloudflare; a scan needs a few per post at most). */
+export const PMVHAVEN_INTERVAL_MS = 1000;
+
+// `/video/<slug>_<id>` (the site since 2025: `pink-orbit_6afa…`; before: `Goon-Edge-Leak_6642…`), or the bare id.
+const PMVHAVEN_PAGE = /^https?:\/\/(?:www\.)?pmvhaven\.com\/video\/(?:([^/?#]*)_)?([0-9a-f]{24})(?=[/?#]|$)/i;
+
+/** The video id (24 hex digits) of a pmvhaven.com video page, else null. */
+export function pmvhavenId(url) {
+  return (PMVHAVEN_PAGE.exec(String(url || '').split('#')[0]) || [])[2]?.toLowerCase() || null;
+}
+
+/**
+ * The pmvhaven.com video pages among a post's links, as
+ * `https://pmvhaven.com/video/<slug>_<id>` (query and fragment dropped),
+ * one per video id, in link order. Profiles, playlists and search pages
+ * aren't videos.
+ */
+export function pmvhavenLinks(hrefs) {
+  const byId = new Map();
+  for (const href of hrefs || []) {
+    const m = PMVHAVEN_PAGE.exec(String(href).split('#')[0]);
+    const id = m?.[2].toLowerCase();
+    if (id && !byId.has(id)) byId.set(id, `${PMVHAVEN_ORIGIN}/video/${m[1] ? `${m[1]}_` : ''}${id}`);
+  }
+  return [...byId.values()];
+}
+
+/**
+ * A video from `GET /api/videos/<id>` (`{success, data}`): id, title, length
+ * (s), frame size, the public mp4 (`direct`, https only), its size in bytes
+ * (0 when the API doesn't say) and uploader. null without a playable mp4
+ * (removed, still processing).
+ *
+ * @returns {{id: string, title: string, durationSec: number|null, width: number, height: number, direct: string, size: number, uploader: string}|null}
+ */
+export function parsePmvhavenVideo(json) {
+  const d = json?.data;
+  const direct = typeof d?.videoUrl === 'string' ? d.videoUrl.trim() : '';
+  if (!d || json.success === false || !/^https:\/\//i.test(direct)) return null;
+  const num = (x) => (Number(x) > 0 ? Number(x) : 0);
+  return {
+    id: String(d._id || ''),
+    title: decodeEntities(String(d.title || '')).trim(),
+    durationSec: num(d.durationSeconds) || null,
+    width: num(d.width),
+    height: num(d.height),
+    direct,
+    size: num(d.fileSize),
+    uploader: String(d.uploader || d.uploaderUsername || ''),
+  };
+}
+
+/**
+ * The pseudo video file of a pmvhaven.com page (parsePmvhavenVideo): `{name:
+ * '<title> <height>p.mp4', size, host: 'pmvhaven', url: <page>, height,
+ * duration: <s>|null, pmvhavenId}`. The mp4 link isn't kept: --fetch asks
+ * the API again, in case the video was replaced or removed.
+ */
+export function pmvhavenFiles(pageUrl, video) {
+  const id = pmvhavenId(pageUrl) || video.id;
+  const base = streamTitle(video.title) || `pmvhaven ${id}`;
+  const height = video.height || 0;
+  return [{
+    name: `${base}${height ? ` ${height}p` : ''}.mp4`, size: video.size || 0, host: PMVHAVEN_HOST, url: pageUrl, height, duration: video.durationSec ?? null, pmvhavenId: id,
+  }];
+}
+
+/**
+ * pmvhaven.com reads for the scout, all through one pacedFetch:
+ * - `files(pageUrl)`: the page's pseudo video file (pmvhavenFiles); an error
+ *   with `status` 404 when the video is gone or has no mp4.
+ * - `video(id)`: the API's video now (parsePmvhavenVideo; frames:
+ *   scripts/scout-frames.mjs).
+ * - `probeSize(file)`: the mp4's size from a `Range: bytes=0-0` request, 0
+ *   when unknown (the API usually gives it).
+ * - `fresh(file)`: the video read again: `{direct, durationSec, size}`.
+ * - `stream(direct)`: the download response (HTTP 200/206), else an error.
+ */
+export function createPmvhaven(opts = {}) {
+  const get = pacedFetch({ intervalMs: PMVHAVEN_INTERVAL_MS, label: PMVHAVEN_HOST, ...opts });
+  async function video(id) {
+    const resp = await get(`${PMVHAVEN_ORIGIN}/api/videos/${id}`, { headers: PMVHAVEN_HEADERS, signal: AbortSignal.timeout(60_000) });
+    if (!resp.ok) {
+      await resp.body?.cancel?.().catch(() => {});
+      throw Object.assign(new Error(`pmvhaven: HTTP ${resp.status} for video ${id}`), { status: resp.status });
+    }
+    const v = parsePmvhavenVideo(await resp.json());
+    if (!v) throw Object.assign(new Error(`pmvhaven: video ${id} has no playable mp4`), { status: 404 });
+    return v;
+  }
+  const idOf = (file) => file.pmvhavenId || pmvhavenId(file.url);
+  return {
+    async files(url) {
+      const id = pmvhavenId(url);
+      return id ? pmvhavenFiles(url, await video(id)) : [];
+    },
+    video,
+    async probeSize(file) {
+      const { direct } = await video(idOf(file));
+      const resp = await get(direct, { headers: { 'User-Agent': RULE34VIDEO_UA, Range: 'bytes=0-0' }, signal: AbortSignal.timeout(60_000) });
+      await resp.body?.cancel?.().catch(() => {});
+      const total = Number((/\/(\d+)\s*$/.exec(resp.headers.get('content-range') || '') || [])[1]);
+      return resp.status === 206 && total > 0 ? total : 0;
+    },
+    async fresh(file) {
+      const v = await video(idOf(file));
+      return { direct: v.direct, durationSec: v.durationSec, size: v.size };
+    },
+    async stream(direct) {
+      const resp = await get(direct, { headers: { 'User-Agent': RULE34VIDEO_UA } });
+      if (!resp.ok || !resp.body) {
+        await resp.body?.cancel?.().catch(() => {});
+        throw new Error(`pmvhaven: HTTP ${resp.status}`);
       }
       return resp;
     },

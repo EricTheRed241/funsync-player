@@ -56,7 +56,7 @@ import {
 import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../renderer/js/preference-score.js';
 import { canonicalArtist } from '../renderer/js/artist-playlists.js';
 import { computeBins } from '../renderer/js/heatmap-strip.js';
-import { capBytes, durationMatches, RULE34VIDEO_HOST, rule34videoPosterUrl, safeName, STEM_BYTES } from './stream-hosts.mjs';
+import { capBytes, durationMatches, PMVHAVEN_HOST, RULE34VIDEO_HOST, rule34videoPosterUrl, safeName, STEM_BYTES } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { SLR_ACCOUNT_DOWNLOAD, SLR_HOST, slrSceneName } from './slr-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
@@ -465,7 +465,7 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
 }
 
 /** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs, scripts/vrbangers-host.mjs, scripts/slr-host.mjs). */
-export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, VRBANGERS_HOST, SLR_HOST]);
+export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, PMVHAVEN_HOST, VRBANGERS_HOST, SLR_HOST]);
 
 /**
  * planScenes, with each scene paired to a streaming page's video checked by
@@ -746,7 +746,9 @@ export function scriptFileName(stem, axis) {
  * file on disk. A vrbangers.com scene keeps its site name (`vrbangers`,
  * read by vrbangersSceneName), a SexLikeReal one too (`slrSceneId` and
  * `slr`, read by slrSceneName); a rule34video one gets the page's cover as
- * `posterUrl`, which the app makes the scene's thumbnail.
+ * `posterUrl`, which the app makes the scene's thumbnail; a pmvhaven one
+ * keeps the video's id and page (`pmvhaven: {id, url}`), so the PMVHaven
+ * scout (crates/pmvhaven-scout) knows the library has that video.
  *
  * @param {object} c candidate (post)
  * @param {object} video the scene's video file (`sc.video`)
@@ -765,6 +767,7 @@ export function sceneSidecar(c, video, file, at) {
       slrSceneId: video.slrSceneId,
       slr: { label: video.slrLabel, url: video.url, title: video.title, performers: video.performers, studio: video.studio, vrSuffix: video.vrSuffix },
     } : {}),
+    ...(video.host === PMVHAVEN_HOST ? { pmvhaven: { id: video.pmvhavenId, url: video.url } } : {}),
     ...(posterUrl ? { posterUrl } : {}),
     at,
   };
@@ -882,9 +885,10 @@ export function remapPaths(value, moves) {
 
 /**
  * Bump when the screening rules change, so every post is judged again (12: vrbangers.com links count as videos;
- * 13: no sex rule; 14: SexLikeReal scene links, and an SLR scene search for posts naming SLR, count as videos).
+ * 13: no sex rule; 14: SexLikeReal scene links, and an SLR scene search for posts naming SLR, count as videos;
+ * 15: pmvhaven.com video links count as videos).
  */
-export const RULES_VERSION = 14;
+export const RULES_VERSION = 15;
 
 export function emptyScoutState() {
   return { version: 1, lastScanAt: null, feeds: {}, topics: {}, pending: {} };

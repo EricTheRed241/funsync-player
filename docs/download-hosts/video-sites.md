@@ -5,6 +5,10 @@ Status (2026-11-09): **rule34video is implemented** in `npm run eroscripts:scout
 
 Status (2026-11-09): **vrbangers.com (paid member downloads) is implemented** too: `npm run vrbangers:scout` / `scripts/vrbangers-host.mjs` (public scene page at scan time, signed links through headless Chrome at download time; see the README's scout section).
 
+Status (2026-11-17): **pmvhaven.com is implemented** in `npm run eroscripts:scout` (`scripts/stream-hosts.mjs`, RULES_VERSION 15). Page links are `https://pmvhaven.com/video/<slug>_<id>` (24 hex digits; the pre-2025 site's `…/video/Title-Words_<id>` ids still work, any slug does). The open JSON API `GET https://pmvhaven.com/api/videos/<id>` (no login, no cookie) returns `{success, data}` with `videoUrl` (public mp4 on `pmvhavencloud.s3.eu-west-par.io.cloud.ovh.net`, HEAD/Range work, `Content-Length` = `data.fileSize`), `durationSeconds`, `width` / `height`, `title`, `uploader`, `originalCreator`, `tags`, `thumbnailUrl`, `timelineThumbnails`; a missing id answers 404 `{"error":true,"statusMessage":"Video not found"}`. One quality per video (HLS variants exist too, not used). No VR flag in the API.
+
+Counted 2026-11-17 (forum search `pmvhaven in:first`, 2,256 hits in all categories; the scout's judged posts read): 180 judged posts link pmvhaven.com in their first post, 158 of them a video page (the rest profiles, playlists, an event page); of those 158, 33 were `no-video`, 33 candidates (another video), the rest excluded / known / live-not-POV / in the library. For VRConk (not built): 7 judged posts link vrconk.com (5 scene pages `vrconk.com/video/<slug>/`, 2 the home page), 6 of them `no-video`; 380 search hits in all categories.
+
 Seen on EroScripts:
 A random sample of 50 of the 1,038 `no-video` posts (seed 7, 49 readable, 1 deleted → 404), fetched 2026-11-03. Every one of the 49 had forum script attachments. They had passed content screening (animated, sex, exclusions) and then failed `planScenes`, because their video sits on a site the scout can't read.
 

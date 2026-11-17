@@ -8,7 +8,8 @@
 // (scripts/eroscripts-scout.mjs).
 //
 // Only free reads: forum attachments, rule34video (a fresh player link, the
-// lowest quality that still shows the scene), pixeldrain's file API (a 403 is
+// lowest quality that still shows the scene), pmvhaven (the public mp4 its
+// API gives), pixeldrain's file API (a 403 is
 // its hotlink protection: the post is marked failed, nothing else), MEGA
 // (ranged megajs downloads; a bandwidth error stops MEGA for the run), the
 // SexLikeReal scene's public trailer encodings (never the account's full
@@ -29,7 +30,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Readable, Transform } from 'node:stream';
 import { isVideoName } from './eroscripts-scout-lib.mjs';
-import { RULE34VIDEO_HEADERS, RULE34VIDEO_HOST } from './stream-hosts.mjs';
+import { PMVHAVEN_HOST, RULE34VIDEO_HEADERS, RULE34VIDEO_HOST } from './stream-hosts.mjs';
 import { SLR_HOST, SLR_UA } from './slr-host.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { findScene, nuxtDataOf, reviveNuxt } from './vrbangers-lib.mjs';
@@ -234,13 +235,14 @@ export function framesQueue(candidates, { state, framesFile = emptyFramesFile(),
 
 /** The scene frames come from: the post's first one with a video (an archive's scenes have none to read). */
 export function frameScene(c) {
-  return (c?.scenes || []).find((sc) => !sc.packed && sc.video && (isVideoName(sc.video.name) || [RULE34VIDEO_HOST, SLR_HOST, VRBANGERS_HOST].includes(sc.video.host))) || null;
+  return (c?.scenes || []).find((sc) => !sc.packed && sc.video && (isVideoName(sc.video.name) || [RULE34VIDEO_HOST, PMVHAVEN_HOST, SLR_HOST, VRBANGERS_HOST].includes(sc.video.host))) || null;
 }
 
 /**
  * Where a post's frames come from, free reads only (FrameSource kinds):
  * - `http`: a forum attachment (`forum: true`, the session goes to the forum host only) or a pixeldrain file (`/api/file/<id>`);
  * - `rule34video`: the page is read again for a fresh player link;
+ * - `pmvhaven`: the API is read again for the video's public mp4 (one quality);
  * - `mega`: the file, read in ranges;
  * - `slr-trailer`: the scene's public trailer (never the account's download: it uses up the weekly quota);
  * - `vrbangers-gallery`: the public scene page's stills (its videos need the paid account).
@@ -262,6 +264,7 @@ export function frameSource(c) {
       return id ? { ...base, kind: 'http', url: `https://pixeldrain.com/api/file/${id}` } : { skip: 'pixeldrain' };
     }
     case RULE34VIDEO_HOST: return { ...base, kind: 'rule34video', url: v.url };
+    case PMVHAVEN_HOST: return { ...base, kind: 'pmvhaven', url: v.url, id: v.pmvhavenId || null };
     case 'mega': return { ...base, kind: 'mega', url: v.url, remote: v.remote || v.name };
     case SLR_HOST: return Number(v.slrSceneId) > 0 ? { ...base, kind: 'slr-trailer', sceneId: Number(v.slrSceneId), lengthMs: null } : { skip: SLR_HOST };
     case VRBANGERS_HOST: return v.slug || v.url ? { ...base, kind: 'vrbangers-gallery', url: v.url || `https://vrbangers.com/video/${v.slug}/`, slug: v.slug || null } : { skip: VRBANGERS_HOST };
@@ -700,7 +703,8 @@ export function readerFailure(host, err) {
 
 /**
  * Frames for one post (frameSource), into `dir`. `deps`: `fetch`, `File` (megajs), `rule34video`
- * (stream-hosts createRule34video: `page(url)`), `slr` (slr-host createSlr: `scene(id)`), `forumHeaders`
+ * (stream-hosts createRule34video: `page(url)`), `pmvhaven` (stream-hosts createPmvhaven: `fresh(file)`), `slr`
+ * (slr-host createSlr: `scene(id)`), `forumHeaders`
  * (the session, forum host only), `run` (spawnRunner), `timeoutMs`, `maxBytes`.
  * Resolves `{files, source, bytes}` (files may be fewer than three), `{skip: host}` when the post has no
  * free source; throws FrameError when none came out.
@@ -732,6 +736,10 @@ export async function postFrames(c, dir, deps) {
       if (page.durationSec) lengthMs = Math.round(page.durationSec * 1000);
       source += ` (${v.height}p)`;
       reader = await httpSource({ url: v.direct, host: plan.host, headers: { ...RULE34VIDEO_HEADERS }, fetch });
+    } else if (plan.kind === 'pmvhaven') {
+      const v = await deps.pmvhaven.fresh({ url: plan.url, pmvhavenId: plan.id });
+      if (v.durationSec) lengthMs = Math.round(v.durationSec * 1000);
+      reader = await httpSource({ url: v.direct, host: plan.host, headers: { 'User-Agent': UA }, fetch });
     } else if (plan.kind === 'mega') {
       reader = await megaSource({ url: plan.url, remote: plan.remote, File: deps.File });
     } else if (plan.kind === 'slr-trailer') {
