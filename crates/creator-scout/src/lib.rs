@@ -157,7 +157,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
     let mut st = state::read(&env.user_data)?;
 
     let code = match mode {
-        Mode::ImportSeed(path) => import_seed(&env, &path, &mut file, out)?,
+        Mode::ImportSeed(path) => import_seed(&env, &path, &mut file, &mut st, out)?,
         Mode::Discover => step("discover", &env, &mut st, err, |st| {
             run_discover(&env, &opts, &mut file, st, out)
         })?,
@@ -250,6 +250,7 @@ fn import_seed(
     env: &Env,
     path: &Path,
     file: &mut store::CreatorsFile,
+    st: &mut state::State,
     out: &mut dyn Write,
 ) -> Result<i32, String> {
     let raw = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -262,7 +263,26 @@ fn import_seed(
         c.update_score();
         store::rebuild_pictures(c);
     }
+    // The snapshot has no pictures: its EroScripts posts wait for the next
+    // --discover to read their details (first image, hosts) like new ones.
+    let mut queued = 0;
+    for (slug, c) in &file.creators {
+        for p in c
+            .posts
+            .iter()
+            .filter(|p| p.kind == "eroscripts" && p.image.is_none())
+        {
+            if st
+                .pending_details
+                .insert(p.id.clone(), slug.clone())
+                .is_none()
+            {
+                queued += 1;
+            }
+        }
+    }
     store::write(&env.user_data, file)?;
+    state::write(&env.user_data, st)?;
     writeln!(
         out,
         "Imported {}: {} new creator(s), {} merged, {} post(s) added; {} creator(s), {} post(s) in {}.",
@@ -277,6 +297,9 @@ fn import_seed(
     .map_err(io)?;
     if !r.skipped.is_empty() {
         writeln!(out, "Skipped (no usable name): {}", r.skipped.join(", ")).map_err(io)?;
+    }
+    if queued > 0 {
+        writeln!(out, "{queued} EroScripts post(s) wait for their details (pictures, hosts) in the next --discover.").map_err(io)?;
     }
     Ok(0)
 }
