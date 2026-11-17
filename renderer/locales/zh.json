@@ -931,6 +931,11 @@
       "watchedTitle": "已看过：评分 {n} 星",
       "watchedCollection": "已看过"
     },
+    "review": {
+      "title": "为此视频评分",
+      "later": "稍后",
+      "saved": "已加入“Needs review”"
+    },
     "queue": {
       "add": "加入队列",
       "queued": "已在队列中",

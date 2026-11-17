@@ -20,6 +20,7 @@ import {
   createRatingControl, updateRatingControl, filterByRating,
   setRating, addToPlaylist, removeFromPlaylist, reportResult, showToast,
 } from './triage.js';
+import { NEEDS_REVIEW_PLAYLIST, needsReviewPrompt, openReviewSheet } from './review-on-end.js';
 import {
   watchedLast, shouldSink, isWatchedCollection, localizeWatchedCollection, videosInOrder, createWatchedBadge,
 } from './watched.js';
@@ -3525,7 +3526,33 @@ async function renderPlayer(id) {
     pendingNext = null;
     phoneQueue = null; // cancelled — stop Play All entirely
   });
+  // Review on end: an unrated video gets the rating sheet first; Up Next
+  // (and its countdown) waits until the user rates it or picks Later.
+  const reviewOnEnd = () => openReviewSheet({
+    container: videoWrap,
+    video,
+    rate: async (change) => {
+      const result = await setRating(video.id, change);
+      reportResult(result);
+      if (!result.ok) return;
+      video.rating = result.data.rating;
+      video.favorite = result.data.favorite;
+      video.watched = video.rating > 0;
+      collections = null; // the Watched collection changed
+      const rowControl = wrap.querySelector('.player__triage .triage-rating');
+      if (rowControl) updateRatingControl(rowControl, { rating: video.rating, favorite: video.favorite });
+    },
+    later: async () => {
+      const result = await addToPlaylist(video.id, { name: NEEDS_REVIEW_PLAYLIST });
+      reportResult(result, t('webRemote.review.saved'));
+      if (result.ok) playlists = null; // membership changed
+    },
+  });
   videoEl.addEventListener('ended', async () => {
+    if (needsReviewPrompt(video)) {
+      await reviewOnEnd();
+      if (!isCurrentPlayer() || !videoEl.ended) return;
+    }
     const next = await resolveNext();
     if (!next || !isCurrentPlayer() || !videoEl.ended) return;
     pendingNext = next;

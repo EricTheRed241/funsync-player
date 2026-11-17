@@ -1040,3 +1040,118 @@ class TestHereSphereQueue:
         client.post("/api/remote/queue/add", json={"videoId": library["B"]})
         sections, names = _sections(client)
         assert names[0] == "Queue" and _ids(sections["Queue"]) == [library["B"]]
+
+
+# --- Review on end (Needs review) ---------------------------------------------
+
+REVIEW = vr_sections.NEEDS_REVIEW_PLAYLIST
+
+
+def _review_list(paths):
+    return {"id": "pl-review", "name": REVIEW, "videoPaths": list(paths), "createdAt": 3}
+
+
+def _review_paths():
+    found = library_edits.find_playlist(media.get_playlists(), name=REVIEW)
+    return found["videoPaths"] if found else None
+
+
+class TestReviewOnEnd:
+    @pytest.mark.parametrize("event, at_ms", [(2, 90_000), (3, 99_500), (3, 150_000), (2.0, 90_000)])
+    def test_end_of_unrated_video_adds_to_needs_review(self, client, library, event, at_ms):
+        # A lasts 100 s; HereSphere's `time` is in milliseconds.
+        client.post(f"/heresphere/events/{library['A']}", json={"event": event, "time": at_ms})
+        [edit] = library_edits.queue.pending()
+        assert (edit["kind"], edit["path"], edit["name"], edit["playlistId"], edit["source"]) == (
+            KIND_PLAYLIST_ADD, A, REVIEW, None, "heresphere")
+        assert _review_paths() == [A]
+
+    @pytest.mark.parametrize("body", [
+        {"event": 2, "time": 89_999},   # before 90 %
+        {"event": 3, "time": 10_000},
+        {"event": 1, "time": 95_000},   # play (consumes the queue only)
+        {"event": 0, "time": 95_000},   # open
+        {"event": True, "time": 95_000},
+        {"event": 2, "time": "95000"},
+        {"event": 2},
+    ])
+    def test_before_the_end_or_other_events_add_nothing(self, client, library, body):
+        client.post(f"/heresphere/events/{library['A']}", json=body)
+        assert [e for e in library_edits.queue.pending() if e["kind"] == KIND_PLAYLIST_ADD] == []
+
+    def test_rated_video_is_not_added(self, client, library):
+        register_ratings({A: {"rating": 3.5, "favorite": False}})
+        client.post(f"/heresphere/events/{library['A']}", json={"event": 3, "time": 99_000})
+        assert library_edits.queue.pending() == []
+
+    def test_pending_rating_counts_and_a_favourite_alone_does_not(self, client, library):
+        client.post("/api/remote/rating", json={"videoId": library["A"], "rating": 4})
+        client.post(f"/heresphere/events/{library['A']}", json={"event": 3, "time": 99_000})
+        assert [e["kind"] for e in library_edits.queue.pending()] == [KIND_RATING]
+        register_ratings({B: {"rating": 0, "favorite": True}})
+        client.post(f"/heresphere/events/{library['B']}", json={"event": 3, "time": 399_000})
+        assert [e["kind"] for e in library_edits.queue.pending()] == [KIND_RATING, KIND_PLAYLIST_ADD]
+
+    def test_added_once_per_watch(self, client, library):
+        a = library["A"]
+        client.post(f"/heresphere/events/{a}", json={"event": 2, "time": 95_000})
+        client.post(f"/heresphere/events/{a}", json={"event": 3, "time": 95_000})
+        assert [e["kind"] for e in library_edits.queue.pending()] == [KIND_PLAYLIST_ADD]
+
+    def test_needs_review_section_comes_first_with_review_tag(self, client, library):
+        register_playlists([
+            {"id": "pl-1", "name": "Evening", "videoPaths": [C, A], "createdAt": 1},
+            _review_list([B, "/gone.mp4"]),
+        ])
+        media.register_queue(_queue(manual=[C]))
+        sections, names = _sections(client)
+        assert names[:2] == [f"Playlist: {REVIEW}", "Queue"]
+        assert _ids(sections[f"Playlist: {REVIEW}"]) == [library["B"]]
+        assert names.count(f"Playlist: {REVIEW}") == 1
+        assert names[-1] == "Playlist: Evening"
+        assert _sections(client, "/deovr")[1][:2] == [f"Playlist: {REVIEW}", "Queue"]
+
+        tags_b = [t["name"] for t in client.get(f"/heresphere/{library['B']}").json()["tags"]]
+        assert "Review:Needed" in tags_b and f"Playlist:{REVIEW}" in tags_b
+        tags_a = [t["name"] for t in client.get(f"/heresphere/{library['A']}").json()["tags"]]
+        assert "Review:Needed" not in tags_a
+
+    def test_empty_needs_review_has_no_section(self, client, library):
+        register_playlists([_review_list([])])
+        assert f"Playlist: {REVIEW}" not in _sections(client)[1]
+
+    def test_review_tag_posted_back_is_ignored(self, client, library):
+        register_playlists([_review_list([B])])
+        b, a = library["B"], library["A"]
+        served = client.get(f"/heresphere/{b}").json()["tags"]
+        client.post(f"/heresphere/{b}", json={"tags": [t for t in served if t["name"] != "Review:Needed"]})
+        served_a = client.get(f"/heresphere/{a}").json()["tags"]
+        client.post(f"/heresphere/{a}", json={"tags": served_a + [{"name": "Review:Needed"}]})
+        assert library_edits.queue.pending() == []
+        assert parse_heresphere_update(
+            {"tags": [{"name": "Review:Needed"}, {"name": f"Playlist:{REVIEW}"}]}, B, {}, [_review_list([B])],
+        ) == []
+
+    def test_pending_rating_takes_video_out_of_needs_review(self, client, library):
+        register_playlists([_review_list([A, B])])
+        client.post("/api/remote/rating", json={"videoId": library["B"], "favorite": True})
+        assert _review_paths() == [A, B]  # a favourite alone isn't a rating
+        client.post("/api/remote/rating", json={"videoId": library["B"], "rating": 0})
+        assert _review_paths() == [A, B]
+        client.post("/api/remote/rating", json={"videoId": library["B"], "rating": 3})
+        assert _review_paths() == [A]
+        sections, _ = _sections(client)
+        assert _ids(sections[f"Playlist: {REVIEW}"]) == [library["A"]]
+        b_tags = [t["name"] for t in client.get(f"/heresphere/{library['B']}").json()["tags"]]
+        assert "Review:Needed" not in b_tags
+
+    def test_overlay_applies_edits_in_order(self):
+        base = [_review_list([])]
+        pending = [
+            {"kind": KIND_RATING, "path": A, "rating": 4.0, "favorite": None},
+            {"kind": KIND_PLAYLIST_ADD, "path": A, "playlistId": None, "name": REVIEW},
+        ]
+        # Rated first, then filed again: the later add stands (the desktop applies them in the same order).
+        assert library_edits.effective_playlists(base, pending)[0]["videoPaths"] == [A]
+        assert library_edits.effective_playlists(base, pending[::-1])[0]["videoPaths"] == []
+        assert base[0]["videoPaths"] == []

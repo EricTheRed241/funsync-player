@@ -6,7 +6,7 @@ import {
   autoFillQueue, stampPlayed, applyQueueChange, reviewPlaylistPaths, DAY_MS, PLAYED_CAP,
 } from '../../renderer/js/play-queue.js';
 import { applyLibraryEdit, LibraryEditApplier } from '../../renderer/js/library-edits.js';
-import { AGE_SCREEN, DELETE_AT_OR_BELOW, QUEUE_AUTOFILL } from '../../renderer/js/content-preferences.js';
+import { AGE_SCREEN, DELETE_AT_OR_BELOW, NEEDS_REVIEW_PLAYLIST, QUEUE_AUTOFILL } from '../../renderer/js/content-preferences.js';
 
 const NOW = 1_800_000_000_000;
 const v = (path, extra = {}) => ({ path, hasFunscript: true, dateAdded: 0, ...extra });
@@ -140,6 +140,19 @@ describe('reviewPlaylistPaths', () => {
     expect(reviewPlaylistPaths(playlists)).toEqual(['/r.mp4']);
     expect(reviewPlaylistPaths([])).toEqual([]);
     expect(reviewPlaylistPaths(undefined)).toEqual([]);
+  });
+
+  it('includes the Needs review playlist (review on end), any case', () => {
+    const playlists = [
+      { name: NEEDS_REVIEW_PLAYLIST.toLowerCase(), videoPaths: ['/n.mp4'] },
+      { name: AGE_SCREEN.playlist, videoPaths: ['/r.mp4'] },
+    ];
+    expect(reviewPlaylistPaths(playlists)).toEqual(['/r.mp4', '/n.mp4']);
+    const auto = autoFillQueue({
+      videos: [{ path: '/n.mp4', hasFunscript: true }, { path: '/ok.mp4', hasFunscript: true }],
+      reviewPaths: reviewPlaylistPaths(playlists), now: NOW,
+    });
+    expect(auto).toEqual(['/ok.mp4']);
   });
 });
 

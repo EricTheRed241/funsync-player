@@ -5,10 +5,13 @@ named sections, and the scene details carry tags the headset can filter
 on. Both endpoints take their rules from here so the two players always
 agree.
 
-The first section is `Queue`: the shared play queue (the videos the user
-queued, then the desktop's auto-fill), in queue order. The headset's own
-next / previous walk the section a video was opened from, so starting from
-Queue plays through it. Every queued scene carries the `Queue:Up next` tag.
+The first section is `Playlist: Needs review` when it holds videos (review
+on end: the unrated videos that played to their end, until they get a
+rating; each carries the read-only `Review:Needed` tag), then `Queue`: the
+shared play queue (the videos the user queued, then the desktop's
+auto-fill), in queue order. The headset's own next / previous walk the
+section a video was opened from, so starting from Queue plays through it.
+Every queued scene carries the `Queue:Up next` tag.
 
 Section names are plain text: HereSphere renders emoji as empty boxes.
 
@@ -136,6 +139,30 @@ SCORE_TAG_PREFIX = 'Score:'
 # `Category:`: the rating decides it.
 STATUS_TAG_PREFIX = 'Status:'
 WATCHED_TAG = f'{STATUS_TAG_PREFIX}Watched'
+
+# Review on end: the playlist an unrated video that played to its end goes
+# into (HereSphere events, the web remote's "Later"); a rating > 0 takes it
+# out. Same name as NEEDS_REVIEW_PLAYLIST in renderer/js/content-preferences.js
+# (and backend/web-remote/review-on-end.js). Its section comes first in the
+# listings, and each of its scenes carries the read-only `Review:Needed` tag.
+NEEDS_REVIEW_PLAYLIST = 'Needs review'
+REVIEW_TAG = 'Review:Needed'
+
+
+def is_needs_review(playlist):
+    """True when `playlist` is the NEEDS_REVIEW_PLAYLIST (name trimmed, any case)."""
+    return ((playlist or {}).get('name') or '').strip().casefold() == NEEDS_REVIEW_PLAYLIST.casefold()
+
+
+def review_tags(path, playlists):
+    """`[Review:Needed]` when `path` is in the Needs review playlist, else [].
+    Read-only in the headset: a rating takes the video out."""
+    if not path:
+        return []
+    for p in playlists or []:
+        if is_needs_review(p) and path in (p.get('videoPaths') or []):
+            return [REVIEW_TAG]
+    return []
 
 
 def _positive_number(value):
@@ -321,12 +348,13 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
     """Group listing items into sections.
 
     `entries` yields `(item, video, is_3d)`, in title order. Returns
-    `[(name, [item, ...])]`: `Queue` first (the entries named by
-    `queue_paths`, in that order), then SECTION_ORDER, then Favorites / Top
-    Rated / Unrated from `ratings` (videoPath → {rating, favorite,
-    updatedAt}), Watched (the rated entries, newest rating first), then one
-    `Playlist: <name>` per entry of `playlists` in the given order. Empty
-    sections are omitted.
+    `[(name, [item, ...])]`: `Playlist: Needs review` first (the
+    NEEDS_REVIEW_PLAYLIST, when it holds listed videos), then `Queue` (the
+    entries named by `queue_paths`, in that order), then SECTION_ORDER, then
+    Favorites / Top Rated / Unrated from `ratings` (videoPath → {rating,
+    favorite, updatedAt}), Watched (the rated entries, newest rating first),
+    then one `Playlist: <name>` per other entry of `playlists` in the given
+    order. Empty sections are omitted.
 
     `scores` is the desktop's preference score per video path (absent =
     not scored). The SCORE_ORDERED_SECTIONS list by score, highest first,
@@ -368,7 +396,15 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
             group = watched_last(group, lambda e: e[1])
         return [e[0] for e in group]
 
-    out = []
+    def playlist_section(playlist):
+        group = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
+        return (playlist_section_name(playlist.get('name')), finish(group, False)) if group else None
+
+    # `Playlist: Needs review` leads, before Queue; the other playlists keep
+    # their place at the end.
+    playlists = list(playlists or [])
+    review = next((s for s in map(playlist_section, filter(is_needs_review, playlists)) if s), None)
+    out = [review] if review else []
     queued = [by_path[p] for p in queue_paths or [] if p in by_path]
     if queued:
         out.append((SECTION_QUEUE, finish(queued, False)))
@@ -376,11 +412,12 @@ def build_sections(entries, now_ms=None, ratings=None, playlists=None, queue_pat
         (name, finish(grouped[name], sink and name in SECTION_ORDER))
         for name in SECTION_ORDER + TRIAGE_SECTION_ORDER if grouped[name]
     )
-    for playlist in playlists or []:
-        group = [by_path[p] for p in playlist.get('videoPaths') or [] if p in by_path]
-        if not group:
+    for playlist in playlists:
+        if is_needs_review(playlist):
             continue
-        out.append((playlist_section_name(playlist.get('name')), finish(group, False)))
+        section = playlist_section(playlist)
+        if section:
+            out.append(section)
     return out
 
 

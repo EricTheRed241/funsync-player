@@ -804,6 +804,11 @@
       "watchedTitle": "Gesehen: mit {n} Sternen bewertet",
       "watchedCollection": "Gesehen"
     },
+    "review": {
+      "title": "Video bewerten",
+      "later": "Später",
+      "saved": "Zu „Needs review“ hinzugefügt"
+    },
     "queue": {
       "add": "Zur Warteschlange",
       "queued": "In Warteschlange",

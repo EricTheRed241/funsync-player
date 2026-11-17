@@ -3,6 +3,7 @@
 // writes update cache immediately + fire-and-forget IPC to main process.
 
 import { applyRatingChange, getRatingEntry } from './ratings.js';
+import { NEEDS_REVIEW_PLAYLIST } from './content-preferences.js';
 import { eventBus } from './event-bus.js';
 
 const SETTINGS_DEFAULTS = {
@@ -226,11 +227,18 @@ class DataService {
   /**
    * Set the rating and/or favourite flag of one video. Absent fields keep
    * their value. Throws on an invalid rating (0–5 in 0.5 steps). Emits
-   * `rating:changed` with the resulting entry (null = cleared).
+   * `rating:changed` with the resulting entry (null = cleared). A rating
+   * > 0 takes the video out of the NEEDS_REVIEW_PLAYLIST, whichever player
+   * the rating came from (every source lands here).
    */
   setRating(videoPath, change) {
     const { map, entry } = applyRatingChange(this.getRatings(), videoPath, change);
     this.set('library.ratings', map);
+    if (entry && entry.rating > 0) {
+      const key = NEEDS_REVIEW_PLAYLIST.toLocaleLowerCase();
+      const review = this.getPlaylists().find((p) => String(p?.name || '').trim().toLocaleLowerCase() === key);
+      if (review && (review.videoPaths || []).includes(videoPath)) this.removeVideoFromPlaylist(review.id, videoPath);
+    }
     eventBus.emit('rating:changed', { path: videoPath, entry });
     return entry;
   }

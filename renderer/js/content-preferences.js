@@ -23,7 +23,8 @@
 // TAG_SCORE_GROUPS (whose tag lists MUSIC_TAGS, POV_TAGS, MONSTER_TAGS,
 // FEET_TAGS and FFM_TAGS are) and ANIMATION_TAGS.
 // Values with a copy outside JavaScript: TOP_RATED_MIN and the SCORE_BANDS
-// thresholds are mirrored in backend/services/vr_sections.py, DEFAULT_SORT in
+// thresholds are mirrored in backend/services/vr_sections.py, NEEDS_REVIEW_PLAYLIST
+// there and in backend/web-remote/review-on-end.js, DEFAULT_SORT in
 // backend/web-remote/sort-default.js (the phone can't import this file).
 
 import data from './content-preferences.json' with { type: 'json' };
@@ -314,6 +315,16 @@ export const ARTIST_ALIASES = {
  * video played or skipped from it comes back only after `replayAfterDays`.
  */
 export const QUEUE_AUTOFILL = { size: 10, replayAfterDays: 30 };
+
+/**
+ * Review on end (user, 2026-11-17): an unrated video that played to its end on
+ * the phone ("Later" on the rating sheet) or in HereSphere goes into this
+ * playlist, and leaves it once it gets a rating > 0 (DataService.setRating).
+ * Never auto-filled into the play queue; HereSphere lists it first. Mirrored
+ * as NEEDS_REVIEW_PLAYLIST in backend/services/vr_sections.py and
+ * backend/web-remote/review-on-end.js (the phone can't import this file).
+ */
+export const NEEDS_REVIEW_PLAYLIST = 'Needs review';
 
 // ── Auto categories ─────────────────────────────────────────────────────
 

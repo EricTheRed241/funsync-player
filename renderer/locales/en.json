@@ -1399,6 +1399,11 @@
       "watchedTitle": "Watched: rated {n, plural, one {# star} other {# stars}}",
       "watchedCollection": "Watched"
     },
+    "review": {
+      "title": "Rate this video",
+      "later": "Later",
+      "saved": "Added to Needs review"
+    },
     "queue": {
       "add": "Add to queue",
       "queued": "Queued",

@@ -931,6 +931,11 @@
       "watchedTitle": "시청함: 별 {n}개로 평가",
       "watchedCollection": "시청함"
     },
+    "review": {
+      "title": "이 동영상 평가",
+      "later": "나중에",
+      "saved": "'Needs review'에 추가됨"
+    },
     "queue": {
       "add": "대기열에 추가",
       "queued": "대기열에 있음",

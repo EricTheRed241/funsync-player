@@ -931,6 +931,11 @@
       "watchedTitle": "Vu : noté {n} étoiles",
       "watchedCollection": "Vus"
     },
+    "review": {
+      "title": "Notez cette vidéo",
+      "later": "Plus tard",
+      "saved": "Ajoutée à « Needs review »"
+    },
     "queue": {
       "add": "Ajouter à la file",
       "queued": "Dans la file",

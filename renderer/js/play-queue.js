@@ -12,7 +12,7 @@
 // Pure, no DOM: app.js holds the state and persists it; library-edits.js
 // routes the phone's and the headset's queue edits to it.
 
-import { AGE_SCREEN, DELETE_AT_OR_BELOW, QUEUE_AUTOFILL } from './content-preferences.js';
+import { AGE_SCREEN, DELETE_AT_OR_BELOW, NEEDS_REVIEW_PLAYLIST, QUEUE_AUTOFILL } from './content-preferences.js';
 import { isFavorite, ratingOf } from './ratings.js';
 
 export const DAY_MS = 86_400_000;
@@ -23,10 +23,17 @@ export const REPLAY_AFTER_MS = QUEUE_AUTOFILL.replayAfterDays * DAY_MS;
 
 const sameName = (a, b) => String(a || '').trim().toLocaleLowerCase() === String(b || '').trim().toLocaleLowerCase();
 
-/** Paths of the age screener's review playlist ("Underage review"): never auto-filled. */
+/**
+ * Paths of the review playlists: the age screener's ("Underage review") and
+ * the unrated videos waiting for a rating ("Needs review"). Never auto-filled.
+ */
 export function reviewPlaylistPaths(playlists) {
-  const list = (playlists || []).find((p) => sameName(p?.name, AGE_SCREEN.playlist));
-  return Array.isArray(list?.videoPaths) ? list.videoPaths : [];
+  const out = [];
+  for (const name of [AGE_SCREEN.playlist, NEEDS_REVIEW_PLAYLIST]) {
+    const list = (playlists || []).find((p) => sameName(p?.name, name));
+    if (Array.isArray(list?.videoPaths)) out.push(...list.videoPaths);
+  }
+  return out;
 }
 
 /**
