@@ -462,6 +462,13 @@
     "confirmDelete": "Delete this playlist?",
     "backToPlaylists": "Back to playlists",
     "removeFromPlaylist": "Remove from playlist",
+    "review": {
+      "keep": "Keep",
+      "keepTitle": "Not underage: take it out of this list and keep the video",
+      "delete": "Delete",
+      "deleteTitle": "Delete video from disk",
+      "deleteConfirm": "Delete \"{name}\" and its scripts from disk? It won't be downloaded again."
+    },
     "funscriptLinked": "Funscript linked",
     "gridView": "Grid view",
     "listView": "List view",

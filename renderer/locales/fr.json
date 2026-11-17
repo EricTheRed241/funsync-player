@@ -462,6 +462,13 @@
     "confirmDelete": "Supprimer cette liste ?",
     "backToPlaylists": "Retour aux listes",
     "removeFromPlaylist": "Retirer de la liste",
+    "review": {
+      "keep": "Garder",
+      "keepTitle": "Pas mineur : retirer de cette liste et garder la vidéo",
+      "delete": "Supprimer",
+      "deleteTitle": "Supprimer la vidéo du disque",
+      "deleteConfirm": "Supprimer « {name} » et ses scripts du disque ? Elle ne sera plus téléchargée."
+    },
     "funscriptLinked": "Funscript lié",
     "gridView": "Vue en grille",
     "listView": "Vue en liste",

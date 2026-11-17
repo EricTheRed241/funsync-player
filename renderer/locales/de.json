@@ -462,6 +462,13 @@
     "confirmDelete": "Diese Playlist löschen?",
     "backToPlaylists": "Zurück zu Playlists",
     "removeFromPlaylist": "Aus Playlist entfernen",
+    "review": {
+      "keep": "Behalten",
+      "keepTitle": "Nicht minderjährig: aus dieser Liste nehmen und das Video behalten",
+      "delete": "Löschen",
+      "deleteTitle": "Video von der Festplatte löschen",
+      "deleteConfirm": "„{name}\" samt Skripten von der Festplatte löschen? Es wird nicht erneut heruntergeladen."
+    },
     "funscriptLinked": "Funscript verknüpft",
     "gridView": "Rasteransicht",
     "listView": "Listenansicht",

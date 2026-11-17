@@ -462,6 +462,13 @@
     "confirmDelete": "¿Eliminar esta lista?",
     "backToPlaylists": "Volver a listas",
     "removeFromPlaylist": "Quitar de la lista",
+    "review": {
+      "keep": "Conservar",
+      "keepTitle": "No es menor: quitarlo de esta lista y conservar el vídeo",
+      "delete": "Eliminar",
+      "deleteTitle": "Eliminar el vídeo del disco",
+      "deleteConfirm": "¿Eliminar \"{name}\" y sus scripts del disco? No se volverá a descargar."
+    },
     "funscriptLinked": "Funscript vinculado",
     "gridView": "Vista de cuadrícula",
     "listView": "Vista de lista",

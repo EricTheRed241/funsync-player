@@ -462,6 +462,13 @@
     "confirmDelete": "Удалить этот плейлист?",
     "backToPlaylists": "Назад к плейлистам",
     "removeFromPlaylist": "Удалить из плейлиста",
+    "review": {
+      "keep": "Оставить",
+      "keepTitle": "Не несовершеннолетний: убрать из этого списка и оставить видео",
+      "delete": "Удалить",
+      "deleteTitle": "Удалить видео с диска",
+      "deleteConfirm": "Удалить «{name}» и его скрипты с диска? Оно больше не будет скачано."
+    },
     "funscriptLinked": "Funscript связан",
     "gridView": "Сетка",
     "listView": "Список",
