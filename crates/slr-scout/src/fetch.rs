@@ -461,6 +461,12 @@ impl Fetch<'_> {
             quota.ai_scripts.total
         )
         .map_err(io)?;
+        // The SLR tab shows the file's quota: keep it as fresh as this read.
+        if !self.dry_run {
+            file.quota = Some(quota.clone());
+            file.quota_error = None;
+            store::write(self.user_data, &file)?;
+        }
         let mut ctx = Ctx {
             token,
             quota,
@@ -531,6 +537,11 @@ impl Fetch<'_> {
                     if let Some(s) = file.scenes.iter_mut().find(|s| s.id == id) {
                         s.fetched_at = Some(at.clone());
                     }
+                    // What's left after this download (the video count as SLR answered it).
+                    file.quota = Some(Quota {
+                        checked_at: at.clone(),
+                        ..ctx.quota.clone()
+                    });
                     write_sidecar(&scene, &planned, &at)?;
                     store::write(self.user_data, &file)?;
                     self.upgrade(&planned.dir, out)?;
