@@ -118,7 +118,7 @@ pub fn load(user_data: &Path) -> Report {
     let mut report = build(&state, &waiting, &rejected);
     mark_in_library(&mut report, &videos);
     for post in &mut report.posts {
-        post.swipe = swipes.dir(post.id);
+        post.swipe = swipes.dir(&post.id.to_string());
         if !post
             .image
             .as_deref()

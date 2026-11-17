@@ -429,7 +429,7 @@ mod tests {
             ("POST", "/api/swipe"),
             ("POST", "/"),
             ("GET", "/api/creators"),
-            ("HEAD", "/api/slr/deck"),
+            ("POST", "/api/scenes/slr/swipe"),
         ] {
             assert!(
                 is_pin_required(&c.send(method, target, "application/json", "")),

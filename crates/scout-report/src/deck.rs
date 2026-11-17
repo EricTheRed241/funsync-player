@@ -1,51 +1,67 @@
-//! The swipe deck: the waiting list's posts with no video in the library and
-//! no swipe yet (posts with a video on SexLikeReal go to the SLR tab instead: `Pool`, slr.rs),
-//! highest score first (the scout's download order), as cards
-//! for `/swipe`; with a `seed`, each card's score is shifted by up to the deal's jitter
-//! (the request's `jitter`, else the stack's MULTI_JITTER or SINGLE_JITTER) either way, so
-//! the order wanders a little. Tag scores and creampie come from the scout's waiting list
-//! (`tagScores`, `creampie`); Rust never computes them.
+//! The swipe deck: three tabs (Stack), each mixing every source. Its cards are the EroScripts
+//! waiting list's posts with no video in the library and no swipe yet, and the site scouts'
+//! scenes (crate::scenes: SexLikeReal, VRBangers / VRConk, PMVHaven, FapTap) not downloaded,
+//! not in the library, not swiped and not a video a waiting post brings (the post wins: its
+//! script is free). A card's tab: multi-axis (a post's `axisType` "multi", a scene's
+//! `script.axes`) → Multi, else VR or Flat by its `vr`.
+//!
+//! Highest score first (the scouts' download order); with a `seed`, each card's score is
+//! shifted by up to the deal's jitter (the request's `jitter`, else the tab's MULTI_JITTER,
+//! VR_JITTER or FLAT_JITTER) either way, so the order wanders a little. Scores, tag scores and
+//! creampie come from the scouts' files (`score`, `tagScores`, `creampie`); Rust never
+//! computes them.
 
 use crate::frames;
 use crate::report::{self, id_of, str_of, strings_of};
-use crate::swipes::{Dir, Swipes};
+use crate::scenes::{self, Covered, SceneCard};
+use crate::swipes::{self, Dir, Swipes};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 pub const DEFAULT_LIMIT: usize = 20;
 pub const MAX_LIMIT: usize = 100;
-/// Most ids one deck request may leave out (`exclude`: the cards the page holds).
+/// Most cards one deck request may leave out (`exclude`: the cards the page holds).
 pub const MAX_EXCLUDE: usize = 1000;
-/// Score points a seeded multi-axis deck moves each card by, at most, either way: multi-axis
-/// posts are a smaller, more valued pool, so the deck stays close to score order.
+/// Score points a seeded Multi deal moves each card by, at most, either way: multi-axis
+/// scripts are a smaller, more valued pool, so the deck stays close to score order.
 pub const MULTI_JITTER: f64 = 4.0;
-/// Score points a seeded single-axis deck moves each card by, at most, either way: wide enough
-/// (scores run about -4 … 24) that low-scoring posts surface too and the whole stack gets swiped.
-pub const SINGLE_JITTER: f64 = 10.0;
+/// Score points a seeded VR deal moves each card by, at most, either way: VR posts and the
+/// hand-picked studio scenes (SLR, VRBangers) cost a download quota or many GB each, so the
+/// order stays close to the score, a little looser than SLR's old ±2 so the sources mix.
+pub const VR_JITTER: f64 = 3.0;
+/// Score points a seeded Flat deal moves each card by, at most, either way: wide enough
+/// (scores run about -4 … 24) that low-scoring posts and videos surface too and the whole
+/// stack gets swiped.
+pub const FLAT_JITTER: f64 = 10.0;
 /// Largest jitter a deck request may ask for (`jitter=N`), in score points.
 pub const MAX_JITTER: f64 = 30.0;
-/// Images per card (the scout saves at most this many).
+/// Images per card (the scouts save at most this many).
 pub const MAX_IMAGES: usize = 5;
 /// Scenes listed per card; the rest only count (`moreScenes`).
 pub const MAX_SCENES: usize = 20;
 const TOP_TAGS: usize = 3;
+/// The source name of a post card (and of its `exclude` entries).
+pub const EROSCRIPTS: &str = "eroscripts";
 
-/// Which posts a deck request deals: multi-axis (the scout's `axisType`; packed archives count
-/// as multi) or single-axis.
+/// Which cards a deck request deals: multi-axis scripts (posts and scenes alike), else VR,
+/// else flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Stack {
     #[default]
     Multi,
-    Single,
+    Vr,
+    Flat,
 }
 
 impl Stack {
     pub fn parse(s: &str) -> Option<Stack> {
         match s {
             "multi" => Some(Stack::Multi),
-            "single" => Some(Stack::Single),
+            "vr" => Some(Stack::Vr),
+            "flat" => Some(Stack::Flat),
             _ => None,
         }
     }
@@ -54,7 +70,19 @@ impl Stack {
     pub fn jitter(self) -> f64 {
         match self {
             Stack::Multi => MULTI_JITTER,
-            Stack::Single => SINGLE_JITTER,
+            Stack::Vr => VR_JITTER,
+            Stack::Flat => FLAT_JITTER,
+        }
+    }
+
+    /// The tab a card goes to: multi-axis first, then VR or flat.
+    pub fn of(multi: bool, vr: bool) -> Stack {
+        if multi {
+            Stack::Multi
+        } else if vr {
+            Stack::Vr
+        } else {
+            Stack::Flat
         }
     }
 }
@@ -69,10 +97,9 @@ pub struct Deal {
     /// Score points a seeded deal moves each card by, at most, either way (0 ..= MAX_JITTER;
     /// 0 = strictly by score). None = the stack's own (`Stack::jitter`).
     pub jitter: Option<f64>,
-    /// Posts the page holds already (on screen, or skipped for later), by topic id.
-    pub exclude: HashSet<u64>,
-    /// SLR scenes the page holds already, by SLR scene id (the SLR tab only).
-    pub exclude_scenes: HashSet<u64>,
+    /// Cards the page holds already (on screen, or skipped for later), as `<source>:<id>`
+    /// (DeckCard::key): ids of different sources may be equal.
+    pub exclude: HashSet<String>,
     pub stack: Stack,
 }
 
@@ -83,7 +110,6 @@ impl Default for Deal {
             seed: None,
             jitter: None,
             exclude: HashSet::new(),
-            exclude_scenes: HashSet::new(),
             stack: Stack::default(),
         }
     }
@@ -92,22 +118,102 @@ impl Default for Deal {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deck {
-    /// Cards left to swipe (all of them, not just the ones returned).
+    /// Cards left to swipe in this tab (all of them, not just the ones returned).
     pub remaining: usize,
-    /// Right swipes still on the waiting list and not in the library: what the next
-    /// `--fetch --auto` downloads (it takes nothing else).
+    /// Right swipes in this tab still to download, every source: waiting posts not in the
+    /// library (the next `eroscripts:scout --fetch --auto`) and scenes not fetched or in the
+    /// library (each scout's `--fetch`).
     pub wanted: usize,
     /// When the EroScripts scout last scanned the forum (`lastScanAt` in its state file).
     pub last_scan_at: Option<String>,
+    /// When each scene scout last wrote its file (`generatedAt`), by source name.
+    pub generated_at: BTreeMap<&'static str, Option<String>>,
+    /// slr:scout's last quota read: `{checkedAt, scripts, aiScripts, videos}`, each
+    /// `{remaining, total, usageExpiresAt}`; null when never read. The page shows it on VR.
+    pub quota: Value,
+    /// Why the last quota read failed (`no session`, `session expired`, …).
+    pub quota_error: Option<String>,
     /// Files that exist but couldn't be read or parsed.
     pub problems: Vec<String>,
     /// The first `limit` cards, in deck order.
-    pub cards: Vec<Card>,
+    pub cards: Vec<DeckCard>,
+}
+
+/// One card; its `source` says where its swipe goes.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum DeckCard {
+    /// A waiting EroScripts post (`source: "eroscripts"`): `/api/swipe`.
+    Post(Card),
+    /// A scout's scene: `/api/scenes/<source>/swipe`.
+    Scene(SceneCard),
+}
+
+impl DeckCard {
+    pub fn source(&self) -> &'static str {
+        match self {
+            DeckCard::Post(p) => p.source,
+            DeckCard::Scene(s) => s.source,
+        }
+    }
+
+    /// The card's id within its source.
+    pub fn id(&self) -> String {
+        match self {
+            DeckCard::Post(p) => p.id.to_string(),
+            DeckCard::Scene(s) => s.id.clone(),
+        }
+    }
+
+    /// `<source>:<id>`: the card's identity across sources (`exclude` takes these).
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.source(), self.id())
+    }
+
+    pub fn score(&self) -> f64 {
+        match self {
+            DeckCard::Post(p) => p.score,
+            DeckCard::Scene(s) => s.score,
+        }
+        .unwrap_or(f64::NEG_INFINITY)
+    }
+
+    /// What the seeded jitter is drawn from: a post's topic id (as before scenes joined the
+    /// tabs), else a hash of the key, so equal ids of two sources move independently.
+    fn jitter_id(&self) -> u64 {
+        match self {
+            DeckCard::Post(p) => p.id,
+            DeckCard::Scene(_) => fnv1a(self.key().as_bytes()),
+        }
+    }
+
+    /// Ties in score: posts first, then SLR, VRBangers, PMVHaven, FapTap; within a source
+    /// the newest (highest) id first.
+    fn tie(&self, other: &DeckCard) -> Ordering {
+        let rank =
+            |s: &SceneCard| scenes::Source::parse(s.source).map_or(usize::MAX, |src| src as usize);
+        match (self, other) {
+            (DeckCard::Post(a), DeckCard::Post(b)) => b.id.cmp(&a.id),
+            (DeckCard::Post(_), DeckCard::Scene(_)) => Ordering::Less,
+            (DeckCard::Scene(_), DeckCard::Post(_)) => Ordering::Greater,
+            (DeckCard::Scene(a), DeckCard::Scene(b)) => rank(a)
+                .cmp(&rank(b))
+                .then_with(|| (b.id.len(), &b.id).cmp(&(a.id.len(), &a.id))),
+        }
+    }
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
+    /// Always `eroscripts`.
+    pub source: &'static str,
     pub id: u64,
     pub url: String,
     pub title: Option<String>,
@@ -143,7 +249,8 @@ pub struct Card {
     pub scenes: Vec<SceneInfo>,
     /// Scenes left out of `scenes`.
     pub more_scenes: usize,
-    /// The first scene whose video is on SexLikeReal (only on the SLR tab's posts).
+    /// The first scene whose video is on SexLikeReal (`eroscripts:scout --fetch` downloads it
+    /// from there with the account's quota).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slr_video: Option<SlrVideo>,
 }
@@ -155,15 +262,6 @@ pub struct SlrVideo {
     pub scene_id: Option<u64>,
     /// The scene's page (https only).
     pub url: Option<String>,
-}
-
-/// Which waiting posts a deck holds: the ones whose videos are all elsewhere (the Multi-axis
-/// and Single-axis stacks), or the ones with a video on SexLikeReal (the SLR tab). Each post
-/// shows in one tab only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pool {
-    Hosts,
-    Slr,
 }
 
 /// One scene (video) of a post, as the card lists it.
@@ -203,69 +301,117 @@ pub struct TagScore {
     pub score: f64,
 }
 
-/// Read the waiting list, the state, the library (`config.json`,
-/// `eroscripts-links.json`), the swipes and the frames file, and deal the cards `deal` asks for.
+/// Everything a deck is built from, parsed (missing files are `Null` / empty).
+#[derive(Debug, Default)]
+pub struct Files {
+    /// eroscripts-scout-state.json: titles, authors, images, dates, lastScanAt.
+    pub state: Value,
+    /// eroscripts-scout.json: the waiting posts.
+    pub waiting: Value,
+    /// The library's videos per topic id (crate::library::topic_videos).
+    pub videos: HashMap<u64, usize>,
+    /// eroscripts-scout-swipes.json.
+    pub post_swipes: Swipes,
+    /// Each scene scout's file with its swipes.
+    pub scenes: Vec<(scenes::Source, Value, Swipes)>,
+}
+
+impl Files {
+    /// Read every file the deck uses; problems go to `problems`.
+    pub fn read(user_data: &Path, problems: &mut Vec<String>) -> Files {
+        let state = report::read_json(user_data, report::STATE_FILE, problems);
+        let waiting = report::read_json(user_data, report::WAITING_FILE, problems);
+        let config = report::read_json(user_data, "config.json", problems);
+        let links = report::read_json(user_data, crate::library::LINKS_FILE, problems);
+        let post_swipes = report::read_swipes(user_data, swipes::EROSCRIPTS, problems);
+        let videos = crate::library::topic_videos(&config, &links, problems);
+        let scenes = scenes::Source::ALL
+            .into_iter()
+            .map(|src| {
+                let file = report::read_json(user_data, src.file(), problems);
+                let swipes = report::read_swipes(user_data, src.swipes(), problems);
+                (src, file, swipes)
+            })
+            .collect();
+        Files {
+            state,
+            waiting,
+            videos,
+            post_swipes,
+            scenes,
+        }
+    }
+
+    fn scene_file(&self, source: scenes::Source) -> &Value {
+        self.scenes
+            .iter()
+            .find(|(s, _, _)| *s == source)
+            .map_or(&Value::Null, |(_, f, _)| f)
+    }
+}
+
+/// Read the files and deal the cards `deal` asks for. Dealt posts get their frames (the
+/// post's record in frames::EROSCRIPTS_FILE) and SLR scenes theirs (the scene's `frames` in
+/// slr-scout.json) after their images.
 pub fn load(user_data: &Path, deal: &Deal) -> Deck {
     let mut problems = Vec::new();
-    let (mut deck, _) = load_pool(user_data, Pool::Hosts, &mut problems);
+    let files = Files::read(user_data, &mut problems);
+    let made = report::read_json(user_data, frames::EROSCRIPTS_FILE, &mut problems);
+    let mut deck = build(&files, deal.stack);
     deck.deal(deal);
+    let slr = files.scene_file(scenes::Source::Slr);
+    for card in &mut deck.cards {
+        match card {
+            DeckCard::Post(p) => frames::append(
+                &mut p.images,
+                frames::urls(
+                    user_data,
+                    frames::Source::Eroscripts,
+                    p.id,
+                    frames::post_record(&made, p.id),
+                ),
+            ),
+            DeckCard::Scene(s) if s.source == scenes::Source::Slr.name() => {
+                let Ok(id) = s.id.parse::<u64>() else {
+                    continue;
+                };
+                let rec = scenes::scenes(scenes::Source::Slr, slr)
+                    .find(|(sid, _)| *sid == s.id)
+                    .map_or(&Value::Null, |(_, rec)| rec);
+                frames::append(
+                    &mut s.images,
+                    frames::urls(user_data, frames::Source::Slr, id, rec),
+                );
+            }
+            DeckCard::Scene(_) => {}
+        }
+    }
     deck.problems = problems;
     deck
 }
 
-/// Read the files `load` reads and build `pool`'s deck (not dealt; problems go to `problems`),
-/// with the waiting list it came from. Cards get their frames (the post's record in
-/// frames::EROSCRIPTS_FILE) after their images.
-pub fn load_pool(user_data: &Path, pool: Pool, problems: &mut Vec<String>) -> (Deck, Value) {
-    let state = report::read_json(user_data, report::STATE_FILE, problems);
-    let waiting = report::read_json(user_data, report::WAITING_FILE, problems);
-    let config = report::read_json(user_data, "config.json", problems);
-    let links = report::read_json(user_data, crate::library::LINKS_FILE, problems);
-    let swipes = report::read_swipes(user_data, crate::swipes::EROSCRIPTS, problems);
-    let made = report::read_json(user_data, frames::EROSCRIPTS_FILE, problems);
-    let videos = crate::library::topic_videos(&config, &links, problems);
-    let mut deck = build(&state, &waiting, &videos, &swipes, pool);
-    for c in &mut deck.cards {
-        frames::append(
-            &mut c.images,
-            frames::urls(
-                user_data,
-                frames::Source::Eroscripts,
-                c.id,
-                frames::post_record(&made, c.id),
-            ),
-        );
-    }
-    (deck, waiting)
-}
-
 impl Deck {
-    /// Reorder by `seed` (shifting scores by up to the deal's jitter), keep `stack`'s posts
-    /// (`remaining` then counts that stack), leave out `exclude`, and keep the first `limit`.
+    /// Reorder by `seed` (shifting scores by up to the deal's jitter), leave out `exclude`
+    /// (`remaining` still counts them), and keep the first `limit`.
     pub fn deal(&mut self, deal: &Deal) {
         if let Some(seed) = deal.seed {
             let amp = deal.jitter.unwrap_or_else(|| deal.stack.jitter());
-            let key = |c: &Card| {
-                c.score
-                    .map_or(f64::NEG_INFINITY, |s| s + jitter(seed, c.id, amp))
-            };
-            self.cards
-                .sort_by(|a, b| key(b).total_cmp(&key(a)).then(b.id.cmp(&a.id)));
+            sort(&mut self.cards, |c| {
+                c.score() + jitter(seed, c.jitter_id(), amp)
+            });
         }
-        match deal.stack {
-            Stack::Multi => self.cards.retain(Card::is_multi),
-            Stack::Single => self.cards.retain(|c| !c.is_multi()),
+        if !deal.exclude.is_empty() {
+            self.cards.retain(|c| !deal.exclude.contains(&c.key()));
         }
-        self.remaining = self.cards.len();
-        self.cards.retain(|c| !deal.exclude.contains(&c.id));
         self.cards.truncate(deal.limit);
     }
 }
 
-impl Card {
-    pub fn is_multi(&self) -> bool {
-        self.axis_type.as_deref() == Some("multi")
-    }
+/// Highest `key` first (each card's key computed once); ties by DeckCard::tie.
+fn sort(cards: &mut Vec<DeckCard>, key: impl Fn(&DeckCard) -> f64) {
+    let mut keyed: Vec<(f64, DeckCard)> = cards.drain(..).map(|c| (key(&c), c)).collect();
+    keyed.sort_by(|(ka, a), (kb, b)| kb.total_cmp(ka).then_with(|| a.tie(b)));
+    cards.extend(keyed.into_iter().map(|(_, c)| c));
 }
 
 /// Card `id`'s score shift for `seed`, in [-amplitude, amplitude] (splitmix64 of both):
@@ -303,56 +449,62 @@ fn slr_videos(cand: &Value) -> impl Iterator<Item = &Value> {
         .filter(|v| v.get("host").and_then(Value::as_str) == Some("slr"))
 }
 
-fn has_slr_video(cand: &Value) -> bool {
-    slr_videos(cand).next().is_some()
+/// A waiting post's tab: the scout's `axisType` "multi" (packed archives count as multi) →
+/// Multi, else VR or Flat by `vr`. Where the video comes from (SLR, MEGA, …) doesn't matter.
+pub fn post_stack(cand: &Value) -> Stack {
+    Stack::of(
+        cand.get("axisType").and_then(Value::as_str) == Some("multi"),
+        cand.get("vr").and_then(Value::as_bool).unwrap_or(false),
+    )
 }
 
-/// The SLR scene ids of every waiting post's videos (`slrSceneId`), swiped, in the library
-/// or not: those scenes come with the post (its script is free), never on their own.
-pub fn slr_scene_ids(waiting: &Value) -> HashSet<u64> {
-    candidates(waiting)
-        .flat_map(|(_, c)| slr_videos(c))
-        .filter_map(|v| id_of(v.get("slrSceneId")?))
-        .collect()
-}
-
-/// Every card of `pool`, in deck order (`problems` empty).
-pub fn build(
-    state: &Value,
-    waiting: &Value,
-    videos: &HashMap<u64, usize>,
-    swipes: &Swipes,
-    pool: Pool,
-) -> Deck {
-    let shared = image_counts(state);
+/// Every card of `stack`, in deck order (no frames; `problems` empty).
+pub fn build(f: &Files, stack: Stack) -> Deck {
+    let shared = image_counts(&f.state);
     let mut wanted = 0;
     let mut cards = Vec::new();
-    for (id, cand) in candidates(waiting) {
-        if videos.get(&id).is_some_and(|&n| n > 0) || has_slr_video(cand) != (pool == Pool::Slr) {
+    for (id, cand) in candidates(&f.waiting) {
+        if f.videos.get(&id).is_some_and(|&n| n > 0) || post_stack(cand) != stack {
             continue;
         }
-        match swipes.dir(id) {
+        match f.post_swipes.dir(&id.to_string()) {
             Some(Dir::Right) => wanted += 1,
             Some(Dir::Left) => {}
-            None => cards.push(card(
+            None => cards.push(DeckCard::Post(card(
                 id,
                 cand,
-                state.pointer(&format!("/topics/{id}")),
+                f.state.pointer(&format!("/topics/{id}")),
                 &shared,
-            )),
+            ))),
         }
     }
-    cards.sort_by(|a, b| {
-        let score = |c: &Card| c.score.unwrap_or(f64::NEG_INFINITY);
-        score(b).total_cmp(&score(a)).then(b.id.cmp(&a.id))
-    });
+    let covered = Covered::of(&f.waiting);
+    let mut generated_at = BTreeMap::new();
+    for (source, file, swipes) in &f.scenes {
+        generated_at.insert(source.name(), str_of(file, "generatedAt"));
+        for (id, scene) in scenes::scenes(*source, file) {
+            if scenes::is_done(scene)
+                || covered.covers(*source, &id, scene)
+                || scenes::stack_of(*source, scene) != stack
+            {
+                continue;
+            }
+            match swipes.dir(&id) {
+                Some(Dir::Right) => wanted += 1,
+                Some(Dir::Left) => {}
+                None => cards.push(DeckCard::Scene(scenes::card(*source, id, scene))),
+            }
+        }
+    }
+    sort(&mut cards, DeckCard::score);
+    let slr = f.scene_file(scenes::Source::Slr);
     Deck {
         remaining: cards.len(),
         wanted,
-        last_scan_at: state
-            .get("lastScanAt")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        last_scan_at: str_of(&f.state, "lastScanAt"),
+        generated_at,
+        quota: slr.get("quota").cloned().unwrap_or(Value::Null),
+        quota_error: str_of(slr, "quotaError"),
         problems: Vec::new(),
         cards,
     }
@@ -366,6 +518,7 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>, shared: &HashMap<&str, usize
         .map_or(&[], Vec::as_slice);
     let tags = post_tags(cand);
     Card {
+        source: EROSCRIPTS,
         id,
         url: format!("{}{id}", report::FORUM_TOPIC),
         title: str_of(rec, "title").or_else(|| str_of(cand, "title")),
@@ -556,6 +709,7 @@ pub(crate) fn top_tags(tags: &[TagScore]) -> Vec<TagScore> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenes::Source;
     use crate::swipes::Swipe;
     use serde_json::json;
 
@@ -576,19 +730,22 @@ mod tests {
             {"id": "15", "title": "No score"},
             {"id": 16, "title": "Low", "score": -2.5, "scenes": [{"packed": true, "axes": []}]},
             {"id": "x", "title": "Bad id", "score": 7.0},
-            {"id": 17, "title": "On SLR", "score": 80.0, "axisType": "multi", "tagScores": {"pov": 2},
+            {"id": 17, "title": "On SLR", "score": 80.0, "axisType": "multi", "vr": true, "tagScores": {"pov": 2},
              "scenes": [{"axes": ["twist"], "video": {"name": "A - B (C)_180_LR.mp4", "host": "slr", "slrSceneId": 66249,
                          "slrLabel": "b-66249", "url": "https://www.sexlikereal.com/scenes/b-66249", "size": null, "height": 2880}}]},
             {"id": 18, "title": "SLR and MEGA", "score": 3.0, "axisType": "single",
              "scenes": [{"video": {"name": "m.mp4", "host": "MEGA"}},
                         {"video": {"host": "slr", "slrSceneId": "51207", "url": "http://insecure/x"}}]},
-            {"id": 19, "title": "SLR in library", "score": 9.0,
-             "scenes": [{"video": {"host": "slr", "slrSceneId": 70000}}]}
+            {"id": 19, "title": "SLR in library", "score": 9.0, "vr": true,
+             "scenes": [{"video": {"host": "slr", "slrSceneId": 70000}}]},
+            {"id": 20, "title": "VRBangers post", "score": 4.0, "vr": true, "axisType": "single",
+             "scenes": [{"axes": [], "video": {"host": "vrbangers", "slug": "full-body-massage",
+                         "url": "https://vrbangers.com/video/full-body-massage/"}}]}
         ]})
     }
 
     fn state() -> Value {
-        json!({"topics": {
+        json!({"lastScanAt": "2026-11-17T00:00:00.000Z", "topics": {
             "10": {"title": "Ten from state", "image": "https://x/a.jpg",
                    "created": "2026-01-02T00:00:00Z", "bumped": "2026-03-04T00:00:00Z",
                    "images": ["https://x/a.jpg", "http://x/insecure.jpg", "https://x/a.jpg", "https://x/b.jpg",
@@ -598,18 +755,59 @@ mod tests {
         }})
     }
 
-    fn swipes() -> Swipes {
+    /// slr-scout.json: 66249 and 51207 come with posts 17 and 18; 901 is downloaded, 902
+    /// swiped right.
+    fn slr() -> Value {
+        json!({"generatedAt": "2026-11-16T00:00:00.000Z",
+        "quota": {"videos": {"remaining": 30, "total": 35}}, "quotaError": "session expired",
+        "scenes": [
+            {"id": 66249, "title": "Same as post 17", "score": 90, "vr": true},
+            {"id": 51207, "title": "Same as post 18", "score": 90, "vr": true},
+            {"id": 900, "title": "SLR scene", "score": 6, "vr": true},
+            {"id": 901, "title": "Downloaded", "score": 50, "vr": true, "fetchedAt": "2026-11-16T00:00:00.000Z"},
+            {"id": 902, "title": "Wanted", "score": 50, "vr": true}
+        ]})
+    }
+
+    /// vrb-scout.json: a1 comes with post 20 (same slug), a2 has hand-made axes, a3 is in the
+    /// library, a5 hidden.
+    fn vrb() -> Value {
+        json!({"version": 1, "generatedAt": "2026-11-17T18:00:00.000Z", "scenes": [
+            {"id": "a1", "site": "vrbangers", "url": "https://vrbangers.com/video/full-body-massage/", "score": 70, "vr": true},
+            {"id": "a2", "site": "vrconk", "url": "https://vrconk.com/video/two/", "score": 7, "vr": true,
+             "script": {"url": "https://x/a2.funscript", "axes": ["twist"]}},
+            {"id": "a3", "site": "vrbangers", "url": "https://vrbangers.com/video/three/", "score": 60, "vr": true, "inLibrary": true},
+            {"id": "a4", "site": "vrbangers", "url": "https://vrbangers.com/video/four/", "score": 2, "vr": true,
+             "script": {"axes": []}},
+            {"id": "a5", "site": "vrbangers", "url": "https://vrbangers.com/video/five/", "score": 60, "vr": true}
+        ]})
+    }
+
+    fn pmvhaven() -> Value {
+        json!({"version": 1, "scenes": [
+            {"id": "p1", "site": "pmvhaven", "score": 3, "vr": false, "pmv": true},
+            {"id": "p2", "site": "pmvhaven", "score": 1, "vr": true},
+            {"id": "p3", "site": "pmvhaven", "score": 40, "vr": false, "fetchedAt": "2026-11-17T00:00:00.000Z"}
+        ]})
+    }
+
+    /// faptap-scout.json's candidates; 12 is also a topic id (in the library there).
+    fn faptap() -> Value {
+        json!({"generatedAt": "2026-11-15T00:00:00.000Z", "candidates": [
+            {"id": "f1", "title": "Flat FapTap", "score": 4, "vr": false},
+            {"id": "f2", "title": "VR FapTap", "score": 9, "vr": true, "projection": "VR180_SBS"},
+            {"id": "f3", "title": "Wanted", "score": 1, "vr": false},
+            {"id": 12, "title": "Topic twelve's twin", "score": 0.5}
+        ]})
+    }
+
+    fn swipes(entries: &[(&str, Dir)]) -> Swipes {
         let mut s = Swipes::default();
-        for (id, dir) in [
-            (13, Dir::Right),
-            (14, Dir::Left),
-            (12, Dir::Right),
-            (18, Dir::Right),
-        ] {
+        for (id, dir) in entries {
             s.swipes.insert(
-                id,
+                id.to_string(),
                 Swipe {
-                    dir,
+                    dir: *dir,
                     at: "2026-11-13T00:00:00.000Z".into(),
                 },
             );
@@ -617,91 +815,191 @@ mod tests {
         s
     }
 
-    fn deck() -> Deck {
-        pool(Pool::Hosts)
+    fn files() -> Files {
+        Files {
+            state: state(),
+            waiting: waiting(),
+            videos: HashMap::from([(12, 1), (11, 0), (19, 1)]),
+            post_swipes: swipes(&[
+                ("13", Dir::Right),
+                ("14", Dir::Left),
+                ("12", Dir::Right),
+                ("18", Dir::Right),
+            ]),
+            scenes: vec![
+                (
+                    Source::Slr,
+                    slr(),
+                    swipes(&[
+                        ("902", Dir::Right),
+                        ("66249", Dir::Right),
+                        ("901", Dir::Right),
+                    ]),
+                ),
+                (Source::Vrb, vrb(), swipes(&[("a5", Dir::Left)])),
+                (Source::Pmvhaven, pmvhaven(), swipes(&[("p3", Dir::Right)])),
+                (Source::Faptap, faptap(), swipes(&[("f3", Dir::Right)])),
+            ],
+        }
     }
 
-    fn pool(pool: Pool) -> Deck {
-        build(
-            &state(),
-            &waiting(),
-            &HashMap::from([(12, 1), (11, 0), (19, 1)]),
-            &swipes(),
-            pool,
-        )
+    fn keys(d: &Deck) -> Vec<String> {
+        d.cards.iter().map(DeckCard::key).collect()
+    }
+
+    fn post(d: &Deck, id: u64) -> &Card {
+        d.cards
+            .iter()
+            .find_map(|c| match c {
+                DeckCard::Post(p) if p.id == id => Some(p),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no post {id}"))
     }
 
     #[test]
-    fn posts_with_an_slr_video_go_to_the_slr_pool_only() {
-        // The Multi-axis / Single-axis stacks never see 17, 18 or 19, nor count 18's right swipe.
-        let hosts = deck();
-        assert!(
-            hosts
-                .cards
-                .iter()
-                .all(|c| c.id < 17 && c.slr_video.is_none())
+    fn every_source_lands_in_its_tab_best_first() {
+        // Multi: multi-axis posts (one with its video on SLR) and a scene with script axes.
+        let d = build(&files(), Stack::Multi);
+        assert_eq!(keys(&d), ["eroscripts:17", "vrb:a2", "eroscripts:10"]);
+        assert_eq!((d.remaining, d.wanted), (3, 0));
+        // VR: single-axis VR posts and VR scenes of every source.
+        let d = build(&files(), Stack::Vr);
+        assert_eq!(
+            keys(&d),
+            [
+                "faptap:f2",
+                "slr:900",
+                "eroscripts:20",
+                "vrb:a4",
+                "pmvhaven:p2"
+            ]
         );
-        assert_eq!(hosts.wanted, 1);
-        for stack in [Stack::Multi, Stack::Single] {
-            let mut d = deck();
-            d.deal(&Deal {
-                stack,
-                ..Deal::default()
-            });
-            assert!(d.cards.iter().all(|c| c.id < 17), "{stack:?}");
+        // 902 is wanted; 66249 (a post brings it) and 901 (downloaded) don't count.
+        assert_eq!((d.remaining, d.wanted), (5, 1));
+        // Flat: the rest; a topic and a FapTap video may share an id.
+        let d = build(&files(), Stack::Flat);
+        assert_eq!(
+            keys(&d),
+            [
+                "eroscripts:11",
+                "faptap:f1",
+                "pmvhaven:p1",
+                "faptap:12",
+                "eroscripts:16",
+                "eroscripts:15"
+            ]
+        );
+        // Posts 13 and 18 and FapTap f3 are wanted; 12 is in the library, p3 downloaded.
+        assert_eq!((d.remaining, d.wanted), (6, 3));
+        assert_eq!(d.last_scan_at.as_deref(), Some("2026-11-17T00:00:00.000Z"));
+        assert_eq!(
+            serde_json::to_value(&d.generated_at).unwrap(),
+            json!({"slr": "2026-11-16T00:00:00.000Z", "vrb": "2026-11-17T18:00:00.000Z",
+                   "pmvhaven": null, "faptap": "2026-11-15T00:00:00.000Z"})
+        );
+        // The SLR quota rides along on every tab (the page shows it on VR).
+        assert_eq!(d.quota["videos"]["remaining"], 30);
+        assert_eq!(d.quota_error.as_deref(), Some("session expired"));
+    }
+
+    #[test]
+    fn a_waiting_post_wins_over_its_scene() {
+        // SLR 66249 and 51207 come with posts 17 and 18, VRBangers a1 with post 20 (same slug):
+        // in no tab, whatever their swipes.
+        for stack in [Stack::Multi, Stack::Vr, Stack::Flat] {
+            let k = keys(&build(&files(), stack));
+            for gone in ["slr:66249", "slr:51207", "vrb:a1"] {
+                assert!(!k.contains(&gone.to_string()), "{stack:?} {gone}");
+            }
         }
-        // The SLR pool: 17 (unswiped), 18 wanted, 19 in the library.
-        let slr = pool(Pool::Slr);
-        assert_eq!(ids(&slr), [17]);
-        assert_eq!((slr.remaining, slr.wanted), (1, 1));
-        let c = serde_json::to_value(&slr.cards[0]).unwrap();
+        // Without the posts they stand on their own.
+        let mut f = files();
+        f.waiting = json!({"candidates": []});
+        let k = keys(&build(&f, Stack::Vr));
+        assert_eq!(&k[..2], ["slr:51207", "vrb:a1"]);
+        // 66249's right swipe counts once no post brings it.
+        assert_eq!(build(&f, Stack::Vr).wanted, 2);
+    }
+
+    #[test]
+    fn fetched_in_library_and_swiped_scenes_stay_hidden() {
+        let all: Vec<String> = [Stack::Multi, Stack::Vr, Stack::Flat]
+            .into_iter()
+            .flat_map(|s| keys(&build(&files(), s)))
+            .collect();
+        for gone in [
+            "slr:901",
+            "slr:902",
+            "vrb:a3",
+            "vrb:a5",
+            "pmvhaven:p3",
+            "faptap:f3",
+        ] {
+            assert!(!all.contains(&gone.to_string()), "{gone}");
+        }
+        // Swipes of one source never hide another's card with the same id.
+        let mut f = files();
+        f.post_swipes = swipes(&[("12", Dir::Left)]);
+        assert!(keys(&build(&f, Stack::Flat)).contains(&"faptap:12".to_string()));
+        f.scenes[3].2 = swipes(&[("11", Dir::Left)]);
+        assert!(keys(&build(&f, Stack::Flat)).contains(&"eroscripts:11".to_string()));
+    }
+
+    #[test]
+    fn posts_on_slr_keep_their_video_link() {
+        let d = build(&files(), Stack::Multi);
+        let c = serde_json::to_value(&d.cards[0]).unwrap();
+        assert_eq!(
+            (c["source"].as_str(), c["id"].as_u64()),
+            (Some("eroscripts"), Some(17))
+        );
         assert_eq!(
             c["slrVideo"],
             json!({"sceneId": 66249, "url": "https://www.sexlikereal.com/scenes/b-66249"})
         );
         assert_eq!(c["scenes"][0]["host"], "slr");
-        assert_eq!(c["topTags"], json!([{"tag": "pov", "score": 2.0}]));
-        // Every waiting post's SLR scenes, whatever its swipe or library state; ids as strings too.
-        assert_eq!(
-            slr_scene_ids(&waiting()),
-            HashSet::from([66249, 51207, 70000])
-        );
-        assert!(slr_scene_ids(&Value::Null).is_empty());
         // Only https links.
-        let mut no_swipes = swipes();
-        no_swipes.swipes.remove(&18);
-        let d = build(&state(), &waiting(), &HashMap::new(), &no_swipes, Pool::Slr);
-        let c = d.cards.iter().find(|c| c.id == 18).unwrap();
+        let mut f = files();
+        f.post_swipes = Swipes::default();
+        let d = build(&f, Stack::Flat);
         assert_eq!(
-            c.slr_video,
+            post(&d, 18).slr_video,
             Some(SlrVideo {
                 scene_id: Some(51207),
                 url: None
             })
         );
-        assert_eq!(ids(&d), [17, 19, 18]);
+        // A scene card: its id a string, its source where the swipe goes.
+        let d = build(&files(), Stack::Vr);
+        let c = serde_json::to_value(&d.cards[1]).unwrap();
+        assert_eq!(
+            (c["source"].as_str(), c["id"].as_str(), c.get("slrVideo")),
+            (Some("slr"), Some("900"), None)
+        );
     }
 
     #[test]
-    fn deals_unswiped_posts_not_in_library_best_first() {
-        let d = deck();
-        // 12 is in the library, 13 wanted, 14 hidden; equal scores by newest id; no score last.
-        assert_eq!(
-            d.cards.iter().map(|c| c.id).collect::<Vec<_>>(),
-            [11, 10, 16, 15]
-        );
-        assert_eq!(d.remaining, 4);
-        // 12's right swipe doesn't count: it's in the library already.
-        assert_eq!(d.wanted, 1);
+    fn posts_go_by_axis_type_then_vr() {
+        for (cand, stack) in [
+            (json!({"axisType": "multi", "vr": true}), Stack::Multi),
+            (json!({"axisType": "multi"}), Stack::Multi),
+            (json!({"axisType": "single", "vr": true}), Stack::Vr),
+            (json!({"vr": true}), Stack::Vr),
+            (json!({"axisType": "single"}), Stack::Flat),
+            (json!({}), Stack::Flat),
+        ] {
+            assert_eq!(post_stack(&cand), stack, "{cand}");
+        }
     }
 
     #[test]
     fn card_fields() {
-        let d = deck();
-        let c = d.cards.iter().find(|c| c.id == 10).unwrap();
+        let d = build(&files(), Stack::Multi);
         assert_eq!(
-            serde_json::to_value(c).unwrap(),
+            serde_json::to_value(post(&d, 10)).unwrap(),
             json!({
+                "source": "eroscripts",
                 "id": 10, "url": "https://discuss.eroscripts.com/t/10", "title": "Ten from state",
                 "author": "a",
                 "images": ["https://x/a.jpg", "https://x/b.jpg", "https://x/c.jpg", "https://x/d.jpg", "https://x/e.jpg"],
@@ -720,8 +1018,9 @@ mod tests {
                 "moreScenes": 0
             })
         );
+        let d = build(&files(), Stack::Flat);
         // Older lists: no tagScores / creampie / images; the single image stands in.
-        let c = d.cards.iter().find(|c| c.id == 11).unwrap();
+        let c = post(&d, 11);
         assert_eq!(c.images, ["https://x/only.jpg"]);
         assert_eq!(
             (c.axes, c.videos, c.creampie, c.vr),
@@ -747,12 +1046,12 @@ mod tests {
                 axes: vec![],
             }]
         );
-        let c = d.cards.iter().find(|c| c.id == 15).unwrap();
+        let c = post(&d, 15);
         assert!(c.images.is_empty());
         assert_eq!((c.axes, c.videos, c.score), (Axes::Count(1), 0, None));
         assert_eq!(c.runtime_ms, None);
         assert!(c.scenes.is_empty() && c.more_scenes == 0);
-        let c = serde_json::to_value(d.cards.iter().find(|c| c.id == 16).unwrap()).unwrap();
+        let c = serde_json::to_value(post(&d, 16)).unwrap();
         assert_eq!(c["axes"], "packed");
         assert_eq!(c["images"], json!([]));
     }
@@ -801,33 +1100,36 @@ mod tests {
     }
 
     fn ids(d: &Deck) -> Vec<u64> {
-        d.cards.iter().map(|c| c.id).collect()
+        d.cards.iter().map(|c| c.id().parse().unwrap()).collect()
     }
 
     /// `n` posts of `stack`'s kind scored 0, 1, … n-1 (id = score), dealt with `deal`.
     fn dealt(n: u64, deal: &Deal) -> Deck {
-        let axis = if deal.stack == Stack::Multi {
-            "multi"
-        } else {
-            "single"
-        };
         let cands: Vec<Value> = (0..n)
-            .map(|i| json!({"id": i, "score": i as f64, "axisType": axis}))
+            .map(|i| {
+                let mut c = json!({"id": i, "score": i as f64});
+                match deal.stack {
+                    Stack::Multi => c["axisType"] = json!("multi"),
+                    Stack::Vr => c["vr"] = json!(true),
+                    Stack::Flat => {}
+                }
+                c
+            })
             .collect();
-        let mut d = build(
-            &json!({}),
-            &json!({"candidates": cands}),
-            &HashMap::new(),
-            &Swipes::default(),
-            Pool::Hosts,
-        );
+        let f = Files {
+            waiting: json!({"candidates": cands}),
+            ..Files::default()
+        };
+        let mut d = build(&f, deal.stack);
         d.deal(deal);
         d
     }
 
+    const STACKS: [Stack; 3] = [Stack::Multi, Stack::Vr, Stack::Flat];
+
     #[test]
     fn jitter_stays_within_bounds_and_repeats_per_seed() {
-        for amp in [MULTI_JITTER, SINGLE_JITTER] {
+        for amp in [MULTI_JITTER, VR_JITTER, FLAT_JITTER] {
             let shifts: Vec<f64> = (0..10_000).map(|id| jitter(7, id, amp)).collect();
             assert!(shifts.iter().all(|s| (-amp..=amp).contains(s)));
             // Spread over the whole range, both ways.
@@ -838,12 +1140,13 @@ mod tests {
         assert_eq!(jitter(7, 42, 4.0), jitter(7, 42, 4.0));
         assert_ne!(jitter(7, 42, 4.0), jitter(8, 42, 4.0));
         assert_eq!(Stack::Multi.jitter(), MULTI_JITTER);
-        assert_eq!(Stack::Single.jitter(), SINGLE_JITTER);
+        assert_eq!(Stack::Vr.jitter(), VR_JITTER);
+        assert_eq!(Stack::Flat.jitter(), FLAT_JITTER);
     }
 
     #[test]
     fn a_seed_shuffles_a_little_and_pages_agree() {
-        for stack in [Stack::Multi, Stack::Single] {
+        for stack in STACKS {
             let amp = stack.jitter();
             let all = Deal {
                 limit: MAX_LIMIT,
@@ -859,18 +1162,14 @@ mod tests {
             let order = ids(&dealt(30, &seeded));
             assert_ne!(order, (0..30).rev().collect::<Vec<_>>());
             // Never further than the jitter allows: a card only passes ones within 2 × amp points.
-            for (i, a) in order.iter().enumerate() {
-                for b in &order[i + 1..] {
-                    assert!(
-                        *b as f64 - *a as f64 <= 2.0 * amp,
-                        "{stack:?}: {a} before {b}"
-                    );
-                }
-            }
+            assert!(most_passed(&order) as f64 <= 2.0 * amp, "{stack:?}");
             // The second page (the first 10 left out) continues the same order.
             let page2 = Deal {
                 limit: 10,
-                exclude: order[..10].iter().copied().collect(),
+                exclude: order[..10]
+                    .iter()
+                    .map(|id| format!("eroscripts:{id}"))
+                    .collect(),
                 ..seeded.clone()
             };
             let d = dealt(30, &page2);
@@ -892,7 +1191,7 @@ mod tests {
 
     #[test]
     fn a_requested_jitter_overrides_the_stacks() {
-        for stack in [Stack::Multi, Stack::Single] {
+        for stack in STACKS {
             let seeded = |jitter: f64| Deal {
                 limit: MAX_LIMIT,
                 seed: Some(3),
@@ -911,53 +1210,75 @@ mod tests {
                 assert_ne!(order, (0..60).rev().collect::<Vec<_>>(), "{stack:?} ±{amp}");
                 assert!(most_passed(&order) as f64 <= 2.0 * amp, "{stack:?} ±{amp}");
             }
-            // Wider than either stack's own.
-            assert!(most_passed(&ids(&dealt(60, &seeded(25.0)))) as f64 > 2.0 * SINGLE_JITTER);
+            // Wider than any stack's own.
+            assert!(most_passed(&ids(&dealt(60, &seeded(25.0)))) as f64 > 2.0 * FLAT_JITTER);
         }
     }
 
-    /// Multi-axis posts 100…(100+m) and single-axis posts 1…s, higher id = higher score.
-    fn kinds(m: u64, s: u64, deal: &Deal) -> Deck {
-        let multi =
-            (0..m).map(|i| json!({"id": 100 + i, "score": 100.0 + i as f64, "axisType": "multi"}));
-        let single = (1..=s).map(|i| json!({"id": i, "score": i as f64, "axisType": "single"}));
-        let cands: Vec<Value> = multi.chain(single).collect();
-        let mut d = build(
-            &json!({}),
-            &json!({"candidates": cands}),
-            &HashMap::new(),
-            &Swipes::default(),
-            Pool::Hosts,
+    #[test]
+    fn excludes_by_source_and_id_and_mixes_sources_when_seeded() {
+        // eroscripts:11 isn't faptap:11.
+        let mut f = files();
+        f.scenes[3].1 = json!({"candidates": [{"id": 11, "score": 5.0}]});
+        let mut d = build(&f, Stack::Flat);
+        d.deal(&Deal {
+            exclude: HashSet::from(["eroscripts:11".to_string(), "pmvhaven:p1".to_string()]),
+            stack: Stack::Flat,
+            ..Deal::default()
+        });
+        assert_eq!(keys(&d), ["faptap:11", "eroscripts:16", "eroscripts:15"]);
+        assert_eq!(d.remaining, 5, "remaining counts the whole tab");
+        // Equal scores: the post first, then the sources in order, newest id first.
+        assert_eq!(
+            keys(&build(&f, Stack::Flat))[..3],
+            ["eroscripts:11", "faptap:11", "pmvhaven:p1"]
         );
-        d.deal(deal);
-        d
+        let mut tie = build(&files(), Stack::Vr);
+        sort(&mut tie.cards, |_| 1.0);
+        assert_eq!(
+            keys(&tie),
+            [
+                "eroscripts:20",
+                "slr:900",
+                "vrb:a4",
+                "pmvhaven:p2",
+                "faptap:f2"
+            ]
+        );
+        // The default VR jitter: a card only passes ones within 2 × VR_JITTER points, and
+        // some seed reorders the sources.
+        let base = build(&files(), Stack::Vr);
+        let scores: HashMap<String, f64> =
+            base.cards.iter().map(|c| (c.key(), c.score())).collect();
+        let mut moved = false;
+        for seed in 0..50 {
+            let mut d = build(&files(), Stack::Vr);
+            d.deal(&Deal {
+                seed: Some(seed),
+                stack: Stack::Vr,
+                ..Deal::default()
+            });
+            moved |= keys(&d) != keys(&base);
+            for (i, a) in d.cards.iter().enumerate() {
+                for b in &d.cards[i + 1..] {
+                    assert!(
+                        scores[&b.key()] - scores[&a.key()] <= 2.0 * VR_JITTER,
+                        "seed {seed}"
+                    );
+                }
+            }
+        }
+        assert!(moved);
     }
 
     #[test]
-    fn one_kind_stacks_count_only_their_own() {
-        let multi = kinds(
-            3,
-            5,
-            &Deal {
-                stack: Stack::Multi,
-                limit: 2,
-                ..Deal::default()
-            },
-        );
-        assert_eq!((ids(&multi), multi.remaining), (vec![102, 101], 3));
-        let single = kinds(
-            3,
-            5,
-            &Deal {
-                stack: Stack::Single,
-                ..Deal::default()
-            },
-        );
-        assert_eq!((ids(&single), single.remaining), (vec![5, 4, 3, 2, 1], 5));
+    fn stacks_parse() {
         assert_eq!(Stack::parse("multi"), Some(Stack::Multi));
-        assert_eq!(Stack::parse("single"), Some(Stack::Single));
-        assert_eq!(Stack::parse("Multi"), None);
-        assert_eq!(Stack::parse("both"), None);
+        assert_eq!(Stack::parse("vr"), Some(Stack::Vr));
+        assert_eq!(Stack::parse("flat"), Some(Stack::Flat));
+        for bad in ["single", "slr", "Multi", "VR", "both", ""] {
+            assert_eq!(Stack::parse(bad), None, "{bad}");
+        }
         assert_eq!(Stack::default(), Stack::Multi);
     }
 
@@ -1038,9 +1359,11 @@ mod tests {
         let d = load(&dir, &Deal::default());
         assert_eq!((d.remaining, d.wanted, d.cards.len()), (0, 0, 0));
         assert!(d.problems.is_empty());
+        assert!(d.quota.is_null());
 
         std::fs::write(dir.join(report::WAITING_FILE), waiting().to_string()).unwrap();
         std::fs::write(dir.join(report::STATE_FILE), state().to_string()).unwrap();
+        std::fs::write(dir.join(Source::Vrb.file()), vrb().to_string()).unwrap();
         let d = load(
             &dir,
             &Deal {
@@ -1048,11 +1371,14 @@ mod tests {
                 ..Deal::default()
             },
         );
-        // The default multi-axis stack: 10 is the only multi-axis post.
-        assert_eq!(d.remaining, 1);
-        assert_eq!(d.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [10]);
+        // The default Multi tab: posts 17 and 10 and scene a2, two of them dealt.
+        assert_eq!(d.remaining, 3);
+        assert_eq!(keys(&d), ["eroscripts:17", "vrb:a2"]);
 
-        std::fs::write(dir.join(crate::swipes::EROSCRIPTS.file), b"nope").unwrap();
+        // Broken files are problems; the rest still deals.
+        std::fs::write(dir.join(swipes::EROSCRIPTS.file), b"nope").unwrap();
+        std::fs::write(dir.join(Source::Pmvhaven.file()), b"{oops").unwrap();
+        std::fs::write(dir.join(swipes::FAPTAP.file), b"[]").unwrap();
         let d = load(
             &dir,
             &Deal {
@@ -1060,8 +1386,18 @@ mod tests {
                 ..Deal::default()
             },
         );
-        assert_eq!((d.remaining, d.cards.len()), (1, 0));
-        assert!(d.problems[0].starts_with(crate::swipes::EROSCRIPTS.file));
+        assert_eq!((d.remaining, d.cards.len()), (3, 0));
+        for file in [
+            swipes::EROSCRIPTS.file,
+            Source::Pmvhaven.file(),
+            swipes::FAPTAP.file,
+        ] {
+            assert!(
+                d.problems.iter().any(|p| p.starts_with(file)),
+                "{file}: {:?}",
+                d.problems
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,17 +1,20 @@
 //! `npm run scout:report`: a webpage listing every EroScripts post the
 //! Discovery scout (`npm run eroscripts:scout`) has judged, with its verdict,
-//! and the waiting list, plus a swipe deck over the waiting list (`/swipe`)
-//! and over the SexLikeReal scenes `npm run slr:scout` found (the SLR tab).
+//! and the waiting list, plus a swipe deck (`/swipe`) over the waiting list and
+//! the scenes the site scouts found (SexLikeReal, VRBangers / VRConk, PMVHaven,
+//! FapTap), in three tabs: Multi, VR and Flat.
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
 //! `eroscripts-scout-rejected.json`, `eroscripts-scout-frames.json`,
-//! `slr-scout.json` and `content-creators.json` (the Content creators tab,
-//! `/creators`) in userData on every request, and serves the scouts'
-//! preview frames (`scout-frames/`). The only
-//! files it writes are the decks' swipes,
-//! `eroscripts-scout-swipes.json` (which the scout reads) and
-//! `slr-scout-swipes.json` (the previous copy of each kept as `.bak`). Bound to
-//! 127.0.0.1, or to every interface with `--lan`; other devices need the access
-//! PIN when one is set (`access-pin.json`, crate::gate).
+//! `slr-scout.json`, `vrb-scout.json`, `pmvhaven-scout.json`, `faptap-scout.json`
+//! and `content-creators.json` (the Content creators tab, `/creators`) in
+//! userData on every request, and serves the scouts' preview frames
+//! (`scout-frames/`). The only files it writes are the deck's swipes, one per
+//! source: `eroscripts-scout-swipes.json`, `slr-scout-swipes.json`,
+//! `vrb-scout-swipes.json`, `pmvhaven-scout-swipes.json` and
+//! `faptap-scout-swipes.json` (which the scouts' `--fetch` reads; the previous
+//! copy of each kept as `.bak`). Bound to 127.0.0.1, or to every interface with
+//! `--lan`; other devices need the access PIN when one is set
+//! (`access-pin.json`, crate::gate).
 
 pub mod cli;
 pub mod creators;
@@ -20,8 +23,8 @@ pub mod frames;
 pub mod gate;
 pub mod library;
 pub mod report;
+pub mod scenes;
 pub mod server;
-pub mod slr;
 pub mod swipes;
 
 use std::ffi::OsString;
