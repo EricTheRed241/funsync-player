@@ -83,6 +83,21 @@ pub struct PornstarTags {
     pub pornstars: Vec<Pornstar>,
 }
 
+/// What never comes in (`screening`; EXCLUDED_TEXT, BLOCKED_CREATORS,
+/// BLOCKED_TAGS, BLOCKED_TITLE, FURRY_TAGS, SFW_TAGS and MIN_VIDEO_MS in
+/// content-preferences.js); applied by `crate::screen`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Screening {
+    pub excluded_words: Vec<String>,
+    pub blocked_creators: Vec<String>,
+    pub blocked_tags: Vec<String>,
+    pub blocked_title_words: Vec<String>,
+    pub furry_tags: Vec<String>,
+    pub sfw_tags: Vec<String>,
+    pub min_video_ms: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Prefs {
@@ -95,6 +110,7 @@ pub struct Prefs {
     pub library_max_videos: usize,
     pub video_caps: VideoCaps,
     pub pornstar_tags: PornstarTags,
+    pub screening: Screening,
 }
 
 /// The embedded preferences.

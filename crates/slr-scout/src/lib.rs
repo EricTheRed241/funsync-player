@@ -20,6 +20,7 @@ pub mod performers;
 pub mod prefs;
 pub mod quota;
 pub mod score;
+pub mod screen;
 pub mod slr;
 pub mod store;
 pub mod text;

@@ -1,4 +1,13 @@
 {
+  "screening": {
+    "excludedWords": ["loli", "lolicon", "shota", "shotacon", "furry", "furries", "anthro", "yiff", "futa", "futas", "futanari", "dickgirl", "dickgirls"],
+    "blockedCreators": ["AidenHet"],
+    "blockedTags": ["mmd", "dildo-riding", "riding-dildo", "dildo-ride"],
+    "blockedTitleWords": ["mmd", "dildo", "dildos"],
+    "furryTags": ["scalie", "knot", "knotted", "horse", "dog", "animal", "my-little-pony", "animal-crossing", "krystal-star-fox", "renamon-digimon", "five-nights-at-freddy-s", "roxanne-wolf-five-nights-at-freddy-s"],
+    "sfwTags": ["sfw", "safe-for-work", "non-porn", "nonporn", "non-nude"],
+    "minVideoMs": 110000
+  },
   "ageScreen": {
     "purgeAt": 0.8,
     "reviewAt": 0.5,
