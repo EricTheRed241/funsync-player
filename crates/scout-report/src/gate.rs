@@ -92,7 +92,7 @@ impl Gate {
             return None;
         }
         let page = matches!(req.method, "GET" | "HEAD")
-            && (matches!(path, "/" | "/swipe") || req.accept.contains("text/html"));
+            && (matches!(path, "/" | "/swipe" | "/creators") || req.accept.contains("text/html"));
         let pin = match self.load(user_data, err) {
             Ok(Some(pin)) => pin,
             Ok(None) => return None,
@@ -413,6 +413,7 @@ mod tests {
         for (target, accept, location) in [
             ("/", "*/*", "/login?next=/"),
             ("/swipe?x=1#top", "", "/login?next=/swipe%3Fx%3D1"),
+            ("/creators", "", "/login?next=/creators"),
             ("/api/report", HTML, "/login?next=/api/report"),
             ("/nowhere", HTML, "/login?next=/nowhere"),
         ] {
@@ -427,6 +428,7 @@ mod tests {
             ("GET", "/frames/eroscripts/1/25.jpg"),
             ("POST", "/api/swipe"),
             ("POST", "/"),
+            ("GET", "/api/creators"),
             ("HEAD", "/api/slr/deck"),
         ] {
             assert!(

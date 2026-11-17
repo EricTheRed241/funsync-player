@@ -3,8 +3,9 @@
 //! and the waiting list, plus a swipe deck over the waiting list (`/swipe`)
 //! and over the SexLikeReal scenes `npm run slr:scout` found (the SLR tab).
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
-//! `eroscripts-scout-rejected.json`, `eroscripts-scout-frames.json` and
-//! `slr-scout.json` in userData on every request, and serves the scouts'
+//! `eroscripts-scout-rejected.json`, `eroscripts-scout-frames.json`,
+//! `slr-scout.json` and `content-creators.json` (the Content creators tab,
+//! `/creators`) in userData on every request, and serves the scouts'
 //! preview frames (`scout-frames/`). The only
 //! files it writes are the decks' swipes,
 //! `eroscripts-scout-swipes.json` (which the scout reads) and
@@ -13,6 +14,7 @@
 //! PIN when one is set (`access-pin.json`, crate::gate).
 
 pub mod cli;
+pub mod creators;
 pub mod deck;
 pub mod frames;
 pub mod gate;
