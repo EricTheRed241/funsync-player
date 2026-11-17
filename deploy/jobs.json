@@ -40,6 +40,11 @@
       "name": "faptap-scout",
       "timeout": "6h",
       "steps": [["npm", "run", "-s", "faptap:scout"]]
+    },
+    {
+      "name": "creators",
+      "timeout": "6h",
+      "steps": [["npm", "run", "-s", "creators:scout", "--", "--daily"]]
     }
   ]
 }

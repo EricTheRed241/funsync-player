@@ -70,6 +70,11 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const rule34video = streams.createRule34video();
 // One per run: pmvhaven.com API reads and downloads, ≥ 1 s apart.
 const pmvhaven = streams.createPmvhaven();
+const phHost = await import('./pornhub-host.mjs');
+// Pornhub links: metadata and download through yt-dlp (scripts/pornhub-host.mjs).
+const pornhub = phHost.createPornhub();
+/** The height cap a post's videos are downloaded within (content-preferences videoCaps). */
+const heightCap = (vr) => (vr ? prefs.VR_MAX_HEIGHT : prefs.FLAT_MAX_HEIGHT);
 // Set in main (it needs the data folder and the credentials file): vrbangers.com reads, and Chrome for --fetch.
 let vrbangers = null;
 // Set in main (it needs the data folder, which holds the SLR session): sexlikereal.com reads and downloads.
@@ -111,6 +116,9 @@ Download:
                          Videos on rule34video.com are read from their pages (paced, ≥ 400 ms apart), those on
                          pmvhaven.com from its API (≥ 1 s apart); both must fit the main script's length (checked
                          again with ffprobe; needs ffprobe on PATH).
+                         Pornhub videos (view_video.php?viewkey=…) come through yt-dlp (on PATH; brew install yt-dlp):
+                         the best quality within the caps, merged into an mp4, length checked like rule34video's;
+                         with --dry-run their metadata is read instead. No yt-dlp: Pornhub links are skipped
                          vrbangers.com scenes come from the paid account through headless Google Chrome (logged in
                          once per pass; ≤ 8K, the planned file); with --dry-run the signed link is resolved and
                          probed for 1 byte instead
@@ -257,7 +265,7 @@ async function pixeldrainFiles(kind, id) {
  * `hostDown`: a rule34video or pmvhaven page or SLR couldn't be read for a reason other than being gone (403, 429, 5xx,
  * timeout), so a post without a video now may have one once the site answers again.
  */
-async function topicFiles(api, pacer, topicId, cooked, title, tags = [], cache = new Map()) {
+async function topicFiles(api, pacer, topicId, cooked, title, tags = [], cache = new Map(), vr = false) {
   await pacer.wait();
   const att = await api.getTopicAttachments(topicId);
   if (att.rateLimited) throw new RateLimitedError();
@@ -283,6 +291,22 @@ async function topicFiles(api, pacer, topicId, cooked, title, tags = [], cache =
         if (err.status !== 404 && err.status !== 410) hostDown = true;
         process.stderr.write(`! ${topicId} ${err.message}\n`);
       }
+    }
+  }
+  for (const u of phHost.pornhubLinks(hrefs)) {
+    try {
+      files.push(...await pornhub.files(u, { cap: heightCap(vr) }));
+      hosts.add(phHost.PORNHUB_HOST);
+    } catch (err) {
+      if (err instanceof phHost.YtDlpMissingError) {
+        // Not a verdict on the post: it stays pending until yt-dlp is installed.
+        hosts.add('pornhub (yt-dlp missing)');
+        hostDown = true;
+      } else {
+        hosts.add('pornhub (unreadable)');
+        if (err.status !== 404) hostDown = true;
+      }
+      process.stderr.write(`! ${topicId} ${err.message}\n`);
     }
   }
   const leads = vrbHost.vrbangersLeads({ hrefs, names: files.map((f) => f.name), title });
@@ -529,7 +553,7 @@ async function scan(opts, { api, userData, config, incoming }) {
       if (!first.ok) { verdict(first.reason); continue; }
       let files, hosts, hostDown;
       const scripts = new Map();
-      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, t.id, cooked, t.title, t.tags, scripts)); } catch (err) {
+      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, t.id, cooked, t.title, t.tags, scripts, s.vr)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         process.stderr.write(`! ${t.id} ${err.message}\n`);
         continue;
@@ -607,7 +631,7 @@ async function addPicked(opts, { api, userData, config, incoming }) {
       if (!first.ok) { console.log(`✗ ${id} ${t.title}: ${first.reason}`); continue; }
       let files, hosts, hostDown;
       const scripts = new Map();
-      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, id, cooked, t.title, t.tags, scripts)); } catch (err) {
+      try { ({ files, hosts, hostDown } = await topicFiles(api, pacer, id, cooked, t.title, t.tags, scripts, s.vr)); } catch (err) {
         if (err instanceof RateLimitedError || err instanceof SessionExpiredError) throw err;
         console.log(`✗ ${id} ${t.title}: ${err.message}`);
         continue;
@@ -687,7 +711,7 @@ function videoSeconds(file) {
  * checks size and length itself (vrbangers-host.mjs download); so does a
  * SexLikeReal scene's (slr-host.mjs download: quota, download type, a fresh link).
  */
-async function download(api, file, dest, staging, local = [], { scriptMs = null } = {}) {
+async function download(api, file, dest, staging, local = [], { scriptMs = null, vr = false } = {}) {
   if (fs.existsSync(dest)) return 'have';
   fs.mkdirSync(staging, { recursive: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -731,6 +755,8 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null 
       await vrbangers.download(file, tmp, { scriptMs, videoSeconds });
     } else if (file.host === slrHost.SLR_HOST) {
       await slr.download(file, tmp, { scriptMs, videoSeconds });
+    } else if (file.host === phHost.PORNHUB_HOST) {
+      await pornhub.download(file, tmp, { cap: heightCap(vr), scriptMs, videoSeconds });
     } else {
       throw new Error(`unknown host ${file.host}`);
     }
@@ -834,7 +860,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
           short++;
           continue;
         }
-        const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs });
+        const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs, vr: c.vr === true });
         writeAtomic(path.join(dir, 'eroscripts.json'), JSON.stringify(
           lib.sceneSidecar(c, sc.video, path.basename(video), new Date().toISOString()), null, 1));
         let note = '';
@@ -1022,7 +1048,8 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.axisType.padEnd(6)} ${c.id} ${c.title}`);
     const vrb = await probeVrbangers(queue, { userData, incoming });
-    return Math.max(vrb, await planSlr(queue, { userData, incoming }));
+    const slrExit = await planSlr(queue, { userData, incoming });
+    return Math.max(vrb, slrExit, await planPornhub(queue, { userData, incoming }));
   }
   ensureLibrarySource(userData, { name: FOLDER, path: incoming });
   const staging = path.join(path.dirname(incoming), '_staging');
@@ -1117,6 +1144,37 @@ async function planSlr(queue, { userData, incoming }) {
     }
   }
   return failed || short ? 2 : 0;
+}
+
+/**
+ * `--fetch --dry-run`: each waiting Pornhub scene's metadata read again with
+ * yt-dlp (nothing downloaded): the height the download gets within the caps,
+ * the video's length against the main script's, and where it goes. yt-dlp
+ * missing, a video gone or a length that doesn't fit: 2.
+ */
+async function planPornhub(queue, { userData, incoming }) {
+  const done = fetchedScenes(incoming, userData);
+  const scenes = queue.flatMap((c) => c.scenes.filter((sc) => sc.video.host === phHost.PORNHUB_HOST && !done.has(lib.fetchedKey(c.id, sc.video.name))).map((sc) => ({ c, sc })));
+  if (!scenes.length) return 0;
+  console.log(`pornhub.com: reading ${scenes.length} video${scenes.length > 1 ? 's' : ''} with yt-dlp (metadata only, nothing downloaded)`);
+  let failed = 0;
+  for (const { c, sc } of scenes) {
+    const { creator, stem } = lib.sceneNameOf(c, sc);
+    const target = path.join(incoming, creator, stem, stem + path.extname(sc.video.name).toLowerCase());
+    const cap = heightCap(c.vr === true);
+    try {
+      const info = await pornhub.info(sc.video.url, cap);
+      const scriptMs = sc.durationMs || null;
+      const fits = phHost.pornhubFits(info.durationSec, scriptMs);
+      console.log(`  ${c.id} ${sc.video.url}\n    ${info.height}p (cap ${cap}p, -f "${phHost.pornhubFormat(cap)}"), ${info.durationSec ? clock(info.durationSec * 1000) : 'length unknown'}${scriptMs ? `, script ${clock(scriptMs)}${fits ? '' : ': not this scene\'s video'}` : ''}\n    → ${target}`);
+      if (!fits) failed++;
+    } catch (err) {
+      console.log(`  ${c.id} ${sc.video.url}: ✗ ${err.message}`);
+      failed++;
+      if (err instanceof phHost.YtDlpMissingError) break;
+    }
+  }
+  return failed ? 2 : 0;
 }
 
 // ── Frames ──────────────────────────────────────────────────────────────

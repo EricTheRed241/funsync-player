@@ -59,6 +59,7 @@ import { computeBins } from '../renderer/js/heatmap-strip.js';
 import { capBytes, durationMatches, PMVHAVEN_HOST, RULE34VIDEO_HOST, rule34videoPosterUrl, safeName, STEM_BYTES } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { SLR_ACCOUNT_DOWNLOAD, SLR_HOST, slrSceneName } from './slr-host.mjs';
+import { PORNHUB_HOST } from './pornhub-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
 
 const { postImages } = createRequire(import.meta.url)('../electron/eroscripts-api.js');
@@ -464,8 +465,8 @@ export function planScenes({ scripts, videos, vr = false, libraryVideos = [] }) 
   return { scenes, inLibrary };
 }
 
-/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs, scripts/vrbangers-host.mjs, scripts/slr-host.mjs). */
-export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, PMVHAVEN_HOST, VRBANGERS_HOST, SLR_HOST]);
+/** Hosts whose "files" are a streaming site's video page in one quality (scripts/stream-hosts.mjs, scripts/vrbangers-host.mjs, scripts/slr-host.mjs, scripts/pornhub-host.mjs). */
+export const STREAM_HOSTS = new Set([RULE34VIDEO_HOST, PMVHAVEN_HOST, VRBANGERS_HOST, SLR_HOST, PORNHUB_HOST]);
 
 /**
  * planScenes, with each scene paired to a streaming page's video checked by
@@ -768,6 +769,7 @@ export function sceneSidecar(c, video, file, at) {
       slr: { label: video.slrLabel, url: video.url, title: video.title, performers: video.performers, studio: video.studio, vrSuffix: video.vrSuffix },
     } : {}),
     ...(video.host === PMVHAVEN_HOST ? { pmvhaven: { id: video.pmvhavenId, url: video.url } } : {}),
+    ...(video.host === PORNHUB_HOST ? { pornhub: { viewkey: video.viewkey, url: video.url, title: video.title, height: video.height } } : {}),
     ...(posterUrl ? { posterUrl } : {}),
     at,
   };

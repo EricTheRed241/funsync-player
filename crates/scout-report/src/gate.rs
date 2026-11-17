@@ -1,13 +1,14 @@
 //! The access PIN in front of every route (video_tags::access): this Mac
 //! (loopback) always passes; other devices pass with a valid `funsync_access`
 //! cookie (or `k=<token>` query) while `<userData>/access-pin.json` sets a
-//! PIN, which is reread on every request. Otherwise pages (`/`, `/swipe`, or
-//! anything a browser asks for as HTML) redirect to `GET /login?next=…` and
-//! everything else gets 401 `{"error":"pin required"}`. `POST /login {pin,
-//! next}` sets the cookie (30 days); 5 wrong PINs from one address within
-//! 10 minutes lock it out (429) until the first of them is 10 minutes old.
-//! `POST /logout` clears the cookie. An unreadable PIN file refuses every
-//! other device (503).
+//! PIN, which is reread on every request. Otherwise pages (the site's own,
+//! `/` and `/swipe` here, or anything a browser asks for as HTML) redirect to
+//! `GET /login?next=…` and everything else gets 401 `{"error":"pin required"}`.
+//! `POST /login {pin, next}` sets the cookie (30 days); 5 wrong PINs from one
+//! address within 10 minutes lock it out (429) until the first of them is 10
+//! minutes old. `POST /logout` clears the cookie. An unreadable PIN file
+//! refuses every other device (503). Other sites (creator-report) put the same
+//! gate in front of their own routes: Gate::new with their name and pages.
 
 use crate::server::{self, Response};
 use serde_json::json;
@@ -38,26 +39,45 @@ pub struct Request<'a> {
 }
 
 /// The gate's memory between requests: wrong PINs per address, and the last
-/// PIN file problem logged.
-#[derive(Debug, Default)]
+/// PIN file problem logged; and the site it guards.
+#[derive(Debug)]
 pub struct Gate {
     failures: HashMap<IpAddr, Vec<u64>>,
     last_problem: Option<String>,
+    name: &'static str,
+    pages: &'static [&'static str],
 }
 
 impl Gate {
+    /// The gate for the site `name` (its log lines start with it), whose `pages`
+    /// (paths) send a device without the PIN to the login page instead of a 401.
+    pub fn new(name: &'static str, pages: &'static [&'static str]) -> Gate {
+        Gate {
+            failures: HashMap::new(),
+            last_problem: None,
+            name,
+            pages,
+        }
+    }
+
+    /// The site's name, for log lines.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
     /// Answer a request: the gate's own answer (login, logout, refusals), else
-    /// the route's. `now` is Unix seconds; PIN file problems go to `err`.
+    /// `route`'s. `now` is Unix seconds; PIN file problems go to `err`.
     pub fn respond(
         &mut self,
         req: &Request,
         user_data: &Path,
         now: u64,
         err: &mut dyn Write,
+        route: impl FnOnce(&Request) -> Response,
     ) -> Response {
         match self.check(req, user_data, now, err) {
             Some(resp) => resp,
-            None => server::route(req.method, req.target, req.body, user_data),
+            None => route(req),
         }
     }
 
@@ -92,7 +112,7 @@ impl Gate {
             return None;
         }
         let page = matches!(req.method, "GET" | "HEAD")
-            && (matches!(path, "/" | "/swipe" | "/creators") || req.accept.contains("text/html"));
+            && (self.pages.contains(&path) || req.accept.contains("text/html"));
         let pin = match self.load(user_data, err) {
             Ok(Some(pin)) => pin,
             Ok(None) => return None,
@@ -169,8 +189,9 @@ impl Gate {
                 if self.last_problem.as_ref() != Some(&e) {
                     let _ = writeln!(
                         err,
-                        "scout-report: access PIN file unreadable, refusing other devices: {e} \
-                         (fix it with npm run access:pin -- set <pin>, or -- clear)"
+                        "{}: access PIN file unreadable, refusing other devices: {e} \
+                         (fix it with npm run access:pin -- set <pin>, or -- clear)",
+                        self.name
                     );
                     self.last_problem = Some(e);
                 }
@@ -287,6 +308,18 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::path::PathBuf;
 
+    /// scout-report's gate.
+    fn gate() -> Gate {
+        Gate::new(server::NAME, server::PAGES)
+    }
+
+    /// The gate's answer, else scout-report's routes'.
+    fn answer(gate: &mut Gate, req: &Request, dir: &Path, now: u64, err: &mut Vec<u8>) -> Response {
+        gate.respond(req, dir, now, err, |r| {
+            server::route(r.method, r.target, r.body, dir)
+        })
+    }
+
     const NOW: u64 = 1_763_290_000;
     const LAN: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 2, 30));
     const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
@@ -332,7 +365,7 @@ mod tests {
                 accept,
             };
             let mut err = Vec::new();
-            let resp = self.gate.respond(&req, self.dir, self.now, &mut err);
+            let resp = answer(self.gate, &req, self.dir, self.now, &mut err);
             assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
             resp
         }
@@ -376,7 +409,7 @@ mod tests {
     #[test]
     fn without_a_pin_everything_is_open() {
         let dir = user_data("open", None);
-        let mut gate = Gate::default();
+        let mut gate = gate();
         let mut c = client(&mut gate, &dir, LAN);
         assert_eq!(c.get("/").status, 200);
         assert_eq!(c.get("/api/report").status, 200);
@@ -391,7 +424,7 @@ mod tests {
     #[test]
     fn this_mac_never_needs_the_pin() {
         let dir = user_data("loopback", Some([1; 32]));
-        let mut gate = Gate::default();
+        let mut gate = gate();
         for ip in [
             LOCAL,
             IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -408,12 +441,11 @@ mod tests {
     #[test]
     fn other_devices_are_sent_to_the_login_page() {
         let dir = user_data("gated", Some([1; 32]));
-        let mut gate = Gate::default();
+        let mut gate = gate();
         let mut c = client(&mut gate, &dir, LAN);
         for (target, accept, location) in [
             ("/", "*/*", "/login?next=/"),
             ("/swipe?x=1#top", "", "/login?next=/swipe%3Fx%3D1"),
-            ("/creators", "", "/login?next=/creators"),
             ("/api/report", HTML, "/login?next=/api/report"),
             ("/nowhere", HTML, "/login?next=/nowhere"),
         ] {
@@ -428,7 +460,6 @@ mod tests {
             ("GET", "/frames/eroscripts/1/25.jpg"),
             ("POST", "/api/swipe"),
             ("POST", "/"),
-            ("GET", "/api/creators"),
             ("POST", "/api/scenes/slr/swipe"),
         ] {
             assert!(
@@ -463,7 +494,7 @@ mod tests {
     #[test]
     fn logging_in_sets_a_30_day_cookie() {
         let dir = user_data("login", Some([1; 32]));
-        let mut gate = Gate::default();
+        let mut gate = gate();
         let mut c = client(&mut gate, &dir, LAN);
         let r = c.login("1234", "%2Fswipe%3Fx%3D1");
         assert_eq!(
@@ -513,7 +544,7 @@ mod tests {
     #[test]
     fn wrong_pins_are_refused_then_rate_limited() {
         let dir = user_data("wrong", Some([1; 32]));
-        let mut gate = Gate::default();
+        let mut gate = gate();
         let mut c = client(&mut gate, &dir, LAN);
         let r = c.login("4321", "%2Fswipe");
         assert_eq!(r.status, 401);
@@ -568,7 +599,7 @@ mod tests {
             assert_eq!(safe_next(next), safe, "{next:?}");
         }
         let dir = user_data("next", Some([1; 32]));
-        let mut gate = Gate::default();
+        let mut gate = gate();
         let mut c = client(&mut gate, &dir, LAN);
         let r = c.login("1234", "https%3A%2F%2Fevil.example%2F");
         assert_eq!(header(&r, "Location"), Some("/"));
@@ -584,7 +615,7 @@ mod tests {
     fn an_unreadable_pin_file_refuses_other_devices() {
         let dir = user_data("unreadable", None);
         std::fs::write(access::file_path(&dir), "{not json").unwrap();
-        let mut gate = Gate::default();
+        let mut gate = gate();
         let mut err = Vec::new();
         let mut send = |ip, target: &str, accept: &str| {
             let req = Request {
@@ -595,7 +626,7 @@ mod tests {
                 cookie: "",
                 accept,
             };
-            gate.respond(&req, &dir, NOW, &mut err)
+            answer(&mut gate, &req, &dir, NOW, &mut err)
         };
         let r = send(LAN, "/", HTML);
         assert_eq!(
