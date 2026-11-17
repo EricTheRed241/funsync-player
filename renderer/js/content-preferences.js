@@ -16,9 +16,9 @@
 //
 // Values the Rust CLIs read too live in content-preferences.json next to this
 // file (the shared part of the preferences: Rust embeds it at compile time,
-// crates/age-screen, crates/pornstar-tags, crates/slr-scout). The ones the app
-// uses are exported here like the rest (`pornstarTags` and `slrScout` are read
-// by Rust only); change them there: the ratings threshold, the underage
+// crates/age-screen, crates/pornstar-tags, crates/slr-scout, crates/pmvhaven-scout).
+// The ones the app uses are exported here like the rest (`pornstarTags`, `slrScout`
+// and `pmvhavenScout` are read by Rust only); change them there: the ratings threshold, the underage
 // screener, LIBRARY_MAX_VIDEOS, the VR / flat caps, FAVOURITES, RANKING,
 // TAG_SCORE_GROUPS (whose tag lists MUSIC_TAGS, POV_TAGS, MONSTER_TAGS,
 // FEET_TAGS and FFM_TAGS are), ANIMATION_TAGS and the screening values

@@ -6,6 +6,10 @@
       "timeout": "12h",
       "steps": [
         ["npm", "run", "-s", "slr:scout", "--", "--fetch"],
+        ["npm", "run", "-s", "vrb:scout", "--", "--fetch"],
+        ["npm", "run", "-s", "pmvhaven:scout", "--", "--fetch"],
+        ["npm", "run", "-s", "vrb:scout"],
+        ["npm", "run", "-s", "pmvhaven:scout"],
         ["npm", "run", "-s", "eroscripts:scout", "--", "--daily", "--passes", "2", "--wait", "1h"]
       ]
     },
