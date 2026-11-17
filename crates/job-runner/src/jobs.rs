@@ -74,7 +74,7 @@ mod tests {
     fn the_built_in_jobs_parse() {
         let jobs = parse(BUILT_IN).unwrap();
         let scout = jobs.iter().find(|j| j.name == "eroscripts-scout").unwrap();
-        assert_eq!((scout.timeout, scout.steps.len()), (12 * 3600, 2));
+        assert_eq!((scout.timeout, scout.steps.len()), (12 * 3600, 6));
         assert!(jobs.iter().any(|j| j.name == "thumbnails"));
     }
 

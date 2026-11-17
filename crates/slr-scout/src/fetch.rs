@@ -839,7 +839,7 @@ fn spend(quota: &mut Quota, script: &ScriptPlan) {
 }
 
 /// Rename, or copy and remove across volumes.
-fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+pub fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     if fs::rename(from, to).is_ok() {
         return Ok(());
     }

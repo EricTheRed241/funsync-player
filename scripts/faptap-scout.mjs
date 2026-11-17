@@ -3,7 +3,7 @@
 // them into the library's FapTap folder.
 //
 //   npm run faptap:scout                 scan new videos (+ some backfill) → <userData>/faptap-scout.json
-//   npm run faptap:scout -- --fetch      download the saved list
+//   npm run faptap:scout -- --fetch      download the videos swiped right in npm run scout:report
 //
 // Rules: scripts/faptap-scout-lib.mjs (no sex rule, the ranking decides;
 // monster, feet and 2D hentai videos rank lower). Scenes
@@ -62,10 +62,12 @@ Pick:
   --add a,b,c            add these FapTap video ids to the list, skipping the live-not-POV and focus rules
                          (exclusions, audio roleplays, length and library duplicates still apply)
 Download (needs ffmpeg and ffprobe on PATH):
-  --fetch                download the saved list, best first, into the FapTap library folder;
-                         skips scripts under ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
+  --fetch                download the saved list's videos swiped right in npm run scout:report
+                         (<userData>/${lib.SWIPES_FILE}), best first, whatever their score, into the FapTap
+                         library folder (a left swipe only hides a video from the deck); skips scripts under
+                         ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting videos now off focus or breaking the content rules
-  --ids a,b,c            only these FapTap video ids
+  --ids a,b,c            only these FapTap video ids, swiped or not (instead of the swipes)
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -455,6 +457,20 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
   return { ok, failed, short, capped };
 }
 
+/**
+ * The FapTap videos swiped in npm run scout:report's deck (lib.readSwipes): none when the file isn't there; an
+ * unreadable one is reported and counts as none.
+ */
+function readSwipesFile(userData) {
+  const file = path.join(userData, lib.SWIPES_FILE);
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return lib.readSwipes(null); }
+  try { return lib.readSwipes(JSON.parse(text)); } catch (err) {
+    console.error(`Ignoring ${file}: ${err.message}`);
+    return lib.readSwipes(null);
+  }
+}
+
 async function fetchAll(opts, { userData, config, incoming }) {
   if (!fs.existsSync(listPath(userData))) throw new Error(`No FapTap list at ${listPath(userData)}; run npm run faptap:scout first.`);
   const { favourites, scoring } = live.scoutPreferences(config);
@@ -467,8 +483,17 @@ async function fetchAll(opts, { userData, config, incoming }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting videos that break the content rules ${JSON.stringify(breaks)}`);
-  const wanted = candidates.filter(lib.stillWanted).filter((c) => !opts.ids || opts.ids.has(String(c.id)));
-  const queue = wanted.sort(byScore);
+  // Without --ids, only what the user swiped right in the deck.
+  const { wanted } = opts.ids ? { wanted: new Set() } : readSwipesFile(userData);
+  if (!opts.ids) {
+    const waiting = candidates.filter((c) => wanted.has(String(c.id))).length;
+    console.log(`Swiped right in npm run scout:report: ${wanted.size} FapTap videos, ${waiting} of them on the list (${path.join(userData, lib.SWIPES_FILE)})`);
+    if (!wanted.size) {
+      console.log('Nothing to download: swipe FapTap videos right in npm run scout:report, or pick videos with --ids.');
+      return 0;
+    }
+  }
+  const queue = candidates.filter(lib.stillWanted).filter((c) => lib.fetchPick(c, { ids: opts.ids, wanted })).sort(byScore);
   console.log(`Queue: ${queue.length} videos → ${incoming}`);
   if (opts.dryRun) {
     for (const c of queue) console.log(`  ${c.id} ${c.quality}p ${c.title}`);

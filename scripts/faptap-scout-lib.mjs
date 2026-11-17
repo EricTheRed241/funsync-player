@@ -37,6 +37,9 @@
 //     sfw / non-nude tags are excluded), at least MIN_VIDEO_MS long.
 //     `--fetch` and every scan drop saved candidates that now break the
 //     content rules (stillWanted).
+//   • Swipes decide downloads (user, 2026-11-17, as on EroScripts):
+//     `--fetch` takes only videos swiped right in `npm run scout:report`'s
+//     deck (SWIPES_FILE), whatever their score, or the ones `--ids` names.
 //   • Ranking as on EroScripts (candidateScore with the user's tag scores,
 //     `library.tagScores`, and favourite artist bonus; monsters, feet and
 //     2D hentai only rank lower), saved lists scored again under it, with
@@ -390,6 +393,7 @@ export function toCandidate(video, screen, scoring = {}) {
     live: !!screen.live,
     favourite: screen.favourite || null,
     picked: !!screen.picked,
+    thumbnail: thumbnailUrl(video),
   };
   return { ...c, score: candidateScore(c, scoring) };
 }
@@ -397,6 +401,45 @@ export function toCandidate(video, screen, scoring = {}) {
 /** Key of a fetched or rejected FapTap scene; the same as electron/rejected-videos.js `faptapRejectionKey`. */
 export function fetchedKey(id) {
   return `faptap|${id}`;
+}
+
+/** The swipe deck's file in userData for FapTap: written by `npm run scout:report` only, read by `--fetch` (readSwipes). */
+export const SWIPES_FILE = 'faptap-scout-swipes.json';
+
+/**
+ * The FapTap videos swiped in `npm run scout:report`'s deck, from SWIPES_FILE
+ * parsed (`{version: 1, swipes: {"<faptap id>": {dir: "right" | "left", at}}}`):
+ * `wanted` (right: `--fetch` takes them) and `hidden` (left: only out of the
+ * deck; the scout takes no notice). Ids stay strings: FapTap's are too long
+ * for a JS number. An undone swipe has no entry; anything else is ignored.
+ *
+ * @param {object|null} json
+ * @returns {{wanted: Set<string>, hidden: Set<string>}}
+ */
+export function readSwipes(json) {
+  const wanted = new Set();
+  const hidden = new Set();
+  const swipes = json?.swipes;
+  if (swipes && typeof swipes === 'object') {
+    for (const [id, s] of Object.entries(swipes)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) continue;
+      if (s?.dir === 'right') wanted.add(id);
+      else if (s?.dir === 'left') hidden.add(id);
+    }
+  }
+  return { wanted, hidden };
+}
+
+/**
+ * True when `--fetch` takes a saved candidate: one picked with `--ids`, else
+ * one swiped right in the deck (`wanted`, readSwipes), whatever its score
+ * (the user decides downloads by swiping, as on EroScripts' `--fetch --auto`).
+ *
+ * @param {object} c saved candidate
+ * @param {{ids?: Set<string>|null, wanted?: Set<string>}} pick
+ */
+export function fetchPick(c, { ids = null, wanted = new Set() } = {}) {
+  return ids ? ids.has(String(c.id)) : wanted.has(String(c.id));
 }
 
 /**

@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='1.5' width='24' height='29' rx='5' fill='%23e0529c'/%3E%3Cpath d='M16 25.5C8.5 20.4 6.5 16.6 6.5 13.4 6.5 10.6 8.7 8.5 11.3 8.5c2 0 3.6 1.1 4.7 2.8 1.1-1.7 2.7-2.8 4.7-2.8 2.6 0 4.8 2.1 4.8 4.9 0 3.2-2 7-9.5 12.1z' fill='%23fff'/%3E%3C/svg%3E">
-<title>EroScripts scout swipe</title>
+<title>Scout swipe</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -88,6 +88,8 @@ a:hover { text-decoration: underline; }
 .b-single { --bc: #8b8b93; } .b-videos { --bc: #d08b2c; } .b-cream { --bc: #e0529c; } .b-time { --bc: #6b7280; }
 .b-hand { --bc: #14b8a6; } .b-music { --bc: #d08b2c; } .b-ai { --bc: #8b8b93; } .b-slr { --bc: #e8743b; }
 .b-fav { --bc: #e0529c; }
+.b-src-eroscripts { --bc: #2f6fdf; } .b-src-slr { --bc: #e8743b; } .b-src-vrb { --bc: #d6336c; }
+.b-src-pmvhaven { --bc: #9b59d0; } .b-src-faptap { --bc: #f08c00; }
 a.badge { color: var(--fg); }
 .scanned, .quota { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
   font-variant-numeric: tabular-nums; }
@@ -159,17 +161,17 @@ a.badge { color: var(--fg); }
   <button type="button" id="gear" title="Shuffle settings: how far each stack's order may wander" aria-label="Shuffle settings" aria-expanded="false" aria-controls="settings">⚙</button>
   <a href="/">Report</a>
   <div class="settings" id="settings" hidden>
-    <label>Multi-axis shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
-    <label>Single-axis shuffle ± <input type="number" id="jitter-single" data-stack="single" min="0" max="30" step="0.5" inputmode="decimal"></label>
-    <label>SLR shuffle ± <input type="number" id="jitter-slr" data-stack="slr" min="0" max="30" step="0.5" inputmode="decimal"></label>
-    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 multi-axis, ±10 single-axis, ±2 SLR). Saved on this device.</div>
+    <label>Multi shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <label>VR shuffle ± <input type="number" id="jitter-vr" data-stack="vr" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <label>Flat shuffle ± <input type="number" id="jitter-flat" data-stack="flat" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 Multi, ±3 VR, ±10 Flat). Saved on this device.</div>
     <button type="button" class="reset" id="jitter-reset">Reset to defaults</button>
   </div>
 </header>
-<nav class="stacks" id="stacks" aria-label="Which posts">
-  <button type="button" data-stack="multi" title="Multi-axis posts only">Multi-axis</button>
-  <button type="button" data-stack="single" title="Single-axis posts only">Single-axis</button>
-  <button type="button" data-stack="slr" title="Downloads from SexLikeReal: EroScripts posts whose video is on SLR, and SLR scenes from npm run slr:scout">SLR</button>
+<nav class="stacks" id="stacks" aria-label="Which cards">
+  <button type="button" data-stack="multi" title="Multi-axis scripts from every source: EroScripts posts and scenes with hand-made axes">Multi</button>
+  <button type="button" data-stack="vr" title="Single-axis VR from every source: EroScripts posts, SLR, VRBangers / VRConk, PMVHaven and FapTap scenes">VR</button>
+  <button type="button" data-stack="flat" title="Single-axis flat from every source: EroScripts posts, PMVHaven and FapTap videos">Flat</button>
 </nav>
 <div class="scanned" id="scanned" hidden></div>
 <div class="quota" id="quota" hidden></div>
@@ -190,26 +192,38 @@ a.badge { color: var(--fg); }
 'use strict';
 const BATCH = 20;
 const REFILL_AT = 5;
-// The deal's shuffle: the server shifts every score by up to ±4 on the multi-axis stack (it stays
-// close to score order) and ±10 on the single-axis one (low scorers come up too) for this seed,
-// unless ⚙ sets another amplitude for the stack; Shuffle (or a page reload) deals a new order.
+// The deal's shuffle: the server shifts every score by up to ±4 on Multi (it stays close to
+// score order), ±3 on VR and ±10 on Flat (low scorers come up too) for this seed, unless ⚙ sets
+// another amplitude for the tab; Shuffle (or a page reload) deals a new order.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
-let generation = 0;     // bumped by Refresh / Shuffle / a stack change: answers to older deck requests are dropped
-// Which stack is dealt (multi, single, slr); remembered on this device. Any other stored value
-// (e.g. a tab that no longer exists) falls back to multi.
-let stack = ['multi', 'single', 'slr'].includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
-// Where a card's swipe goes: SLR scenes from slr:scout (source "slr") to /api/slr/… and
-// slr-scout-swipes.json; EroScripts posts (no source, or "eroscripts"; on the SLR tab the ones
-// whose video is on SLR) to /api/… and eroscripts-scout-swipes.json.
-const isScene = (c) => c.source === 'slr';
-const apiOf = (c) => (isScene(c) ? '/api/slr' : '/api');
-// A card's identity: posts and SLR scenes have separate id ranges that may overlap.
-const keyOf = (c) => (isScene(c) ? 's' : 'p') + c.id;
-const STACK_NAMES = { multi: 'Multi-axis', single: 'Single-axis', slr: 'SLR' };
-// ⚙ shuffle amplitude per stack, in score points; unset = the server's default (deck.rs
-// MULTI_JITTER / SINGLE_JITTER, slr.rs SLR_JITTER), shown as the placeholder. Remembered on this device.
-const JITTER_DEFAULT = { multi: 4, single: 10, slr: 2 };
+let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
+// Which tab is dealt (multi, vr, flat); remembered on this device. Any other stored value
+// (the old single-axis and SLR tabs) falls back to multi.
+const STACKS = ['multi', 'vr', 'flat'];
+let stack = STACKS.includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
+// Where a card comes from, and so where its swipe goes: an EroScripts post (source
+// "eroscripts") to /api/swipe and eroscripts-scout-swipes.json, a scout's scene (slr, vrb,
+// pmvhaven, faptap) to /api/scenes/<source>/swipe and that scout's swipes file.
+const sourceOf = (c) => c.source || 'eroscripts';
+const isScene = (c) => sourceOf(c) !== 'eroscripts';
+const swipePath = (c) => (isScene(c) ? `/api/scenes/${encodeURIComponent(c.source)}/swipe` : '/api/swipe');
+// A card's identity across sources (two sources' ids may be equal); also the deck's exclude key.
+const keyOf = (c) => sourceOf(c) + ':' + c.id;
+const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat' };
+// The scouts whose runs fill each tab: an empty tab names them.
+const TAB_SCOUTS = {
+  multi: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout'],
+  vr: ['eroscripts:scout', 'slr:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout'],
+  flat: ['eroscripts:scout', 'pmvhaven:scout', 'faptap:scout'],
+};
+// The source badge; VRBangers and VRConk share the vrb scout and differ by `site`.
+const SOURCE_NAMES = { eroscripts: 'EroScripts', slr: 'SLR', vrb: 'VRBangers', pmvhaven: 'PMVHaven', faptap: 'FapTap' };
+const SITE_NAMES = { vrbangers: 'VRBangers', vrconk: 'VRConk' };
+const sourceName = (c) => SITE_NAMES[c.site] || SOURCE_NAMES[sourceOf(c)] || sourceOf(c);
+// ⚙ shuffle amplitude per tab, in score points; unset = the server's default (deck.rs
+// MULTI_JITTER / VR_JITTER / FLAT_JITTER), shown as the placeholder. Remembered on this device.
+const JITTER_DEFAULT = { multi: 4, vr: 3, flat: 10 };
 const JITTER_MAX = 30;
 const validJitter = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= JITTER_MAX;
 let jitters = (() => {
@@ -291,8 +305,9 @@ function clock(ms) {
 }
 
 function badges(c) {
-  if (isScene(c)) return slrBadges(c);
-  const out = [el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
+  const src = el('span', { class: 'badge b-src-' + sourceOf(c), title: 'From ' + sourceName(c) }, sourceName(c));
+  if (isScene(c)) return [src, ...sceneBadges(c)];
+  const out = [src, el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: c.videos > 1 ? 'Length of the first video' : 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
   const multi = c.axisType ? c.axisType === 'multi' : typeof c.axes === 'number' && c.axes > 1;
@@ -304,7 +319,7 @@ function badges(c) {
   }
   if (c.videos > 1) out.push(el('span', { class: 'badge b-videos' }, `${c.videos} videos`));
   if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
-  // On the SLR tab: the post's video comes from SexLikeReal (the user's account).
+  // The post's video comes from SexLikeReal (the user's account and quota).
   if (c.slrVideo) {
     out.push(c.slrVideo.url
       ? el('a', { class: 'badge b-slr', href: c.slrVideo.url, target: '_blank', rel: 'noopener noreferrer', title: 'The video downloads from SexLikeReal' }, 'video: SLR ↗')
@@ -317,24 +332,38 @@ function badges(c) {
 const SCRIPT_SOURCES = { eroscripts: 'EroScripts (free)', 'slr-handcrafted': 'SLR hand-crafted', 'slr-ai': 'SLR AI' };
 const scriptLabel = (s) => 'script: ' + (SCRIPT_SOURCES[s] || s || 'none');
 
-/** An SLR scene: score, length, VR, creampie, where the script comes from, a favourite, PMV, compilation. */
-function slrBadges(c) {
+/**
+ * A scout's scene: score (its parts on hover), length, VR (passthrough, fps) or flat, its
+ * script's axes (SLR: where the script comes from), creampie, a favourite, PMV, compilation,
+ * FapTap's stream height.
+ */
+function sceneBadges(c) {
   const parts = c.scoreParts || {};
   const why = Object.entries(parts).map(([k, v]) => `${k} ${signed(v)}`).join(', ');
   const out = [el('span', { class: 'badge b-score', title: why ? 'Score: ' + why : 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.runtimeMs)));
-  out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
+  out.push(c.vr ? el('span', { class: 'badge b-vr' }, c.passthrough ? 'VR · passthrough' : 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
+  if (c.fps) out.push(el('span', { class: 'badge b-time', title: 'Frame rate' }, fmt(c.fps) + ' fps'));
+  if (c.quality) out.push(el('span', { class: 'badge b-time', title: 'Stream height --fetch takes' }, c.quality + 'p'));
+  const axes = c.axes || [];
+  if (axes.length) {
+    out.push(el('span', { class: 'badge b-multi', title: 'Script axes: stroke, ' + axes.join(', ') }, `Multi-axis (${axes.length + 1})`));
+  } else if (c.source === 'slr') {
+    const hand = c.handmade || [];
+    const scripts = [...hand.map(handLabel), c.aiScript ? 'SLR AI script' : null].filter(Boolean).join('\n');
+    out.push(el('span', { class: c.scriptSource ? 'badge b-hand' : 'badge b-ai', title: scripts || 'No script found' }, scriptLabel(c.scriptSource)));
+  } else {
+    out.push(c.script ? el('span', { class: 'badge b-single' }, 'Single-axis')
+      : el('span', { class: 'badge b-ai', title: 'The scout found no script for it' }, 'No script'));
+  }
   if (c.creampie) out.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
-  const hand = c.handmade || [];
-  const scripts = [...hand.map(handLabel), c.aiScript ? 'SLR AI script' : null].filter(Boolean).join('\n');
-  out.push(el('span', { class: c.scriptSource ? 'badge b-hand' : 'badge b-ai', title: scripts || 'No script found' }, scriptLabel(c.scriptSource)));
   if (c.favourite) out.push(el('span', { class: 'badge b-fav', title: 'Favourite' }, '♥ ' + c.favourite));
   if (c.pmv) out.push(el('span', { class: 'badge b-music' }, 'PMV'));
   if (c.compilation) out.push(el('span', { class: 'badge b-music' }, 'Compilation'));
   return out;
 }
 
-/** Where a hand-made script for an SLR scene is: SLR's own (hand-crafted), or an EroScripts post. */
+/** Where a hand-made script for a scene is: SLR's own (hand-crafted), or an EroScripts post. */
 function handLabel(h) {
   if (h.source === 'slr') return 'SLR hand-crafted script' + (h.author ? ' by ' + h.author : '');
   const kind = [h.free ? 'free' : 'paid', h.multiAxis ? 'multi-axis' : null].filter(Boolean).join(', ');
@@ -383,12 +412,12 @@ function cardNode(c, isTop) {
     media.append(el('div', { class: 'none' }, 'No image'));
   }
   media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
-  const slr = isScene(c);
-  // A post's creation date, or an SLR scene's release date.
-  const posted = slr ? c.date : c.created;
+  const scene = isScene(c);
+  // A post's creation date, or a scene's release (upload) date.
+  const posted = scene ? c.date : c.created;
   const best = new Set((c.topTags || []).map((t) => t.tag));
   const tagTop = (c.topTags || []).map((t) => el('span', { class: 'tag' }, t.tag + ' ', el('b', {}, '+' + fmt(t.score))));
-  const topTags = slr
+  const topTags = scene
     ? [...tagTop, ...(c.handmade || []).map((h) => h.source === 'eroscripts'
       ? el('a', { class: 'tag', href: 'https://discuss.eroscripts.com/t/' + h.topicId, target: '_blank', rel: 'noopener noreferrer', title: h.title || null },
         `EroScripts #${h.topicId} ` + (h.free ? 'free' : 'paid'))
@@ -401,16 +430,16 @@ function cardNode(c, isTop) {
       heatStrip(c.heat),
       el('div', { class: 'ttl', title: c.title || null }, c.title || '#' + c.id),
       el('div', { class: 'by' },
-        c.author ? el('span', {}, (slr ? '' : 'by ') + c.author) : null,
-        el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (slr ? 'SLR ' : '#' + c.id + ' ') + '↗'),
-        monthYear(posted) ? el('span', { class: 'date', title: (slr ? 'Released ' : 'Posted ') + day(posted) }, monthYear(posted)) : null),
+        c.author ? el('span', {}, (scene ? '' : 'by ') + c.author) : null,
+        c.url ? el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (scene ? sourceName(c) + ' ' : '#' + c.id + ' ') + '↗') : null,
+        monthYear(posted) ? el('span', { class: 'date', title: (scene ? 'Released ' : 'Posted ') + day(posted) }, monthYear(posted)) : null),
       topTags.length ? el('div', { class: 'tags top-tags' }, topTags) : null,
-      slr ? slrDetails(c, best) : details(c, best)));
+      scene ? sceneDetails(c, best) : details(c, best)));
   if (isTop) drag(node);
   return node;
 }
 
-/** Every tag with its tag score (best ones outlined); a null score (an SLR scene the scout didn't score) shows the tag alone. */
+/** Every tag with its tag score (best ones outlined); a null score (a scene the scout didn't score) shows the tag alone. */
 function tagChips(tags, best) {
   return el('div', { class: 'tags all-tags' }, tags.map((t) => (t.score == null
     ? el('span', { class: 'tag' }, t.tag)
@@ -450,18 +479,28 @@ function details(c, best) {
   return out;
 }
 
-/** The wide layout's sections for an SLR scene: its facts, tags, the score's parts and its hand-made scripts. */
-function slrDetails(c, best) {
+/** What a scene's script is: SLR's source, else stroke plus its axes, single-axis or none. */
+function sceneScript(c) {
+  if (c.axes && c.axes.length) return 'stroke, ' + c.axes.join(', ');
+  if (c.source === 'slr') return scriptLabel(c.scriptSource).slice('script: '.length);
+  return c.script ? 'single-axis' : 'none';
+}
+
+/** The wide layout's sections for a scene: its facts, tags, the score's parts and its hand-made scripts. */
+function sceneDetails(c, best) {
   const out = [];
   const facts = [
-    ['Script', scriptLabel(c.scriptSource).slice('script: '.length)],
+    ['Source', sourceName(c)],
+    ['Script', sceneScript(c)],
     ['Performers', c.actors && c.actors.length ? c.actors.join(', ') : null],
     ['Favourite', c.favourite],
-    ['Studio', c.author],
+    [c.source === 'slr' || c.source === 'vrb' ? 'Studio' : 'By', c.author],
     ['Released', c.date],
-    ['Favourites', c.favorites],
+    [c.source === 'slr' ? 'Favourites' : 'Likes', c.likes],
     ['FPS', c.fps],
     ['Passthrough', c.passthrough ? 'yes' : null],
+    ['Projection', c.projection],
+    ['Quality', c.quality ? c.quality + 'p' : null],
     ['SLR AI script', c.aiScript ? 'yes' : null],
   ].filter(([, v]) => v != null);
   out.push(el('div', { class: 'sect' }, 'Scene'), el('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
@@ -485,39 +524,44 @@ function slrDetails(c, best) {
   return out;
 }
 
-/** When the shown stack's scout last looked: the EroScripts scan, or slr:scout's run on the SLR tab. */
+const SCOUT_NAMES = { slr: 'SLR', vrb: 'VRBangers', pmvhaven: 'PMVHaven', faptap: 'FapTap' };
+
+/** "3 h ago" from an ISO time. */
+function ago(at) {
+  const hours = Math.max(0, (Date.now() - new Date(at)) / 3600e3);
+  return hours < 1 ? 'under an hour ago' : hours < 48 ? `${Math.round(hours)} h ago` : `${Math.round(hours / 24)} days ago`;
+}
+
+/** When each scout last looked: the EroScripts forum scan, and each scene scout's last run. */
 function renderScanned(d) {
   const s = $('scanned');
-  const at = d && (stack === 'slr' ? d.generatedAt : d.lastScanAt);
-  if (!at) { s.hidden = true; return; }
-  const t = new Date(at);
-  const hours = Math.max(0, (Date.now() - t) / 3600e3);
-  const ago = hours < 1 ? 'under an hour ago' : hours < 48 ? `${Math.round(hours)} h ago` : `${Math.round(hours / 24)} days ago`;
-  const when = t.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  s.textContent = `Last scanned: ${when} (${ago})`;
-  s.title = stack === 'slr' ? 'When npm run slr:scout last ran' : 'When the EroScripts scout last scanned the forum';
+  const runs = d ? [['EroScripts', d.lastScanAt],
+    ...Object.entries(d.generatedAt || {}).map(([k, at]) => [SCOUT_NAMES[k] || k, at])].filter(([, at]) => at) : [];
+  if (!runs.length) { s.hidden = true; return; }
+  s.textContent = 'Last scanned: ' + runs.map(([name, at]) => `${name} ${ago(at)}`).join(' · ');
+  s.title = runs.map(([name, at]) => `${name}: ${new Date(at).toLocaleString()}`).join('\n');
   s.hidden = false;
 }
 
-/** The SLR tab's line: the account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
+/** The VR tab's line: the SLR account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
 function renderQuota(d) {
   const q = $('quota');
-  if (stack !== 'slr' || !d) { q.hidden = true; return; }
+  if (stack !== 'vr' || !d) { q.hidden = true; return; }
   const left = (x) => (x && x.total != null ? el('b', {}, `${x.remaining} of ${x.total}`) : null);
   const quota = d.quota || {};
   const line = [];
   const videos = left(quota.videos);
-  if (videos) line.push('Videos left ', videos, ' (7 days)');
+  if (videos) line.push('SLR videos left ', videos, ' (7 days)');
   const scripts = [[left(quota.scripts), ' hand-crafted'], [left(quota.aiScripts), ' AI']].filter(([b]) => b);
   if (scripts.length) {
-    line.push(line.length ? ' · scripts this month ' : 'Scripts this month ', ...scripts.flatMap(([b, what], i) => (i ? [' · ', b, what] : [b, what])));
+    line.push(line.length ? ' · scripts this month ' : 'SLR scripts this month ', ...scripts.flatMap(([b, what], i) => (i ? [' · ', b, what] : [b, what])));
   }
   if (line.length) {
     if (quota.checkedAt) line.push(` · checked ${day(quota.checkedAt)}`);
-  } else if (!d.generatedAt) {
+  } else if (!(d.generatedAt && d.generatedAt.slr)) {
     line.push('No slr:scout run yet: npm run slr:scout');
   } else {
-    line.push('Quota not read yet');
+    line.push('SLR quota not read yet');
   }
   if (d.quotaError) {
     const login = /session/i.test(d.quotaError) ? ': npm run slr:scout -- --login' : '';
@@ -549,8 +593,9 @@ function render(enterFrom) {
     empty.hidden = false;
     empty.replaceChildren(...(loadError ? ['Could not load the deck: ' + loadError, el('button', { type: 'button', class: 'round small', onclick: reload, title: 'Retry' }, '⟳')]
       : loading ? ['Loading…']
-      : stack === 'slr' ? ['Nothing on SexLikeReal left to swipe.', el('span', {}, 'npm run slr:scout and npm run eroscripts:scout find more.')]
-      : ['Nothing left to swipe.', el('a', { href: '/' }, 'Back to the report')]));
+      : [`Nothing left to swipe on ${STACK_NAMES[stack]}.`,
+        el('span', {}, TAB_SCOUTS[stack].map((s) => 'npm run ' + s).join(', ') + ' find more.'),
+        el('a', { href: '/' }, 'Back to the report')]));
     return;
   }
   empty.hidden = true;
@@ -688,8 +733,8 @@ function swipe(dir, dy) {
   image = 0;
   render();
   const from = stack;
-  // Each card's own endpoint: a post to /api/swipe, an SLR scene to /api/slr/swipe.
-  serial(() => post(apiOf(card) + '/swipe', { id: card.id, dir })).catch((e) => {
+  // Each card's own endpoint: a post to /api/swipe, a scene to /api/scenes/<source>/swipe.
+  serial(() => post(swipePath(card), { id: card.id, dir })).catch((e) => {
     // Not saved: put the card back on top (unless the page moved to another tab meanwhile).
     const i = undoStack.findIndex((u) => u.card === card);
     if (i >= 0) undoStack.splice(i, 1);
@@ -737,7 +782,7 @@ function undo() {
   if (last.stack !== stack) {
     // Made on another tab: forget it there; this tab's cards and counters stay.
     if (last.dir === 'skip') return;
-    serial(() => post(apiOf(last.card) + '/swipe/undo', { id: last.card.id }))
+    serial(() => post(swipePath(last.card) + '/undo', { id: last.card.id }))
       .then(() => toast(`Undone on the ${STACK_NAMES[last.stack]} tab: ${last.card.title || '#' + last.card.id}`))
       .catch((e) => { undoStack.push(last); toast('Undo not saved: ' + e.message); });
     renderCounter();
@@ -753,7 +798,7 @@ function undo() {
   }
   count(1, last.dir === 'right' ? -1 : 0);
   render(last.dir);
-  serial(() => post(apiOf(last.card) + '/swipe/undo', { id: last.card.id })).catch((e) => {
+  serial(() => post(swipePath(last.card) + '/undo', { id: last.card.id })).catch((e) => {
     // The swipe still stands: take the card off again.
     queue = queue.filter((c) => keyOf(c) !== keyOf(last.card));
     undoStack.push(last);
@@ -773,13 +818,11 @@ function more() {
   loading = true;
   since = { remaining: 0, wanted: 0 };
   const gen = generation;
-  // The cards this page holds: posts by topic id (exclude), SLR scenes by scene id (excludeScenes).
-  const held = [...queue, ...skipped];
-  const ids = (scenes) => held.filter((c) => isScene(c) === scenes).map((c) => c.id).join(',');
+  // The cards this page holds (on screen or skipped), as <source>:<id>: the server leaves them out.
+  const held = [...queue, ...skipped].map(keyOf).join(',');
   serial(async () => {
     const jitter = jitters[stack] == null ? '' : `&jitter=${jitters[stack]}`;
-    const which = stack === 'slr' ? `/api/slr/deck?excludeScenes=${ids(true)}&` : `/api/deck?stack=${stack}&`;
-    const res = await fetch(`${which}limit=${BATCH}&seed=${seed}${jitter}&exclude=${ids(false)}`, { cache: 'no-store' });
+    const res = await fetch(`/api/deck?stack=${stack}&limit=${BATCH}&seed=${seed}${jitter}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -854,8 +897,8 @@ $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(
 
 function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
-  $('like').title = stack === 'slr' ? 'Want: the scout downloads it from SexLikeReal (→)' : 'Want: the scout downloads it (→)';
-  if (stack !== 'slr') renderQuota(null);
+  $('like').title = 'Want: its scout downloads it (→)';
+  if (stack !== 'vr') renderQuota(null);
   renderScanned(null);
 }
 $('stacks').addEventListener('click', (e) => {

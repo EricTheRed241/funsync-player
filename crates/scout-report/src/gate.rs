@@ -460,7 +460,7 @@ mod tests {
             ("GET", "/frames/eroscripts/1/25.jpg"),
             ("POST", "/api/swipe"),
             ("POST", "/"),
-            ("HEAD", "/api/slr/deck"),
+            ("POST", "/api/scenes/slr/swipe"),
         ] {
             assert!(
                 is_pin_required(&c.send(method, target, "application/json", "")),

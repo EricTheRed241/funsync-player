@@ -16,12 +16,14 @@
 //
 // Values the Rust CLIs read too live in content-preferences.json next to this
 // file (the shared part of the preferences: Rust embeds it at compile time,
-// crates/age-screen, crates/pornstar-tags, crates/slr-scout). The ones the app
-// uses are exported here like the rest (`pornstarTags` and `slrScout` are read
-// by Rust only); change them there: the ratings threshold, the underage
+// crates/age-screen, crates/pornstar-tags, crates/slr-scout, crates/pmvhaven-scout).
+// The ones the app uses are exported here like the rest (`pornstarTags`, `slrScout`
+// and `pmvhavenScout` are read by Rust only); change them there: the ratings threshold, the underage
 // screener, LIBRARY_MAX_VIDEOS, the VR / flat caps, FAVOURITES, RANKING,
 // TAG_SCORE_GROUPS (whose tag lists MUSIC_TAGS, POV_TAGS, MONSTER_TAGS,
-// FEET_TAGS and FFM_TAGS are) and ANIMATION_TAGS.
+// FEET_TAGS and FFM_TAGS are), ANIMATION_TAGS and the screening values
+// (EXCLUDED_TEXT's words, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE's
+// words, FURRY_TAGS, SFW_TAGS, MIN_VIDEO_MS).
 // Values with a copy outside JavaScript: TOP_RATED_MIN and the SCORE_BANDS
 // thresholds are mirrored in backend/services/vr_sections.py, NEEDS_REVIEW_PLAYLIST
 // there and in backend/web-remote/review-on-end.js, DEFAULT_SORT in
@@ -31,26 +33,28 @@ import data from './content-preferences.json' with { type: 'json' };
 
 /** A TAG_SCORE_GROUPS group's tags. */
 const groupTags = (name) => data.tagScoreGroups.find((g) => g.name === name).tags;
+/** Any of `words` as a whole word (no letter or digit either side), case-insensitive. */
+const wordsPattern = (words) => new RegExp(`(?<![\\p{L}\\p{N}])(${words.join('|')})(?![\\p{L}\\p{N}])`, 'iu');
 
 // ── Discovery: what never comes in ──────────────────────────────────────
 
+// The screening values below live in content-preferences.json (`screening`), which the Rust
+// scouts (crates/slr-scout screen.rs, vrb-scout, pmvhaven-scout) read too.
+
 /** Excluded content, by tag, title or first post / description. Hyphenated tags (`futa-on-male`) match, `Futaba` doesn't. */
-export const EXCLUDED_TEXT = /(?<![\p{L}\p{N}])(loli|lolicon|shota|shotacon|furry|furries|anthro|yiff|futa|futas|futanari|dickgirls?)(?![\p{L}\p{N}])/iu;
+export const EXCLUDED_TEXT = wordsPattern(data.screening.excludedWords);
 /** Creators never taken by either scout (picks included): named in the title, as the poster / uploader, or as a performer. Case, spaces and punctuation don't matter. */
-export const BLOCKED_CREATORS = ['AidenHet'];
+export const BLOCKED_CREATORS = data.screening.blockedCreators;
 /**
  * Tags never taken by either scout (picks and favourites included): MMD
  * animations by the `mmd` tag (FapTap's slug too), and dildo riding (user,
  * 2026-11-04: "no dildo riding videos") …
  */
-export const BLOCKED_TAGS = new Set(['mmd', 'dildo-riding', 'riding-dildo', 'dildo-ride']);
+export const BLOCKED_TAGS = new Set(data.screening.blockedTags);
 /** … or MMD / dildo as a word in the title. */
-export const BLOCKED_TITLE = /(?<![\p{L}\p{N}])(mmd|dildos?)(?![\p{L}\p{N}])/iu;
+export const BLOCKED_TITLE = wordsPattern(data.screening.blockedTitleWords);
 /** FapTap tags that are furry without saying so. */
-export const FURRY_TAGS = new Set([
-  'scalie', 'knot', 'knotted', 'horse', 'dog', 'animal', 'my-little-pony', 'animal-crossing', 'krystal-star-fox',
-  'renamon-digimon', 'five-nights-at-freddy-s', 'roxanne-wolf-five-nights-at-freddy-s',
-]);
+export const FURRY_TAGS = new Set(data.screening.furryTags);
 /** Monsters, by tag or title word (`X WW` = werewolf; EroScripts also by these words in the first post): not preferred, they rank lower (the Monster group of TAG_SCORE_GROUPS) but still come in. Succubi, demon girls and elves aren't monsters. */
 export const MONSTER_TAGS = new Set(groupTags('Monster'));
 export const MONSTER_TITLE = /(?<![\p{L}\p{N}])(monsters?|monster ?girls?|tentacles?|w[ae]rewol(?:f|ves)|horse ?guys?|horse ?cocks?|orcs?|goblins?|minotaurs?|ogres?|trolls?|aliens?|beasts?|bestiality)(?![\p{L}\p{N}])|触手/iu;
@@ -63,13 +67,13 @@ export const FEET_TITLE = /(?<![\p{L}\p{N}])(feet|foot|footjobs?|toes|soles|foot
 export const FFM_TAGS = new Set(groupTags('FFM'));
 export const FFM_TITLE = /(?<![\p{L}\p{N}])ffm(?![\p{L}\p{N}])/iu;
 /** Tags that say a post has no porn in it: never taken. */
-export const SFW_TAGS = new Set(['sfw', 'safe-for-work', 'non-porn', 'nonporn', 'non-nude']);
+export const SFW_TAGS = new Set(data.screening.sfwTags);
 /** FapTap audio roleplays (erotic audio / ASMR over a still or a loop): never taken. */
 export const AUDIO_TITLE = /(?<![\p{L}\p{N}])(erotic audio|asmr|audio role ?play|f4m)(?![\p{L}\p{N}])/iu;
 /** Audio roleplay tags: `asmr-audio-roleplay`, `erotic-audio-for-men`, `lewdlexiaudio`. */
 export const isAudioRoleplayTag = (t) => t.includes('asmr') || t.includes('audio-roleplay') || (t.endsWith('audio') && t !== 'audio');
 /** Shortest video worth downloading, by its main script's last action (FapTap also by listed length). 1:50 since 2026-11-09 (was 2:00). */
-export const MIN_VIDEO_MS = 110_000;
+export const MIN_VIDEO_MS = data.screening.minVideoMs;
 
 // ── Discovery: animated or live action ──────────────────────────────────
 

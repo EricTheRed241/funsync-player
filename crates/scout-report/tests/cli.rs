@@ -263,7 +263,7 @@ fn swipes_through_the_deck() {
         assert!(p.contains(r#"<link rel="icon" href="data:image/svg+xml,"#));
     }
 
-    // The default stack is multi-axis: only 31.
+    // The default tab is Multi: only 31 (multi-axis, VR).
     let deck: Value = serde_json::from_slice(&get(port, "/api/deck?limit=2").2).unwrap();
     assert_eq!(
         (deck["remaining"].as_u64(), deck["wanted"].as_u64()),
@@ -278,14 +278,16 @@ fn swipes_through_the_deck() {
             .collect()
     };
     assert_eq!(ids(&deck), [31]);
-    let single: Value = serde_json::from_slice(&get(port, "/api/deck?stack=single").2).unwrap();
+    let flat: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat").2).unwrap();
     assert_eq!(
-        (ids(&single), single["remaining"].as_u64()),
+        (ids(&flat), flat["remaining"].as_u64()),
         (vec![33, 32], Some(2))
     );
+    let vr: Value = serde_json::from_slice(&get(port, "/api/deck?stack=vr").2).unwrap();
+    assert_eq!(vr["remaining"], 0);
     assert_eq!(
         deck["cards"][0],
-        json!({"id": 31, "url": "https://discuss.eroscripts.com/t/31", "title": "Thirty-one", "author": null,
+        json!({"source": "eroscripts", "id": 31, "url": "https://discuss.eroscripts.com/t/31", "title": "Thirty-one", "author": null,
                "images": ["https://x/31.jpg", "https://x/31b.jpg"], "score": 9.5, "vr": true,
                "axisType": "multi", "axes": 2, "videos": 1, "creampie": true,
                "topTags": [{"tag": "pov", "score": 3.0}],
@@ -295,8 +297,9 @@ fn swipes_through_the_deck() {
                "scenes": [{"name": null, "host": null, "size": null, "runtimeMs": null, "axes": ["twist"]}],
                "moreScenes": 0})
     );
-    // A shuffle wider than MAX_JITTER is refused.
+    // A shuffle wider than MAX_JITTER is refused, and so is the old single-axis tab.
     assert_eq!(get(port, "/api/deck?seed=1&jitter=31").0, 400);
+    assert_eq!(get(port, "/api/deck?stack=single").0, 400);
 
     let (status, v) = post(port, "/api/swipe", r#"{"id":31,"dir":"right"}"#);
     assert_eq!(status, 200);
@@ -315,11 +318,12 @@ fn swipes_through_the_deck() {
         ),
         (vec![], Some(0), Some(1))
     );
-    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=single").2).unwrap();
+    // Each tab counts its own right swipes: 31's is Multi's.
+    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat").2).unwrap();
     assert_eq!(ids(&deck), [33]);
     assert_eq!(
         (deck["remaining"].as_u64(), deck["wanted"].as_u64()),
-        (Some(1), Some(1))
+        (Some(1), Some(0))
     );
     let file: Value =
         serde_json::from_slice(&fs::read(ud.join("eroscripts-scout-swipes.json")).unwrap())
@@ -346,7 +350,7 @@ fn swipes_through_the_deck() {
     // Undo brings the card back and drops the entry.
     let (status, v) = post(port, "/api/swipe/undo", r#"{"id":32}"#);
     assert_eq!((status, v["removed"].as_bool()), (200, Some(true)));
-    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=single").2).unwrap();
+    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat").2).unwrap();
     assert_eq!(ids(&deck), [33, 32]);
     let file: Value =
         serde_json::from_slice(&fs::read(ud.join("eroscripts-scout-swipes.json")).unwrap())
@@ -373,105 +377,169 @@ fn swipes_through_the_deck() {
 }
 
 #[test]
-fn slr_tab_deals_posts_on_slr_and_scenes() {
-    let tmp = TempDir::new("slr");
+fn every_source_deals_into_the_tabs_and_swipes_into_its_own_file() {
+    let tmp = TempDir::new("sources");
     let ud = tmp.0.join("userData");
     fs::create_dir_all(&ud).unwrap();
     let waiting = json!({"candidates": [
         {"id": 31, "title": "MEGA post", "score": 9.5, "axisType": "multi", "scenes": [{"video": {"host": "MEGA"}}]},
-        {"id": 34, "title": "SLR post", "score": 4, "axisType": "multi", "tagScores": {"pov": 2},
-         "scenes": [{"axes": ["twist"], "video": {"name": "A - B (C)_180_LR.mp4", "host": "slr", "slrSceneId": 66249,
-             "slrLabel": "b-66249", "url": "https://www.sexlikereal.com/scenes/b-66249", "size": null, "height": 2880}}]}
+        {"id": 34, "title": "SLR post", "score": 4, "axisType": "single", "vr": true, "tagScores": {"pov": 2},
+         "scenes": [{"axes": [], "video": {"name": "A - B (C)_180_LR.mp4", "host": "slr", "slrSceneId": 66249,
+             "slrLabel": "b-66249", "url": "https://www.sexlikereal.com/scenes/b-66249", "size": null, "height": 2880}}]},
+        {"id": 35, "title": "VRBangers post", "score": 3, "axisType": "single", "vr": true,
+         "scenes": [{"axes": [], "video": {"host": "vrbangers", "slug": "same-scene",
+             "url": "https://vrbangers.com/video/same-scene/"}}]}
     ]});
-    let scout = json!({"generatedAt": "2026-11-13T18:00:00.000Z",
+    let slr = json!({"generatedAt": "2026-11-13T18:00:00.000Z",
     "quota": {"videos": {"remaining": 30, "total": 35}},
     "scenes": [
-        {"id": 66249, "title": "Same video as post 34", "score": 8},
-        {"id": 51207, "title": "Scene", "score": 6, "tags": ["milf"], "tagScores": {"milf": 2},
+        {"id": 66249, "title": "Same video as post 34", "score": 8, "vr": true},
+        {"id": 51207, "title": "Scene", "score": 6, "vr": true, "tags": ["milf"], "tagScores": {"milf": 2},
          "scriptSource": "slr-handcrafted", "scoreParts": {"vr": 2, "tag:milf": 2}},
-        {"id": 70001, "title": "Downloaded", "score": 9, "fetchedAt": "2026-11-13T19:00:00.000Z"}
+        {"id": 70001, "title": "Downloaded", "score": 9, "vr": true, "fetchedAt": "2026-11-13T19:00:00.000Z"}
+    ]});
+    let vrb = json!({"version": 1, "generatedAt": "2026-11-17T18:00:00.000Z", "scenes": [
+        {"id": "6accfc2cff316f0c39086f52", "site": "vrbangers", "url": "https://vrbangers.com/video/same-scene/",
+         "title": "Same as post 35", "score": 50, "vr": true, "script": {"axes": []}},
+        {"id": "7b", "site": "vrconk", "url": "https://vrconk.com/video/hand-made/", "title": "Hand-made axes",
+         "studio": "VRConk", "score": 7, "vr": true, "script": {"url": "https://mov/x.funscript", "axes": ["twist", "roll"]},
+         "thumbnail": "https://content/7b.jpg", "images": ["https://content/7b-2.jpg"]},
+        {"id": "8c", "site": "vrbangers", "url": "https://vrbangers.com/video/in-library/", "score": 70, "vr": true,
+         "inLibrary": true}
+    ]});
+    let pmvhaven = json!({"version": 1, "scenes": [
+        {"id": "pmv1", "site": "pmvhaven", "url": "https://pmvhaven.com/video/x_pmv1", "title": "Flat PMV",
+         "score": 2, "vr": false, "pmv": true, "script": {"axes": []}}
+    ]});
+    let faptap = json!({"generatedAt": "2026-11-15T00:00:00.000Z", "candidates": [
+        {"id": "1957860091331874817", "title": "FapTap flat", "url": "https://faptap.net/v/1957860091331874817",
+         "author": "scripter", "score": 3, "vr": false, "duration": 300, "projection": "MONO_FLAT", "quality": 1080}
     ]});
     fs::write(ud.join("eroscripts-scout.json"), waiting.to_string()).unwrap();
-    fs::write(ud.join("slr-scout.json"), scout.to_string()).unwrap();
+    for (name, v) in [
+        ("slr-scout.json", &slr),
+        ("vrb-scout.json", &vrb),
+        ("pmvhaven-scout.json", &pmvhaven),
+        ("faptap-scout.json", &faptap),
+    ] {
+        fs::write(ud.join(name), v.to_string()).unwrap();
+    }
+    // An SLR swipes file from before ids were strings keeps working.
+    fs::write(
+        ud.join("slr-scout-swipes.json"),
+        r#"{"version":1,"swipes":{"70001":{"dir":"right","at":"2026-11-13T19:00:00.000Z"}}}"#,
+    )
+    .unwrap();
     let (_server, port) = start(&ud);
     let deck = |path: &str| -> Value { serde_json::from_slice(&get(port, path).2).unwrap() };
-    let cards = |d: &Value| -> Vec<(String, u64)> {
+    let cards = |d: &Value| -> Vec<String> {
         d["cards"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|c| {
-                (
-                    c["source"].as_str().unwrap().into(),
-                    c["id"].as_u64().unwrap(),
-                )
+            .map(|c| match &c["id"] {
+                Value::String(s) => format!("{}:{s}", c["source"].as_str().unwrap()),
+                n => format!("{}:{n}", c["source"].as_str().unwrap()),
             })
             .collect()
     };
 
-    // Post 34 shows on the SLR tab only; scene 66249 comes with it, 70001 is downloaded.
-    let multi = deck("/api/deck");
-    assert_eq!(multi["cards"].as_array().unwrap().len(), 1);
-    assert_eq!(multi["cards"][0]["id"], 31);
-    let slr = deck("/api/slr/deck");
+    // Multi: the multi-axis post and the scene with hand-made axes.
+    let multi = deck("/api/deck?stack=multi");
+    assert_eq!(cards(&multi), ["eroscripts:31", "vrb:7b"]);
     assert_eq!(
-        cards(&slr),
-        [("slr".into(), 51207), ("eroscripts".into(), 34)]
+        multi["cards"][1]["images"],
+        json!(["https://content/7b.jpg", "https://content/7b-2.jpg"])
     );
+    assert_eq!(multi["cards"][1]["axes"], json!(["twist", "roll"]));
+    // VR: the posts win over SLR 66249 and VRBangers same-scene; 70001 is downloaded, 8c in
+    // the library.
+    let vr = deck("/api/deck?stack=vr");
+    assert_eq!(cards(&vr), ["slr:51207", "eroscripts:34", "eroscripts:35"]);
     assert_eq!(
-        (slr["remaining"].as_u64(), slr["wanted"].as_u64()),
-        (Some(2), Some(0))
+        (vr["remaining"].as_u64(), vr["wanted"].as_u64()),
+        (Some(3), Some(0))
     );
-    assert_eq!(slr["quota"]["videos"]["remaining"], 30);
-    let scene = &slr["cards"][0];
-    assert_eq!(scene["scriptSource"], "slr-handcrafted");
-    assert_eq!(scene["tags"], json!([{"tag": "milf", "score": 2.0}]));
-    let post34 = &slr["cards"][1];
+    assert_eq!(vr["quota"]["videos"]["remaining"], 30);
+    assert_eq!(vr["generatedAt"]["vrb"], "2026-11-17T18:00:00.000Z");
+    assert_eq!(vr["cards"][0]["scriptSource"], "slr-handcrafted");
     assert_eq!(
-        post34["slrVideo"]["url"],
+        vr["cards"][1]["slrVideo"]["url"],
         "https://www.sexlikereal.com/scenes/b-66249"
     );
-    assert_eq!(post34["topTags"], json!([{"tag": "pov", "score": 2.0}]));
+    // Flat: FapTap and PMVHaven.
+    let flat = deck("/api/deck?stack=flat");
+    assert_eq!(
+        cards(&flat),
+        ["faptap:1957860091331874817", "pmvhaven:pmv1"]
+    );
+    assert_eq!(flat["cards"][0]["runtimeMs"], 300_000);
 
-    // Each card's swipe goes through its own endpoint into its own file.
-    assert_eq!(
-        post(port, "/api/swipe", r#"{"id":34,"dir":"right"}"#).0,
-        200
-    );
-    assert_eq!(
-        post(port, "/api/slr/swipe", r#"{"id":51207,"dir":"left"}"#).0,
-        200
-    );
+    // One right swipe per source, each into its own file.
+    for (path, body) in [
+        ("/api/swipe", r#"{"id":34,"dir":"right"}"#),
+        ("/api/scenes/slr/swipe", r#"{"id":51207,"dir":"right"}"#),
+        ("/api/scenes/vrb/swipe", r#"{"id":"7b","dir":"right"}"#),
+        (
+            "/api/scenes/pmvhaven/swipe",
+            r#"{"id":"pmv1","dir":"right"}"#,
+        ),
+        (
+            "/api/scenes/faptap/swipe",
+            r#"{"id":"1957860091331874817","dir":"right"}"#,
+        ),
+    ] {
+        assert_eq!(post(port, path, body).0, 200, "{path}");
+    }
     let read = |name: &str| -> Value {
         serde_json::from_slice(&fs::read(ud.join(name)).unwrap()).unwrap()
     };
-    let ero = read("eroscripts-scout-swipes.json");
-    let scenes = read("slr-scout-swipes.json");
-    assert_eq!(ero["swipes"]["34"]["dir"], "right");
-    assert!(ero["swipes"].get("51207").is_none());
-    assert_eq!(scenes["swipes"]["51207"]["dir"], "left");
-    assert!(scenes["swipes"].get("34").is_none());
-    let slr = deck("/api/slr/deck");
     assert_eq!(
-        (
-            cards(&slr).len(),
-            slr["remaining"].as_u64(),
-            slr["wanted"].as_u64()
-        ),
-        (0, Some(0), Some(1))
+        read("eroscripts-scout-swipes.json")["swipes"]["34"]["dir"],
+        "right"
     );
-    assert_eq!(deck("/api/deck")["wanted"], 0);
+    let slr_swipes = read("slr-scout-swipes.json");
+    assert_eq!(slr_swipes["swipes"]["51207"]["dir"], "right");
+    assert_eq!(slr_swipes["swipes"]["70001"]["dir"], "right", "kept");
+    assert_eq!(
+        read("vrb-scout-swipes.json")["swipes"]["7b"]["dir"],
+        "right"
+    );
+    assert_eq!(
+        read("pmvhaven-scout-swipes.json")["swipes"]["pmv1"]["dir"],
+        "right"
+    );
+    assert_eq!(
+        read("faptap-scout-swipes.json")["swipes"]["1957860091331874817"]["dir"],
+        "right"
+    );
+    for (tab, left, wanted) in [("multi", 1, 1), ("vr", 1, 2), ("flat", 0, 2)] {
+        let d = deck(&format!("/api/deck?stack={tab}"));
+        assert_eq!(
+            (d["remaining"].as_u64(), d["wanted"].as_u64()),
+            (Some(left), Some(wanted)),
+            "{tab}"
+        );
+    }
 
     // Undo, each through its own endpoint.
     assert_eq!(
-        post(port, "/api/slr/swipe/undo", r#"{"id":51207}"#).1["removed"],
+        post(port, "/api/scenes/vrb/swipe/undo", r#"{"id":"7b"}"#).1["removed"],
         true
     );
     assert_eq!(
         post(port, "/api/swipe/undo", r#"{"id":34}"#).1["removed"],
         true
     );
-    assert_eq!(cards(&deck("/api/slr/deck")).len(), 2);
+    assert!(read("vrb-scout-swipes.json")["swipes"].get("7b").is_none());
+    assert_eq!(cards(&deck("/api/deck?stack=multi")).len(), 2);
+    assert_eq!(cards(&deck("/api/deck?stack=vr")).len(), 2);
+    // The old SLR tab's routes are gone.
+    assert_eq!(get(port, "/api/slr/deck").0, 404);
+    assert_eq!(
+        post(port, "/api/slr/swipe", r#"{"id":51207,"dir":"left"}"#).0,
+        404
+    );
 }
 
 #[test]
