@@ -284,13 +284,27 @@ def effective_ratings(base, pending):
 
 
 def effective_playlists(base, pending):
-    """The registered playlists with the pending playlist edits applied."""
-    edits = [e for e in pending if e["kind"] in (KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE)]
+    """The registered playlists with the pending playlist edits applied. A
+    pending rating edit with a rating > 0 also takes its video out of the
+    Needs review playlist, as the desktop does when it applies the rating
+    (DataService.setRating)."""
+    from services.vr_sections import is_needs_review  # vr_sections imports this module
+
+    edits = [
+        e for e in pending
+        if e["kind"] in (KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE)
+        or (e["kind"] == KIND_RATING and (e.get("rating") or 0) > 0)
+    ]
     if not edits:
         return list(base or [])
     out = copy.deepcopy(list(base or []))
     for edit in edits:
-        apply_to_playlists(out, edit)
+        if edit["kind"] == KIND_RATING:
+            for p in out:
+                if is_needs_review(p):
+                    p["videoPaths"] = [v for v in p.get("videoPaths") or [] if v != edit["path"]]
+        else:
+            apply_to_playlists(out, edit)
     return out
 
 

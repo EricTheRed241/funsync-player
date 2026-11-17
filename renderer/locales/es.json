@@ -931,6 +931,11 @@
       "watchedTitle": "Visto: valorado con {n} estrellas",
       "watchedCollection": "Vistos"
     },
+    "review": {
+      "title": "Valora este vídeo",
+      "later": "Más tarde",
+      "saved": "Añadido a «Needs review»"
+    },
     "queue": {
       "add": "Añadir a la cola",
       "queued": "En la cola",

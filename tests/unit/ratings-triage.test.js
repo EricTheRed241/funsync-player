@@ -8,6 +8,7 @@ import { applyLibraryEdit, findPlaylist, LibraryEditApplier } from '../../render
 import { DEFAULT_TAG_SCORES } from '../../renderer/js/preference-score.js';
 import { DataService } from '../../renderer/js/data-service.js';
 import { eventBus } from '../../renderer/js/event-bus.js';
+import { NEEDS_REVIEW_PLAYLIST } from '../../renderer/js/content-preferences.js';
 
 describe('normalizeRating', () => {
   it.each([[0, 0], [0.5, 0.5], [4.5, 4.5], [5, 5], ['3.5', 3.5], [' 2 ', 2]])('accepts %j', (v, out) => {
@@ -94,6 +95,35 @@ describe('DataService.setRating', () => {
   it('rejects an invalid rating without storing anything', () => {
     expect(() => ds.setRating('/v/a.mp4', { rating: 9 })).toThrow();
     expect(ds.getRatings()).toEqual({});
+  });
+
+  describe('Needs review', () => {
+    beforeEach(() => {
+      window.funsync.removeVideoFromPlaylist.mockClear?.();
+      ds._cache.playlists = [
+        { id: 'pl-r', name: ` ${NEEDS_REVIEW_PLAYLIST.toUpperCase()} `, videoPaths: ['/v/a.mp4', '/v/b.mp4'] },
+        { id: 'pl-e', name: 'Evening', videoPaths: ['/v/a.mp4'] },
+      ];
+    });
+
+    it('a rating > 0 takes the video out of Needs review only', () => {
+      ds.setRating('/v/a.mp4', { rating: 3 });
+      expect(ds.getPlaylist('pl-r').videoPaths).toEqual(['/v/b.mp4']);
+      expect(ds.getPlaylist('pl-e').videoPaths).toEqual(['/v/a.mp4']);
+      expect(window.funsync.removeVideoFromPlaylist).toHaveBeenCalledWith('pl-r', '/v/a.mp4');
+    });
+
+    it('rating 0 or a favourite alone leaves it there', () => {
+      ds.setRating('/v/a.mp4', { favorite: true });
+      ds.setRating('/v/a.mp4', { rating: 0 });
+      expect(ds.getPlaylist('pl-r').videoPaths).toEqual(['/v/a.mp4', '/v/b.mp4']);
+      expect(window.funsync.removeVideoFromPlaylist).not.toHaveBeenCalled();
+    });
+
+    it('a video not in Needs review is left alone', () => {
+      ds.setRating('/v/c.mp4', { rating: 4 });
+      expect(window.funsync.removeVideoFromPlaylist).not.toHaveBeenCalled();
+    });
   });
 });
 

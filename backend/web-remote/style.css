@@ -2296,6 +2296,40 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
   color: #fff;
 }
 
+/* Review on end (review-on-end.js): rating sheet before Up Next. */
+.review-sheet {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 64px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-lg);
+  background: rgba(26, 26, 46, 0.92);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--elev-3);
+  z-index: 6;
+}
+.review-sheet__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.review-sheet__later {
+  align-self: stretch;
+  min-height: var(--tap-min);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* ============================================================
    Light theme (F5, 2026-08-04) — mirrors the desktop's saved theme
    via /api/remote/locale (data-theme set pre-render in i18n.js).

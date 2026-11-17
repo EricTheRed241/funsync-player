@@ -14,7 +14,8 @@ edits HereSphere POSTs back become library edits for the desktop
 (number, 0-5 in 0.5 steps), `isFavorite` (bool) and `tags` (`[{"name",
 "start", "end", "track"}]`, the full list). Only `Playlist:<name>` and
 `Queue:Up next` tags are acted on; every other tag edit is ignored (the
-generated `Studio:` / `Format:` / `Category:` / `Tag:` / `Score:` ... tags
+generated `Studio:` / `Format:` / `Category:` / `Tag:` / `Score:` /
+`Review:Needed` ... tags
 simply come back on the next load). `hsp` and `deleteFile` are ignored too
 (`writeHSP` stays false; nothing is ever deleted from the headset).
 
@@ -28,6 +29,11 @@ relative to what the scene detail last SERVED for that path
 `eventServer` points at `/heresphere/events/{id}`; a play event there
 (`event` 1) consumes the video from the queue (`queue-played`), once per
 video in a row since HereSphere sends play again after every pause.
+
+Review on end: a pause or close event at >= 90 % of an unrated video's
+duration adds it to the `Needs review` playlist (`review_on_end_edit`),
+which the listing shows first and whose scenes carry `Review:Needed`; a
+rating from any player takes it out again.
 
 `Playlist:<name>` tags follow the same rule (`_served_playlists`): only a tag
 added or removed relative to the served scene changes a playlist, so a save
@@ -552,8 +558,9 @@ def _scene_tag_names(video, is_3d, playlists, ratings, queued=()):
     video's path is in `queued` (two-way in HereSphere), then
     `Playlist:<name>` per playlist holding the video (two-way in
     HereSphere), `Category:<name>` per desktop category, `Tag:<tag>` per
-    chip tag, `Score:<n>` for the preference score and `Status:Watched`
-    when `ratings` give it a rating (all four read-only)."""
+    chip tag, `Score:<n>` for the preference score, `Status:Watched`
+    when `ratings` give it a rating and `Review:Needed` while it is in the
+    Needs review playlist (all five read-only)."""
     tags = []
     path = video.get('path', '')
     source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
@@ -568,11 +575,43 @@ def _scene_tag_names(video, is_3d, playlists, ratings, queued=()):
     tags.extend(vr_sections.chip_tag_names(get_chip_tags(path)))
     tags.extend(vr_sections.score_tags(get_preference_score(path)))
     tags.extend(vr_sections.watched_tags(path, ratings))
+    tags.extend(vr_sections.review_tags(path, playlists))
     return tags
 
 
 # HereSphere playback events (`eventServer`): 0 open, 1 play, 2 pause, 3 close.
+# `time` is the playback position in milliseconds.
 HERESPHERE_EVENT_PLAY = 1
+HERESPHERE_EVENT_PAUSE = 2
+HERESPHERE_EVENT_CLOSE = 3
+# Review on end: a pause or close at or past this share of the duration
+# counts as watched to the end.
+REVIEW_AT_FRACTION = 0.9
+
+
+def review_on_end_edit(body, video, ratings, playlists):
+    """The `playlist-add` to Needs review a HereSphere event earns, or None.
+
+    Review on end: a pause or close (`event` 2 / 3) at `time` (ms) >= 90 %
+    of the video's duration, for a video without a rating (> 0) that isn't
+    in the Needs review playlist yet (so each watch adds it once). `ratings`
+    and `playlists` are the effective ones (pending edits included)."""
+    if not isinstance(body, dict) or not video or not video.get('path'):
+        return None
+    event, at_ms = body.get('event'), body.get('time')
+    if isinstance(event, bool) or event not in (HERESPHERE_EVENT_PAUSE, HERESPHERE_EVENT_CLOSE):
+        return None
+    if isinstance(at_ms, bool) or not isinstance(at_ms, (int, float)):
+        return None
+    duration = _get_duration(video)
+    path = video['path']
+    if duration <= 0 or at_ms / 1000 < REVIEW_AT_FRACTION * duration:
+        return None
+    if library_edits.rating_entry(ratings, path)[0] > 0 or vr_sections.review_tags(path, playlists):
+        return None
+    return library_edits.make_playlist_edit(
+        library_edits.KIND_PLAYLIST_ADD, path, name=vr_sections.NEEDS_REVIEW_PLAYLIST, source='heresphere',
+    )
 
 # path → whether the HereSphere scene detail last served for it carried
 # `Queue:Up next`. Only a tag change relative to this is a queue edit.
@@ -1031,7 +1070,7 @@ async def heresphere_scene(video_id: str, request: Request):
     # removing it in the headset queues / unqueues the video), Playlist:
     # (removing one in the headset takes the video out of that playlist,
     # adding `Playlist:<name>` puts it in, creating it), Category:, Tag:,
-    # Score: and Status:Watched (all read-only); chapters follow.
+    # Score:, Status:Watched and Review:Needed (all read-only); chapters follow.
     queued = set(vr_sections.queued_paths(get_queue()))
     tags = [{'name': name} for name in _scene_tag_names(video, is_3d, playlists, ratings, queued)]
     _served_queue_tag[path] = path in queued
@@ -1105,7 +1144,8 @@ async def heresphere_event(video_id: str, request: Request):
     utc, connectionKey}`, `event` 0 open, 1 play, 2 pause, 3 close. A play
     consumes the video from the play queue (`queue-played`) unless it is
     the video HereSphere last reported playing (play repeats after every
-    pause). Always 200: a bad body or an unknown video changes nothing."""
+    pause). A pause or close near the end of an unrated video files it
+    under Needs review (`review_on_end_edit`). Always 200: a bad body or an unknown video changes nothing."""
     global _last_headset_played
     try:
         body = await request.json()
@@ -1122,4 +1162,10 @@ async def heresphere_event(video_id: str, request: Request):
             _last_headset_played = path
         except library_edits.QueueFull as e:
             log.warning('[heresphere] Played edit dropped: %s', e)
+    review = review_on_end_edit(body, video, get_ratings(), get_playlists())
+    if review:
+        try:
+            await submit_library_edit(review)
+        except library_edits.QueueFull as e:
+            log.warning('[heresphere] Needs review edit dropped: %s', e)
     return JSONResponse(content={}, headers={'Access-Control-Allow-Origin': '*'})

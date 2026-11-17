@@ -931,6 +931,11 @@
       "watchedTitle": "視聴済み：星{n}で評価",
       "watchedCollection": "視聴済み"
     },
+    "review": {
+      "title": "この動画を評価",
+      "later": "後で",
+      "saved": "「Needs review」に追加しました"
+    },
     "queue": {
       "add": "キューに追加",
       "queued": "キューに追加済み",
