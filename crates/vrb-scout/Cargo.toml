@@ -1,0 +1,25 @@
+[package]
+name = "vrb-scout"
+version = "0.1.0"
+description = "Find VRBangers and VRConk VR scenes with their free toy scripts, score them, and download the ones swiped right: <userData>/vrb-scout.json"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "vrb_scout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vrb-scout"
+path = "src/main.rs"
+
+[dependencies]
+# The SLR scout's library: the shared preferences, score, screen, curl
+# client and pacer, library walk, scene naming and the DevTools client.
+slr-scout = { path = "../slr-scout" }
+# userData default (env var), host-aware lock files, atomic write,
+# timestamps, config.json, the app's rescan request.
+video-tags = { path = "../video-tags" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
