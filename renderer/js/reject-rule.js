@@ -5,6 +5,8 @@
 //   IPC), taken out of every playlist and its script association dropped.
 // • Any other rating keeps the video where it is (the Review playlist for
 //   2½–3½ stars was retired on 2026-11-10).
+// • rejectVideo: the user deletes one video on purpose (the Underage review
+//   playlist's Delete button), favourite or not, through the same rule.
 //
 // Runs at startup and whenever a rating changes, from the desktop, the web
 // remote or HereSphere (all go through the data service).
@@ -24,6 +26,18 @@ export function ratingVerdict(entry) {
   const rating = Number(entry?.rating) || 0;
   if (rating <= 0) return null;
   return rating <= DELETE_AT_OR_BELOW && entry.favorite !== true ? 'delete' : 'keep';
+}
+
+/**
+ * Delete `videoPath` through the triage rule: rated DELETE_AT_OR_BELOW and no
+ * longer a favourite, so the next sweep deletes it from disk, takes it out of
+ * every playlist and records the rejection (the scouts never fetch it again).
+ *
+ * @param {object} data DataService (setRating)
+ * @param {string} videoPath
+ */
+export function rejectVideo(data, videoPath) {
+  data.setRating(videoPath, { rating: DELETE_AT_OR_BELOW, favorite: false });
 }
 
 /**

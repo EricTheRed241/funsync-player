@@ -462,6 +462,13 @@
     "confirmDelete": "このプレイリストを削除しますか?",
     "backToPlaylists": "プレイリストに戻る",
     "removeFromPlaylist": "プレイリストから削除",
+    "review": {
+      "keep": "残す",
+      "keepTitle": "未成年ではない：このリストから外して動画を残す",
+      "delete": "削除",
+      "deleteTitle": "動画をディスクから削除",
+      "deleteConfirm": "「{name}」とスクリプトをディスクから削除しますか？再ダウンロードされません。"
+    },
     "funscriptLinked": "ファンスクリプトがリンクされています",
     "gridView": "グリッド表示",
     "listView": "リスト表示",

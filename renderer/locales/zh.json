@@ -462,6 +462,13 @@
     "confirmDelete": "确定删除此播放列表？",
     "backToPlaylists": "返回播放列表",
     "removeFromPlaylist": "从播放列表中移除",
+    "review": {
+      "keep": "保留",
+      "keepTitle": "非未成年：从此列表移除并保留视频",
+      "delete": "删除",
+      "deleteTitle": "从磁盘删除视频",
+      "deleteConfirm": "从磁盘删除“{name}”及其脚本？之后不会再次下载。"
+    },
     "funscriptLinked": "已关联脚本",
     "gridView": "网格视图",
     "listView": "列表视图",

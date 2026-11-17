@@ -25,9 +25,10 @@ import {
   groupByVolume,
 } from '../js/playlist-availability.js';
 import { isWatched, ratingOf, watchedLast } from '../js/ratings.js';
-import { playlistKind, sinksWatched, WATCHED_LAST_KEY, watchedLastOn } from '../js/watched-lists.js';
+import { playlistKind, sinksWatched, LIST_RATING, WATCHED_LAST_KEY, watchedLastOn } from '../js/watched-lists.js';
 import { ARTIST_PLAYLISTS_KEY } from '../js/artist-playlists.js';
 import { markWatched } from '../js/watched-badge.js';
+import { rejectVideo } from '../js/reject-rule.js';
 
 export class Playlists {
   constructor({ settings, onPlayVideo, onPlayAll, library }) {
@@ -701,6 +702,8 @@ export class Playlists {
     titleEl.title = videoPath;
     info.appendChild(titleEl);
     card.appendChild(info);
+    const review = this._createReviewActions(videoPath, playlist, card);
+    if (review) card.appendChild(review);
 
     // Lazy-load thumbnail
     this._loadVideoThumbnail(card, thumbnail, videoPath);
@@ -720,6 +723,53 @@ export class Playlists {
     });
 
     return card;
+  }
+
+  /**
+   * Keep / Delete for one video of the age screener's review playlist
+   * ("Underage review"); null for any other playlist. Keep takes the video
+   * out of the list (the screener skips videos it judged before, so it
+   * doesn't come back). Delete, after a confirmation, deletes it from disk
+   * through the triage rule (reject-rule.js rejectVideo: favourite or not),
+   * which also takes it out of every playlist; `el` is dimmed until then.
+   */
+  _createReviewActions(videoPath, playlist, el) {
+    if (playlistKind(playlist) !== LIST_RATING) return null;
+    const name = videoPath.split(/[\\/]/).pop();
+    const bar = document.createElement('div');
+    bar.className = 'playlists__review-actions';
+    bar.addEventListener('click', (e) => e.stopPropagation());
+
+    const keep = document.createElement('button');
+    keep.type = 'button';
+    keep.className = 'playlists__review-btn';
+    keep.append(icon(Check, { width: 14, height: 14 }), document.createTextNode(t('playlists.review.keep')));
+    keep.title = t('playlists.review.keepTitle');
+    keep.addEventListener('click', () => {
+      this._settings.removeVideoFromPlaylist(playlist.id, videoPath);
+      this._renderDetail(playlist.id);
+    });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'playlists__review-btn playlists__review-btn--danger';
+    del.append(icon(Trash2, { width: 14, height: 14 }), document.createTextNode(t('playlists.review.delete')));
+    del.title = t('playlists.review.deleteTitle');
+    del.addEventListener('click', async () => {
+      if (!(await Modal.confirm(t('playlists.review.deleteTitle'), t('playlists.review.deleteConfirm', { name })))) return;
+      el.classList.add('playlists__review-pending');
+      keep.disabled = true;
+      del.disabled = true;
+      const off = eventBus.on('playlist:changed', (ev) => {
+        if (ev?.action !== 'removeVideo' || ev.id !== playlist.id || ev.videoPath !== videoPath) return;
+        off?.();
+        if (this._view === 'detail' && this._detailPlaylistId === playlist.id) this._renderDetail(playlist.id);
+      });
+      rejectVideo(this._settings, videoPath);
+    });
+
+    bar.append(keep, del);
+    return bar;
   }
 
   /**
@@ -1519,7 +1569,8 @@ export class Playlists {
       badges.appendChild(marker);
     }
 
-    row.append(handle, title, heatmap, ...(resumeBar ? [resumeBar] : []), badges, moveGroup, removeBtn);
+    const review = this._createReviewActions(videoPath, playlist, row);
+    row.append(handle, title, heatmap, ...(resumeBar ? [resumeBar] : []), badges, moveGroup, ...(review ? [review] : []), removeBtn);
 
     row.addEventListener('click', () => {
       // Same rule as the grid tile: unreachable explains, it doesn't open.

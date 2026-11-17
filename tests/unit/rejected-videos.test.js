@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sweepRejected, ratingVerdict } from '../../renderer/js/reject-rule.js';
+import { sweepRejected, ratingVerdict, rejectVideo } from '../../renderer/js/reject-rule.js';
 
 const require = createRequire(import.meta.url);
 const { deleteRejectedVideo, readRejected, recordRejection, faptapRejectionKey } = require('../../electron/rejected-videos.js');
@@ -196,6 +196,18 @@ describe('sweepRejected', () => {
     const store = { 'library.associations': { '/a.mp4': { active: 'single', single: '/a.funscript' }, '/b.mp4': { active: 'single', single: '/b.funscript' }, '/c.mp4': { active: 'single', single: '/c.funscript' } } };
     await sweepRejected({ data: data([], ratings, store), deleteVideo: async (p) => (p === '/b.mp4' ? { success: false, error: 'busy' } : { success: true }) });
     expect(Object.keys(store['library.associations'])).toEqual(['/b.mp4', '/c.mp4']);
+  });
+
+  it('rejectVideo deletes a video through the sweep, a favourite included', async () => {
+    const playlists = [{ id: 'u', name: 'Underage review', videoPaths: ['/fav.mp4', '/keep.mp4'] }];
+    const ratings = { '/fav.mp4': { rating: 0, favorite: true } };
+    const d = { ...data(playlists, ratings), setRating: (p, change) => { ratings[p] = { ...ratings[p], ...change }; } };
+    rejectVideo(d, '/fav.mp4');
+    const deleted = [];
+    const r = await sweepRejected({ data: d, deleteVideo: async (p, reason) => { deleted.push([p, reason]); return { success: true }; } });
+    expect(deleted).toEqual([['/fav.mp4', 'low-rating']]);
+    expect(r.removed).toEqual([{ path: '/fav.mp4', reason: 'low-rating' }]);
+    expect(playlists[0].videoPaths).toEqual(['/keep.mp4']);
   });
 });
 

@@ -261,19 +261,20 @@ export const SCORE_BANDS = [
 /**
  * Smart playlists (user, 2026-11-10; renderer/js/smart-playlists.js): app-made playlists that
  * refill themselves after each scan and whenever ratings, scores or durations change. Each
- * holds exactly its current members, only unwatched (unrated) videos, in its own order, so the
- * phone and the headsets (`Playlist: <name>`) show them like any playlist.
+ * holds exactly its current members, in its own order, so the phone and the headsets
+ * (`Playlist: <name>`) show them like any playlist. Only unwatched (unrated) videos, except
+ * for `favorite`.
  * • `vr: true` — the backend's VR decision (as in the scores and the VR category).
  * • `minScore` — preference score at least this (`library.preferenceScores`).
  * • `maxSeconds` — known duration (`library.durationCache`) below this.
- * • `addedWithinDays` — added (the scan's `dateAdded`, the Date added sort and the headsets'
- *   Recently Added) at most this many days ago.
- * `order`: 'score' (highest first, title breaking ties) or 'added' (newest first).
+ * • `favorite: true` — the video's favourite heart (`library.ratings`), watched or not.
+ * `order`: 'score' (highest first, title breaking ties). `formerNames`: a playlist under an
+ * older name is taken over and renamed (user, 2026-11-17: "Fresh downloads" became "Favorites").
  */
 export const SMART_PLAYLISTS = [
   { key: 'vr-picks', name: 'VR picks', vr: true, minScore: 15, order: 'score' },
   { key: 'quick-ones', name: 'Quick ones', maxSeconds: 5 * 60, minScore: 15, order: 'score' },
-  { key: 'fresh-downloads', name: 'Fresh downloads', addedWithinDays: 14, order: 'added' },
+  { key: 'favorites', name: 'Favorites', favorite: true, order: 'score', formerNames: ['Fresh downloads'] },
 ];
 
 // ── Artist playlists ────────────────────────────────────────────────────
