@@ -115,7 +115,18 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         Err(LockError::Io(m)) => return Err(m),
     };
     if mode == Mode::Login {
-        let session = instagram::login(&user_data, err)?;
+        let path = slr_scout::login::credentials_path_for(
+            opts.credentials.as_deref(),
+            std::env::var(instagram::CREDENTIALS_ENV).ok(),
+            instagram::CREDENTIALS_FILE,
+        );
+        // A missing default file means the user signs in by hand.
+        let creds = if opts.credentials.is_none() && !path.is_file() {
+            None
+        } else {
+            Some(slr_scout::login::read_credentials(&path)?)
+        };
+        let session = instagram::login(&user_data, creds.as_ref(), err)?;
         instagram::write_session(&user_data, &session)?;
         writeln!(
             out,

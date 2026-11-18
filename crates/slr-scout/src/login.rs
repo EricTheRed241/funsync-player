@@ -51,13 +51,20 @@ pub fn parse_credentials(raw: &str) -> Result<Credentials, String> {
 /// `--credentials`, else `$FUNSYNC_SLR_CREDENTIALS`, else `slr_creds.txt` at
 /// the repo root.
 pub fn credentials_path(flag: Option<&Path>, env: Option<String>) -> PathBuf {
+    credentials_path_for(flag, env, "slr_creds.txt")
+}
+
+/// The flag's file, else the env variable's, else `file` at the repo root.
+pub fn credentials_path_for(flag: Option<&Path>, env: Option<String>, file: &str) -> PathBuf {
     if let Some(p) = flag {
         return p.to_path_buf();
     }
     if let Some(p) = env.filter(|v| !v.trim().is_empty()) {
         return PathBuf::from(p);
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../slr_creds.txt")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(file)
 }
 
 pub fn read_credentials(path: &Path) -> Result<Credentials, String> {

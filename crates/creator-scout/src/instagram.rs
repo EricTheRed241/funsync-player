@@ -1,5 +1,6 @@
-//! Instagram: the session (`--login`: the user signs in in a visible
-//! Chrome; its cookies go to `instagram-session.json`, 0600, never
+//! Instagram: the session (`--login`: a visible Chrome signs in with the
+//! credentials file, or the user does; its cookies go to
+//! `instagram-session.json`, 0600; credentials and cookies are never
 //! printed) and the pictures step (`--pictures`): with a session, the
 //! newest timeline posts from `web_profile_info`; without, the profile
 //! photo from the public page.
@@ -20,6 +21,8 @@ pub const PROFILE_DIR: &str = "instagram-chrome";
 pub const LOGIN_URL: &str = "https://www.instagram.com/accounts/login/";
 pub const APP_ID: &str = "936619743392459";
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
+pub const CREDENTIALS_ENV: &str = "FUNSYNC_INSTAGRAM_CREDENTIALS";
+pub const CREDENTIALS_FILE: &str = "instagram_creds.txt";
 /// Timeline posts looked at, pictures kept.
 pub const TIMELINE_POSTS: usize = 12;
 pub const KEEP_PICTURES: usize = 9;
@@ -115,16 +118,74 @@ pub fn write_session(user_data: &Path, s: &Session) -> Result<(), String> {
     result.map_err(|e| format!("writing {}: {e}", target.display()))
 }
 
+fn js(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_default()
+}
+
+/// Fill Instagram's login form (username, password, submit). `Ok(false)`
+/// when the page shows no form (already signed in in this profile, or a
+/// layout this doesn't know: the user signs in by hand).
+fn fill_form(
+    cdp: &mut slr_scout::cdp::Cdp<std::net::TcpStream>,
+    s: &str,
+    creds: &slr_scout::login::Credentials,
+) -> Result<bool, String> {
+    // The EU cookie dialog covers the form until it is answered.
+    let _ = cdp.eval(
+        s,
+        "(()=>{const b=[...document.querySelectorAll('button')].find(x=>/^(Decline optional cookies|Only allow essential cookies|Allow all cookies)$/i.test(x.innerText.trim())); if(b) b.click(); return !!b})()",
+    )?;
+    std::thread::sleep(Duration::from_millis(800));
+    for (sel, value) in [
+        (r#"input[name="username"]"#, &creds.username),
+        (r#"input[name="password"]"#, &creds.password),
+    ] {
+        let found = cdp.eval(
+            s,
+            &format!(
+                "(()=>{{const i=document.querySelector({}); if(!i) return false; i.focus(); i.select?.(); return true}})()",
+                js(sel)
+            ),
+        )?;
+        if found != true {
+            return Ok(false);
+        }
+        cdp.call("Input.insertText", json!({ "text": value }), Some(s))?;
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    std::thread::sleep(Duration::from_millis(600));
+    let clicked = cdp.eval(
+        s,
+        "(()=>{const b=document.querySelector('button[type=\"submit\"]'); if(!b) return false; b.click(); return true})()",
+    )?;
+    Ok(clicked == true)
+}
+
 /// `--login`: open Instagram's login page in a visible Chrome (its own
-/// profile in userData) and wait until the user has signed in.
-pub fn login(user_data: &Path, log: &mut dyn Write) -> Result<Session, String> {
+/// profile in userData), sign in with `creds` when given, and wait until
+/// a session appears (the user finishes any check Instagram asks for).
+pub fn login(
+    user_data: &Path,
+    creds: Option<&slr_scout::login::Credentials>,
+    log: &mut dyn Write,
+) -> Result<Session, String> {
     let mut b = slr_scout::login::open_chrome(&user_data.join(PROFILE_DIR))?;
     let s = b.session.clone();
     b.cdp
         .call("Page.navigate", json!({ "url": LOGIN_URL }), Some(&s))?;
+    std::thread::sleep(Duration::from_secs(5));
+    let typed = match creds {
+        Some(c) => fill_form(&mut b.cdp, &s, c)?,
+        None => false,
+    };
     let _ = writeln!(
         log,
-        "Sign in to Instagram in the Chrome window; waiting up to {} minutes...",
+        "{}; waiting up to {} minutes...",
+        if typed {
+            "Signed in with the credentials file: finish any check Instagram asks for (a code, \"save login info\") in the Chrome window"
+        } else {
+            "Sign in to Instagram in the Chrome window"
+        },
         LOGIN_TIMEOUT.as_secs() / 60
     );
     let started = Instant::now();

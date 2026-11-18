@@ -16,6 +16,7 @@ backend/*.pyc
 .env.*
 vb_hack.txt
 slr_creds.txt
+instagram_creds.txt
 
 # Logs
 *.log
