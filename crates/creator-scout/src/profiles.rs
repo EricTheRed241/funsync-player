@@ -10,7 +10,7 @@
 //! are dropped. Used by `--discover` for new creators and by `--profiles`
 //! (the people the user likes, and creators short of pictures).
 
-use crate::discover::{self, Filing, combine, note_net};
+use crate::discover::{self, Filing, combine};
 use crate::eroscripts;
 use crate::faptap;
 use crate::html;
@@ -26,6 +26,15 @@ use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
+
+/// A page, search or post that failed for one person: logged, and the step
+/// says work is left (exit 2; the person or post is tried next run) rather
+/// than failing: one unreachable site (a TLS error on a link page) mustn't
+/// fail a run that confirmed everyone else.
+fn note_skip(e: &NetError, what: &str, code: &mut i32, out: &mut dyn Write) {
+    let _ = writeln!(out, "{what}: {e}");
+    *code = combine(*code, 2);
+}
 
 /// A creator with fewer pictures than this is due for `--profiles`.
 pub const MIN_PICTURES: usize = 3;
@@ -763,7 +772,7 @@ fn add_posts(
                     c.upsert_post(post);
                     added += 1;
                     if let Err(e) = discover::add_details(f, &mut p.forum, c, slug, t.id) {
-                        note_net(&e, &format!("  EroScripts post {id}"), code, out);
+                        note_skip(&e, &format!("  EroScripts post {id}"), code, out);
                         state.pending_details.insert(id, slug.to_string());
                         if matches!(e, NetError::RateLimited(_)) {
                             break;
@@ -771,7 +780,7 @@ fn add_posts(
                     }
                 }
             }
-            Err(e) => note_net(&e, &format!("  EroScripts search {}", c.name), code, out),
+            Err(e) => note_skip(&e, &format!("  EroScripts search {}", c.name), code, out),
         }
     }
     if added < MAX_POSTS {
@@ -791,7 +800,7 @@ fn add_posts(
                 }
                 added += mine.len();
             }
-            Err(e) => note_net(&e, &format!("  FapTap search {}", c.name), code, out),
+            Err(e) => note_skip(&e, &format!("  FapTap search {}", c.name), code, out),
         }
     }
     added
@@ -954,7 +963,7 @@ pub fn run(
             ) {
                 Ok(finds) => finds,
                 Err(e) => {
-                    note_net(&e, &format!("  {}", person.name), &mut code, out);
+                    note_skip(&e, &format!("  {}", person.name), &mut code, out);
                     if matches!(e, NetError::RateLimited(_)) {
                         break;
                     }
@@ -1022,7 +1031,7 @@ pub fn run(
             let mut pictures = finds.pictures.clone();
             match video_pictures(http, &mut p.pages, &c) {
                 Ok(v) => pictures.extend(v),
-                Err(e) => note_net(
+                Err(e) => note_skip(
                     &e,
                     &format!("  {}: video pages", person.name),
                     &mut code,
