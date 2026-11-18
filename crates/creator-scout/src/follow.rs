@@ -1,23 +1,22 @@
 //! `--follow [N]`: our Instagram account (the `--login` session) follows the
 //! creators the user wants: a confirmed Instagram account and source
 //! `favourite` or `swiped` (yes on the Creators site; one swiped no is
-//! left alone). Like the web app: her profile page (already followed?
-//! her user id), then `POST /api/v1/friendships/create/<id>/`. 20–40 s
-//! between creators; the first challenge or lost session stops the run
-//! (exit 3), a rate limit or "feedback required" too (exit 2, next day).
-//! Recorded in the state (`follows`) and on her Instagram entry
+//! left alone). Instagram's follow API answers HTML and does nothing, so a
+//! Chrome does it like a person: headless on the `--login` profile with the
+//! session's cookies (headed when headless meets a login wall), her profile
+//! page, the "Follow" button, then "Following" / "Requested". One browser
+//! for the step, 20–40 s between creators; a login wall stops the run
+//! (exit 3), a "Try Again Later" / action-blocked dialog too (exit 2, next
+//! day). Recorded in the state (`follows`) and on her Instagram entry
 //! (`followed`: following / requested); never undone.
 
-use crate::instagram::{self, Answer};
+use crate::instagram;
 use crate::state::{Follow, State, Swipes};
 use crate::store::{self, CreatorsFile};
-use serde_json::Value;
-use slr_scout::http::{Http, Request, Response};
+use serde_json::{Value, json};
 use std::io::Write;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-pub const APP_ID: &str = "936619743392459";
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Creators to follow, in slug order: an Instagram account, a source
 /// favourite or swiped, not swiped no, not followed (or requested) yet.
@@ -37,114 +36,185 @@ pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes) -> Vec<String> {
         .collect()
 }
 
-/// Her user id in her profile page: `"profile_id":"…"`, else the owner of
-/// the timeline's posts.
-pub fn user_pk(page: &str) -> Option<String> {
-    let key = "\"profile_id\":\"";
-    if let Some(at) = page.find(key) {
-        let id: String = page[at + key.len()..]
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect();
-        if !id.is_empty() {
-            return Some(id);
+/// What a profile page shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PageState {
+    /// A "Follow" / "Follow Back" button.
+    Follow,
+    Following,
+    /// A private account asked.
+    Requested,
+    /// A login form: the session is gone.
+    LoginWall,
+    /// "Try Again Later", action blocked: stop for today.
+    Blocked,
+    /// "Sorry, this page isn't available".
+    Missing,
+    /// Not loaded (yet), or a layout this doesn't know.
+    Unknown,
+}
+
+/// The page as [`DOM_PROBE`] reads it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Dom {
+    /// The texts of the profile header's buttons.
+    pub buttons: Vec<String>,
+    /// The page's visible text (the start of it).
+    pub text: String,
+    pub login_form: bool,
+    pub url: String,
+}
+
+/// Reads [`Dom`] in the page.
+pub const DOM_PROBE: &str = "(()=>{const q=(s)=>[...document.querySelectorAll(s)];\
+const b=q('header button, header div[role=button], main header [role=button]').map(x=>x.innerText.trim()).filter(Boolean);\
+return {buttons:b.slice(0,30),text:(document.body?document.body.innerText:'').slice(0,4000),\
+login:!!document.querySelector('input[name=\"password\"]'),url:location.href}})()";
+
+/// Clicks the "Follow" / "Follow Back" button; whether there was one.
+pub const CLICK_FOLLOW: &str = "(()=>{const b=[...document.querySelectorAll('header button, header div[role=button], main header [role=button]')]\
+.find(x=>/^(Follow|Follow Back)$/.test(x.innerText.trim())); if(!b) return false; b.click(); return true})()";
+
+impl Dom {
+    pub fn from_value(v: &Value) -> Dom {
+        Dom {
+            buttons: v["buttons"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|b| b.as_str().map(str::to_string))
+                .collect(),
+            text: v["text"].as_str().unwrap_or_default().to_string(),
+            login_form: v["login"] == true,
+            url: v["url"].as_str().unwrap_or_default().to_string(),
         }
     }
-    let conn = instagram::timeline_json(page)?;
-    conn["edges"].as_array()?.iter().find_map(|e| {
-        let n = &e["node"];
-        instagram::text_id(&n["owner_id"]["pk"])
-            .or_else(|| instagram::text_id(&n["owner"]["pk"]))
-            .or_else(|| instagram::text_id(&n["user"]["pk"]))
-            .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
-    })
-}
 
-/// Whether her page says we follow her already.
-pub fn already_following(page: &str) -> bool {
-    if page.contains("\"followed_by_viewer\":true") {
-        return true;
-    }
-    let key = "\"friendship_status\":{";
-    page.match_indices(key).any(|(at, _)| {
-        let rest = &page[at + key.len()..];
-        let end = rest.find('}').unwrap_or(rest.len());
-        rest[..end].contains("\"following\":true")
-    })
-}
-
-/// The `csrftoken` of a session's cookie header.
-fn csrf(cookie: &str) -> Option<&str> {
-    cookie
-        .split("; ")
-        .find_map(|c| c.strip_prefix("csrftoken="))
-}
-
-/// The web app's follow request.
-pub fn follow_request(base: &str, pk: &str, handle: &str, cookie: &str) -> Request {
-    let req = Request::post(
-        format!("{base}/api/v1/friendships/create/{pk}/"),
-        format!("container_module=profile&user_id={pk}"),
-    )
-    .header("User-Agent", slr_scout::http::USER_AGENT)
-    .header("Accept", "*/*")
-    .header("Content-Type", "application/x-www-form-urlencoded")
-    .header("x-ig-app-id", APP_ID)
-    .header("X-Requested-With", "XMLHttpRequest")
-    .header("Origin", base)
-    .header("Referer", format!("{base}/{handle}/"))
-    .header("Sec-Fetch-Site", "same-origin")
-    .header("Sec-Fetch-Mode", "cors")
-    .header("Sec-Fetch-Dest", "empty")
-    .header("Cookie", cookie);
-    match csrf(cookie) {
-        Some(token) => req.header("X-CSRFToken", token),
-        None => req,
+    pub fn state(&self) -> PageState {
+        let text = self.text.to_lowercase();
+        if self.login_form || self.url.contains("/accounts/login") {
+            return PageState::LoginWall;
+        }
+        if text.contains("try again later")
+            || text.contains("action blocked")
+            || text.contains("we restrict certain activity")
+        {
+            return PageState::Blocked;
+        }
+        if text.contains("this page isn't available") || text.contains("this page isn’t available")
+        {
+            return PageState::Missing;
+        }
+        let has = |t: &str| self.buttons.iter().any(|b| b == t);
+        if has("Following") {
+            PageState::Following
+        } else if has("Requested") {
+            PageState::Requested
+        } else if has("Follow") || has("Follow Back") {
+            PageState::Follow
+        } else {
+            PageState::Unknown
+        }
     }
 }
 
-/// What a follow answer means.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Followed {
-    Following,
-    /// A private account: the request waits for her.
-    Requested,
-    NotLoggedIn,
-    Challenge,
-    /// 429, "feedback required", "please wait": stop for today.
-    Limited(String),
-    Failed(String),
+/// The browser `--follow` drives (a Chrome over DevTools; a fake in tests).
+pub trait FollowBrowser {
+    /// Open `url` and wait (15 s at most) until the page shows a state.
+    fn open(&mut self, url: &str) -> Result<PageState, String>;
+    /// Click "Follow" and wait (8 s at most) for the answer; `Ok(None)`
+    /// when there was no button to click.
+    fn click_follow(&mut self) -> Result<Option<PageState>, String>;
 }
 
-pub fn classify_follow(res: &Response) -> Followed {
-    let body = res.body.as_str();
-    let lower = body.to_lowercase();
-    let location = res.header_values("location").next().unwrap_or("");
-    let challenge = lower.contains("checkpoint_required") || lower.contains("challenge_required");
-    let limited = lower.contains("feedback_required") || lower.contains("please wait");
-    match res.status {
-        429 => Followed::Limited("HTTP 429".into()),
-        300..=399 if location.contains("/challenge") => Followed::Challenge,
-        300..=399 if location.contains("/accounts/login") => Followed::NotLoggedIn,
-        _ if challenge => Followed::Challenge,
-        _ if limited => Followed::Limited("Instagram asks to wait (feedback required)".into()),
-        401 | 403 => Followed::NotLoggedIn,
-        200..=299 => {
-            let Ok(v) = serde_json::from_str::<Value>(body) else {
-                return Followed::NotLoggedIn;
-            };
-            let f = &v["friendship_status"];
-            if f["following"] == true {
-                Followed::Following
-            } else if f["outgoing_request"] == true {
-                Followed::Requested
-            } else if v["require_login"] == true {
-                Followed::NotLoggedIn
-            } else {
-                Followed::Failed("unexpected answer".into())
+/// A Chrome over DevTools on the `--login` profile, the session's cookies
+/// set.
+pub struct Chrome {
+    b: slr_scout::login::Browser,
+}
+
+/// Cookies as `Network.setCookies` takes them.
+fn cookie_params(cookies: &[Value]) -> Vec<Value> {
+    cookies
+        .iter()
+        .filter_map(|c| {
+            let mut p = json!({
+                "name": c["name"].as_str()?,
+                "value": c["value"].as_str()?,
+                "domain": c["domain"].as_str()?,
+                "path": c["path"].as_str().unwrap_or("/"),
+                "secure": c["secure"].as_bool().unwrap_or(true),
+                "httpOnly": c["httpOnly"].as_bool().unwrap_or(false),
+            });
+            if let Some(s) = c["sameSite"].as_str() {
+                p["sameSite"] = json!(s);
+            }
+            if let Some(e) = c["expires"].as_f64().filter(|e| *e > 0.0) {
+                p["expires"] = json!(e);
+            }
+            Some(p)
+        })
+        .collect()
+}
+
+impl Chrome {
+    pub fn open(
+        user_data: &Path,
+        session: &instagram::Session,
+        headless: bool,
+    ) -> Result<Chrome, String> {
+        let extra: &[&str] = if headless { &["--headless=new"] } else { &[] };
+        let mut b =
+            slr_scout::login::open_chrome_with(&user_data.join(instagram::PROFILE_DIR), extra)?;
+        let s = b.session.clone();
+        b.cdp.call(
+            "Network.setCookies",
+            json!({ "cookies": cookie_params(&session.cookies) }),
+            Some(&s),
+        )?;
+        Ok(Chrome { b })
+    }
+
+    fn dom(&mut self) -> Result<PageState, String> {
+        let s = self.b.session.clone();
+        Ok(Dom::from_value(&self.b.cdp.eval(&s, DOM_PROBE)?).state())
+    }
+
+    /// Poll the page until `done` accepts its state or `limit` passes.
+    fn wait(
+        &mut self,
+        limit: Duration,
+        done: impl Fn(&PageState) -> bool,
+    ) -> Result<PageState, String> {
+        let started = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let state = self.dom()?;
+            if done(&state) || started.elapsed() > limit {
+                return Ok(state);
             }
         }
-        s => Followed::Failed(format!("HTTP {s}")),
+    }
+}
+
+impl FollowBrowser for Chrome {
+    fn open(&mut self, url: &str) -> Result<PageState, String> {
+        let s = self.b.session.clone();
+        self.b
+            .cdp
+            .call("Page.navigate", json!({ "url": url }), Some(&s))?;
+        self.wait(Duration::from_secs(15), |st| *st != PageState::Unknown)
+    }
+
+    fn click_follow(&mut self) -> Result<Option<PageState>, String> {
+        let s = self.b.session.clone();
+        if self.b.cdp.eval(&s, CLICK_FOLLOW)? != true {
+            return Ok(None);
+        }
+        self.wait(Duration::from_secs(8), |st| {
+            !matches!(st, PageState::Follow | PageState::Unknown)
+        })
+        .map(Some)
     }
 }
 
@@ -164,10 +234,13 @@ pub struct FollowRun {
     pub left: usize,
 }
 
+/// Opens the browser: headless first, headed (`false`) after a login wall.
+pub type Opener<'a> = dyn FnMut(bool) -> Result<Box<dyn FollowBrowser>, String> + 'a;
+
 /// `--follow N`. Writes creators.json and the state after each creator.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
-    http: &dyn Http,
+    open: &mut Opener,
     base: &str,
     user_data: &Path,
     file: &mut CreatorsFile,
@@ -188,14 +261,8 @@ pub fn run(
     if due.is_empty() {
         return Ok(run);
     }
-    let Some(cookie) = instagram::read_session(user_data)?
-        .as_ref()
-        .and_then(instagram::Session::cookie_header)
-    else {
-        let _ = writeln!(out, "No Instagram session: nobody followed.");
-        run.code = 3;
-        return Ok(run);
-    };
+    let mut headless = true;
+    let mut browser = open(headless)?;
     for (i, slug) in due.iter().take(limit).enumerate() {
         if i > 0 && !fake {
             pause();
@@ -208,49 +275,34 @@ pub fn run(
         else {
             continue;
         };
+        let url = format!("{base}/{handle}/");
+        let mut seen = browser.open(&url)?;
+        if seen == PageState::LoginWall && headless {
+            // Headless may be refused where a visible window isn't.
+            headless = false;
+            browser = open(headless)?;
+            seen = browser.open(&url)?;
+        }
+        let outcome = match seen {
+            PageState::Follow => browser.click_follow()?.unwrap_or(PageState::Unknown),
+            other => other,
+        };
         let now = video_tags::timefmt::now_iso();
-        let res = http
-            .send(&instagram::timeline_request(base, &handle, &cookie))
-            .map_err(|e| format!("Instagram: {e}"))?;
         let record = |status: &str, error: Option<String>| Follow {
             handle: handle.clone(),
             at: now.clone(),
             status: status.into(),
             error,
         };
-        let outcome = match instagram::classify_page(&res) {
-            Answer::Profile(_) if already_following(&res.body) => Followed::Following,
-            Answer::Profile(_) => match user_pk(&res.body) {
-                Some(pk) => {
-                    if !fake {
-                        std::thread::sleep(Duration::from_secs(3));
-                    }
-                    let res = http
-                        .send(&follow_request(base, &pk, &handle, &cookie))
-                        .map_err(|e| format!("Instagram: {e}"))?;
-                    classify_follow(&res)
-                }
-                None => Followed::Failed("no user id in her page".into()),
-            },
-            Answer::Missing => Followed::Failed("account not found".into()),
-            Answer::NotLoggedIn => Followed::NotLoggedIn,
-            Answer::Challenge => Followed::Challenge,
-            Answer::Limited(why) => Followed::Limited(why),
-            Answer::Failed(why) => Followed::Failed(why),
-        };
-        let followed = match &outcome {
-            Followed::Following => Some("following"),
-            Followed::Requested => Some("requested"),
-            _ => None,
-        };
         match outcome {
-            Followed::Following | Followed::Requested => {
-                let status = followed.unwrap_or_default();
-                if status == "following" {
+            PageState::Following | PageState::Requested => {
+                let status = if outcome == PageState::Following {
                     run.following += 1;
+                    "following"
                 } else {
                     run.requested += 1;
-                }
+                    "requested"
+                };
                 let _ = writeln!(out, "  @{handle}: {status}");
                 state.follows.insert(slug.clone(), record(status, None));
                 if let Some(ig) = file
@@ -261,15 +313,7 @@ pub fn run(
                     ig.followed = Some(status.into());
                 }
             }
-            Followed::Failed(why) => {
-                let _ = writeln!(out, "  @{handle}: {why}; tried again next run.");
-                run.failed += 1;
-                run.code = run.code.max(2);
-                state
-                    .follows
-                    .insert(slug.clone(), record("failed", Some(why)));
-            }
-            Followed::NotLoggedIn => {
+            PageState::LoginWall => {
                 let _ = writeln!(
                     out,
                     "Instagram asks to log in: the session expired; run --login."
@@ -277,18 +321,26 @@ pub fn run(
                 run.code = 3;
                 break;
             }
-            Followed::Challenge => {
+            PageState::Blocked => {
                 let _ = writeln!(
                     out,
-                    "Instagram asks to confirm the account (a challenge): run --login and finish it in the window."
+                    "Instagram: try again later (action blocked); no more follows today."
                 );
-                run.code = 3;
-                break;
-            }
-            Followed::Limited(why) => {
-                let _ = writeln!(out, "Instagram: {why}; no more follows today.");
                 run.code = 2;
                 break;
+            }
+            PageState::Missing | PageState::Follow | PageState::Unknown => {
+                let why = match outcome {
+                    PageState::Missing => "account not found",
+                    PageState::Follow => "the click didn't take",
+                    _ => "no Follow button on her page",
+                };
+                let _ = writeln!(out, "  @{handle}: {why}; tried again next run.");
+                run.failed += 1;
+                run.code = run.code.max(2);
+                state
+                    .follows
+                    .insert(slug.clone(), record("failed", Some(why.into())));
             }
         }
         store::write(user_data, file)?;
@@ -304,121 +356,242 @@ pub fn run(
 mod tests {
     use super::*;
     use crate::store::{Creator, Instagram};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
 
-    fn res(status: u16, body: &str) -> Response {
-        Response {
-            status,
-            headers: Vec::new(),
-            body: body.into(),
+    fn dom(buttons: &[&str], text: &str) -> Dom {
+        Dom {
+            buttons: buttons.iter().map(|b| b.to_string()).collect(),
+            text: text.into(),
+            ..Dom::default()
         }
     }
 
     #[test]
-    fn classifies_follow_answers() {
+    fn reads_page_states() {
+        assert_eq!(dom(&["Follow", "Message"], "").state(), PageState::Follow);
+        assert_eq!(dom(&["Follow Back"], "").state(), PageState::Follow);
         assert_eq!(
-            classify_follow(&res(
-                200,
-                r#"{"friendship_status":{"following":true,"outgoing_request":false},"status":"ok"}"#
-            )),
-            Followed::Following
+            dom(&["Following", "Message"], "").state(),
+            PageState::Following
+        );
+        assert_eq!(dom(&["Requested"], "").state(), PageState::Requested);
+        assert_eq!(
+            dom(&["Follow"], "Try Again Later\nWe limit how often…").state(),
+            PageState::Blocked
         );
         assert_eq!(
-            classify_follow(&res(
-                200,
-                r#"{"friendship_status":{"following":false,"outgoing_request":true},"status":"ok"}"#
-            )),
-            Followed::Requested
+            dom(&[], "Sorry, this page isn't available.").state(),
+            PageState::Missing
         );
-        assert!(matches!(
-            classify_follow(&res(429, "")),
-            Followed::Limited(_)
-        ));
-        assert!(matches!(
-            classify_follow(&res(
-                400,
-                r#"{"message":"feedback_required","spam":true,"status":"fail"}"#
-            )),
-            Followed::Limited(_)
-        ));
-        assert!(matches!(
-            classify_follow(&res(
-                400,
-                r#"{"message":"Please wait a few minutes before you try again.","status":"fail"}"#
-            )),
-            Followed::Limited(_)
-        ));
-        assert_eq!(
-            classify_follow(&res(
-                400,
-                r#"{"message":"challenge_required","status":"fail"}"#
-            )),
-            Followed::Challenge
-        );
-        assert_eq!(classify_follow(&res(401, "{}")), Followed::NotLoggedIn);
-        assert_eq!(
-            classify_follow(&res(200, "<html>login</html>")),
-            Followed::NotLoggedIn
-        );
-        assert_eq!(
-            classify_follow(&res(404, "<html></html>")),
-            Followed::Failed("HTTP 404".into())
-        );
+        assert_eq!(dom(&[], "Loading").state(), PageState::Unknown);
+        let login = Dom {
+            login_form: true,
+            ..dom(&["Log in"], "")
+        };
+        assert_eq!(login.state(), PageState::LoginWall);
+        let v = json!({"buttons": ["Following"], "text": "x", "login": false, "url": "https://www.instagram.com/accounts/login/?next=/a/"});
+        assert_eq!(Dom::from_value(&v).state(), PageState::LoginWall);
+        let cookies = cookie_params(&[
+            json!({"name": "sessionid", "value": "S", "domain": ".instagram.com",
+            "path": "/", "expires": 1.9e9, "size": 9, "httpOnly": true, "secure": true, "sameSite": "Lax"}),
+        ]);
+        assert_eq!(cookies[0]["sameSite"], "Lax");
+        assert!(cookies[0].get("size").is_none());
+    }
+
+    /// Page states per URL; each `open` answers the next one, each click the
+    /// URL's click answer.
+    #[derive(Clone, Default)]
+    struct Fake {
+        pages: Rc<RefCell<HashMap<String, Vec<PageState>>>>,
+        clicks: Rc<RefCell<HashMap<String, PageState>>>,
+        log: Rc<RefCell<Vec<String>>>,
+        current: String,
+    }
+
+    impl FollowBrowser for Fake {
+        fn open(&mut self, url: &str) -> Result<PageState, String> {
+            self.current = url.into();
+            self.log.borrow_mut().push(format!("open {url}"));
+            let mut pages = self.pages.borrow_mut();
+            let list = pages.get_mut(url).ok_or("no page")?;
+            Ok(if list.len() > 1 {
+                list.remove(0)
+            } else {
+                list[0].clone()
+            })
+        }
+
+        fn click_follow(&mut self) -> Result<Option<PageState>, String> {
+            self.log
+                .borrow_mut()
+                .push(format!("click {}", self.current));
+            Ok(self.clicks.borrow().get(&self.current).cloned())
+        }
+    }
+
+    fn setup() -> (CreatorsFile, std::path::PathBuf) {
+        let mut file = CreatorsFile::empty();
+        for (slug, sources) in [
+            ("a1", vec!["favourite"]),
+            ("a2", vec!["swiped"]),
+            ("a3", vec!["favourite", "pornstar"]),
+            ("a4", vec!["favourite"]),
+            ("a5", vec!["favourite"]),
+            ("star", vec!["pornstar"]),
+        ] {
+            file.creators.insert(
+                slug.into(),
+                Creator {
+                    instagram: Some(Instagram {
+                        handle: slug.into(),
+                        ..Instagram::default()
+                    }),
+                    sources: sources.into_iter().map(String::from).collect(),
+                    ..Creator::default()
+                },
+            );
+        }
+        let dir = std::env::temp_dir().join(format!("creator-scout-follow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        (file, dir)
     }
 
     #[test]
-    fn reads_the_profile_page() {
-        let page = r#"{"props":{"profile_id":"123456","x":1}}"#;
-        assert_eq!(user_pk(page).as_deref(), Some("123456"));
-        let timeline = r#"<script>{"xdt_api__v1__feed__user_timeline_graphql_connection":{"edges":[{"node":{"code":"A","owner_id":{"pk":"777"}}}]}}</script>"#;
-        assert_eq!(user_pk(timeline).as_deref(), Some("777"));
-        assert_eq!(user_pk("<html></html>"), None);
-        assert!(already_following(
-            r#"{"friendship_status":{"followed_by":false,"following":true}}"#
-        ));
-        assert!(already_following(r#"{"followed_by_viewer":true}"#));
-        assert!(!already_following(
-            r#"{"friendship_status":{"following":false},"x":{"following":true}}"#
-        ));
-        let req = follow_request(
-            "https://www.instagram.com",
-            "123",
-            "ann",
-            "csrftoken=C; sessionid=S",
-        );
+    fn follows_by_clicking_and_stops_when_blocked_or_logged_out() {
+        let (mut file, dir) = setup();
+        let fake = Fake::default();
+        let u = |h: &str| format!("https://ig/{h}/");
+        for (h, s) in [
+            ("a1", PageState::Follow),
+            ("a2", PageState::Follow),
+            ("a3", PageState::Following),
+            ("a4", PageState::Follow),
+            ("a5", PageState::Follow),
+        ] {
+            fake.pages.borrow_mut().insert(u(h), vec![s]);
+        }
+        fake.clicks
+            .borrow_mut()
+            .insert(u("a1"), PageState::Following);
+        fake.clicks
+            .borrow_mut()
+            .insert(u("a2"), PageState::Requested);
+        fake.clicks.borrow_mut().insert(u("a4"), PageState::Blocked);
+        let opened = Rc::new(RefCell::new(Vec::new()));
+        let (f, o) = (fake.clone(), opened.clone());
+        let mut open = move |headless: bool| -> Result<Box<dyn FollowBrowser>, String> {
+            o.borrow_mut().push(headless);
+            Ok(Box::new(f.clone()))
+        };
+        let mut state = State::default();
+        let mut out = Vec::new();
+        let r = run(
+            &mut open,
+            "https://ig",
+            &dir,
+            &mut file,
+            &mut state,
+            &Swipes::default(),
+            10,
+            true,
+            &mut out,
+        )
+        .unwrap();
+        // Blocked at a4: stop for today.
+        assert_eq!((r.code, r.following, r.requested), (2, 2, 1));
+        assert_eq!(state.follows["a1"].status, "following");
+        assert_eq!(state.follows["a2"].status, "requested");
+        // Followed already: no click.
+        assert_eq!(state.follows["a3"].status, "following");
+        assert!(!fake.log.borrow().contains(&format!("click {}", u("a3"))));
+        assert!(!state.follows.contains_key("a4") && !state.follows.contains_key("star"));
         assert_eq!(
-            req.url,
-            "https://www.instagram.com/api/v1/friendships/create/123/"
+            file.creators["a2"]
+                .instagram
+                .as_ref()
+                .unwrap()
+                .followed
+                .as_deref(),
+            Some("requested")
         );
+        assert_eq!(*opened.borrow(), [true]);
+
+        // Next day: headless meets a login wall, the visible window too.
+        fake.pages
+            .borrow_mut()
+            .insert(u("a4"), vec![PageState::LoginWall]);
+        let r = run(
+            &mut open,
+            "https://ig",
+            &dir,
+            &mut file,
+            &mut state,
+            &Swipes::default(),
+            10,
+            true,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(r.code, 3);
+        assert_eq!(*opened.borrow(), [true, true, false]);
+        // A headed retry that works: followed.
+        fake.pages
+            .borrow_mut()
+            .insert(u("a4"), vec![PageState::LoginWall, PageState::Follow]);
+        fake.clicks
+            .borrow_mut()
+            .insert(u("a4"), PageState::Following);
+        fake.pages
+            .borrow_mut()
+            .insert(u("a5"), vec![PageState::Missing]);
+        let r = run(
+            &mut open,
+            "https://ig",
+            &dir,
+            &mut file,
+            &mut state,
+            &Swipes::default(),
+            1,
+            true,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!((r.code, r.following, r.left), (2, 1, 1));
+        assert_eq!(state.follows["a4"].status, "following");
+        let r = run(
+            &mut open,
+            "https://ig",
+            &dir,
+            &mut file,
+            &mut state,
+            &Swipes::default(),
+            5,
+            true,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!((r.code, r.failed), (2, 1));
         assert_eq!(
-            req.body.as_deref(),
-            Some("container_module=profile&user_id=123")
+            state.follows["a5"].error.as_deref(),
+            Some("account not found")
         );
-        assert!(req.headers.contains(&("X-CSRFToken".into(), "C".into())));
-        assert!(
-            req.headers
-                .contains(&("Referer".into(), "https://www.instagram.com/ann/".into()))
-        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn follows_favourites_and_swiped_yes_with_instagram() {
-        let mut file = CreatorsFile::empty();
-        let mk = |sources: &[&str], ig: bool| Creator {
-            instagram: ig.then(Instagram::default),
-            sources: sources.iter().map(|s| s.to_string()).collect(),
-            ..Creator::default()
-        };
-        file.creators.insert("fav".into(), mk(&["favourite"], true));
-        file.creators.insert("star".into(), mk(&["pornstar"], true));
-        file.creators.insert("swiped".into(), mk(&["swiped"], true));
-        file.creators
-            .insert("noig".into(), mk(&["favourite"], false));
-        file.creators
-            .insert("done".into(), mk(&["favourite"], true));
-        file.creators
-            .insert("failed".into(), mk(&["favourite"], true));
-        file.creators
-            .insert("said".into(), mk(&["favourite"], true));
+        let (mut file, _) = setup();
+        file.creators.insert(
+            "noig".into(),
+            Creator {
+                sources: vec!["favourite".into()],
+                ..Creator::default()
+            },
+        );
         let mut state = State::default();
         let rec = |status: &str| Follow {
             handle: "h".into(),
@@ -426,10 +599,10 @@ mod tests {
             status: status.into(),
             error: None,
         };
-        state.follows.insert("done".into(), rec("requested"));
-        state.follows.insert("failed".into(), rec("failed"));
+        state.follows.insert("a1".into(), rec("requested"));
+        state.follows.insert("a2".into(), rec("failed"));
         let mut swipes = Swipes::default();
-        swipes.creators.insert("said".into(), "no".into());
-        assert_eq!(due(&file, &state, &swipes), ["failed", "fav", "swiped"]);
+        swipes.creators.insert("a5".into(), "no".into());
+        assert_eq!(due(&file, &state, &swipes), ["a2", "a3", "a4"]);
     }
 }

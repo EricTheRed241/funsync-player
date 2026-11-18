@@ -14,7 +14,7 @@ use crate::discover::{self, Filing, combine, note_net};
 use crate::eroscripts;
 use crate::faptap;
 use crate::html;
-use crate::judge::{self, Handles, PeopleBatch, PersonItem};
+use crate::judge::{self, Handles, PersonItem};
 use crate::library::LibraryIds;
 use crate::people::{Person, merge_sources};
 use crate::state::{State, Swipes};
@@ -879,48 +879,63 @@ pub fn run(
                 "EroScripts: no session cookie (log in to EroScripts in the app); forum posts skipped."
             );
         }
-        let batch = PeopleBatch {
-            people: todo
-                .iter()
-                .map(|x| PersonItem {
-                    name: x.name.clone(),
-                    aliases: x.aliases.clone(),
-                    sources: x.sources.iter().map(|s| s.to_string()).collect(),
-                    posts: file
-                        .creators
-                        .get(&x.slug)
-                        .map(|c| c.posts.iter().take(10).map(|p| p.title.clone()).collect())
-                        .unwrap_or_default(),
-                })
-                .collect(),
-        };
+        let items: Vec<PersonItem> = todo
+            .iter()
+            .map(|x| PersonItem {
+                name: x.name.clone(),
+                aliases: x.aliases.clone(),
+                sources: x.sources.iter().map(|s| s.to_string()).collect(),
+                posts: file
+                    .creators
+                    .get(&x.slug)
+                    .map(|c| c.posts.iter().take(10).map(|p| p.title.clone()).collect())
+                    .unwrap_or_default(),
+            })
+            .collect();
         let work = user_data.join(judge::WORK_DIR);
-        let (batch_path, results_path) = judge::write_people(&work, &batch)?;
-        let names: Vec<String> = todo.iter().map(|x| x.name.clone()).collect();
-        let _ = writeln!(out, "Asking the judge about {} people...", names.len());
-        let results = judge::run(
-            &f.judge_cmd,
-            &judge::people_prompt(&batch_path, &results_path),
-            &work,
-        )
-        .and_then(|_| judge::read_people_results(&results_path, &names));
-        let results: BTreeMap<String, Handles> = match results {
-            Ok(r) => r.into_iter().map(|h| (store::slug(&h.name), h)).collect(),
-            Err(e) => {
-                let _ = writeln!(
-                    out,
-                    "Judge: {e}; these people are looked up again next run."
-                );
-                store::write(user_data, file)?;
-                crate::state::write(user_data, state)?;
-                return Ok(combine(code, 1));
+        let batches = judge::write_people(&work, &items)?;
+        let _ = writeln!(
+            out,
+            "Asking the judge about {} people in {} batch(es)...",
+            items.len(),
+            batches.len()
+        );
+        if let Err(e) = judge::run(&f.judge_cmd, &judge::people_prompt(&batches), &work) {
+            let _ = writeln!(out, "Judge: {e}; reading what it wrote.");
+        }
+        // A batch without a results file is asked again next run; the
+        // others count.
+        let mut results: BTreeMap<String, Handles> = BTreeMap::new();
+        for b in &batches {
+            match judge::read_people_results(&b.results, &b.names) {
+                Ok(r) => results.extend(r.into_iter().map(|h| (store::slug(&h.name), h))),
+                Err(e) => {
+                    let _ = writeln!(
+                        out,
+                        "Judge, {}: {e}; these people are looked up again next run.",
+                        b.results.display()
+                    );
+                    code = combine(code, 2);
+                }
             }
-        };
+        }
+        if results.is_empty() {
+            store::write(user_data, file)?;
+            crate::state::write(user_data, state)?;
+            return Ok(combine(code, 1));
+        }
         for person in todo {
-            let Some(h) = results.get(&store::slug(&person.name)) else {
+            let Some(h) = results.get(&store::slug(&person.name)).filter(|h| {
+                !(h.instagram.is_empty()
+                    && h.twitch.is_empty()
+                    && h.profiles.is_empty()
+                    && h.images.is_empty())
+            }) else {
+                // Not researched (no entry, or an empty one): due next run,
+                // not marked missing.
                 let _ = writeln!(
                     out,
-                    "  {}: no answer from the judge; next run.",
+                    "  {}: the judge found nothing to check; next run.",
                     person.name
                 );
                 code = combine(code, 2);

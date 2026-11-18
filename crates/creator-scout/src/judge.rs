@@ -15,8 +15,6 @@ pub const DEFAULT_MAX_COST: f64 = 5.0;
 pub const WORK_DIR: &str = "creator-scout-work";
 pub const BATCH_FILE: &str = "titles.json";
 pub const RESULTS_FILE: &str = "results.json";
-pub const PEOPLE_FILE: &str = "people.json";
-pub const PEOPLE_RESULTS_FILE: &str = "people-results.json";
 /// Handle candidates per account kind, at most.
 pub const MAX_HANDLES: usize = 5;
 const MAX_NAME: usize = 60;
@@ -97,9 +95,58 @@ pub fn write_batch(work: &Path, batch: &Batch) -> Result<(PathBuf, PathBuf), Str
     write_files(work, BATCH_FILE, RESULTS_FILE, batch)
 }
 
-/// Write the people batch; returns (batch file, results file).
-pub fn write_people(work: &Path, batch: &PeopleBatch) -> Result<(PathBuf, PathBuf), String> {
-    write_files(work, PEOPLE_FILE, PEOPLE_RESULTS_FILE, batch)
+/// People per judge batch (one subagent each).
+pub const PEOPLE_BATCH: usize = 8;
+/// The default spending cap of `--profiles`' judge (it searches many sites
+/// for every person).
+pub const PEOPLE_MAX_COST: f64 = 10.0;
+
+/// The default judge command of `--profiles`: the main agent spawns one
+/// subagent per batch (`task`), each searching the web.
+pub fn default_people_command(max_cost: f64) -> String {
+    format!(
+        "omp -p --wait-async --tools read,write,task,web_search --auto-approve --max-cost {max_cost}"
+    )
+}
+
+/// A people batch file, its results file and the names in it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeopleFiles {
+    pub batch: PathBuf,
+    pub results: PathBuf,
+    pub names: Vec<String>,
+}
+
+/// Write the people in batches of [`PEOPLE_BATCH`] (`people-<n>.json`,
+/// results `people-results-<n>.json`); earlier batch and results files are
+/// removed first.
+pub fn write_people(work: &Path, people: &[PersonItem]) -> Result<Vec<PeopleFiles>, String> {
+    fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
+    for e in fs::read_dir(work).into_iter().flatten().flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with("people") && n.ends_with(".json") {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+    people
+        .chunks(PEOPLE_BATCH)
+        .enumerate()
+        .map(|(i, chunk)| {
+            let (batch, results) = write_files(
+                work,
+                &format!("people-{}.json", i + 1),
+                &format!("people-results-{}.json", i + 1),
+                &PeopleBatch {
+                    people: chunk.to_vec(),
+                },
+            )?;
+            Ok(PeopleFiles {
+                batch,
+                results,
+                names: chunk.iter().map(|p| p.name.clone()).collect(),
+            })
+        })
+        .collect()
 }
 
 /// What the judge looks for, the same for new creators and for people.
@@ -111,23 +158,41 @@ candidates, most likely first, [] when none (handles without @ and without URL);
 https URLs); and, when you see them, up to 10 free public pictures of her as {\"url\": \"<image URL>\", \"page\": \
 \"<the profile page URL above it is on>\"}";
 
-pub fn people_prompt(batch: &Path, results: &Path) -> String {
+/// The main judge's instructions: one subagent per people batch.
+pub fn people_prompt(batches: &[PeopleFiles]) -> String {
+    let list: String = batches
+        .iter()
+        .map(|b| {
+            format!(
+                "- {} → {} ({} people)\n",
+                b.batch.display(),
+                b.results.display(),
+                b.names.len()
+            )
+        })
+        .collect();
     format!(
         "You find the public profiles of people a user likes: adult performers, OnlyFans / Fansly creators, \
-camgirls, cosplayers, and adult artists or animators (3D, hentai, PMV makers) and studios. Read {batch} with the \
-read tool. It is JSON: {{\"people\": [{{\"name\", \"aliases\", \"sources\", \"posts\"}}]}} (sources: favourite = a \
-favourite artist, pornstar = on the user's pornstar list, swiped = liked on the user's Creators site; posts: titles \
-of funscripts made for her videos, to tell her from namesakes).
+camgirls, cosplayers, and adult artists or animators (3D, hentai, PMV makers) and studios. Each batch file below is \
+JSON: {{\"people\": [{{\"name\", \"aliases\", \"sources\", \"posts\"}}]}} (sources: favourite = a favourite artist, \
+pornstar = on the user's pornstar list, swiped = liked on the user's Creators site; posts: titles of funscripts made \
+for her videos, to tell her from namesakes).
 
-For every person search the web (web_search) for {FIND}.
-
-Write {results} with the write tool, and nothing else in it:
+Batches (batch file → results file):
+{list}
+Spawn one `task` subagent per batch, all in a single parallel call. Give each subagent its batch file and its \
+results file and these instructions, word for word:
+1. Read the batch file with the read tool.
+2. For every person, search the web (web_search) for {FIND}. Check every one of those sites for every person: \
+search each site by her name (and aliases), e.g. \"<name> instagram\", \"<name> onlyfans\", \"<name> iafd\", \
+\"<name> babepedia\", \"<name> pornhub\", \"<name> twitch\"; don't stop at the first find.
+3. Write the results file with the write tool, and nothing else in it: \
 {{\"people\": [{{\"name\": \"<name as in the batch>\", \"instagram\": [\"handle\"], \"twitch\": [\"login\"], \
-\"profiles\": [\"https://…\"], \"images\": [{{\"url\": \"https://…\", \"page\": \"https://…\"}}]}}]}}
-with exactly one entry per batch person. Don't change any other file. When the results file is written, reply \
-with one line: done.",
-        batch = batch.display(),
-        results = results.display()
+\"profiles\": [\"https://…\"], \"images\": [{{\"url\": \"https://…\", \"page\": \"https://…\"}}]}}]}} with exactly \
+one entry per batch person.
+
+Don't change any other file. The subagents' results come back to you as they finish; when every subagent has \
+reported and every results file exists, reply with one line: done. If a subagent failed, run that batch again."
     )
 }
 
@@ -584,10 +649,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.creators[0].profiles, ["https://fansly.com/a"]);
-        let p = people_prompt(
-            Path::new("/w/people.json"),
-            Path::new("/w/people-results.json"),
+        let dir = std::env::temp_dir().join(format!("creator-scout-people-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("people-results-7.json"), "stale").unwrap();
+        let item = |n: usize| PersonItem {
+            name: format!("P{n}"),
+            aliases: vec![],
+            sources: vec!["favourite".into()],
+            posts: vec![],
+        };
+        let people: Vec<PersonItem> = (0..19).map(item).collect();
+        let batches = write_people(&dir, &people).unwrap();
+        // Batches of 8: one subagent each.
+        let sizes: Vec<usize> = batches.iter().map(|b| b.names.len()).collect();
+        assert_eq!(sizes, [8, 8, 3]);
+        assert!(batches[2].batch.ends_with("people-3.json"));
+        assert!(
+            !dir.join("people-results-7.json").exists(),
+            "stale results removed"
         );
-        assert!(p.contains("/w/people.json") && p.contains("OnlyFans") && p.contains("\"images\""));
+        let p = people_prompt(&batches);
+        assert!(p.contains("people-2.json") && p.contains("people-results-3.json"));
+        assert!(
+            p.contains("one `task` subagent per batch")
+                && p.contains("IAFD")
+                && p.contains("\"images\"")
+        );
+        assert!(default_people_command(PEOPLE_MAX_COST).contains("task,web_search"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }
