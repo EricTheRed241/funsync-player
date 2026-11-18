@@ -124,6 +124,11 @@ pub struct Browser {
 /// a DevTools port, and attach to a blank page. Shared with
 /// crates/creator-scout (Instagram login).
 pub fn open_chrome(profile: &Path) -> Result<Browser, String> {
+    open_chrome_with(profile, &[])
+}
+
+/// [`open_chrome`] with more Chrome flags (e.g. `--headless=new`).
+pub fn open_chrome_with(profile: &Path, extra: &[&str]) -> Result<Browser, String> {
     fs::create_dir_all(profile).map_err(|e| format!("{}: {e}", profile.display()))?;
     let port_file = profile.join("DevToolsActivePort");
     let _ = fs::remove_file(&port_file);
@@ -135,8 +140,9 @@ pub fn open_chrome(profile: &Path) -> Result<Browser, String> {
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--window-size=1366,900",
-                "about:blank",
             ])
+            .args(extra)
+            .arg("about:blank")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

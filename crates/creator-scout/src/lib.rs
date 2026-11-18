@@ -437,7 +437,7 @@ fn run_profiles(
             scoring: &scoring,
         },
         judge_cmd: opts.judge_cmd.clone().unwrap_or_else(|| {
-            judge::default_command(opts.max_cost.unwrap_or(judge::DEFAULT_MAX_COST))
+            judge::default_people_command(opts.max_cost.unwrap_or(judge::PEOPLE_MAX_COST))
         }),
         fake: env.fake,
         library: &library,
@@ -454,8 +454,26 @@ fn run_follow(
     out: &mut dyn Write,
 ) -> Result<i32, String> {
     let swipes = state::read_swipes(&env.user_data)?;
+    if follow::due(file, st, &swipes).is_empty() {
+        writeln!(out, "Follow: nobody to follow.").map_err(io)?;
+        return Ok(0);
+    }
+    let login_hint =
+        "Not logged in to Instagram: run `npm run creators:scout -- --login` and sign in.";
+    let Some(session) =
+        instagram::read_session(&env.user_data)?.filter(|s| s.cookie_header().is_some())
+    else {
+        writeln!(out, "No Instagram session: nobody followed.\n{login_hint}").map_err(io)?;
+        return Ok(3);
+    };
+    let user_data = env.user_data.clone();
+    let mut open = move |headless: bool| -> Result<Box<dyn follow::FollowBrowser>, String> {
+        Ok(Box::new(follow::Chrome::open(
+            &user_data, &session, headless,
+        )?))
+    };
     let r = follow::run(
-        env.http.as_ref(),
+        &mut open,
         verify::INSTAGRAM,
         &env.user_data,
         file,
@@ -472,11 +490,7 @@ fn run_follow(
     )
     .map_err(io)?;
     if r.code == 3 {
-        writeln!(
-            out,
-            "Not logged in to Instagram: run `npm run creators:scout -- --login` and sign in."
-        )
-        .map_err(io)?;
+        writeln!(out, "{login_hint}").map_err(io)?;
     }
     Ok(r.code)
 }

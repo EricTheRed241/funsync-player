@@ -71,9 +71,11 @@ Modes:
                         only the profile photo is saved (exit 3).
   --follow [N]          Follow on Instagram (the --login account) up to N creators
                         (default 10) with a confirmed Instagram account who are a
-                        favourite or swiped yes; 20-40 s between them; never
-                        unfollows. A challenge or lost session stops it (exit 3),
-                        a rate limit too (exit 2, next day).
+                        favourite or swiped yes: a Chrome (headless, the --login
+                        profile and session; a visible one when headless meets a
+                        login wall) opens her profile and clicks Follow; 20-40 s
+                        between them; never unfollows. A login wall stops it
+                        (exit 3), \"Try Again Later\" too (exit 2, next day).
   --login               Open Chrome (profile <userData>/instagram-chrome) on
                         Instagram's login page and sign in with the credentials
                         file (below); without one, sign in yourself. A check
@@ -97,11 +99,12 @@ Modes:
 Options:
   --user-data <dir>     FunSync's userData folder
                         (default $FUNSYNC_USER_DATA, else ~/Library/Application Support/funsync-player)
-  --max-cost <usd>      Spending cap of the default judge (default 5)
+  --max-cost <usd>      Spending cap of the default judge (default 5; 10 for
+                        --profiles)
   --judge-cmd <cmd>     Another judge command (run by sh in <userData>/creator-scout-work
                         with the prompt as its last argument); it must write
                         results.json for titles.json (--discover) and
-                        people-results.json for people.json (--profiles)
+                        people-results-<n>.json for each people-<n>.json (--profiles)
   --repo <dir>          The repo the npm scripts run in (default: this checkout)
   --credentials <file>  The Instagram account for --login: \"username: …\" and
                         \"password: …\" lines (default $FUNSYNC_INSTAGRAM_CREDENTIALS,

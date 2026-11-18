@@ -531,12 +531,12 @@ fn gif(w: u16, h: u16) -> String {
     String::from_utf8(b).expect("dimensions whose bytes are ASCII")
 }
 
-/// A judge for --profiles: writes fixed people-results.json.
+/// A judge for --profiles: writes fixed results for the first batch.
 fn people_judge(t: &TempDir, results: &Value) -> String {
     let r = t.write("people-results.json", &results.to_string());
     let script = t.write(
         "people-judge.sh",
-        &format!("cp '{}' people-results.json\n", r.display()),
+        &format!("cp '{}' people-results-1.json\n", r.display()),
     );
     format!("sh {}", script.display())
 }
@@ -614,7 +614,7 @@ fn profiles_make_the_people_you_like_creators_with_profiles_and_pictures() {
         "{out}"
     );
     let batch: Value = serde_json::from_str(
-        &fs::read_to_string(t.ud().join("creator-scout-work/people.json")).unwrap(),
+        &fs::read_to_string(t.ud().join("creator-scout-work/people-1.json")).unwrap(),
     )
     .unwrap();
     let names: Vec<&str> = batch["people"]
@@ -724,81 +724,25 @@ fn profile_page(class: &str, followers: &str, name: &str, edges: &[Value]) -> St
 }
 
 #[test]
-fn follows_favourites_and_swiped_yes_on_instagram() {
+fn follow_without_a_session_exits_3_without_a_browser() {
     let t = TempDir::new();
-    let ig = |h: &str| json!({"handle": h, "followers": "1M", "posts": "10", "match": "high"});
+    let ig = json!({"handle": "a1", "followers": "1M", "posts": "10", "match": "high"});
     fs::write(
         t.ud().join("creators.json"),
         json!({"version": 1, "creators": {
-            "a1": {"name": "A One", "instagram": ig("a1"), "sources": ["favourite"]},
-            "a2": {"name": "A Two", "instagram": ig("a2"), "sources": ["swiped"]},
-            "a3": {"name": "A Three", "instagram": ig("a3"), "sources": ["favourite", "pornstar"]},
-            "a4": {"name": "A Four", "instagram": ig("a4"), "sources": ["favourite"]},
-            "a5": {"name": "A Five", "instagram": ig("a5"), "sources": ["favourite"]},
-            "star": {"name": "Star", "instagram": ig("star"), "sources": ["pornstar"]},
-            "noig": {"name": "No IG", "sources": ["favourite"]}
-        }})
+            "a1": {"name": "A One", "instagram": ig, "sources": ["favourite"]}}})
         .to_string(),
     )
     .unwrap();
-    fs::write(
-        t.ud().join("instagram-session.json"),
-        json!({"cookies": [
-            {"name": "sessionid", "value": "SID", "domain": ".instagram.com"},
-            {"name": "csrftoken", "value": "CSRF", "domain": ".instagram.com"}],
-            "savedAt": "2026-11-17T00:00:00.000Z"})
-        .to_string(),
-    )
-    .unwrap();
-    let page = |pk: &str, following: bool| {
-        format!(
-            r#"<html class="_9dls"><meta property="og:description" content="1M Followers, 1 Following, 10 Posts - See Instagram photos and videos from A (&#064;a)" />
-            <script>{{"profile_id":"{pk}","friendship_status":{{"following":{following},"outgoing_request":false}}}}</script></html>"#
-        )
-    };
-    let create = |pk: &str| format!("POST {IG}/api/v1/friendships/create/{pk}/");
-    let mut fx = json!({
-        format!("GET {IG}/a1/"): {"body": page("101", false)},
-        format!("GET {IG}/a2/"): {"body": page("102", false)},
-        format!("GET {IG}/a3/"): {"body": page("103", true)},
-        format!("GET {IG}/a4/"): {"body": page("104", false)},
-        format!("GET {IG}/a5/"): {"body": page("105", false)},
-        create("101"): {"body": {"friendship_status": {"following": true, "outgoing_request": false}, "status": "ok"}},
-        create("102"): {"body": {"friendship_status": {"following": false, "outgoing_request": true}, "status": "ok"}},
-        create("104"): {"status": 400, "body": {"message": "feedback_required", "spam": true, "status": "fail"}}
-    });
-    let fixtures = t.write("fixtures.json", &fx.to_string());
-    let o = run(&t, &["--follow"], Some(&fixtures));
-    let out = text(&o);
-    // Rate limited at A Four: stop for today.
-    assert_eq!(o.status.code(), Some(2), "{out}");
-    assert!(!out.contains("SID") && !out.contains("CSRF"), "{out}");
-    let st = t.state();
-    assert_eq!(st["follows"]["a1"]["status"], "following");
-    assert_eq!(st["follows"]["a2"]["status"], "requested");
-    // Followed already: no request needed.
-    assert_eq!(st["follows"]["a3"]["status"], "following");
-    for slug in ["a4", "a5", "star", "noig"] {
-        assert!(st["follows"].get(slug).is_none(), "{slug}");
-    }
-    let f = t.creators();
-    assert_eq!(f["creators"]["a1"]["instagram"]["followed"], "following");
-    assert_eq!(f["creators"]["a2"]["instagram"]["followed"], "requested");
-    assert!(f["creators"]["a4"]["instagram"]["followed"].is_null());
-
-    // Next day: a challenge stops it, not logged in.
-    fx[create("104")] =
-        json!({"status": 400, "body": {"message": "challenge_required", "status": "fail"}});
-    let fixtures = t.write("fixtures.json", &fx.to_string());
-    let o = run(&t, &["--follow", "5"], Some(&fixtures));
+    let none = t.write("fixtures.json", "{}");
+    let o = run(&t, &["--follow"], Some(&none));
     let out = text(&o);
     assert_eq!(o.status.code(), Some(3), "{out}");
     assert!(out.contains("--login"), "{out}");
-    assert!(t.state()["follows"].get("a5").is_none());
-
+    assert!(t.state()["follows"].as_object().unwrap().is_empty());
     let o = run(&t, &["--status"], None);
     assert!(
-        text(&o).contains("Follow: 2 followed, 1 requested"),
+        text(&o).contains("Follow: 0 followed, 0 requested, 0 failed, 1 waiting"),
         "{}",
         text(&o)
     );
