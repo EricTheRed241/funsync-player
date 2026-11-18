@@ -18,6 +18,9 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Chrome's profile for `--follow`, in userData (not `--login`'s).
+pub const FOLLOW_PROFILE_DIR: &str = "instagram-follow-chrome";
+
 /// Creators to follow, in slug order: an Instagram account, a source
 /// favourite or swiped, not swiped no, not followed (or requested) yet.
 pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes) -> Vec<String> {
@@ -164,8 +167,11 @@ impl Chrome {
         headless: bool,
     ) -> Result<Chrome, String> {
         let extra: &[&str] = if headless { &["--headless=new"] } else { &[] };
-        let mut b =
-            slr_scout::login::open_chrome_with(&user_data.join(instagram::PROFILE_DIR), extra)?;
+        // Its own profile, not --login's: a Chrome left open on that one
+        // (an interrupted login) holds it, and a second Chrome then hands
+        // over to it without opening a DevTools port. The session's cookies
+        // are set below, so the profile needs nothing of its own.
+        let mut b = slr_scout::login::open_chrome_with(&user_data.join(FOLLOW_PROFILE_DIR), extra)?;
         let s = b.session.clone();
         b.cdp.call(
             "Network.setCookies",
