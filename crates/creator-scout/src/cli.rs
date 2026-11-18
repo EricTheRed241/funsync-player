@@ -15,7 +15,7 @@ Usage:
   npm run creators:scout -- --import-seed <file>   [--user-data <dir>]
   npm run creators:scout -- --discover             [options]
   npm run creators:scout -- --pictures [N]         [--user-data <dir>]
-  npm run creators:scout -- --login                [--user-data <dir>]
+  npm run creators:scout -- --login [--credentials <file>] [--user-data <dir>]
   npm run creators:scout -- --status               [--user-data <dir>]
   npm run creators:scout -- --fetch [--dry-run]    [options]
   npm run creators:scout -- --daily                [options]
@@ -41,9 +41,12 @@ Modes:
                         between creators. Needs --login for the posts; without a
                         session only the profile photo is saved (exit 3).
   --login               Open Chrome (profile <userData>/instagram-chrome) on
-                        Instagram's login page; sign in yourself. The session is
-                        saved to <userData>/instagram-session.json (0600) once it
-                        appears (10 minutes at most).
+                        Instagram's login page and sign in with the credentials
+                        file (below); without one, sign in yourself. A check
+                        Instagram asks for (a code, \"save login info\") is done in
+                        the window. The session is saved to
+                        <userData>/instagram-session.json (0600) once it appears
+                        (10 minutes at most).
   --status              Creators, posts, the Instagram session and its age, the
                         cursors and the fetch queue.
   --fetch               Fetch the posts swiped \"want\" on the Creators site that
@@ -65,6 +68,9 @@ Options:
                         with the prompt as its last argument); it must write
                         results.json for titles.json
   --repo <dir>          The repo the npm scripts run in (default: this checkout)
+  --credentials <file>  The Instagram account for --login: \"username: …\" and
+                        \"password: …\" lines (default $FUNSYNC_INSTAGRAM_CREDENTIALS,
+                        else instagram_creds.txt at the repo root; never printed)
   --npm <cmd>           The npm command for --fetch (default npm)
 
 Files in <userData>: creators.json (read by the Creators site), creator-pictures/,
@@ -98,6 +104,7 @@ pub struct Options {
     pub judge_cmd: Option<String>,
     pub repo: Option<PathBuf>,
     pub npm: Option<String>,
+    pub credentials: Option<PathBuf>,
 }
 
 pub fn parse(args: &[OsString]) -> Result<Options, String> {
@@ -126,6 +133,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 | "--repo"
                 | "--npm"
                 | "--pictures"
+                | "--credentials"
         );
         if inline.is_some() && !takes_value {
             return Err(format!("{flag} takes no value"));
@@ -196,6 +204,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 o.judge_cmd = Some(v);
             }
             "--repo" => o.repo = Some(PathBuf::from(value()?)),
+            "--credentials" => o.credentials = Some(PathBuf::from(value()?)),
             "--npm" => {
                 let v = value()?;
                 if v.trim().is_empty() {
