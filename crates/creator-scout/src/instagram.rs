@@ -137,8 +137,12 @@ fn fill_form(
     )?;
     std::thread::sleep(Duration::from_millis(800));
     for (sel, value) in [
-        (r#"input[name="username"]"#, &creds.username),
-        (r#"input[name="password"]"#, &creds.password),
+        // Instagram renamed the fields (2026-11: name="email" / "pass").
+        (
+            r#"input[name="username"], input[name="email"], input[autocomplete^="username"]"#,
+            &creds.username,
+        ),
+        (r#"input[type="password"]"#, &creds.password),
     ] {
         let found = cdp.eval(
             s,
@@ -156,7 +160,7 @@ fn fill_form(
     std::thread::sleep(Duration::from_millis(600));
     let clicked = cdp.eval(
         s,
-        "(()=>{const b=document.querySelector('button[type=\"submit\"]'); if(!b) return false; b.click(); return true})()",
+        "(()=>{const b=document.querySelector('button[type=\"submit\"], input[type=\"submit\"]') || [...document.querySelectorAll('button,[role=button]')].find(x=>x.innerText.trim()==='Log in'); if(!b) return false; b.click(); return true})()",
     )?;
     Ok(clicked == true)
 }
