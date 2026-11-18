@@ -16,6 +16,8 @@ pub const PICTURES_DIR: &str = "creator-pictures";
 pub const FORUM_SITE: &str = "https://discuss.eroscripts.com";
 pub const FAPTAP_SITE: &str = "https://faptap.net";
 pub const INSTAGRAM_SITE: &str = "https://www.instagram.com";
+/// A creator's sources (`Creator::sources`), in this order.
+pub const SOURCES: [&str; 3] = ["swiped", "favourite", "pornstar"];
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +51,9 @@ pub struct Instagram {
     pub match_: Option<String>,
     #[serde(default)]
     pub checked_at: Option<String>,
+    /// Our Instagram account follows her: following / requested (`--follow`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followed: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -69,16 +74,45 @@ pub struct Twitch {
     pub extra: Map<String, Value>,
 }
 
+/// A public profile page confirmed hers (`--discover`, `--profiles`): its
+/// own name or handle matches hers (the verify rule) and it answered.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    /// onlyfans / fansly / pornhub / x / reddit / manyvids / linktree /
+    /// iafd / babepedia / boobpedia / freeones / profile (another page).
+    pub site: String,
+    pub url: String,
+    #[serde(default)]
+    pub handle: String,
+    /// high / medium.
+    #[serde(default, rename = "match")]
+    pub match_: Option<String>,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Picture {
     /// A file name in the creator's picture folder.
     pub file: String,
-    /// instagram / eroscripts / faptap.
+    /// instagram / eroscripts / faptap (post images), pornhub / web (video
+    /// thumbnails and pictures the judge found), onlyfans / fansly / x /
+    /// reddit / profile (a confirmed profile's own picture).
     pub source: String,
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub taken_at: Option<String>,
+}
+
+impl Picture {
+    /// A post's own image (rebuilt from the posts every time).
+    fn is_post_image(&self) -> bool {
+        self.source == "eroscripts" || self.source == "faptap"
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -112,6 +146,10 @@ pub struct Post {
     pub in_library: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    /// The post's public video pages (Pornhub, rule34video, SexLikeReal):
+    /// their poster frames are pictures of her.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub video_pages: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -142,11 +180,19 @@ pub struct Creator {
     pub instagram: Option<Instagram>,
     #[serde(default)]
     pub twitch: Option<Twitch>,
+    /// Her other public profiles confirmed hers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<Profile>,
     /// Newest first.
     #[serde(default)]
     pub pictures: Vec<Picture>,
     #[serde(default)]
     pub posts: Vec<Post>,
+    /// Why the user wants her, set by `--favourites`: `swiped` (yes on the
+    /// Creators site), `favourite` (a favourite artist), `pornstar` (the
+    /// pornstar list), in that order; empty for a creator only discovered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -196,6 +242,16 @@ impl Creator {
             .chain(&self.aliases)
             .map(|n| slug(n))
             .filter(|s| !s.is_empty())
+    }
+
+    /// Her first source's place in [`SOURCES`] (swiped 0, favourite 1,
+    /// pornstar 2); `SOURCES.len()` for a creator only discovered.
+    pub fn source_rank(&self) -> usize {
+        self.sources
+            .iter()
+            .filter_map(|s| SOURCES.iter().position(|x| x == s))
+            .min()
+            .unwrap_or(SOURCES.len())
     }
 }
 
@@ -297,6 +353,17 @@ pub fn faptap_picture(id: &str) -> Option<String> {
     safe_id(id).map(|id| format!("ft-{id}.jpg"))
 }
 
+/// `web-<hash of the URL>.<ext>`: a picture from a public page.
+pub fn web_picture(url: &str, ext: &str) -> String {
+    let h = url.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("web-{h:016x}.{ext}")
+}
+
+/// Pictures a creator keeps besides Instagram's, at most.
+pub const MAX_OTHER_PICTURES: usize = 9;
+
 pub fn file_path(user_data: &Path) -> PathBuf {
     user_data.join(FILE_NAME)
 }
@@ -336,22 +403,24 @@ pub fn write(user_data: &Path, file: &mut CreatorsFile) -> Result<(), String> {
     video_tags::store::write_json_atomic(user_data, FILE_NAME, BACKUP_NAME, file).map(|_| ())
 }
 
-/// The post pictures (EroScripts images, FapTap thumbnails) after the
-/// creator's Instagram ones (kept as they are), newest first; a picture
-/// without a time goes last.
+/// A creator's pictures: Instagram's first (newest first), then her
+/// confirmed profiles' own pictures (undated, as found), then the post
+/// images (EroScripts images, FapTap thumbnails) and video poster frames,
+/// newest first, a picture without a time last; at most
+/// [`MAX_OTHER_PICTURES`] besides Instagram's.
 pub fn rebuild_pictures(c: &mut Creator) {
-    let mut pictures: Vec<Picture> = c
+    let mut kept: Vec<Picture> = c
         .pictures
         .iter()
-        .filter(|p| p.source == "instagram")
+        .filter(|p| !p.is_post_image())
         .cloned()
         .collect();
     for post in &c.posts {
         let Some(file) = &post.image else { continue };
-        if pictures.iter().any(|p| p.file == *file) {
+        if kept.iter().any(|p| p.file == *file) {
             continue;
         }
-        pictures.push(Picture {
+        kept.push(Picture {
             file: file.clone(),
             source: post.kind.clone(),
             url: post.url.clone(),
@@ -359,12 +428,20 @@ pub fn rebuild_pictures(c: &mut Creator) {
         });
     }
     // ISO times sort as text; None last.
-    pictures.sort_by(|a, b| match (&a.taken_at, &b.taken_at) {
+    let newest_first = |a: &Picture, b: &Picture| match (&a.taken_at, &b.taken_at) {
         (Some(x), Some(y)) => y.cmp(x),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
-    });
+    };
+    let (mut pictures, rest): (Vec<Picture>, Vec<Picture>) =
+        kept.into_iter().partition(|p| p.source == "instagram");
+    pictures.sort_by(newest_first);
+    let (profile, mut dated): (Vec<Picture>, Vec<Picture>) = rest
+        .into_iter()
+        .partition(|p| p.taken_at.is_none() && !p.is_post_image());
+    dated.sort_by(newest_first);
+    pictures.extend(profile.into_iter().chain(dated).take(MAX_OTHER_PICTURES));
     c.pictures = pictures;
 }
 
@@ -475,8 +552,8 @@ mod tests {
         };
         rebuild_pictures(&mut c);
         let files: Vec<&str> = c.pictures.iter().map(|p| p.file.as_str()).collect();
-        assert_eq!(files, ["es-5-0.jpg", "ig-1.jpg", "ft-9.jpg"]);
-        assert_eq!(c.pictures[0].source, "eroscripts");
+        assert_eq!(files, ["ig-1.jpg", "es-5-0.jpg", "ft-9.jpg"]);
+        assert_eq!(c.pictures[1].source, "eroscripts");
         let pics = pictures_dir(&dir, "a");
         fs::create_dir_all(&pics).unwrap();
         for f in ["ig-1.jpg", "ig-old.jpg", "es-5-0.jpg", "ft-9.jpg"] {
@@ -486,5 +563,51 @@ mod tests {
         assert!(!pics.join("ig-old.jpg").exists());
         assert!(pics.join("ft-9.jpg").exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn profile_pictures_before_post_ones_nine_at_most() {
+        let pic = |file: &str, source: &str, at: Option<&str>| Picture {
+            file: file.into(),
+            source: source.into(),
+            url: "u".into(),
+            taken_at: at.map(str::to_string),
+        };
+        let mut pictures = vec![
+            pic("ig-1.jpg", "instagram", Some("2026-11-01T00:00:00Z")),
+            pic("web-a.jpg", "onlyfans", None),
+            pic("web-b.jpg", "pornhub", Some("2026-10-01T00:00:00Z")),
+        ];
+        for i in 0..10 {
+            pictures.push(pic(
+                &format!("web-{i}.jpg"),
+                "web",
+                Some(&format!("2026-09-0{}T00:00:00Z", i.min(8) + 1)),
+            ));
+        }
+        let mut c = Creator {
+            pictures,
+            posts: vec![Post {
+                kind: "eroscripts".into(),
+                id: "5".into(),
+                image: Some("es-5-0.jpg".into()),
+                created_at: Some("2026-11-12T00:00:00Z".into()),
+                ..Post::default()
+            }],
+            ..Creator::default()
+        };
+        rebuild_pictures(&mut c);
+        let files: Vec<&str> = c.pictures.iter().map(|p| p.file.as_str()).collect();
+        assert_eq!(files.len(), 1 + MAX_OTHER_PICTURES);
+        assert_eq!(
+            &files[..4],
+            ["ig-1.jpg", "web-a.jpg", "es-5-0.jpg", "web-b.jpg"]
+        );
+        assert_eq!(files[4], "web-8.jpg");
+        assert_eq!(
+            web_picture("https://x/a.jpg", "png").len(),
+            "web-".len() + 16 + 4
+        );
+        assert!(safe_name(&web_picture("https://x/a.jpg", "jpg")));
     }
 }

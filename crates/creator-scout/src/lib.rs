@@ -2,10 +2,12 @@
 //! (OnlyFans / Fansly / camgirls / cosplayers / influencers) behind new
 //! EroScripts script posts (`real` + `non-vr`) and FapTap videos, named by a
 //! judge (an omp run) and kept when an Instagram or Twitch account of theirs
-//! exists; their posts (scored like the EroScripts deck), Instagram
-//! pictures, and the fetch of the posts swiped in. Writes
-//! `<userData>/creators.json`, `creator-pictures/`, `creator-scout-state.json`
-//! and `instagram-session.json`; reads `creator-swipes.json` (the site's) and
+//! exists; the people the user likes (favourite artists, the pornstar list,
+//! creators swiped yes) looked up on Instagram and Twitch; their posts
+//! (scored like the EroScripts deck), Instagram pictures, and the fetch of
+//! the posts swiped in. Writes `<userData>/creators.json`,
+//! `creator-pictures/`, `creator-scout-state.json` and
+//! `instagram-session.json`; reads `creator-swipes.json` (the site's) and
 //! config.json, which it never writes. The forum is read-only and paced.
 
 pub mod cli;
@@ -13,10 +15,13 @@ pub mod discover;
 pub mod eroscripts;
 pub mod faptap;
 pub mod fetch;
+pub mod follow;
 pub mod html;
 pub mod instagram;
 pub mod judge;
 pub mod library;
+pub mod people;
+pub mod profiles;
 pub mod seed;
 pub mod state;
 pub mod store;
@@ -175,6 +180,12 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         Mode::Pictures(n) => step("pictures", &env, &mut st, err, |st| {
             run_pictures(&env, n, &mut file, st, out)
         })?,
+        Mode::Profiles(n) => step("profiles", &env, &mut st, err, |st| {
+            run_profiles(&env, &opts, n, &mut file, st, out)
+        })?,
+        Mode::Follow(n) => step("follow", &env, &mut st, err, |st| {
+            run_follow(&env, n, &mut file, st, out)
+        })?,
         Mode::Fetch => step("fetch", &env, &mut st, err, |st| {
             run_fetch(&env, &opts, &mut file, st, out)
         })?,
@@ -187,11 +198,25 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
                     run_discover(&env, &opts, &mut file, st, out)
                 })?,
             ));
+            writeln!(out, "== profiles").map_err(io)?;
+            codes.push((
+                "profiles",
+                step("profiles", &env, &mut st, err, |st| {
+                    run_profiles(&env, &opts, cli::DEFAULT_PROFILES, &mut file, st, out)
+                })?,
+            ));
             writeln!(out, "== pictures").map_err(io)?;
             codes.push((
                 "pictures",
                 step("pictures", &env, &mut st, err, |st| {
                     run_pictures(&env, cli::DEFAULT_PICTURES, &mut file, st, out)
+                })?,
+            ));
+            writeln!(out, "== follow").map_err(io)?;
+            codes.push((
+                "follow",
+                step("follow", &env, &mut st, err, |st| {
+                    run_follow(&env, cli::DEFAULT_FOLLOWS, &mut file, st, out)
                 })?,
             ));
             writeln!(out, "== fetch").map_err(io)?;
@@ -373,6 +398,142 @@ fn run_pictures(
     Ok(r.code)
 }
 
+/// The people `--profiles` looks up: favourite artists (with config.json's
+/// changes), the pornstar list, creators swiped yes.
+fn people(
+    prefs: &slr_scout::prefs::Prefs,
+    user: &slr_scout::library::UserConfig,
+    file: &store::CreatorsFile,
+    swipes: &state::Swipes,
+) -> Vec<people::Person> {
+    people::people(
+        &prefs.favourites,
+        &user.favourite_changes,
+        &prefs.pornstar_tags.pornstars,
+        file,
+        swipes,
+    )
+}
+
+fn run_profiles(
+    env: &Env,
+    opts: &cli::Options,
+    n: usize,
+    file: &mut store::CreatorsFile,
+    st: &mut state::State,
+    out: &mut dyn Write,
+) -> Result<i32, String> {
+    let prefs = slr_scout::prefs::load()?;
+    let swipes = state::read_swipes(&env.user_data)?;
+    let people = people(&prefs, &env.user, file, &swipes);
+    let scoring = Scoring::new(&prefs, &env.user);
+    let library = env.library();
+    let cookie = slr_scout::forum::session_cookie(&env.config);
+    let f = profiles::Profiles {
+        filing: discover::Filing {
+            http: env.http.as_ref(),
+            user_data: &env.user_data,
+            cookie: cookie.as_deref(),
+            scoring: &scoring,
+        },
+        judge_cmd: opts.judge_cmd.clone().unwrap_or_else(|| {
+            judge::default_command(opts.max_cost.unwrap_or(judge::DEFAULT_MAX_COST))
+        }),
+        fake: env.fake,
+        library: &library,
+        limit: n,
+    };
+    profiles::run(&f, &people, file, st, &swipes, out)
+}
+
+fn run_follow(
+    env: &Env,
+    n: usize,
+    file: &mut store::CreatorsFile,
+    st: &mut state::State,
+    out: &mut dyn Write,
+) -> Result<i32, String> {
+    let swipes = state::read_swipes(&env.user_data)?;
+    let r = follow::run(
+        env.http.as_ref(),
+        verify::INSTAGRAM,
+        &env.user_data,
+        file,
+        st,
+        &swipes,
+        n,
+        env.fake,
+        out,
+    )?;
+    writeln!(
+        out,
+        "Follow: {} followed, {} requested (private), {} failed, {} waiting.",
+        r.following, r.requested, r.failed, r.left
+    )
+    .map_err(io)?;
+    if r.code == 3 {
+        writeln!(
+            out,
+            "Not logged in to Instagram: run `npm run creators:scout -- --login` and sign in."
+        )
+        .map_err(io)?;
+    }
+    Ok(r.code)
+}
+
+/// `--status`'s profiles and follows lines.
+fn profiles_status(user_data: &Path) -> Result<String, String> {
+    let file = store::read(user_data)?.unwrap_or_else(store::CreatorsFile::empty);
+    let config = if user_data.join("config.json").is_file() {
+        video_tags::config::read_json(user_data)?
+    } else {
+        Value::Null
+    };
+    let st = state::read(user_data)?;
+    let swipes = state::read_swipes(user_data)?;
+    let list = people(
+        &slr_scout::prefs::load()?,
+        &slr_scout::library::from_json(&config),
+        &file,
+        &swipes,
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let count = |s: profiles::Standing| {
+        list.iter()
+            .filter(|p| profiles::standing(&p.slug, &file, &st, &swipes, now) == s)
+            .count()
+    };
+    let with = |s: &str| list.iter().filter(|p| p.sources.contains(&s)).count();
+    let others = profiles::due(&list, &file, &st, &swipes, now)
+        .iter()
+        .filter(|p| p.sources.is_empty())
+        .count();
+    let follows = |s: &str| st.follows.values().filter(|f| f.status == s).count();
+    Ok(format!(
+        "Profiles: {} people ({} swiped yes, {} favourite(s), {} on the pornstar list): {} done, {} not found (looked up again after {} days), {} waiting, {} swiped no; {} other creator(s) with fewer than {} pictures waiting.\nFollow: {} followed, {} requested, {} failed, {} waiting.",
+        list.len(),
+        with("swiped"),
+        with("favourite"),
+        with("pornstar"),
+        count(profiles::Standing::Done),
+        count(profiles::Standing::Missing),
+        profiles::MISS_DAYS,
+        count(profiles::Standing::Waiting),
+        count(profiles::Standing::SwipedNo),
+        others,
+        profiles::MIN_PICTURES,
+        follows("following"),
+        follows("requested"),
+        follows("failed"),
+        follow::due(&file, &st, &swipes)
+            .iter()
+            .filter(|s| !st.follows.contains_key(*s))
+            .count(),
+    ))
+}
+
 fn run_fetch(
     env: &Env,
     opts: &cli::Options,
@@ -464,6 +625,10 @@ fn status(user_data: &Path, out: &mut dyn Write) -> std::io::Result<()> {
         )?,
         Ok(_) => writeln!(out, "Instagram session: none (run --login).")?,
         Err(e) => writeln!(out, "Instagram session: {e}")?,
+    }
+    match profiles_status(user_data) {
+        Ok(lines) => writeln!(out, "{lines}")?,
+        Err(e) => writeln!(out, "Profiles: {e}")?,
     }
     match state::read(user_data) {
         Ok(st) => {

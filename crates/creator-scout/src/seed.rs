@@ -42,6 +42,7 @@ fn instagram(v: &Value, at: Option<&str>) -> Option<Instagram> {
         last_post_at: text(&v["lastPostAt"]),
         match_: text(&v["match"]),
         checked_at: at.map(str::to_string),
+        followed: None,
         extra: Map::new(),
     })
 }
@@ -77,6 +78,7 @@ fn eroscripts_post(v: &Value) -> Option<Post> {
         duration_s: v["duration"].as_u64(),
         in_library: v["inLibrary"].as_bool().unwrap_or(false),
         created_at: None,
+        video_pages: Vec::new(),
         extra: Map::new(),
     })
 }
@@ -101,6 +103,7 @@ fn faptap_post(v: &Value) -> Option<Post> {
         duration_s: v["duration"].as_u64(),
         in_library: false,
         created_at: None,
+        video_pages: Vec::new(),
         extra: Map::new(),
     })
 }

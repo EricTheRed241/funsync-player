@@ -229,6 +229,7 @@ pub fn post(v: &Video) -> Post {
         duration_s: v.duration_s,
         in_library: false,
         created_at: v.created_at.clone(),
+        video_pages: Vec::new(),
         extra: Map::new(),
     }
 }

@@ -1,25 +1,22 @@
 //! `--discover`: the feeds since the cursors → the judge → verified new
-//! creators → their posts. The cursors move only when every title of the
-//! run was judged and every new creator checked, so nothing is skipped
-//! when a step fails (the next run judges those titles again; posts
-//! already filed aren't).
+//! creators (one profile confirmed hers is enough: Instagram, Twitch or a
+//! public profile page, crate::profiles) → their posts and pictures. The
+//! cursors move only when every title of the run was judged and every new
+//! creator checked, so nothing is skipped when a step fails (the next run
+//! judges those titles again; posts already filed aren't).
 
 use crate::eroscripts::{self, Topic};
 use crate::faptap::{self, Video};
 use crate::judge::{self, Batch, Handles, Item, Known};
 use crate::library::{LibraryIds, Scoring};
+use crate::profiles::{self, Finds, Pacers};
 use crate::state::{State, Unverified};
-use crate::store::{
-    self, Creator, CreatorsFile, EroscriptsChecked, FaptapChecked, Instagram, Twitch,
-};
-use crate::verify;
-use serde_json::Map;
+use crate::store::{self, Creator, CreatorsFile, EroscriptsChecked, FaptapChecked};
 use slr_scout::http::{Http, NetError, Pacer};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
 
 /// A name searched without finding an account isn't searched again for
 /// this long.
@@ -47,13 +44,6 @@ pub struct Discover<'a> {
     pub library: &'a LibraryIds,
 }
 
-struct Pacers {
-    forum: Pacer,
-    faptap: Pacer,
-    instagram: Pacer,
-    twitch: Pacer,
-}
-
 enum Title<'a> {
     Topic(&'a Topic),
     Video(&'a Video),
@@ -65,15 +55,35 @@ fn now_secs() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// What filing a post needs (`--discover` and `--favourites`): the
+/// network, where pictures go, the forum session cookie, the scores.
+pub struct Filing<'a> {
+    pub http: &'a dyn Http,
+    pub user_data: &'a Path,
+    pub cookie: Option<&'a str>,
+    pub scoring: &'a Scoring,
+}
+
+impl Discover<'_> {
+    fn filing(&self) -> Filing<'_> {
+        Filing {
+            http: self.http,
+            user_data: self.user_data,
+            cookie: self.cookie.as_deref(),
+            scoring: self.scoring,
+        }
+    }
+}
+
 /// Download a post picture (forum ones with the cookie) unless it is there.
 fn save_image(
-    d: &Discover,
+    f: &Filing,
     pacer: &mut Pacer,
     url: &str,
     slug: &str,
     name: &str,
 ) -> Result<bool, String> {
-    let dir = store::pictures_dir(d.user_data, slug);
+    let dir = store::pictures_dir(f.user_data, slug);
     let dest = dir.join(name);
     if dest.is_file() {
         return Ok(false);
@@ -81,10 +91,10 @@ fn save_image(
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let part = dir.join(format!(".{name}.part"));
     let r = eroscripts::download_image(
-        d.http,
+        f.http,
         pacer,
         eroscripts::FORUM,
-        d.cookie.as_deref().unwrap_or_default(),
+        f.cookie.unwrap_or_default(),
         url,
         &part,
     )
@@ -97,15 +107,15 @@ fn save_image(
 
 /// Read a topic's details into its post (hosts, image); `Err` leaves the
 /// post as listed and the topic waiting in `pendingDetails`.
-fn add_details(
-    d: &Discover,
-    p: &mut Pacers,
+pub fn add_details(
+    f: &Filing,
+    forum: &mut Pacer,
     c: &mut Creator,
     slug: &str,
     id: u64,
 ) -> Result<(), NetError> {
-    let cookie = d.cookie.as_deref().unwrap_or_default();
-    let v = eroscripts::topic_json(d.http, &mut p.forum, eroscripts::FORUM, cookie, id)?;
+    let cookie = f.cookie.unwrap_or_default();
+    let v = eroscripts::topic_json(f.http, forum, eroscripts::FORUM, cookie, id)?;
     let Some((mut post, image)) = eroscripts::detailed_post(&v, eroscripts::FORUM) else {
         // No longer a script post (moved, AI-tagged): drop it.
         c.posts
@@ -115,79 +125,30 @@ fn add_details(
     if let Some(url) = image {
         let name = store::eroscripts_picture(id, 0);
         // A picture that won't download leaves the post without one.
-        if save_image(d, &mut p.forum, &url, slug, &name).is_ok() {
+        if save_image(f, forum, &url, slug, &name).is_ok() {
             post.image = Some(name);
         }
     }
-    post.score = Some(d.scoring.score(&post, &c.name));
+    post.score = Some(f.scoring.score(&post, &c.name));
     c.upsert_post(post);
     Ok(())
 }
 
-fn add_video(d: &Discover, p: &mut Pacers, c: &mut Creator, slug: &str, v: &Video) {
+/// File a FapTap video under `c`, its thumbnail saved as her picture.
+pub fn add_video(f: &Filing, faptap: &mut Pacer, c: &mut Creator, slug: &str, v: &Video) {
     let mut post = faptap::post(v);
     if let (Some(url), Some(name)) = (&v.thumbnail, store::faptap_picture(&v.id)) {
-        let dir = store::pictures_dir(d.user_data, slug);
-        p.faptap.wait();
-        if crate::instagram::save(d.http, url, &dir, &name).is_ok() {
+        let dir = store::pictures_dir(f.user_data, slug);
+        faptap.wait();
+        if crate::instagram::save(f.http, url, &dir, &name).is_ok() {
             post.image = Some(name);
         }
     }
-    post.score = Some(d.scoring.score(&post, &c.name));
+    post.score = Some(f.scoring.score(&post, &c.name));
     c.upsert_post(post);
 }
 
-/// Check a new creator's handle candidates: the first Instagram and the
-/// first Twitch account that exist and match the name (high / medium).
-fn verify_creator(
-    d: &Discover,
-    p: &mut Pacers,
-    name: &str,
-    h: &Handles,
-) -> Result<(Option<Instagram>, Option<Twitch>), NetError> {
-    let now = video_tags::timefmt::now_iso();
-    let names = [name.to_string()];
-    let mut ig = None;
-    for cand in &h.instagram {
-        if let Some(page) = verify::instagram(d.http, &mut p.instagram, verify::INSTAGRAM, cand)? {
-            let q = verify::match_quality(&names, &page.handle, &page.full_name);
-            if q != "low" {
-                ig = Some(Instagram {
-                    handle: page.handle,
-                    followers: Some(page.followers),
-                    posts: Some(page.posts),
-                    full_name: Some(page.full_name).filter(|n| !n.is_empty()),
-                    bio: page.bio,
-                    last_post_at: None,
-                    match_: Some(q.into()),
-                    checked_at: Some(now.clone()),
-                    extra: Map::new(),
-                });
-                break;
-            }
-        }
-    }
-    let mut tw = None;
-    for cand in &h.twitch {
-        if let Some(u) = verify::twitch(d.http, &mut p.twitch, verify::TWITCH_GQL, cand)? {
-            let q = verify::match_quality(&names, &u.login, &u.display_name);
-            if q != "low" {
-                tw = Some(Twitch {
-                    handle: u.login,
-                    followers: Some(u.followers),
-                    last_live: u.last_live,
-                    match_: Some(q.into()),
-                    checked_at: Some(now.clone()),
-                    extra: Map::new(),
-                });
-                break;
-            }
-        }
-    }
-    Ok((ig, tw))
-}
-
-fn note_net(e: &NetError, what: &str, code: &mut i32, out: &mut dyn Write) {
+pub fn note_net(e: &NetError, what: &str, code: &mut i32, out: &mut dyn Write) {
     let _ = writeln!(out, "{what}: {e}");
     *code = combine(
         *code,
@@ -204,13 +165,7 @@ pub fn discover(
     state: &mut State,
     out: &mut dyn Write,
 ) -> Result<i32, String> {
-    let gap = |g: Duration| if d.fake { Duration::ZERO } else { g };
-    let mut p = Pacers {
-        forum: Pacer::new(gap(eroscripts::GAP)),
-        faptap: Pacer::new(gap(faptap::GAP)),
-        instagram: Pacer::new(gap(verify::INSTAGRAM_GAP)),
-        twitch: Pacer::new(gap(verify::TWITCH_GAP)),
-    };
+    let mut p = Pacers::new(d.fake);
     let mut code = 0;
     let now = video_tags::timefmt::now_iso();
     let mut touched: BTreeSet<String> = BTreeSet::new();
@@ -222,7 +177,7 @@ pub fn discover(
                 state.pending_details.remove(&id);
                 continue;
             };
-            match add_details(d, &mut p, c, &slug, topic) {
+            match add_details(&d.filing(), &mut p.forum, c, &slug, topic) {
                 Ok(()) => {
                     state.pending_details.remove(&id);
                     touched.insert(slug);
@@ -412,11 +367,12 @@ pub fn discover(
             by_creator.len()
         );
         let mut new_creators: Vec<String> = Vec::new();
+        let mut new_finds: HashMap<String, Finds> = HashMap::new();
         for (slug, (name, keys)) in &by_creator {
             if !file.creators.contains_key(slug) {
                 let none = Handles::default();
                 let h = handles.get(slug).copied().unwrap_or(&none);
-                if h.instagram.is_empty() && h.twitch.is_empty() {
+                if h.instagram.is_empty() && h.twitch.is_empty() && h.profiles.is_empty() {
                     if !state.unverified.contains_key(slug) {
                         state.unverified.insert(
                             slug.clone(),
@@ -426,10 +382,11 @@ pub fn discover(
                             },
                         );
                     }
-                    let _ = writeln!(out, "  {name}: no account to check; skipped.");
+                    let _ = writeln!(out, "  {name}: no account or profile to check; skipped.");
                     continue;
                 }
-                let (ig, tw) = match verify_creator(d, &mut p, name, h) {
+                let names = [name.clone()];
+                let finds = match profiles::verify(d.http, &mut p, &names, h, false, false, &now) {
                     Ok(found) => found,
                     Err(e) => {
                         note_net(&e, &format!("  {name}"), &mut code, out);
@@ -440,7 +397,7 @@ pub fn discover(
                         continue;
                     }
                 };
-                if ig.is_none() && tw.is_none() {
+                if !finds.any() {
                     state.unverified.insert(
                         slug.clone(),
                         Unverified {
@@ -450,37 +407,24 @@ pub fn discover(
                     );
                     let _ = writeln!(
                         out,
-                        "  {name}: no matching Instagram or Twitch account; skipped."
+                        "  {name}: no Instagram, Twitch or profile page confirmed hers; skipped."
                     );
                     continue;
                 }
-                let _ = writeln!(
-                    out,
-                    "  New creator {name}:{}{}",
-                    ig.as_ref().map_or(String::new(), |i| format!(
-                        " Instagram @{} ({} followers, {} match)",
-                        i.handle,
-                        i.followers.as_deref().unwrap_or("?"),
-                        i.match_.as_deref().unwrap_or("?")
-                    )),
-                    tw.as_ref().map_or(String::new(), |t| format!(
-                        " Twitch {} ({} followers, {} match)",
-                        t.handle,
-                        t.followers.unwrap_or(0),
-                        t.match_.as_deref().unwrap_or("?")
-                    ))
-                );
+                let _ = writeln!(out, "  New creator {name}: {}", finds.describe());
                 state.unverified.remove(slug);
                 file.creators.insert(
                     slug.clone(),
                     Creator {
                         name: name.clone(),
                         first_seen: Some(now.clone()),
-                        instagram: ig,
-                        twitch: tw,
+                        instagram: finds.instagram.clone(),
+                        twitch: finds.twitch.clone(),
+                        profiles: finds.profiles.clone(),
                         ..Creator::default()
                     },
                 );
+                new_finds.insert(slug.clone(), finds);
                 new_creators.push(slug.clone());
             }
             let Some(c) = file.creators.get_mut(slug) else {
@@ -492,12 +436,12 @@ pub fn discover(
                         let mut post = eroscripts::listed_post(t);
                         post.score = Some(d.scoring.score(&post, &c.name));
                         c.upsert_post(post);
-                        if let Err(e) = add_details(d, &mut p, c, slug, t.id) {
+                        if let Err(e) = add_details(&d.filing(), &mut p.forum, c, slug, t.id) {
                             note_net(&e, &format!("  EroScripts post {}", t.id), &mut code, out);
                             state.pending_details.insert(t.id.to_string(), slug.clone());
                         }
                     }
-                    Some(Title::Video(v)) => add_video(d, &mut p, c, slug, v),
+                    Some(Title::Video(v)) => add_video(&d.filing(), &mut p.faptap, c, slug, v),
                     None => continue,
                 }
                 added_posts += 1;
@@ -531,10 +475,27 @@ pub fn discover(
             }
             let c = file.creators.get_mut(slug).ok_or("creator vanished")?;
             for v in &mine {
-                add_video(d, &mut p, c, slug, v);
+                add_video(&d.filing(), &mut p.faptap, c, slug, v);
             }
             added_posts += mine.len();
             let _ = writeln!(out, "  {}: {} FapTap video(s) by name", c.name, mine.len());
+        }
+
+        // A new creator's pictures: her profiles', the judge's on pages
+        // that passed, her posts' video pages'.
+        for slug in &new_creators {
+            let (Some(c), Some(finds)) = (file.creators.get_mut(slug), new_finds.get(slug)) else {
+                continue;
+            };
+            let mut found = finds.pictures.clone();
+            match profiles::video_pictures(d.http, &mut p.pages, c) {
+                Ok(v) => found.extend(v),
+                Err(e) => note_net(&e, &format!("  {}: video pages", c.name), &mut code, out),
+            }
+            let n = profiles::add_pictures(d.http, d.user_data, slug, c, &found, out);
+            if n > 0 {
+                let _ = writeln!(out, "  {}: {n} picture(s)", c.name);
+            }
         }
     }
 

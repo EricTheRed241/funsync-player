@@ -2,8 +2,9 @@
 //! credentials file, or the user does; its cookies go to
 //! `instagram-session.json`, 0600; credentials and cookies are never
 //! printed) and the pictures step (`--pictures`): with a session, the
-//! newest timeline posts from `web_profile_info`; without, the profile
-//! photo from the public page.
+//! newest timeline posts the profile page embeds (fetched like Chrome
+//! navigating to it; Instagram's JSON endpoints answer 404 since
+//! 2026-11); without, the profile photo from the public page.
 
 use crate::state::{State, Swipes};
 use crate::store::{self, CreatorsFile, Instagram, Picture};
@@ -19,7 +20,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const SESSION_FILE: &str = "instagram-session.json";
 pub const PROFILE_DIR: &str = "instagram-chrome";
 pub const LOGIN_URL: &str = "https://www.instagram.com/accounts/login/";
-pub const APP_ID: &str = "936619743392459";
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 pub const CREDENTIALS_ENV: &str = "FUNSYNC_INSTAGRAM_CREDENTIALS";
 pub const CREDENTIALS_FILE: &str = "instagram_creds.txt";
@@ -214,125 +214,182 @@ pub fn login(
 /// A timeline post.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
+    /// The media id (`pk`).
     pub id: String,
     pub shortcode: String,
-    /// The biggest rendition at most 1080 px wide.
+    /// The biggest rendition at most 1080 px wide (else the post's
+    /// `/media/?size=l` redirect to its picture).
     pub image: String,
     pub taken_at: i64,
 }
 
+/// A profile page as a logged-in browser gets it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Profile {
-    pub followers: u64,
-    pub posts: u64,
-    pub full_name: String,
-    pub bio: String,
+    /// The counts, name and bio of its description meta, when it has them.
+    pub meta: Option<verify::IgPage>,
     /// Newest first, at most 12.
     pub items: Vec<Item>,
 }
 
-fn image_of(node: &Value) -> Option<String> {
-    let best = node["display_resources"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|r| Some((r["config_width"].as_u64()?, r["src"].as_str()?)))
-        .filter(|(w, _)| *w <= MAX_WIDTH)
-        .max_by_key(|(w, _)| *w)
-        .map(|(_, s)| s.to_string());
-    best.or_else(|| node["display_url"].as_str().map(str::to_string))
-        .or_else(|| node["thumbnail_src"].as_str().map(str::to_string))
-        .filter(|u| u.starts_with("https://"))
+/// The timeline the profile page embeds (`{"edges": [{"node": …}], …}`).
+const TIMELINE_KEY: &str = "\"xdt_api__v1__feed__user_timeline_graphql_connection\":";
+
+/// The JSON object or array `s` starts with, by bracket matching outside
+/// strings.
+fn json_span(s: &str) -> Option<&str> {
+    let b = s.as_bytes();
+    let (open, close) = match b.first()? {
+        b'[' => (b'[', b']'),
+        b'{' => (b'{', b'}'),
+        _ => return None,
+    };
+    let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+    for (i, &c) in b.iter().enumerate() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == b'\\' {
+                esc = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+        } else if c == b'"' {
+            in_str = true;
+        } else if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(&s[..=i]);
+            }
+        }
+    }
+    None
 }
 
-/// `web_profile_info`'s answer; `None` when the user doesn't exist.
-pub fn parse_profile(v: &Value) -> Option<Profile> {
-    let u = &v["data"]["user"];
-    if !u.is_object() {
-        return None;
+/// The biggest of `image_versions2.candidates` at most 1080 px wide.
+fn best_candidate(v: &Value) -> Option<String> {
+    v["image_versions2"]["candidates"]
+        .as_array()?
+        .iter()
+        .filter_map(|c| Some((c["width"].as_u64()?, c["url"].as_str()?)))
+        .filter(|(w, u)| *w <= MAX_WIDTH && u.starts_with("https://"))
+        .max_by_key(|(w, _)| *w)
+        .map(|(_, u)| u.to_string())
+}
+
+pub fn text_id(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
     }
-    let media = &u["edge_owner_to_timeline_media"];
-    let mut items: Vec<Item> = media["edges"]
-        .as_array()
-        .into_iter()
-        .flatten()
+}
+
+/// The timeline connection a profile page embeds (`{"edges": [...], …}`).
+pub fn timeline_json(page: &str) -> Option<Value> {
+    let at = page.find(TIMELINE_KEY)? + TIMELINE_KEY.len();
+    serde_json::from_str(json_span(page[at..].trim_start())?).ok()
+}
+
+/// The timeline posts a profile page embeds, newest first, at most 12;
+/// `None` when it embeds no timeline.
+pub fn parse_timeline(page: &str) -> Option<Vec<Item>> {
+    let conn = timeline_json(page)?;
+    let mut items: Vec<Item> = conn["edges"]
+        .as_array()?
+        .iter()
         .filter_map(|e| {
             let n = &e["node"];
+            let shortcode = n["code"].as_str().filter(|c| store::safe_name(c))?;
+            let image = best_candidate(n)
+                .or_else(|| best_candidate(&n["carousel_media"][0]))
+                .or_else(|| {
+                    n["display_uri"]
+                        .as_str()
+                        .filter(|u| u.starts_with("https://"))
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| {
+                    format!("{}/p/{shortcode}/media/?size=l", store::INSTAGRAM_SITE)
+                });
             Some(Item {
-                id: match &n["id"] {
-                    Value::String(s) => s.clone(),
-                    Value::Number(x) => x.to_string(),
-                    _ => return None,
-                },
-                shortcode: n["shortcode"].as_str()?.to_string(),
-                image: image_of(n)?,
-                taken_at: n["taken_at_timestamp"].as_i64()?,
+                id: text_id(&n["pk"]).or_else(|| text_id(&n["id"]))?,
+                shortcode: shortcode.to_string(),
+                image,
+                taken_at: n["taken_at"].as_i64()?,
             })
         })
         .collect();
     items.sort_by(|a, b| b.taken_at.cmp(&a.taken_at));
     items.truncate(TIMELINE_POSTS);
-    Some(Profile {
-        followers: u["edge_followed_by"]["count"].as_u64().unwrap_or(0),
-        posts: media["count"].as_u64().unwrap_or(0),
-        full_name: u["full_name"].as_str().unwrap_or_default().to_string(),
-        bio: u["biography"].as_str().unwrap_or_default().to_string(),
-        items,
-    })
+    Some(items)
 }
 
-/// What an API answer means.
+/// What a profile page answer means.
 #[derive(Debug, PartialEq)]
 pub enum Answer {
     Profile(Box<Profile>),
     Missing,
     NotLoggedIn,
-    /// 429, a challenge or checkpoint: stop for today.
+    /// A challenge or checkpoint: the account must be confirmed in a browser.
+    Challenge,
+    /// 429: stop for today.
     Limited(String),
     Failed(String),
 }
 
-pub fn classify(res: &Response) -> Answer {
-    let body = res.body.as_str();
-    let challenge = body.contains("checkpoint_required") || body.contains("challenge_required");
+/// Whether the page's `<html>` says the session is gone (class
+/// `not-logged-in`).
+fn not_logged_in(page: &str) -> bool {
+    page.find("<html")
+        .and_then(|i| page[i..].find('>').map(|j| &page[i..i + j + 1]))
+        .and_then(|tag| crate::html::attr(tag, "class"))
+        .is_some_and(|c| c.split_whitespace().any(|x| x == "not-logged-in"))
+}
+
+/// A profile page fetched with the session ([`timeline_request`]).
+pub fn classify_page(res: &Response) -> Answer {
     let location = res.header_values("location").next().unwrap_or("");
     match res.status {
         429 => Answer::Limited("HTTP 429".into()),
-        300..=399 if location.contains("/challenge") => Answer::Limited("challenge".into()),
+        300..=399 if location.contains("/challenge") => Answer::Challenge,
         300..=399 if location.contains("/accounts/login") => Answer::NotLoggedIn,
-        401 | 403 if challenge => Answer::Limited("challenge".into()),
-        401 | 403 => Answer::NotLoggedIn,
         404 => Answer::Missing,
         200..=299 => {
-            let Ok(v) = serde_json::from_str::<Value>(body) else {
-                // The login page instead of JSON.
-                return Answer::NotLoggedIn;
-            };
-            if v["require_login"] == true || v["message"] == "login_required" {
+            if not_logged_in(&res.body) {
                 return Answer::NotLoggedIn;
             }
-            if challenge {
-                return Answer::Limited("challenge".into());
-            }
-            match parse_profile(&v) {
-                Some(p) => Answer::Profile(Box::new(p)),
-                None if v["data"].is_object() => Answer::Missing,
-                None => Answer::Failed("unexpected answer".into()),
+            let meta = verify::parse_instagram_page(&res.body);
+            match parse_timeline(&res.body) {
+                Some(items) => Answer::Profile(Box::new(Profile { meta, items })),
+                // A private account, or none posted yet.
+                None if meta.is_some() => Answer::Profile(Box::new(Profile {
+                    meta,
+                    items: Vec::new(),
+                })),
+                None => Answer::Failed("a page without the profile".into()),
             }
         }
         s => Answer::Failed(format!("HTTP {s}")),
     }
 }
 
-fn profile_request(base: &str, handle: &str, cookie: &str) -> Request {
-    Request::get(format!(
-        "{base}/api/v1/users/web_profile_info/?username={handle}"
-    ))
-    .header("x-ig-app-id", APP_ID)
-    .header("X-Requested-With", "XMLHttpRequest")
-    .header("Accept", "*/*")
-    .header("Referer", format!("{base}/{handle}/"))
-    .header("Cookie", cookie)
+/// The profile page as Chrome navigates to it with the session (without
+/// the `Sec-Fetch-*` headers the page leaves the posts out).
+pub fn timeline_request(base: &str, handle: &str, cookie: &str) -> Request {
+    Request::get(format!("{base}/{handle}/"))
+        .header("User-Agent", slr_scout::http::USER_AGENT)
+        .header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "none")
+        .header("Sec-Fetch-Dest", "document")
+        .header("Cookie", cookie)
 }
 
 fn iso_of(secs: i64) -> String {
@@ -366,26 +423,28 @@ fn now_secs() -> i64 {
 }
 
 /// Creators whose pictures are due (an Instagram handle, not swiped no,
-/// none fetched for 3 days), stalest first.
+/// none fetched for 3 days): those with a source first (swiped, then
+/// favourite, then pornstar list), then the rest; stalest first in each.
 pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes, now: i64) -> Vec<String> {
-    let mut list: Vec<(Option<i64>, String)> = file
+    let mut list: Vec<(usize, Option<i64>, String)> = file
         .creators
         .iter()
         .filter(|(slug, c)| c.instagram.is_some() && !swipes.creator_is_no(slug))
-        .map(|(slug, _)| {
+        .map(|(slug, c)| {
             (
+                c.source_rank(),
                 state.pictures.get(slug).and_then(|t| parse_iso(t)),
                 slug.clone(),
             )
         })
-        .filter(|(at, _)| at.is_none_or(|t| now - t >= (REFRESH_DAYS * 86_400) as i64))
+        .filter(|(_, at, _)| at.is_none_or(|t| now - t >= (REFRESH_DAYS * 86_400) as i64))
         .collect();
     list.sort();
-    list.into_iter().map(|(_, s)| s).collect()
+    list.into_iter().map(|(_, _, s)| s).collect()
 }
 
-/// 8–15 s between creators.
-fn pause() {
+/// 8–15 s between Instagram requests.
+pub fn pause() {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
@@ -464,17 +523,40 @@ pub fn pictures(
         let dir = store::pictures_dir(user_data, slug);
         match &cookie {
             Some(cookie) => {
-                let req = profile_request(base, &ig.handle, cookie);
+                let req = timeline_request(base, &ig.handle, cookie);
                 let res = http.send(&req).map_err(|e| format!("Instagram: {e}"))?;
-                match classify(&res) {
+                match classify_page(&res) {
                     Answer::Profile(p) => {
                         let mut ig = ig;
-                        ig.followers = Some(verify::compact(p.followers));
-                        ig.posts = Some(p.posts.to_string());
-                        if !p.full_name.is_empty() {
-                            ig.full_name = Some(p.full_name.clone());
+                        // The counts: the page's meta, else the preview bot's.
+                        let meta = match &p.meta {
+                            Some(m) => Some(m.clone()),
+                            None => {
+                                match verify::instagram(http, &mut page_pacer, base, &ig.handle) {
+                                    Ok(m) => m,
+                                    Err(slr_scout::http::NetError::RateLimited(m)) => {
+                                        let _ =
+                                            writeln!(out, "Instagram: {m}; stopping for today.");
+                                        run.code = 2;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        let _ = writeln!(out, "  {}: counts: {e}", c.name);
+                                        None
+                                    }
+                                }
+                            }
+                        };
+                        if let Some(m) = meta {
+                            ig.followers = Some(m.followers);
+                            ig.posts = Some(m.posts);
+                            if !m.full_name.is_empty() {
+                                ig.full_name = Some(m.full_name);
+                            }
+                            if m.bio.is_some() {
+                                ig.bio = m.bio;
+                            }
                         }
-                        ig.bio = Some(p.bio.clone()).filter(|b| !b.is_empty());
                         ig.last_post_at = p.items.first().map(|x| iso_of(x.taken_at));
                         ig.checked_at = Some(now.clone());
                         let mut pics = Vec::new();
@@ -520,6 +602,11 @@ pub fn pictures(
                             "Instagram asks to log in: the session expired; run --login."
                         );
                         run.code = 3;
+                        break;
+                    }
+                    Answer::Challenge => {
+                        let _ = writeln!(out, "Instagram: challenge; stopping for today.");
+                        run.code = 2;
                         break;
                     }
                     Answer::Limited(why) => {
@@ -643,31 +730,68 @@ mod tests {
         assert!(session_from_cookies(&no_session, "N").is_none());
     }
 
-    fn profile_json() -> Value {
-        let node = |id: u64, t: i64| {
-            json!({"node": {"id": id.to_string(), "shortcode": format!("S{id}"), "taken_at_timestamp": t,
-                "display_url": format!("https://cdn.ig/{id}_1440.jpg"),
-                "display_resources": [
-                    {"src": format!("https://cdn.ig/{id}_640.jpg"), "config_width": 640},
-                    {"src": format!("https://cdn.ig/{id}_1080.jpg"), "config_width": 1080},
-                    {"src": format!("https://cdn.ig/{id}_1440.jpg"), "config_width": 1440}]}})
-        };
-        let edges: Vec<Value> = (1..=14)
-            .map(|i| node(i, 1_700_000_000 + i as i64))
-            .collect();
-        json!({"data": {"user": {"full_name": "Sweetie Fox", "biography": "hi",
-            "edge_followed_by": {"count": 5_000_000},
-            "edge_owner_to_timeline_media": {"count": 225, "edges": edges}}}})
+    fn node(id: u64, t: i64) -> Value {
+        json!({"node": {"code": format!("S{id}"), "pk": id.to_string(), "id": format!("{id}_9"),
+            "taken_at": t, "media_type": 1, "product_type": "feed", "timeline_pinned_user_ids": [],
+            "owner_id": {"pk": "9"},
+            "image_versions2": {"candidates": [
+                {"width": 1440, "height": 1800, "url": format!("https://cdn.ig/{id}_1440.jpg")},
+                {"width": 1080, "height": 1350, "url": format!("https://cdn.ig/{id}_1080.jpg")},
+                {"width": 640, "height": 800, "url": format!("https://cdn.ig/{id}_640.jpg")}]}}})
+    }
+
+    /// A trimmed profile page: the description meta and the embedded
+    /// timeline (its cursor holds a brace, as real ones may).
+    fn page(class: &str, edges: &[Value]) -> String {
+        let conn =
+            json!({"edges": edges, "page_info": {"end_cursor": "QV}{x\"y", "has_next_page": true}});
+        format!(
+            r#"<!DOCTYPE html><html class="{class}" lang="en"><head>
+            <meta property="og:description" content="668K Followers, 192 Following, 39 Posts - See Instagram photos and videos from Hannah (&#064;itshannahowo)" />
+            </head><body><script type="application/json">{{"require":[["ScheduledServerJS",{{"__bbox":{{"result":{{"data":{{"xdt_api__v1__feed__user_timeline_graphql_connection":{conn}}}}}}}}}]]}}</script></body></html>"#
+        )
     }
 
     #[test]
-    fn parses_the_profile_api() {
-        let p = parse_profile(&profile_json()).unwrap();
-        assert_eq!((p.followers, p.posts), (5_000_000, 225));
-        assert_eq!(p.items.len(), TIMELINE_POSTS);
-        assert_eq!(p.items[0].id, "14");
-        assert_eq!(p.items[0].image, "https://cdn.ig/14_1080.jpg");
-        assert_eq!(parse_profile(&json!({"data": {"user": null}})), None);
+    fn parses_the_timeline_the_page_embeds() {
+        let mut edges: Vec<Value> = (1..=14)
+            .map(|i| node(i, 1_700_000_000 + i as i64))
+            .collect();
+        // A pinned old post, a carousel without its own picture, one
+        // without any (its /media/ redirect), one without a code.
+        edges.push(
+            json!({"node": {"code": "OLD", "pk": 1, "taken_at": 1_600_000_000,
+            "timeline_pinned_user_ids": ["9"], "display_uri": "https://cdn.ig/old.jpg"}}),
+        );
+        edges.push(json!({"node": {"code": "CAR", "pk": "50", "taken_at": 1_800_000_000,
+            "carousel_media": [{"image_versions2": {"candidates": [{"width": 720, "url": "https://cdn.ig/c.jpg"}]}}]}}));
+        edges.push(json!({"node": {"code": "BARE", "pk": "51", "taken_at": 1_799_999_999}}));
+        edges.push(json!({"node": {"pk": "52", "taken_at": 1_900_000_000}}));
+        let items = parse_timeline(&page("_9dls", &edges)).unwrap();
+        assert_eq!(items.len(), TIMELINE_POSTS);
+        assert_eq!(
+            (
+                items[0].id.as_str(),
+                items[0].shortcode.as_str(),
+                items[0].image.as_str()
+            ),
+            ("50", "CAR", "https://cdn.ig/c.jpg")
+        );
+        assert_eq!(
+            items[1].image,
+            "https://www.instagram.com/p/BARE/media/?size=l"
+        );
+        assert_eq!(
+            (items[2].id.as_str(), items[2].image.as_str()),
+            ("14", "https://cdn.ig/14_1080.jpg")
+        );
+        assert_eq!(items[2].taken_at, 1_700_000_014);
+        assert_eq!(parse_timeline("<html><body>nothing</body></html>"), None);
+        assert_eq!(
+            json_span(r#"{"a":"}\"{","b":[1,{"c":2}]} tail"#),
+            Some(r#"{"a":"}\"{","b":[1,{"c":2}]}"#)
+        );
+        assert_eq!(json_span("{unclosed"), None);
     }
 
     fn res(status: u16, body: &str) -> Response {
@@ -679,45 +803,58 @@ mod tests {
     }
 
     #[test]
-    fn classifies_answers() {
-        assert!(matches!(
-            classify(&res(200, &profile_json().to_string())),
-            Answer::Profile(_)
-        ));
+    fn classifies_profile_pages() {
+        let Answer::Profile(p) = classify_page(&res(200, &page("_9dls x", &[node(1, 5)]))) else {
+            panic!("not a profile");
+        };
+        assert_eq!(p.items.len(), 1);
+        let meta = p.meta.unwrap();
         assert_eq!(
-            classify(&res(200, r#"{"data":{"user":null}}"#)),
-            Answer::Missing
+            (meta.followers.as_str(), meta.posts.as_str()),
+            ("668K", "39")
         );
+        // A private account: the meta, no timeline.
+        let private = r#"<html class="_9dls"><meta name="description" content="5M Followers, 1 Following, 2 Posts - A (&#064;a) on Instagram"></html>"#;
+        let Answer::Profile(p) = classify_page(&res(200, private)) else {
+            panic!("not a profile");
+        };
+        assert!(p.items.is_empty() && p.meta.is_some());
         assert_eq!(
-            classify(&res(
-                200,
-                r#"{"message":"login_required","require_login":true}"#
+            classify_page(&res(200, &page("_9dls not-logged-in", &[node(1, 5)]))),
+            Answer::NotLoggedIn
+        );
+        assert!(matches!(
+            classify_page(&res(200, "<html class=\"x\">?</html>")),
+            Answer::Failed(_)
+        ));
+        assert_eq!(classify_page(&res(404, "")), Answer::Missing);
+        assert!(matches!(classify_page(&res(429, "")), Answer::Limited(_)));
+        assert!(matches!(classify_page(&res(500, "")), Answer::Failed(_)));
+        let redirect = |to: &str| Response {
+            status: 302,
+            headers: vec![("location".into(), to.into())],
+            body: String::new(),
+        };
+        assert_eq!(
+            classify_page(&redirect(
+                "https://www.instagram.com/accounts/login/?next=%2Fa%2F"
             )),
             Answer::NotLoggedIn
         );
         assert_eq!(
-            classify(&res(200, "<html>login</html>")),
-            Answer::NotLoggedIn
+            classify_page(&redirect("https://www.instagram.com/challenge/?next=/a/")),
+            Answer::Challenge
         );
-        assert_eq!(classify(&res(401, "{}")), Answer::NotLoggedIn);
-        assert!(matches!(classify(&res(429, "")), Answer::Limited(_)));
-        assert!(matches!(
-            classify(&res(400, r#"{"message":"checkpoint_required"}"#)),
-            Answer::Failed(_)
-        ));
-        assert!(matches!(
-            classify(&res(403, r#"{"message":"challenge_required"}"#)),
-            Answer::Limited(_)
-        ));
-        let redirect = Response {
-            status: 302,
-            headers: vec![(
-                "location".into(),
-                "https://www.instagram.com/accounts/login/".into(),
-            )],
-            body: String::new(),
-        };
-        assert_eq!(classify(&redirect), Answer::NotLoggedIn);
+        let req = timeline_request("https://www.instagram.com", "a.b", "sessionid=S");
+        assert_eq!(req.url, "https://www.instagram.com/a.b/");
+        for h in [
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Site", "none"),
+            ("Sec-Fetch-Dest", "document"),
+            ("Cookie", "sessionid=S"),
+        ] {
+            assert!(req.headers.contains(&(h.0.into(), h.1.into())), "{h:?}");
+        }
     }
 
     #[test]
@@ -747,6 +884,27 @@ mod tests {
         let mut swipes = Swipes::default();
         swipes.creators.insert("d".into(), "no".into());
         assert_eq!(due(&file, &state, &swipes, now), ["c", "b"]);
+        // Sources go first: swiped, favourite, pornstar list, then the rest.
+        file.creators.get_mut("a").unwrap().sources = vec!["pornstar".into()];
+        state.pictures.remove("a");
+        file.creators.get_mut("b").unwrap().sources = vec!["favourite".into(), "pornstar".into()];
+        file.creators.get_mut("c").unwrap().sources = vec!["swiped".into()];
+        state
+            .pictures
+            .insert("c".into(), "2026-11-01T00:00:00.000Z".into());
+        // A creator never fetched but without a source comes after them.
+        file.creators.insert(
+            "f".into(),
+            store::Creator {
+                name: "f".into(),
+                instagram: Some(Instagram {
+                    handle: "f".into(),
+                    ..Instagram::default()
+                }),
+                ..store::Creator::default()
+            },
+        );
+        assert_eq!(due(&file, &state, &swipes, now), ["c", "b", "a", "f"]);
         assert_eq!(parse_iso("1970-01-02T00:00:01Z"), Some(86_401));
         assert_eq!(iso_of(1_793_793_600), "2026-11-04T12:00:00.000Z");
     }

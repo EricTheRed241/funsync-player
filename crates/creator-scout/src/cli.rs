@@ -4,17 +4,23 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub const DEFAULT_PICTURES: usize = 40;
+pub const DEFAULT_PROFILES: usize = 30;
+pub const DEFAULT_FOLLOWS: usize = 10;
 
 pub const USAGE: &str = "\
 creator-scout: find independent creators (OnlyFans / Fansly / camgirls /
-cosplayers / influencers with an Instagram or Twitch account) behind new
-EroScripts script posts and FapTap videos, collect their pictures and posts
-for the Creators site (npm run creators:site), and fetch the posts swiped in.
+cosplayers / influencers) behind new EroScripts script posts and FapTap videos,
+and the people you like (favourite artists, the pornstar list, creators swiped
+yes); confirm their profiles, collect their pictures and posts for the Creators
+site (npm run creators:site), follow them on Instagram, and fetch the posts
+swiped in.
 
 Usage:
   npm run creators:scout -- --import-seed <file>   [--user-data <dir>]
   npm run creators:scout -- --discover             [options]
+  npm run creators:scout -- --profiles [N]         [options]
   npm run creators:scout -- --pictures [N]         [--user-data <dir>]
+  npm run creators:scout -- --follow [N]           [--user-data <dir>]
   npm run creators:scout -- --login [--credentials <file>] [--user-data <dir>]
   npm run creators:scout -- --status               [--user-data <dir>]
   npm run creators:scout -- --fetch [--dry-run]    [options]
@@ -27,19 +33,47 @@ Modes:
   --discover            New EroScripts posts tagged real + non-vr (Free and Paid
                         Scripts) and new FapTap videos since the last run; a judge
                         (an omp run) names each one's on-screen creator and, for a
-                        new creator, Instagram / Twitch handle candidates found by
-                        web search. A new creator is kept only with an Instagram or
-                        Twitch account that exists and matches the name. Then her
-                        posts: the EroScripts post's video hosts, tags, likes and
-                        first image; FapTap videos found by her name. Posts are
-                        scored like the EroScripts deck (candidateScore); a
-                        creator's score is her posts' average. First run: the 5
-                        newest pages of each feed.
-  --pictures [N]        Instagram pictures (the 9 newest of the latest 12 posts)
-                        for up to N creators (default 40), stalest first, each at
-                        most every 3 days, creators swiped no skipped; 8-15 s
-                        between creators. Needs --login for the posts; without a
-                        session only the profile photo is saved (exit 3).
+                        new creator, finds her Instagram / Twitch handles, profile
+                        pages and pictures by web search. A new creator is kept
+                        only when one of them checks out live as hers (below).
+                        Then her posts: the EroScripts post's video hosts, tags,
+                        likes, first image and linked video pages; FapTap videos
+                        found by her name; and her pictures. Posts are scored
+                        like the EroScripts deck (candidateScore); a creator's
+                        score is her posts' average. First run: the 5 newest
+                        pages of each feed.
+  --profiles [N]        The people you like become creators (the creators swiped
+                        yes on the Creators site, your favourite artists:
+                        content-preferences.json favourites with the app's
+                        changes, and the pornstar list), and creators with fewer
+                        than 3 pictures get some. Each creator's sources (swiped /
+                        favourite / pornstar) are set from them. Up to N of them
+                        (default 30; a creator whose Instagram pictures were never
+                        fetched waits for --pictures) go to the judge in one run,
+                        which finds her Instagram / Twitch handles, profile pages
+                        (OnlyFans, Fansly, Pornhub, X, Reddit, ManyVids, a link
+                        page, IAFD / Babepedia / Boobpedia / FreeOnes) and
+                        pictures. A profile is kept when the page answers and its
+                        own name or handle matches hers; pictures come from those
+                        pages, from the judge (only on a page that passed) and
+                        from the video pages her posts link, 9 at most besides
+                        Instagram's, none under 300 px or wider than 3:1. A new
+                        creator also gets her EroScripts script posts (forum
+                        search, her name in the title) and FapTap videos, 30 at
+                        most. Nothing confirmed, or still under 3 pictures: looked
+                        up again after 30 days.
+  --pictures [N]        Instagram pictures (the 9 newest of the latest 12 posts,
+                        from her profile page as Chrome loads it) for up to N
+                        creators (default 40), those with a source first (swiped,
+                        favourite, pornstar list), stalest first, each at most
+                        every 3 days, creators swiped no skipped; 8-15 s between
+                        creators. Needs --login for the posts; without a session
+                        only the profile photo is saved (exit 3).
+  --follow [N]          Follow on Instagram (the --login account) up to N creators
+                        (default 10) with a confirmed Instagram account who are a
+                        favourite or swiped yes; 20-40 s between them; never
+                        unfollows. A challenge or lost session stops it (exit 3),
+                        a rate limit too (exit 2, next day).
   --login               Open Chrome (profile <userData>/instagram-chrome) on
                         Instagram's login page and sign in with the credentials
                         file (below); without one, sign in yourself. A check
@@ -48,7 +82,7 @@ Modes:
                         <userData>/instagram-session.json (0600) once it appears
                         (10 minutes at most).
   --status              Creators, posts, the Instagram session and its age, the
-                        cursors and the fetch queue.
+                        cursors, the profiles step, the follows and the fetch queue.
   --fetch               Fetch the posts swiped \"want\" on the Creators site that
                         are downloadable and not in the library: EroScripts posts
                         through npm run eroscripts:scout (--add, then --fetch
@@ -56,8 +90,8 @@ Modes:
                         that doesn't reach the library is tried again next run,
                         5 times at most.
   --dry-run             With --fetch: print what would be fetched, change nothing
-  --daily               --discover, --pictures 40 and --fetch; a failing step
-                        doesn't stop the next
+  --daily               --discover, --profiles 30, --pictures 40, --follow 10 and
+                        --fetch; a failing step doesn't stop the next
   -h, --help            This text
 
 Options:
@@ -66,7 +100,8 @@ Options:
   --max-cost <usd>      Spending cap of the default judge (default 5)
   --judge-cmd <cmd>     Another judge command (run by sh in <userData>/creator-scout-work
                         with the prompt as its last argument); it must write
-                        results.json for titles.json
+                        results.json for titles.json (--discover) and
+                        people-results.json for people.json (--profiles)
   --repo <dir>          The repo the npm scripts run in (default: this checkout)
   --credentials <file>  The Instagram account for --login: \"username: …\" and
                         \"password: …\" lines (default $FUNSYNC_INSTAGRAM_CREDENTIALS,
@@ -76,11 +111,11 @@ Options:
 Files in <userData>: creators.json (read by the Creators site), creator-pictures/,
 creator-scout-state.json, instagram-session.json; creator-swipes.json is read
 (the site writes it). config.json is only read (the EroScripts session cookie,
-the library sources, tag scores). Lock: creator-scout.lock.
+the library sources, tag scores, favourite artists). Lock: creator-scout.lock.
 
 Exit codes: 0 ok, 1 error, 2 rate limited or work left (more pages, creators
 or fetches than this run took), 3 not logged in (EroScripts session missing,
-no Instagram session, or Instagram asked to log in).
+no Instagram session, or Instagram asked to log in or to confirm the account).
 ";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +123,8 @@ pub enum Mode {
     ImportSeed(PathBuf),
     Discover,
     Pictures(usize),
+    Profiles(usize),
+    Follow(usize),
     Login,
     Status,
     Fetch,
@@ -133,6 +170,8 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 | "--repo"
                 | "--npm"
                 | "--pictures"
+                | "--profiles"
+                | "--follow"
                 | "--credentials"
         );
         if inline.is_some() && !takes_value {
@@ -152,7 +191,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
         let mut set_mode = |m: Mode| -> Result<(), String> {
             if o.mode.is_some() {
                 return Err(
-                    "give one of --import-seed, --discover, --pictures, --login, --status, --fetch, --daily"
+                    "give one of --import-seed, --discover, --profiles, --pictures, --follow, --login, --status, --fetch, --daily"
                         .into(),
                 );
             }
@@ -163,7 +202,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
             "-h" | "--help" => o.help = true,
             "--import-seed" => set_mode(Mode::ImportSeed(PathBuf::from(value()?)))?,
             "--discover" => set_mode(Mode::Discover)?,
-            "--pictures" => {
+            "--pictures" | "--profiles" | "--follow" => {
                 // The count is optional: a following number is it.
                 let n = match inline.as_deref() {
                     Some(v) => Some(v.to_string()),
@@ -172,14 +211,19 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                         v.to_string()
                     }),
                 };
-                let n =
-                    match n {
-                        Some(v) => v.parse::<usize>().ok().filter(|&n| n > 0).ok_or_else(|| {
-                            format!("--pictures {v}: give a whole number above 0")
-                        })?,
-                        None => DEFAULT_PICTURES,
-                    };
-                set_mode(Mode::Pictures(n))?
+                let n = n
+                    .map(|v| {
+                        v.parse::<usize>()
+                            .ok()
+                            .filter(|&n| n > 0)
+                            .ok_or_else(|| format!("{flag} {v}: give a whole number above 0"))
+                    })
+                    .transpose()?;
+                set_mode(match flag {
+                    "--pictures" => Mode::Pictures(n.unwrap_or(DEFAULT_PICTURES)),
+                    "--profiles" => Mode::Profiles(n.unwrap_or(DEFAULT_PROFILES)),
+                    _ => Mode::Follow(n.unwrap_or(DEFAULT_FOLLOWS)),
+                })?
             }
             "--login" => set_mode(Mode::Login)?,
             "--status" => set_mode(Mode::Status)?,
@@ -220,16 +264,16 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
     }
     let Some(mode) = &o.mode else {
         return Err(
-            "nothing to do: give --import-seed, --discover, --pictures, --login, --status, --fetch or --daily (see --help)"
+            "nothing to do: give --import-seed, --discover, --profiles, --pictures, --follow, --login, --status, --fetch or --daily (see --help)"
                 .into(),
         );
     };
     if o.dry_run && *mode != Mode::Fetch {
         return Err("--dry-run goes with --fetch".into());
     }
-    let judging = matches!(mode, Mode::Discover | Mode::Daily);
+    let judging = matches!(mode, Mode::Discover | Mode::Profiles(_) | Mode::Daily);
     if !judging && (o.judge_cmd.is_some() || o.max_cost.is_some()) {
-        return Err("--judge-cmd and --max-cost go with --discover and --daily".into());
+        return Err("--judge-cmd and --max-cost go with --discover, --profiles and --daily".into());
     }
     if o.judge_cmd.is_some() && o.max_cost.is_some() {
         return Err("--max-cost applies to the default judge only".into());
@@ -262,6 +306,22 @@ mod tests {
         );
         assert_eq!(p(&["--pictures=7"]).unwrap().mode, Some(Mode::Pictures(7)));
         assert!(p(&["--pictures", "0"]).is_err());
+        assert_eq!(
+            p(&["--profiles"]).unwrap().mode,
+            Some(Mode::Profiles(DEFAULT_PROFILES))
+        );
+        assert_eq!(
+            p(&["--profiles", "3", "--judge-cmd", "j"]).unwrap().mode,
+            Some(Mode::Profiles(3))
+        );
+        assert_eq!(
+            p(&["--follow"]).unwrap().mode,
+            Some(Mode::Follow(DEFAULT_FOLLOWS))
+        );
+        assert_eq!(p(&["--follow=2"]).unwrap().mode, Some(Mode::Follow(2)));
+        assert!(p(&["--profiles=0"]).is_err());
+        assert!(p(&["--profiles", "--pictures"]).is_err());
+        assert!(p(&["--follow", "--judge-cmd", "j"]).is_err());
         let o = p(&["--import-seed", "/s.json", "--user-data=/u"]).unwrap();
         assert_eq!(o.mode, Some(Mode::ImportSeed(PathBuf::from("/s.json"))));
         assert_eq!(o.user_data, Some(PathBuf::from("/u")));
