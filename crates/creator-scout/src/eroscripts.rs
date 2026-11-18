@@ -179,6 +179,31 @@ pub fn topic_json(
     http::json(http, &req)
 }
 
+/// The script posts (Free / Paid Scripts, not AI-generated) among the
+/// topics a forum search (`/search.json?q=`) finds.
+pub fn search(
+    http: &dyn Http,
+    pacer: &mut Pacer,
+    base: &str,
+    cookie: &str,
+    query: &str,
+) -> Result<Vec<Topic>, NetError> {
+    pacer.wait();
+    let req = Request::get(format!(
+        "{base}/search.json?q={}",
+        slr_scout::text::url_encode(query)
+    ))
+    .header("Cookie", format!("_t={cookie}"))
+    .header("Accept", "application/json");
+    let v = http::json(http, &req)?;
+    Ok(v["topics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(topic)
+        .collect())
+}
+
 /// The domain of an absolute URL, lower case, without `www.`.
 fn domain(url: &str) -> Option<String> {
     let rest = url
@@ -238,6 +263,31 @@ pub fn hosts(cooked: &str, forum_base: &str) -> Vec<String> {
     out
 }
 
+/// Public video pages a post links (Pornhub videos, rule34video videos,
+/// SexLikeReal scenes), each once, at most 5: their poster frames show her.
+pub fn video_pages(cooked: &str, forum_base: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in ["a", "iframe"] {
+        for t in html::open_tags(cooked, tag) {
+            for (name, value) in html::attrs(t) {
+                if name != "href" && name != "src" {
+                    continue;
+                }
+                let page = match host_of(&value, forum_base) {
+                    Some("pornhub") => value.contains("view_video.php?viewkey="),
+                    Some("rule34video") => value.contains("/video/") || value.contains("/videos/"),
+                    Some("slr") => value.contains("/scenes/"),
+                    _ => false,
+                };
+                if page && value.starts_with("https://") && !out.contains(&value) && out.len() < 5 {
+                    out.push(value);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The first picture in a post (emoji, avatars and site icons skipped), as
 /// an absolute URL.
 pub fn first_image(cooked: &str, forum_base: &str) -> Option<String> {
@@ -288,6 +338,7 @@ pub fn listed_post(t: &Topic) -> Post {
         duration_s: None,
         in_library: false,
         created_at: t.created_at.clone(),
+        video_pages: Vec::new(),
         extra: Map::new(),
     }
 }
@@ -305,6 +356,7 @@ pub fn detailed_post(v: &Value, forum_base: &str) -> Option<(Post, Option<String
         .unwrap_or_default();
     let mut post = listed_post(&t);
     post.hosts = hosts(cooked, forum_base);
+    post.video_pages = video_pages(cooked, forum_base);
     post.downloadable = post.free
         && post
             .hosts
@@ -406,6 +458,10 @@ mod tests {
         assert!(p.free && p.downloadable && p.creampie && p.multi_axis);
         assert_eq!(p.likes, 108);
         assert_eq!(p.tags, ["multi-axis", "real"]);
+        assert_eq!(
+            p.video_pages,
+            ["https://de.pornhub.com/view_video.php?viewkey=1"]
+        );
         assert!(image.is_some());
         let mut paid = v.clone();
         paid["category_id"] = json!(15);

@@ -1,6 +1,7 @@
 //! `<userData>/creator-scout-state.json` (this CLI's own bookkeeping: when
 //! each creator's pictures were fetched, creators the judge named without a
-//! verifiable account, posts waiting for their details, fetch tries) and
+//! verifiable account, people and creators looked up without enough found,
+//! posts waiting for their details, fetch tries, Instagram follows) and
 //! `creator-swipes.json` (written by the Creators site, read here).
 
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,18 @@ pub struct FetchRecord {
     pub done_at: Option<String>,
 }
 
+/// A follow of a creator's Instagram account (`--follow`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Follow {
+    pub handle: String,
+    pub at: String,
+    /// following / requested (a private account) / failed.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
@@ -67,6 +80,14 @@ pub struct State {
     /// Post key (`eroscripts:41415`) → fetch attempts.
     #[serde(default)]
     pub fetch: BTreeMap<String, FetchRecord>,
+    /// Person or creator slug → when `--profiles` last found nothing
+    /// confirmed hers, or still too few pictures (looked up again after 30
+    /// days).
+    #[serde(default)]
+    pub profile_misses: BTreeMap<String, String>,
+    /// Creator slug → her Instagram follow (`--follow`; never undone).
+    #[serde(default)]
+    pub follows: BTreeMap<String, Follow>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

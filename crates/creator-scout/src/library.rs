@@ -2,7 +2,7 @@
 //! are scored: the EroScripts deck's `candidateScore` (slr-scout's port),
 //! with the user's tag scores and favourites from config.json.
 
-use crate::store::{CreatorsFile, Post};
+use crate::store::{Creator, CreatorsFile, Post};
 use serde_json::Value;
 use slr_scout::library::{self as lib, Source, UserConfig};
 use slr_scout::prefs::Prefs;
@@ -92,13 +92,19 @@ impl LibraryIds {
     /// Set every post's `inLibrary` (a post once in the library stays so);
     /// returns how many changed.
     pub fn mark(&self, file: &mut CreatorsFile) -> usize {
+        file.creators
+            .values_mut()
+            .map(|c| self.mark_creator(c))
+            .sum()
+    }
+
+    /// [`mark`](Self::mark) for one creator.
+    pub fn mark_creator(&self, c: &mut Creator) -> usize {
         let mut n = 0;
-        for c in file.creators.values_mut() {
-            for p in &mut c.posts {
-                if !p.in_library && self.has(p) {
-                    p.in_library = true;
-                    n += 1;
-                }
+        for p in &mut c.posts {
+            if !p.in_library && self.has(p) {
+                p.in_library = true;
+                n += 1;
             }
         }
         n

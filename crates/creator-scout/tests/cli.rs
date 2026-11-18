@@ -398,19 +398,18 @@ fn pictures_with_a_session() {
     fs::create_dir_all(&old).unwrap();
     fs::write(old.join("ig-111.jpg"), "stale").unwrap();
     let node = |id: u64, at: i64| {
-        json!({"node": {"id": id.to_string(), "shortcode": format!("SC{id}"), "taken_at_timestamp": at,
-            "display_url": format!("https://cdn.ig/p{id}.jpg")}})
+        json!({"node": {"code": format!("SC{id}"), "pk": id.to_string(), "taken_at": at,
+            "owner_id": {"pk": "42"}, "timeline_pinned_user_ids": [],
+            "image_versions2": {"candidates": [
+                {"width": 1440, "height": 1800, "url": format!("https://cdn.ig/p{id}_big.jpg")},
+                {"width": 1080, "height": 1350, "url": format!("https://cdn.ig/p{id}.jpg")}]}}})
     };
-    let profile = |edges: Value| {
-        json!({"data": {"user": {"full_name": "Lucy", "biography": "bio", "edge_followed_by": {"count": 35_560},
-            "edge_owner_to_timeline_media": {"count": 10, "edges": edges}}}})
-    };
-    let api = |h: &str| format!("GET {IG}/api/v1/users/web_profile_info/?username={h}");
     let fixtures = t.write(
         "fixtures.json",
         &json!({
-            api("lucycat"): {"body": profile(json!([node(1, 1_793_793_600), node(2, 1_793_000_000)]))},
-            api("stormiskies01"): {"body": {"message": "login_required", "require_login": true, "status": "fail"}},
+            format!("GET {IG}/lucycat/"): {"body": profile_page("_9dls", "35.5K", "Lucy",
+                &[node(1, 1_793_793_600), node(2, 1_793_000_000)])},
+            format!("GET {IG}/stormiskies01/"): {"body": profile_page("_9dls not-logged-in", "1", "S", &[])},
             "GET https://cdn.ig/p1.jpg": {"body": "P1"},
             "GET https://cdn.ig/p2.jpg": {"body": "P2"}
         })
@@ -459,4 +458,348 @@ fn a_held_lock_exits_2() {
     let o = run(&t, &["--discover"], None);
     assert_eq!(o.status.code(), Some(2), "{}", text(&o));
     assert!(text(&o).contains("creator-scout.lock"));
+}
+
+/// The real preferences (embedded in the binary): their favourites, to turn
+/// them off, and the first pornstar.
+fn prefs() -> Value {
+    serde_json::from_str(
+        &fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../renderer/js/content-preferences.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn slug(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect()
+}
+
+/// A userData for --profiles: every built-in favourite turned off, Sweetie
+/// Fox and Nobody Known turned on; Lucy Cat (with Instagram) and Bea Bright
+/// (Twitch only) swiped yes; the first listed pornstar a creator already.
+fn favourites_setup(t: &TempDir) -> String {
+    let prefs = prefs();
+    let mut changes = serde_json::Map::new();
+    for f in prefs["favourites"].as_array().unwrap() {
+        changes.insert(f.as_str().unwrap().to_string(), json!(false));
+    }
+    changes.insert("Sweetie Fox".into(), json!(true));
+    changes.insert("Nobody Known".into(), json!(true));
+    let config = json!({"settings": {
+        "eroscripts": {"session": {"cookie": "_t=SECRET-COOKIE"}},
+        "library": {"sources": [{"name": "EroScripts", "path": t.lib().join("EroScripts"), "enabled": true}],
+                    "favouriteArtists": changes}
+    }});
+    fs::write(t.ud().join("config.json"), config.to_string()).unwrap();
+    let star = prefs["pornstarTags"]["pornstars"][0]["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let ig = |h: &str| json!({"handle": h, "followers": "1M", "posts": "10", "match": "high"});
+    let mut creators = json!({
+        "lucycat": {"name": "Lucy Cat", "instagram": ig("lucycat")},
+        "beabright": {"name": "Bea Bright", "twitch": {"handle": "beabright", "followers": 10}},
+        "oldfav": {"name": "Old Fav", "instagram": ig("oldfav"), "sources": ["favourite"]}
+    });
+    creators[slug(&star)] = json!({"name": star, "instagram": ig("star")});
+    fs::write(
+        t.ud().join("creators.json"),
+        json!({"version": 1, "creators": creators}).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        t.ud().join("creator-swipes.json"),
+        json!({"version": 1, "creators": {"lucycat": {"choice": "yes", "at": "t"},
+            "beabright": {"choice": "yes", "at": "t"}}, "posts": {}})
+        .to_string(),
+    )
+    .unwrap();
+    slug(&star)
+}
+
+fn gif(w: u16, h: u16) -> String {
+    let mut b = b"GIF89a".to_vec();
+    b.extend(w.to_le_bytes());
+    b.extend(h.to_le_bytes());
+    b.extend([0; 8]);
+    String::from_utf8(b).expect("dimensions whose bytes are ASCII")
+}
+
+/// A judge for --profiles: writes fixed people-results.json.
+fn people_judge(t: &TempDir, results: &Value) -> String {
+    let r = t.write("people-results.json", &results.to_string());
+    let script = t.write(
+        "people-judge.sh",
+        &format!("cp '{}' people-results.json\n", r.display()),
+    );
+    format!("sh {}", script.display())
+}
+
+fn profiles_fixtures() -> Value {
+    let topic = |id: u64, title: &str, cat: u64, tags: Value| {
+        json!({"id": id, "title": title, "category_id": cat, "tags": tags, "like_count": 7,
+            "created_at": "2026-11-10T00:00:00Z"})
+    };
+    let mut detail = topic(500_001, "Sweetie Fox - Yoga", 14, json!(["real"]));
+    detail["post_stream"] = json!({"posts": [{"cooked":
+        r#"<p><a href="https://pixeldrain.com/u/sf">video</a> <a href="https://www.pornhub.com/view_video.php?viewkey=sf1">PH</a>
+        <img src="https://cdn.es/optimized/yoga.jpeg" alt="y"></p>"#}]});
+    let og = |title: &str, image: &str| {
+        format!(
+            r#"<html><head><meta property="og:title" content="{title}"><meta property="og:image" content="{image}"></head></html>"#
+        )
+    };
+    json!({
+        format!("GET {IG}/beabright/"): {"body": ig_page("beabright", "Bea Bright")},
+        "GET https://onlyfans.com/beabright": {"body": og("Bea Bright", "https://cdn.web/bea-of.gif")},
+        "GET https://www.iafd.com/person.rme/id=9/bea-bright.htm":
+            {"body": "<html><title>IAFD</title><h1>Bea Bright</h1><meta property=\"og:image\" content=\"https://cdn.web/banner.gif\"></html>"},
+        "GET https://cdn.web/bea-of.gif": {"body": gif(344, 600)},
+        "GET https://cdn.web/bea1.gif": {"body": gif(600, 600)},
+        "GET https://cdn.web/banner.gif": {"body": gif(1919, 300)},
+        "GET https://x.com/someone": {"body": og("Jane Doe (@someone)", "https://cdn.web/jane.gif")},
+        "GET https://fansly.com/SweetieFox": {"body": og("Sweetie Fox (@SweetieFox) | Fansly", "https://cdn.web/sf.gif")},
+        "GET https://cdn.web/sf.gif": {"body": gif(600, 344)},
+        "GET https://www.pornhub.com/view_video.php?viewkey=sf1": {"body": og("Yoga", "https://ci.phncdn.com/sf1.gif")},
+        "GET https://ci.phncdn.com/sf1.gif": {"body": gif(600, 344)},
+        format!("GET {FORUM}/search.json?q=Sweetie%20Fox"): {"body": {"posts": [], "topics": [
+            topic(500_001, "Sweetie Fox - Yoga", 14, json!(["real"])),
+            topic(500_002, "Another girl", 14, json!([])),
+            topic(500_003, "Sweetie Fox AI", 14, json!(["ai-generated"])),
+            topic(500_004, "Sweetie Fox chat", 2, json!([]))]}},
+        format!("GET {FORUM}/t/500001.json"): {"body": detail},
+        "GET https://cdn.es/optimized/yoga.jpeg": {"body": "JPEG-YOGA"},
+        format!("GET {FAPTAP}/api/videos?limit=42&page=1&q=Sweetie%20Fox"):
+            {"body": {"data": {"total": 2, "videos": [
+                {"id": "9101", "name": "Sweetie Fox dance", "duration": 120, "rating": {"likes": 2}, "tags": [],
+                 "user": {"username": "s"}, "user_thumbnail_url": "user_thumbnails/9101.webp"},
+                {"id": "9102", "name": "Someone else", "duration": 120, "tags": [], "user": {"username": "s"}}]}}},
+        format!("GET {FAPTAP}/api/assets/user_thumbnails/9101.webp"): {"body": "WEBP-9101"}
+    })
+}
+
+#[test]
+fn profiles_make_the_people_you_like_creators_with_profiles_and_pictures() {
+    let t = TempDir::new();
+    let star = favourites_setup(&t);
+    let fixtures = t.write("fixtures.json", &profiles_fixtures().to_string());
+    let judge = people_judge(
+        &t,
+        &json!({"people": [
+            {"name": "Bea Bright", "instagram": ["beabright"], "twitch": [],
+             "profiles": ["https://onlyfans.com/beabright", "https://www.iafd.com/person.rme/id=9/bea-bright.htm"],
+             "images": [{"url": "https://cdn.web/bea1.gif", "page": "https://onlyfans.com/beabright/"},
+                        {"url": "https://cdn.web/jane.gif", "page": "https://x.com/someone"}]},
+            {"name": "Nobody Known", "instagram": [], "twitch": [], "profiles": ["https://x.com/someone"]},
+            {"name": "Sweetie Fox", "profiles": ["https://fansly.com/SweetieFox"]}
+        ]}),
+    );
+    let o = run(
+        &t,
+        &["--profiles", "3", "--judge-cmd", &judge],
+        Some(&fixtures),
+    );
+    let out = text(&o);
+    // The rest of the pornstar list waits for the next run.
+    assert_eq!(o.status.code(), Some(2), "{out}");
+    assert!(!out.contains("SECRET-COOKIE"), "{out}");
+    assert!(
+        out.contains("3 looked up, 2 with a confirmed profile, 1 not found, 1 new creator(s), 4 picture(s) added"),
+        "{out}"
+    );
+    let batch: Value = serde_json::from_str(
+        &fs::read_to_string(t.ud().join("creator-scout-work/people.json")).unwrap(),
+    )
+    .unwrap();
+    let names: Vec<&str> = batch["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    // Lucy Cat and the listed pornstar wait for their Instagram pictures.
+    assert_eq!(names, ["Bea Bright", "Nobody Known", "Sweetie Fox"]);
+    let f = t.creators();
+    let c = &f["creators"];
+    assert_eq!(c["lucycat"]["sources"], json!(["swiped"]));
+    assert_eq!(c[&star]["sources"], json!(["pornstar"]));
+    // No longer a favourite: the source is gone.
+    assert!(c["oldfav"]["sources"].is_null(), "{}", c["oldfav"]);
+    // Swiped yes, Twitch only: her Instagram, two profiles, two pictures
+    // (the IAFD banner and the judge's picture on someone else's page are
+    // dropped).
+    let bea = &c["beabright"];
+    assert_eq!(bea["instagram"]["handle"], "beabright");
+    assert_eq!(bea["twitch"]["handle"], "beabright");
+    let sites: Vec<&str> = bea["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["site"].as_str().unwrap())
+        .collect();
+    assert_eq!(sites, ["onlyfans", "iafd"]);
+    assert_eq!(bea["profiles"][0]["match"], "high");
+    let sources: Vec<&str> = bea["pictures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, ["onlyfans", "web"]);
+    // A new creator with a Fansly page only: kept, with her posts and
+    // pictures (Fansly's own, the Pornhub video's poster, the posts').
+    let sf = &c["sweetiefox"];
+    assert_eq!(sf["sources"], json!(["favourite"]));
+    assert!(sf["instagram"].is_null() && sf["twitch"].is_null());
+    assert_eq!(sf["profiles"][0]["url"], "https://fansly.com/SweetieFox");
+    let ids: Vec<&str> = sf["posts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["500001", "9101"]);
+    assert_eq!(
+        sf["posts"][0]["videoPages"],
+        json!(["https://www.pornhub.com/view_video.php?viewkey=sf1"])
+    );
+    let pics: Vec<(&str, &str)> = sf["pictures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (p["source"].as_str().unwrap(), p["file"].as_str().unwrap()))
+        .collect();
+    assert_eq!(pics[0].0, "fansly");
+    assert!(pics[0].1.starts_with("web-") && pics[0].1.ends_with(".gif"));
+    assert!(pics.iter().any(|p| p.0 == "pornhub"), "{pics:?}");
+    assert!(
+        pics.iter().any(|p| p == &("eroscripts", "es-500001-0.jpg")),
+        "{pics:?}"
+    );
+    let dir = t.ud().join("creator-pictures/sweetiefox");
+    assert_eq!(
+        fs::read_to_string(dir.join("ft-9101.jpg")).unwrap(),
+        "WEBP-9101"
+    );
+    assert!(dir.join(pics[0].1).is_file());
+    // Nobody confirmed: not a creator, noted for 30 days.
+    assert!(c.get("nobodyknown").is_none());
+    let st = t.state();
+    assert!(st["profileMisses"]["nobodyknown"].is_string());
+    assert!(st["profileMisses"].get("sweetiefox").is_none());
+    assert_eq!(st["lastRuns"]["profiles"]["code"], 2);
+
+    let o = run(&t, &["--status"], None);
+    let out = text(&o);
+    assert!(
+        out.contains("1 not found (looked up again after 30 days)"),
+        "{out}"
+    );
+    assert!(out.contains("Follow: 0 followed"), "{out}");
+
+    // A judge that writes nothing: an error, nobody marked missing.
+    let o = run(
+        &t,
+        &["--profiles", "1", "--judge-cmd", "true"],
+        Some(&fixtures),
+    );
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("no results file"), "{}", text(&o));
+}
+
+/// A trimmed logged-in profile page: its description meta and the timeline
+/// it embeds.
+fn profile_page(class: &str, followers: &str, name: &str, edges: &[Value]) -> String {
+    let conn = json!({"edges": edges, "page_info": {"end_cursor": "x}y", "has_next_page": false}});
+    format!(
+        r#"<!DOCTYPE html><html class="{class}"><head><meta property="og:description" content="{followers} Followers, 5 Following, 10 Posts - See Instagram photos and videos from {name} (&#064;someone)" /></head>
+        <body><script type="application/json">{{"require":[[{{"profile_id":"42","data":{{"xdt_api__v1__feed__user_timeline_graphql_connection":{conn}}}}}]]}}</script></body></html>"#
+    )
+}
+
+#[test]
+fn follows_favourites_and_swiped_yes_on_instagram() {
+    let t = TempDir::new();
+    let ig = |h: &str| json!({"handle": h, "followers": "1M", "posts": "10", "match": "high"});
+    fs::write(
+        t.ud().join("creators.json"),
+        json!({"version": 1, "creators": {
+            "a1": {"name": "A One", "instagram": ig("a1"), "sources": ["favourite"]},
+            "a2": {"name": "A Two", "instagram": ig("a2"), "sources": ["swiped"]},
+            "a3": {"name": "A Three", "instagram": ig("a3"), "sources": ["favourite", "pornstar"]},
+            "a4": {"name": "A Four", "instagram": ig("a4"), "sources": ["favourite"]},
+            "a5": {"name": "A Five", "instagram": ig("a5"), "sources": ["favourite"]},
+            "star": {"name": "Star", "instagram": ig("star"), "sources": ["pornstar"]},
+            "noig": {"name": "No IG", "sources": ["favourite"]}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        t.ud().join("instagram-session.json"),
+        json!({"cookies": [
+            {"name": "sessionid", "value": "SID", "domain": ".instagram.com"},
+            {"name": "csrftoken", "value": "CSRF", "domain": ".instagram.com"}],
+            "savedAt": "2026-11-17T00:00:00.000Z"})
+        .to_string(),
+    )
+    .unwrap();
+    let page = |pk: &str, following: bool| {
+        format!(
+            r#"<html class="_9dls"><meta property="og:description" content="1M Followers, 1 Following, 10 Posts - See Instagram photos and videos from A (&#064;a)" />
+            <script>{{"profile_id":"{pk}","friendship_status":{{"following":{following},"outgoing_request":false}}}}</script></html>"#
+        )
+    };
+    let create = |pk: &str| format!("POST {IG}/api/v1/friendships/create/{pk}/");
+    let mut fx = json!({
+        format!("GET {IG}/a1/"): {"body": page("101", false)},
+        format!("GET {IG}/a2/"): {"body": page("102", false)},
+        format!("GET {IG}/a3/"): {"body": page("103", true)},
+        format!("GET {IG}/a4/"): {"body": page("104", false)},
+        format!("GET {IG}/a5/"): {"body": page("105", false)},
+        create("101"): {"body": {"friendship_status": {"following": true, "outgoing_request": false}, "status": "ok"}},
+        create("102"): {"body": {"friendship_status": {"following": false, "outgoing_request": true}, "status": "ok"}},
+        create("104"): {"status": 400, "body": {"message": "feedback_required", "spam": true, "status": "fail"}}
+    });
+    let fixtures = t.write("fixtures.json", &fx.to_string());
+    let o = run(&t, &["--follow"], Some(&fixtures));
+    let out = text(&o);
+    // Rate limited at A Four: stop for today.
+    assert_eq!(o.status.code(), Some(2), "{out}");
+    assert!(!out.contains("SID") && !out.contains("CSRF"), "{out}");
+    let st = t.state();
+    assert_eq!(st["follows"]["a1"]["status"], "following");
+    assert_eq!(st["follows"]["a2"]["status"], "requested");
+    // Followed already: no request needed.
+    assert_eq!(st["follows"]["a3"]["status"], "following");
+    for slug in ["a4", "a5", "star", "noig"] {
+        assert!(st["follows"].get(slug).is_none(), "{slug}");
+    }
+    let f = t.creators();
+    assert_eq!(f["creators"]["a1"]["instagram"]["followed"], "following");
+    assert_eq!(f["creators"]["a2"]["instagram"]["followed"], "requested");
+    assert!(f["creators"]["a4"]["instagram"]["followed"].is_null());
+
+    // Next day: a challenge stops it, not logged in.
+    fx[create("104")] =
+        json!({"status": 400, "body": {"message": "challenge_required", "status": "fail"}});
+    let fixtures = t.write("fixtures.json", &fx.to_string());
+    let o = run(&t, &["--follow", "5"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(3), "{out}");
+    assert!(out.contains("--login"), "{out}");
+    assert!(t.state()["follows"].get("a5").is_none());
+
+    let o = run(&t, &["--status"], None);
+    assert!(
+        text(&o).contains("Follow: 2 followed, 1 requested"),
+        "{}",
+        text(&o)
+    );
 }

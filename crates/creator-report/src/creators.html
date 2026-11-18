@@ -86,6 +86,10 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
   background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
 .b-score { --bc: #2f6fdf; } .b-time { --bc: #6b7280; } .b-cream { --bc: #e0529c; } .b-multi { --bc: #14b8a6; }
 .b-es { --bc: #d08b2c; } .b-paid { --bc: #8b8b93; } .b-ft { --bc: #a46ad6; }
+.b-fav { --bc: #e8a317; } .b-star { --bc: #e0529c; }
+.profiles { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
+.profiles a { color: var(--muted); }
+.follow { font-size: 11px; font-weight: 600; color: var(--like); margin-left: 4px; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
 .tags.one-line { flex-wrap: nowrap; overflow: hidden; }
 .ttl { font-weight: 650; font-size: 16px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
@@ -234,7 +238,19 @@ const TABS = {
     hint: '← hide · → want (downloads at the next daily run) · ↓ skip · Backspace undo · Space next picture',
   },
 };
-const SOURCES = { instagram: 'Instagram', eroscripts: 'EroScripts', faptap: 'FapTap' };
+const SOURCES = { instagram: 'Instagram', eroscripts: 'EroScripts', faptap: 'FapTap', pornhub: 'Pornhub',
+  onlyfans: 'OnlyFans', fansly: 'Fansly', x: 'X', reddit: 'Reddit', profile: 'Profile page', web: 'Web' };
+const SITES = { onlyfans: 'OnlyFans', fansly: 'Fansly', pornhub: 'Pornhub', x: 'X', reddit: 'Reddit',
+  manyvids: 'ManyVids', linktree: 'Links', iafd: 'IAFD', babepedia: 'Babepedia', boobpedia: 'Boobpedia',
+  freeones: 'FreeOnes', profile: 'Site' };
+// Why she is yes without a swipe (creators.json sources).
+const FROM = { favourite: 'from favourites', pornstar: 'from pornstar list' };
+function sourceBadges(sources) {
+  const s = sources || [];
+  return [s.includes('favourite') ? el('span', { class: 'badge b-fav', title: 'One of your favourite artists' }, 'Favourite') : null,
+    s.includes('pornstar') ? el('span', { class: 'badge b-star', title: 'On your pornstar list' }, 'Pornstar list') : null]
+    .filter(Boolean);
+}
 const KIND_SHORT = { eroscripts: 'ES', faptap: 'FT' };
 
 const $ = (id) => document.getElementById(id);
@@ -320,10 +336,12 @@ function followers(v) {
 
 const scoreBadge = (s) => el('span', { class: 'badge b-score', title: 'Score' }, s == null ? '★ –' : '★ ' + fmt(s));
 
-function social(net, href, label, count, when, whenNone, whenTitle) {
+function social(net, href, label, count, when, whenNone, whenTitle, followed) {
   return el('div', { class: 'social' },
     el('span', { class: 'net' }, net),
     ext(href, label),
+    followed ? el('span', { class: 'follow', title: 'Our Instagram account ' + (followed === 'requested' ? 'asked to follow her' : 'follows her') },
+      followed === 'requested' ? 'Requested' : 'Following') : null,
     count ? el('span', { class: 'n' }, count + ' followers') : null,
     when ? el('span', { class: 'when', title: whenTitle + ' ' + when }, whenTitle.toLowerCase() + ' ' + day(when))
       : el('span', { class: 'when none' }, whenNone));
@@ -331,7 +349,7 @@ function social(net, href, label, count, when, whenNone, whenTitle) {
 
 function creatorInfo(c) {
   const n = c.counts || {};
-  const badges = [scoreBadge(c.score)];
+  const badges = [scoreBadge(c.score), ...sourceBadges(c.sources)];
   if (n.eroscriptsFree) badges.push(el('span', { class: 'badge b-es', title: 'Free EroScripts posts with a downloadable video' }, `EroScripts ${n.eroscriptsFree} free`));
   if (n.eroscriptsPaid) badges.push(el('span', { class: 'badge b-paid', title: 'Paid EroScripts posts' }, `${n.eroscriptsPaid} paid`));
   if (n.faptap) badges.push(el('span', { class: 'badge b-ft', title: 'FapTap videos' }, `FapTap ${n.faptap}`));
@@ -343,9 +361,11 @@ function creatorInfo(c) {
     c.aliases && c.aliases.length ? el('div', { class: 'aka' }, 'aka ' + c.aliases.join(', ')) : null,
     el('div', { class: 'badges' }, badges),
     ig && ig.handle ? social('IG', 'https://www.instagram.com/' + encodeURIComponent(ig.handle) + '/', '@' + ig.handle,
-      followers(ig.followers), ig.lastPostAt, 'no login yet', 'Last post') : null,
+      followers(ig.followers), ig.lastPostAt, 'no login yet', 'Last post', ig.followed) : null,
     tw && tw.handle ? social('TW', 'https://www.twitch.tv/' + encodeURIComponent(tw.handle), tw.handle,
       followers(tw.followers), tw.lastLive, 'never live', 'Last live') : null,
+    (c.profiles || []).length ? el('div', { class: 'profiles' }, c.profiles.map((p) =>
+      ext(p.url, (SITES[p.site] || p.site) + (p.handle && p.site !== 'profile' ? ' ' + p.handle : '')))) : null,
     tops.length ? el('ol', { class: 'tops' }, tops.map((p) => el('li', {},
       el('span', { class: 'k', title: SOURCES[p.kind] || p.kind }, KIND_SHORT[p.kind] || ''),
       p.url ? ext(p.url, p.title || '(untitled)') : el('span', { class: 't' }, p.title || '(untitled)'),
@@ -806,18 +826,20 @@ $('tabs').addEventListener('click', (e) => {
 });
 window.addEventListener('popstate', () => switchTab(location.pathname === '/posts' ? 'posts' : 'creators'));
 
-// The Yes list: the creators swiped yes; "Change to no" takes their posts off the Posts deck.
+// The Yes list: the creators swiped yes, and the favourites and pornstar-list ones not swiped
+// no; "Change to no" takes their posts off the Posts deck.
 function yesRow(y) {
   const meta = el('div', { class: 'mt' });
   const button = el('button', { type: 'button' });
   const row = el('li', {},
     y.picture ? el('img', { src: y.picture, alt: '', loading: 'lazy' }) : el('div', { class: 'noimg' }),
-    el('div', { class: 'who' }, el('div', { class: 'nm' }, y.name), meta),
+    el('div', { class: 'who' }, el('div', { class: 'nm' }, y.name, ' ', ...sourceBadges(y.sources)), meta),
     button);
   const show = (isYes) => {
     row.classList.toggle('changed', !isYes);
     meta.textContent = isYes
-      ? [plural(y.unswiped, 'post') + ' to swipe', y.wanted ? y.wanted + ' wanted' : null, 'yes since ' + day(y.at)].filter(Boolean).join(' · ')
+      ? [plural(y.unswiped, 'post') + ' to swipe', y.wanted ? y.wanted + ' wanted' : null,
+        y.at ? 'yes since ' + day(y.at) : FROM[y.from] || null].filter(Boolean).join(' · ')
       : 'Changed to no: their posts left the Posts deck';
     button.textContent = isYes ? 'Change to no' : 'Back to yes';
     button.dataset.yes = isYes ? '1' : '';

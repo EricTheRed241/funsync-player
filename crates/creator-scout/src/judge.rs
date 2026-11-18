@@ -1,7 +1,8 @@
 //! The judge: an omp run (default `omp -p …`, `--judge-cmd` to replace it)
 //! that names the on-screen creator of each new title and, for new
-//! creators, finds Instagram / Twitch handle candidates by web search; and
-//! the checks its results file must pass.
+//! creators, finds Instagram / Twitch handle candidates by web search
+//! (`--discover`), or finds them for the people the user likes
+//! (`--favourites`); and the checks its results files must pass.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -14,6 +15,8 @@ pub const DEFAULT_MAX_COST: f64 = 5.0;
 pub const WORK_DIR: &str = "creator-scout-work";
 pub const BATCH_FILE: &str = "titles.json";
 pub const RESULTS_FILE: &str = "results.json";
+pub const PEOPLE_FILE: &str = "people.json";
+pub const PEOPLE_RESULTS_FILE: &str = "people-results.json";
 /// Handle candidates per account kind, at most.
 pub const MAX_HANDLES: usize = 5;
 const MAX_NAME: usize = 60;
@@ -54,16 +57,132 @@ pub struct Batch {
     pub skip: Vec<String>,
 }
 
-/// Write the batch; returns (batch file, results file). A stale results
-/// file is removed first.
-pub fn write_batch(work: &Path, batch: &Batch) -> Result<(PathBuf, PathBuf), String> {
+/// A person or creator to find the profiles and pictures of (`--profiles`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PersonItem {
+    pub name: String,
+    pub aliases: Vec<String>,
+    /// `swiped` / `favourite` / `pornstar`; empty for a creator only
+    /// discovered.
+    pub sources: Vec<String>,
+    /// Her funscript posts' titles (EroScripts / FapTap), to tell her from
+    /// namesakes.
+    pub posts: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PeopleBatch {
+    pub people: Vec<PersonItem>,
+}
+
+/// Write `batch` to `work/<name>`; returns (batch file, results file
+/// `work/<results>`). A stale results file is removed first.
+fn write_files(
+    work: &Path,
+    name: &str,
+    results: &str,
+    batch: &impl Serialize,
+) -> Result<(PathBuf, PathBuf), String> {
     fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
-    let batch_path = work.join(BATCH_FILE);
-    let results = work.join(RESULTS_FILE);
+    let batch_path = work.join(name);
+    let results = work.join(results);
     let _ = fs::remove_file(&results);
     let json = serde_json::to_string_pretty(batch).map_err(|e| e.to_string())?;
     fs::write(&batch_path, json).map_err(|e| format!("{}: {e}", batch_path.display()))?;
     Ok((batch_path, results))
+}
+
+/// Write the titles batch; returns (batch file, results file).
+pub fn write_batch(work: &Path, batch: &Batch) -> Result<(PathBuf, PathBuf), String> {
+    write_files(work, BATCH_FILE, RESULTS_FILE, batch)
+}
+
+/// Write the people batch; returns (batch file, results file).
+pub fn write_people(work: &Path, batch: &PeopleBatch) -> Result<(PathBuf, PathBuf), String> {
+    write_files(work, PEOPLE_FILE, PEOPLE_RESULTS_FILE, batch)
+}
+
+/// What the judge looks for, the same for new creators and for people.
+const FIND: &str = "her Instagram account, her Twitch channel and her public profile pages on OnlyFans, Fansly, \
+Pornhub (model / pornstar / channel page), X (Twitter), Reddit (u/…), ManyVids, Linktree or her own link page, and \
+pornstar databases (IAFD, Babepedia, Boobpedia, FreeOnes). Only her own accounts and pages that you saw in search \
+results, not fan pages, reposts or namesakes; never guessed ones. List up to 3 Instagram and up to 3 Twitch handle \
+candidates, most likely first, [] when none (handles without @ and without URL); up to 10 profile page URLs (full \
+https URLs); and, when you see them, up to 10 free public pictures of her as {\"url\": \"<image URL>\", \"page\": \
+\"<the profile page URL above it is on>\"}";
+
+pub fn people_prompt(batch: &Path, results: &Path) -> String {
+    format!(
+        "You find the public profiles of people a user likes: adult performers, OnlyFans / Fansly creators, \
+camgirls, cosplayers, and adult artists or animators (3D, hentai, PMV makers) and studios. Read {batch} with the \
+read tool. It is JSON: {{\"people\": [{{\"name\", \"aliases\", \"sources\", \"posts\"}}]}} (sources: favourite = a \
+favourite artist, pornstar = on the user's pornstar list, swiped = liked on the user's Creators site; posts: titles \
+of funscripts made for her videos, to tell her from namesakes).
+
+For every person search the web (web_search) for {FIND}.
+
+Write {results} with the write tool, and nothing else in it:
+{{\"people\": [{{\"name\": \"<name as in the batch>\", \"instagram\": [\"handle\"], \"twitch\": [\"login\"], \
+\"profiles\": [\"https://…\"], \"images\": [{{\"url\": \"https://…\", \"page\": \"https://…\"}}]}}]}}
+with exactly one entry per batch person. Don't change any other file. When the results file is written, reply \
+with one line: done.",
+        batch = batch.display(),
+        results = results.display()
+    )
+}
+
+/// The people results: handle candidates by batch name (people the file
+/// leaves out aren't in it).
+pub fn read_people_results(path: &Path, names: &[String]) -> Result<Vec<Handles>, String> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err("no results file".into());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    validate_people(&raw, names)
+}
+
+/// Check a people results file against the batch's names; any problem
+/// rejects the whole file.
+pub fn validate_people(raw: &str, names: &[String]) -> Result<Vec<Handles>, String> {
+    let v: Value = serde_json::from_str(raw).map_err(|e| format!("not JSON ({e})"))?;
+    let top = v.as_object().ok_or("not a JSON object")?;
+    check_keys(top, &["people"], "results")?;
+    let list = top
+        .get("people")
+        .and_then(Value::as_array)
+        .ok_or("no \"people\" list")?;
+    let mut out: Vec<Handles> = Vec::new();
+    for (i, e) in list.iter().enumerate() {
+        let what = format!("person {}", i + 1);
+        let o = e
+            .as_object()
+            .ok_or_else(|| format!("{what} is not an object"))?;
+        check_keys(
+            o,
+            &[
+                "name",
+                "instagram",
+                "twitch",
+                "profiles",
+                "images",
+                "reason",
+            ],
+            &what,
+        )?;
+        let n = name(o.get("name").unwrap_or(&Value::Null), &what)?;
+        let slug = crate::store::slug(&n);
+        let Some(batch_name) = names.iter().find(|b| crate::store::slug(b) == slug) else {
+            return Err(format!("{what}: \"{n}\" is not in the batch"));
+        };
+        if out.iter().any(|h| crate::store::slug(&h.name) == slug) {
+            return Err(format!("{what}: \"{n}\" appears twice"));
+        }
+        out.push(found(o, batch_name.clone(), &what)?);
+    }
+    Ok(out)
 }
 
 pub fn prompt(batch: &Path, results: &Path) -> String {
@@ -79,13 +198,12 @@ Bangbros and the like, or anyone known mainly from studio scenes), JAV actresses
 several people, celebrities, fictional or game characters, and when the title only names the scripter. \"uploader\" \
 is the scripter, never the creator. When the creator is one of \"known\" (by name or alias), write the known name \
 exactly. Search the web when a name is unfamiliar and you can't tell otherwise.
-2. For every creator you named who is not in \"known\" and not in \"skip\": search the web (web_search) for her \
-Instagram and her Twitch accounts. List up to 3 handle candidates for each, most likely first, [] when none; only \
-handles you saw in search results, never guessed ones. Handles without @ and without URL.
+2. For every creator you named who is not in \"known\" and not in \"skip\": search the web (web_search) for {FIND}.
 
 Write {results} with the write tool, and nothing else in it:
 {{\"titles\": [{{\"key\": \"<key>\", \"creator\": \"<name>\" or null}}], \
-\"creators\": [{{\"name\": \"<name as in titles>\", \"instagram\": [\"handle\"], \"twitch\": [\"login\"]}}]}}
+\"creators\": [{{\"name\": \"<name as in titles>\", \"instagram\": [\"handle\"], \"twitch\": [\"login\"], \
+\"profiles\": [\"https://…\"], \"images\": [{{\"url\": \"https://…\", \"page\": \"https://…\"}}]}}]}}
 \"titles\" has exactly one entry per batch title with its key; \"creators\" lists only the new creators of step 2. \
 Don't change any other file. When the results file is written, reply with one line: done.",
         batch = batch.display(),
@@ -118,12 +236,22 @@ pub fn run(command: &str, prompt: &str, work: &Path) -> Result<(), String> {
     }
 }
 
-/// A new creator's handle candidates.
+/// A picture the judge found, on a page it says is hers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Image {
+    pub url: String,
+    pub page: String,
+}
+
+/// What the judge found for a creator: handle candidates, profile pages,
+/// pictures.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Handles {
     pub name: String,
     pub instagram: Vec<String>,
     pub twitch: Vec<String>,
+    pub profiles: Vec<String>,
+    pub images: Vec<Image>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -205,6 +333,70 @@ fn handles(v: Option<&Value>, twitch: bool, what: &str) -> Result<Vec<String>, S
     Ok(out)
 }
 
+/// Profile pages or pictures per creator, at most.
+pub const MAX_LINKS: usize = 10;
+
+/// A full `https://` URL: no spaces or control characters, 400 bytes at
+/// most.
+fn https_url(v: &Value, what: &str) -> Result<String, String> {
+    let s = v
+        .as_str()
+        .map(str::trim)
+        .ok_or_else(|| format!("{what}: a URL is not text"))?;
+    let ok = s.len() <= 400
+        && s.strip_prefix("https://").is_some_and(|r| !r.is_empty())
+        && !s.chars().any(|c| c.is_whitespace() || c.is_control());
+    if !ok {
+        return Err(format!("{what}: \"{s}\" is not an https URL"));
+    }
+    Ok(s.to_string())
+}
+
+fn list<'a>(v: Option<&'a Value>, kind: &str, what: &str) -> Result<&'a [Value], String> {
+    let list = match v {
+        None | Some(Value::Null) => return Ok(&[]),
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| format!("{what}: {kind} is not a list"))?,
+    };
+    if list.len() > MAX_LINKS {
+        return Err(format!("{what}: more than {MAX_LINKS} {kind}"));
+    }
+    Ok(list)
+}
+
+/// A creator's or person's finds: handles, profile pages, pictures.
+fn found(o: &serde_json::Map<String, Value>, name: String, what: &str) -> Result<Handles, String> {
+    let mut profiles: Vec<String> = Vec::new();
+    for v in list(o.get("profiles"), "profiles", what)? {
+        let url = https_url(v, what)?;
+        if !profiles.contains(&url) {
+            profiles.push(url);
+        }
+    }
+    let mut images: Vec<Image> = Vec::new();
+    for v in list(o.get("images"), "images", what)? {
+        let i = v
+            .as_object()
+            .ok_or_else(|| format!("{what}: an image is not an object"))?;
+        check_keys(i, &["url", "page"], what)?;
+        let image = Image {
+            url: https_url(i.get("url").unwrap_or(&Value::Null), what)?,
+            page: https_url(i.get("page").unwrap_or(&Value::Null), what)?,
+        };
+        if !images.iter().any(|x| x.url == image.url) {
+            images.push(image);
+        }
+    }
+    Ok(Handles {
+        instagram: handles(o.get("instagram"), false, what)?,
+        twitch: handles(o.get("twitch"), true, what)?,
+        profiles,
+        images,
+        name,
+    })
+}
+
 /// Check a results file against the batch's keys. Any problem rejects the
 /// whole file (the titles stay unjudged and the cursors don't move).
 pub fn validate(raw: &str, keys: &[String]) -> Result<Results, String> {
@@ -262,7 +454,11 @@ pub fn validate(raw: &str, keys: &[String]) -> Result<Results, String> {
         let o = e
             .as_object()
             .ok_or_else(|| format!("{what} is not an object"))?;
-        check_keys(o, &["name", "instagram", "twitch"], &what)?;
+        check_keys(
+            o,
+            &["name", "instagram", "twitch", "profiles", "images"],
+            &what,
+        )?;
         let n = name(o.get("name").unwrap_or(&Value::Null), &what)?;
         let slug = crate::store::slug(&n);
         if !named.contains(&slug) {
@@ -271,11 +467,7 @@ pub fn validate(raw: &str, keys: &[String]) -> Result<Results, String> {
         if creators.iter().any(|c| crate::store::slug(&c.name) == slug) {
             return Err(format!("{what}: \"{n}\" appears twice"));
         }
-        creators.push(Handles {
-            instagram: handles(o.get("instagram"), false, &what)?,
-            twitch: handles(o.get("twitch"), true, &what)?,
-            name: n,
-        });
+        creators.push(found(o, n, &what)?);
     }
     Ok(Results {
         titles: keys
@@ -353,5 +545,49 @@ mod tests {
             default_command(5.0)
                 .ends_with("--tools read,write,web_search --auto-approve --max-cost 5")
         );
+    }
+
+    #[test]
+    fn people_results_with_profiles_and_images() {
+        let names = vec!["Bea Bright".to_string(), "Sweetie Fox".to_string()];
+        let r = validate_people(
+            r#"{"people":[{"name":"bea bright","instagram":["@beabright"],"twitch":[],
+                "profiles":["https://onlyfans.com/beabright","https://onlyfans.com/beabright"],
+                "images":[{"url":"https://cdn/a.jpg","page":"https://onlyfans.com/beabright"}]}]}"#,
+            &names,
+        )
+        .unwrap();
+        // Named as in the batch; one person may be left out.
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].name, "Bea Bright");
+        assert_eq!(r[0].instagram, ["beabright"]);
+        assert_eq!(r[0].profiles, ["https://onlyfans.com/beabright"]);
+        assert_eq!(r[0].images[0].page, "https://onlyfans.com/beabright");
+        let bad = [
+            r#"{"people":[{"name":"Someone Else"}]}"#,
+            r#"{"people":[{"name":"Bea Bright"},{"name":"bea  bright"}]}"#,
+            r#"{"people":[{"name":"Bea Bright","profiles":["http://onlyfans.com/b"]}]}"#,
+            r#"{"people":[{"name":"Bea Bright","profiles":["https://a b"]}]}"#,
+            r#"{"people":[{"name":"Bea Bright","images":[{"url":"https://a/b.jpg"}]}]}"#,
+            r#"{"people":[{"name":"Bea Bright","images":[{"url":"https://a/b.jpg","page":"https://p","x":1}]}]}"#,
+            r#"{"people":[{"name":"Bea Bright","extra":1}]}"#,
+            r#"{"titles":[]}"#,
+        ];
+        for raw in bad {
+            assert!(validate_people(raw, &names).is_err(), "{raw}");
+        }
+        // New creators of --discover carry them too.
+        let r = validate(
+            r#"{"titles":[{"key":"eroscripts:1","creator":"A"},{"key":"faptap:2","creator":null}],
+                "creators":[{"name":"A","profiles":["https://fansly.com/a"],"images":[]}]}"#,
+            &keys(),
+        )
+        .unwrap();
+        assert_eq!(r.creators[0].profiles, ["https://fansly.com/a"]);
+        let p = people_prompt(
+            Path::new("/w/people.json"),
+            Path::new("/w/people-results.json"),
+        );
+        assert!(p.contains("/w/people.json") && p.contains("OnlyFans") && p.contains("\"images\""));
     }
 }

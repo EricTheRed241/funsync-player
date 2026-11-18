@@ -51,6 +51,26 @@ pub struct Creator {
     pub pictures: Vec<Picture>,
     #[serde(deserialize_with = "nullable")]
     pub posts: Vec<Post>,
+    /// Why the user wants her (creator-scout --profiles): `swiped`, `favourite` (a
+    /// favourite artist), `pornstar` (the pornstar list); empty when only discovered.
+    #[serde(deserialize_with = "nullable")]
+    pub sources: Vec<String>,
+    /// Her other public profiles creator-scout confirmed hers (OnlyFans, Fansly, …).
+    #[serde(deserialize_with = "nullable")]
+    pub profiles: Vec<Profile>,
+}
+
+#[derive(Debug, Default, Deserialize, Clone, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Profile {
+    /// onlyfans / fansly / pornhub / x / reddit / manyvids / linktree / iafd /
+    /// babepedia / boobpedia / freeones / profile.
+    #[serde(deserialize_with = "nullable")]
+    pub site: String,
+    #[serde(deserialize_with = "nullable")]
+    pub url: String,
+    #[serde(deserialize_with = "nullable")]
+    pub handle: String,
 }
 
 /// `followers` and `posts` are kept as given ("5M", or a number).
@@ -64,6 +84,8 @@ pub struct Instagram {
     pub full_name: Option<String>,
     /// None until creator-scout has an Instagram login.
     pub last_post_at: Option<String>,
+    /// Our Instagram account follows her: `following` / `requested`.
+    pub followed: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Clone, PartialEq)]
@@ -217,8 +239,9 @@ mod tests {
         std::fs::write(
             d.join(FILE),
             r#"{"version":1,"updatedAt":"2026-11-18T01:40:00Z","eroscriptsChecked":{"newestTopicId":348600},
-              "creators":{"sweetiefox":{"name":"Sweetie Fox","aliases":["SweetieFox"],"score":6.1,"extra":1,
-                "instagram":{"handle":"swfx_real","followers":"5M","posts":"225","lastPostAt":null,"match":"high"},
+              "creators":{"sweetiefox":{"name":"Sweetie Fox","aliases":["SweetieFox"],"score":6.1,"extra":1,"sources":["favourite","pornstar"],
+                "instagram":{"handle":"swfx_real","followers":"5M","posts":"225","lastPostAt":null,"match":"high","followed":"following"},
+                "profiles":[{"site":"onlyfans","url":"https://onlyfans.com/sf","handle":"sf","match":"high","checkedAt":"t"}],
                 "twitch":{"handle":"sweetiefoxxx","followers":9225,"lastLive":"2020-09-11T18:17:44Z"},
                 "pictures":[{"file":"ig-1.jpg","source":"instagram","url":"https://www.instagram.com/p/x/"}],
                 "posts":[{"kind":"eroscripts","id":"41415","title":"T","free":true,"hosts":["pornhub"],
@@ -230,6 +253,13 @@ mod tests {
         assert_eq!(c.updated_at.as_deref(), Some("2026-11-18T01:40:00Z"));
         let fox = &c.creators["sweetiefox"];
         assert_eq!(fox.score, Some(6.1));
+        assert_eq!(fox.sources, ["favourite", "pornstar"]);
+        assert_eq!(fox.profiles[0].site, "onlyfans");
+        assert_eq!(fox.profiles[0].url, "https://onlyfans.com/sf");
+        assert_eq!(
+            fox.instagram.as_ref().unwrap().followed.as_deref(),
+            Some("following")
+        );
         let ig = fox.instagram.as_ref().unwrap();
         assert_eq!(ig.followers, Value::from("5M"));
         assert_eq!(ig.last_post_at, None);
