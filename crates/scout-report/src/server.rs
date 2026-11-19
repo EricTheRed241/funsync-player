@@ -1,21 +1,23 @@
-//! The HTTP side: one request at a time. `GET /` (the report page),
-//! `GET /api/report` (the report, rebuilt from the files on every request),
+//! The HTTP side: one request at a time. `GET /` (redirects to the deck page),
 //! `GET /swipe` (the deck page),
 //! `GET /api/deck?stack=multi|vr|flat|free&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
 //! (the next cards of a tab, every source mixed, crate::deck; `free` is the Free space tab's
-//! library videos, crate::free_space),
+//! library videos, crate::free_space), `GET /api/drive` (the library drive's free space and
+//! whether swiping is off, crate::drive),
 //! `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview frames,
 //! crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (waiting
 //! posts), `POST /api/scenes/<slr|vrb|pmvhaven|faptap>/swipe {id, dir}` and `…/undo {id}`
 //! (that scout's scenes), `POST /api/free-space/swipe {id, dir}`, `…/undo {id}` (marks on
 //! library videos) and `POST /api/free-space/delete` (rates the left-marked ones for deletion
-//! through the app's backend). The swipes files are the only writes, crate::swipes. In front of
-//! them all, crate::gate: the access PIN, and `/login` and `/logout`.
+//! through the app's backend). The swipes files are the only writes, crate::swipes. Post and
+//! scene swipes are refused (507) while the library drive is full; undos and the Free space
+//! tab's marks never are. In front of them all, crate::gate: the access PIN, and `/login`
+//! and `/logout`.
 
 use crate::gate::{self, Gate};
 use crate::scenes::{self, Source};
 use crate::swipes::{self, Dir, Store};
-use crate::{deck, frames, free_space, report};
+use crate::{deck, drive, frames, free_space, report};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -23,9 +25,7 @@ use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::path::Path;
 use std::time::Duration;
 
-/// The report page: HTML, CSS and JS in one file, no external scripts.
-pub const PAGE: &str = include_str!("page.html");
-/// The swipe deck page, likewise self-contained.
+/// The swipe deck page: HTML, CSS and JS in one file, no external scripts.
 pub const SWIPE_PAGE: &str = include_str!("swipe.html");
 
 /// This site's name (log lines) and its pages, for the gate.
@@ -112,9 +112,13 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
     let target = target.split('#').next().unwrap_or("");
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     match (method, path) {
-        ("GET" | "HEAD", "/") => html(PAGE),
+        ("GET" | "HEAD", "/") => {
+            let mut resp = text(303, "");
+            resp.headers.push(("Location", "/swipe".into()));
+            resp
+        }
         ("GET" | "HEAD", "/swipe") => html(SWIPE_PAGE),
-        ("GET" | "HEAD", "/api/report") => json_ok(&report::load(user_data)),
+        ("GET" | "HEAD", "/api/drive") => json_ok(&drive::status(user_data)),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
             Ok(d) if d.stack == deck::Stack::Free => {
                 json_ok(&free_space::load(user_data, d.limit, &d.exclude))
@@ -309,10 +313,31 @@ fn swipe(body: &[u8], user_data: &Path, source: Option<Source>) -> Response {
     if let Err(why) = known {
         return text(400, &format!("{id} {why}\n"));
     }
+    if let Some(refused) = refuse_when_full(&drive::status(user_data)) {
+        return refused;
+    }
     match store(source).set(user_data, &id, dir, video_tags::timefmt::now_iso()) {
         Ok(s) => json_ok(&json!({"id": id_json(&id, source), "dir": s.dir, "at": s.at})),
         Err(e) => text(500, &format!("{e}\n")),
     }
+}
+
+/// 507 while the library drive is full (drive::Status::full): a right swipe would queue a
+/// download with no room for it, so the download tabs take no swipes until space is freed.
+fn refuse_when_full(status: &drive::Status) -> Option<Response> {
+    let (Some(d), true) = (&status.drive, status.full) else {
+        return None;
+    };
+    let gb = |b: u64| format!("{:.1} GB", b as f64 / 1e9);
+    Some(text(
+        507,
+        &format!(
+            "The library drive is full: {} free on {}, swiping stops under {}. Delete videos (the Free space tab) to swipe again.\n",
+            gb(d.free),
+            d.mount,
+            gb(status.min_free_bytes.unwrap_or(0))
+        ),
+    ))
 }
 
 /// The id as the answer gives it back: a post's as a number (as its card has it), a
@@ -347,6 +372,7 @@ fn reason(status: u16) -> &'static str {
         413 => "Content Too Large",
         429 => "Too Many Requests",
         503 => "Service Unavailable",
+        507 => "Insufficient Storage",
         _ => "Internal Server Error",
     }
 }
@@ -591,32 +617,55 @@ mod tests {
     }
 
     #[test]
-    fn routes_the_pages_and_the_report() {
+    fn serves_the_deck_page_and_sends_the_root_there() {
         let dir = user_data("pages");
-        let r = route("GET", "/", b"", &dir);
-        assert_eq!(
-            (r.status, r.content_type),
-            (200, "text/html; charset=utf-8")
-        );
-        assert_eq!(r.body, PAGE.as_bytes());
-        assert_eq!(route("HEAD", "/?x=1", b"", &dir).status, 200);
+        for (m, t) in [("GET", "/"), ("HEAD", "/?x=1")] {
+            let r = route(m, t, b"", &dir);
+            assert_eq!(r.status, 303, "{m} {t}");
+            assert_eq!(r.headers, [("Location", "/swipe".to_string())]);
+        }
         let r = route("GET", "/swipe#top", b"", &dir);
         assert_eq!(
             (r.status, r.content_type),
             (200, "text/html; charset=utf-8")
         );
         assert_eq!(r.body, SWIPE_PAGE.as_bytes());
-
-        let v = get_json("/api/report?t=123", &dir);
-        assert_eq!(v["posts"][0]["id"], 7);
-        assert_eq!(v["posts"][0]["url"], "https://discuss.eroscripts.com/t/7");
-        assert_eq!(v["verdicts"]["known"], 1);
-
-        // The report is rebuilt on every request.
-        std::fs::remove_file(dir.join(report::STATE_FILE)).unwrap();
-        let v = get_json("/api/report", &dir);
-        assert_eq!(v["posts"], serde_json::json!([]));
+        // The judgments report is gone.
+        assert_eq!(route("GET", "/api/report", b"", &dir).status, 404);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn drive_status_without_a_library() {
+        let dir = user_data("drive");
+        let v = get_json("/api/drive", &dir);
+        assert_eq!((&v["drive"], &v["full"]), (&Value::Null, &json!(false)));
+        let problem = v["problems"][0].as_str().unwrap();
+        assert!(problem.contains("config.json"), "{problem}");
+        assert_eq!(v["minFreeBytes"], drive::min_free_bytes().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_full_drive_refuses_swipes() {
+        let status = |free: u64, full: bool| drive::Status {
+            drive: Some(free_space::Drive {
+                mount: "/Volumes/2TB".into(),
+                free,
+                total: 2_000_000_000_000,
+            }),
+            min_free_bytes: Some(50_000_000_000),
+            full,
+            problems: vec![],
+        };
+        let r = refuse_when_full(&status(18_544_640 * 1024, true)).unwrap();
+        assert_eq!(r.status, 507);
+        assert_eq!(
+            String::from_utf8(r.body).unwrap(),
+            "The library drive is full: 19.0 GB free on /Volumes/2TB, swiping stops under 50.0 GB. Delete videos (the Free space tab) to swipe again.\n"
+        );
+        assert_eq!(reason(507), "Insufficient Storage");
+        assert_eq!(refuse_when_full(&status(60_000_000_000, false)), None);
     }
 
     #[test]
@@ -761,20 +810,6 @@ mod tests {
             (s.dir("8"), s.dir("9")),
             (Some(Dir::Right), Some(Dir::Left))
         );
-        let report = get_json("/api/report", &dir);
-        let post = |id: u64| {
-            report["posts"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|p| p["id"] == id)
-                .unwrap()
-                .clone()
-        };
-        assert_eq!(post(8)["swipe"], "right");
-        assert_eq!(post(9)["swipe"], "left");
-        assert!(post(7).get("swipe").is_none());
-
         let r = route("POST", "/api/swipe/undo", br#"{"id":8}"#, &dir);
         assert_eq!(r.status, 200);
         let v: Value = serde_json::from_slice(&r.body).unwrap();
@@ -1062,7 +1097,7 @@ mod tests {
             );
             assert_eq!(r.body, body.as_bytes());
         }
-        assert_eq!(route("GET", "/api/report", b"", &dir).cache, "no-store");
+        assert_eq!(route("GET", "/api/deck", b"", &dir).cache, "no-store");
         for target in [
             "/frames/eroscripts/12/50.jpg",
             "/frames/eroscripts/12/26.jpg",
@@ -1184,22 +1219,6 @@ mod tests {
         );
         // 78's frame isn't on disk.
         assert_eq!(images(&v, 2), json!([]));
-
-        // The report shows a frame for a post without an image.
-        let v = get_json("/api/report", &dir);
-        let image = |id: u64| {
-            v["posts"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|p| p["id"] == id)
-                .unwrap()["image"]
-                .clone()
-        };
-        assert_eq!(image(7), "/frames/eroscripts/7/25.jpg");
-        assert_eq!(image(8), "https://x/8a.jpg");
-        assert_eq!(image(40), "/frames/eroscripts/40/50.jpg");
-        assert_eq!(image(41), Value::Null);
         // Every frame URL a card lists is served.
         assert_eq!(route("GET", "/frames/slr/77/50.jpg", b"", &dir).status, 200);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1242,7 +1261,7 @@ mod tests {
         let dir = std::env::temp_dir();
         for (m, t) in [
             ("GET", "/index.html"),
-            ("GET", "/api/report/"),
+            ("GET", "/api/report"),
             ("GET", "/api"),
             ("GET", "/../eroscripts-scout.json"),
             ("GET", "/eroscripts-scout-state.json"),
@@ -1256,7 +1275,7 @@ mod tests {
             ("PUT", "/api/scenes/vrb/swipe"),
             ("GET", "/api/swipe"),
             ("GET", "/swipe/"),
-            ("POST", "/api/report"),
+            ("POST", "/api/drive"),
             ("POST", "/api/deck"),
             ("PUT", "/api/swipe"),
             ("DELETE", "/"),

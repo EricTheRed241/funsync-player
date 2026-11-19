@@ -28,6 +28,8 @@
 // thresholds are mirrored in backend/services/vr_sections.py, NEEDS_REVIEW_PLAYLIST
 // there and in backend/web-remote/review-on-end.js, DEFAULT_SORT in
 // backend/web-remote/sort-default.js (the phone can't import this file).
+// `swipeDeck.minFreeGb` (JSON only, read by crates/scout-report): the swipe deck's download
+// tabs stop swiping while the library drive has less free space than this.
 
 import data from './content-preferences.json' with { type: 'json' };
 

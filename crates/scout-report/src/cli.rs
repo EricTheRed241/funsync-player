@@ -6,9 +6,9 @@ use std::path::PathBuf;
 pub const DEFAULT_PORT: u16 = 5131;
 
 pub const USAGE: &str = "\
-scout-report: browse every EroScripts post the Discovery scout (npm run eroscripts:scout)
-has judged, with its verdict, and the waiting list, on a webpage; swipe through the
-waiting list and the site scouts' scenes to pick what the scouts download
+scout-report: the swipe deck: swipe through the EroScripts Discovery scout's waiting
+list (npm run eroscripts:scout) and the site scouts' scenes to pick what the scouts
+download
 
 Usage:
   npm run scout:report [-- --lan] [-- --port N] [-- --user-data <dir>]
@@ -20,17 +20,15 @@ Options:
   --lan                Serve the home network too (every interface, 0.0.0.0), not just this Mac
   -h, --help           This text
 
-The page is http://127.0.0.1:<port>/, bound to the loopback interface only; with
---lan it also answers on the Mac's network address, which the banner prints. With an
-access PIN set (npm run access:pin -- set <pin>, <userData>/access-pin.json, reread
-on every request) other devices first get the /login page; a login lasts 30 days and
-also unlocks the app's backend on the same address. Without a PIN anyone on the network
-can read it, and swipe, while it runs; this Mac never needs the PIN. Every load of
-/api/report rereads eroscripts-scout-state.json (verdicts, feed coverage), eroscripts-scout.json
-(the waiting list) and eroscripts-scout-rejected.json (scenes turned down); a missing
-file shows as an empty section.
+The page is http://127.0.0.1:<port>/swipe (/ redirects there), bound to the loopback
+interface only; with --lan it also answers on the Mac's network address, which the
+banner prints. With an access PIN set (npm run access:pin -- set <pin>,
+<userData>/access-pin.json, reread on every request) other devices first get the
+/login page; a login lasts 30 days and also unlocks the app's backend on the same
+address. Without a PIN anyone on the network can swipe while it runs; this Mac never
+needs the PIN.
 
-The swipe deck, http://127.0.0.1:<port>/swipe, deals one card at a time, loosely
+The deck deals one card at a time, loosely
 highest score first, from every source: the EroScripts waiting posts not in the
 library, and the scenes of slr-scout.json (npm run slr:scout), vrb-scout.json
 (VRBangers and VRConk, npm run vrb:scout), pmvhaven-scout.json (npm run pmvhaven:scout)
@@ -55,11 +53,17 @@ pmvhaven-scout-swipes.json and faptap-scout-swipes.json. These are the only file
 CLI writes. The VR tab also shows the SLR account's download quota slr:scout last read:
 videos left in the 7-day window, hand-crafted and AI scripts left this month.
 
+Above the tabs a bar shows the library drive's free space in GB (df on the library
+sources in config.json; with sources on several drives, the one with the least free).
+Below swipeDeck.minFreeGb free (renderer/js/content-preferences.json) the drive counts
+as full: the page turns swiping off and the swipe routes answer 507 until space is
+freed; skip and undo still work. The bar rereads /api/drive every minute.
+
 A card's pictures are the post's or scene's images, then the preview frames the scouts
 took at 25, 50 and 75 % of a video (<userData>/scout-frames/eroscripts/<topic id>/,
 listed in the post's record of eroscripts-scout-frames.json, and
 scout-frames/slr/<scene id>/, in the scene's frames record in slr-scout.json), at most
-five; the report shows a post's first frame when it has no image. They're served at
+five. They're served at
 /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg and nowhere else. Stop it with Ctrl-C.
 
 Exit codes: 0 ok, 1 error (2 and 3 are not used).

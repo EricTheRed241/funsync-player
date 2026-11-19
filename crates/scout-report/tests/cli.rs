@@ -1,5 +1,5 @@
 //! End to end through the binary: serve a temp userData on a free loopback
-//! port, fetch the pages, the report and the deck, and swipe, over raw HTTP.
+//! port, fetch the deck page, the deck and the drive, and swipe, over raw HTTP.
 
 use serde_json::{Value, json};
 use std::fs;
@@ -97,107 +97,38 @@ fn request(port: u16, method: &str, path: &str, body: Option<&[u8]>) -> (u16, St
 }
 
 #[test]
-fn serves_the_page_and_the_report() {
+fn the_root_goes_to_the_deck_and_the_report_is_gone() {
     let tmp = TempDir::new("serve");
-    let ud = tmp.0.join("userData");
-    fs::create_dir_all(&ud).unwrap();
-    let state = json!({
-        "version": 1,
-        "lastScanAt": "2026-11-12T10:00:00.000Z",
-        "feeds": {"vam": {"backfillPage": 2, "exhausted": true, "reached": "2025-04-09T20:34:05.030Z"}},
-        "topics": {
-            "11": {"verdict": "no-video", "rules": 12, "at": "2026-11-10T18:05:15.337Z"},
-            "22": {"verdict": "candidate", "rules": 12, "at": "2026-11-11T00:00:00Z",
-                   "title": "A post", "author": "ann", "created": "2026-10-01T00:00:00Z",
-                   "bumped": "2026-10-05T00:00:00Z", "image": null}
-        },
-        "pending": {}
-    });
-    let waiting = json!({
-        "generatedAt": "2026-11-12T10:00:01.000Z", "listed": 1, "judged": 2, "rejected": {},
-        "candidates": [{"id": 22, "title": "Listed", "url": "https://discuss.eroscripts.com/t/22",
-            "author": "ann", "tags": ["pov"], "likes": 3, "vr": false, "music": false,
-            "axisType": "single", "hosts": ["MEGA"], "live": false, "favourite": null,
-            "artistInLibrary": null, "score": 2.5,
-            "scenes": [{"base": "S", "axes": [], "video": {"name": "S.mp4", "host": "MEGA", "size": 250000000}}]}]
-    });
-    let rejected = json!({"version": 1, "entries": [
-        {"key": "11|v.mp4", "topicId": 11, "video": "v.mp4", "title": "Turned down",
-         "url": "https://discuss.eroscripts.com/t/11", "reason": "short", "at": "2026-11-01T00:00:00Z"}
-    ]});
-    fs::write(ud.join("eroscripts-scout-state.json"), state.to_string()).unwrap();
-    fs::write(ud.join("eroscripts-scout.json"), waiting.to_string()).unwrap();
-    fs::write(
-        ud.join("eroscripts-scout-rejected.json"),
-        rejected.to_string(),
-    )
-    .unwrap();
-    let before: Vec<_> = fs::read_dir(&ud)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
-
-    let (_server, port) = start(&ud);
-
-    let (status, head, body) = get(port, "/");
-    assert_eq!(status, 200);
-    assert!(head.contains("Content-Type: text/html"));
-    let page = String::from_utf8(body).unwrap();
-    assert!(page.contains("/api/report"));
-    assert!(!page.contains("<script src"), "no external scripts");
-
-    let (status, head, body) = get(port, "/api/report");
-    assert_eq!(status, 200);
-    assert!(head.contains("Content-Type: application/json"));
-    let r: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(r["lastScanAt"], "2026-11-12T10:00:00.000Z");
-    assert_eq!(r["feeds"]["vam"]["backfillPage"], 2);
-    assert_eq!(r["verdicts"], json!({"candidate": 1, "no-video": 1}));
-    assert_eq!(r["waiting"], 1);
-    let posts = r["posts"].as_array().unwrap();
-    assert_eq!(posts.len(), 2);
-    assert_eq!(posts[0]["id"], 22);
-    assert_eq!(posts[0]["title"], "A post");
-    assert_eq!(posts[0]["waiting"], true);
-    assert_eq!(posts[0]["score"], 2.5);
-    assert_eq!(posts[0]["gb"], 0.25);
-    assert_eq!(posts[1]["id"], 11);
-    assert_eq!(posts[1]["url"], "https://discuss.eroscripts.com/t/11");
-    assert_eq!(posts[1]["title"], "Turned down");
-    assert_eq!(posts[1]["waiting"], false);
-    assert_eq!(posts[1]["rejectedScenes"][0]["reason"], "short");
-
-    // Rebuilt per request: a file that disappears empties its section.
-    fs::remove_file(ud.join("eroscripts-scout.json")).unwrap();
-    let r: Value = serde_json::from_slice(&get(port, "/api/report").2).unwrap();
-    assert_eq!(r["waiting"], 0);
-    assert_eq!(r["posts"][0]["waiting"], false);
-
+    let (_server, port) = start(&tmp.0);
+    let (status, head, _) = get(port, "/");
+    assert_eq!(status, 303);
+    assert!(head.contains("\r\nLocation: /swipe\r\n"), "{head}");
+    assert_eq!(get(port, "/api/report").0, 404);
     assert_eq!(get(port, "/eroscripts-scout-state.json").0, 404);
     assert_eq!(get(port, "/api/nope").0, 404);
-
-    // Read-only: nothing was written next to the inputs.
-    let mut after: Vec<_> = fs::read_dir(&ud)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
-    after.push(ud.join("eroscripts-scout.json"));
-    let (mut a, mut b) = (before, after);
-    a.sort();
-    b.sort();
-    assert_eq!(a, b);
 }
 
 #[test]
-fn empty_user_data_serves_an_empty_report() {
-    let tmp = TempDir::new("empty");
-    let (_server, port) = start(&tmp.0);
-    let (status, _, body) = get(port, "/api/report");
+fn the_drive_bar_measures_the_library_sources() {
+    let tmp = TempDir::new("drive");
+    let ud = tmp.0.join("userData");
+    let lib = tmp.0.join("Library");
+    fs::create_dir_all(&ud).unwrap();
+    fs::create_dir_all(&lib).unwrap();
+    let config = json!({"settings": {"library": {"sources": [{"path": lib.to_str().unwrap()}]}}});
+    fs::write(ud.join("config.json"), config.to_string()).unwrap();
+    let (_server, port) = start(&ud);
+    let (status, head, body) = get(port, "/api/drive");
     assert_eq!(status, 200);
-    let r: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(r["posts"], json!([]));
-    assert_eq!(r["feeds"], json!({}));
-    assert_eq!(r["lastScanAt"], Value::Null);
+    assert!(head.contains("Content-Type: application/json"));
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    let (free, total) = (
+        v["drive"]["free"].as_u64().unwrap(),
+        v["drive"]["total"].as_u64().unwrap(),
+    );
+    assert!(total > 0 && free <= total, "{v}");
+    assert!(v["minFreeBytes"].as_u64().unwrap() > 0);
+    assert_eq!(v["full"], free < v["minFreeBytes"].as_u64().unwrap());
 }
 
 #[test]
@@ -212,8 +143,8 @@ fn with_a_pin_this_mac_still_gets_in_and_logins_set_the_cookie() {
     )
     .unwrap();
     let (_server, port) = start(&tmp.0);
-    assert_eq!(get(port, "/api/report").0, 200);
-    assert_eq!(get(port, "/").0, 200);
+    assert_eq!(get(port, "/api/deck").0, 200);
+    assert_eq!(get(port, "/swipe").0, 200);
     let (status, head, _) = request(port, "POST", "/login", Some(b"pin=2468&next=%2Fswipe"));
     assert_eq!(status, 303);
     assert!(head.starts_with("HTTP/1.1 303 See Other\r\n"), "{head}");
@@ -255,13 +186,12 @@ fn swipes_through_the_deck() {
     let page = String::from_utf8(body).unwrap();
     assert!(page.contains(r#"<meta name="referrer" content="no-referrer">"#));
     assert!(!page.contains("<script src"), "no external scripts");
-    assert!(page.contains(r#"href="/""#), "links back to the report");
-    let report_page = String::from_utf8(get(port, "/").2).unwrap();
-    assert!(report_page.contains(r#"href="/swipe""#));
-    // Both pages carry their tab icon inline.
-    for p in [&page, &report_page] {
-        assert!(p.contains(r#"<link rel="icon" href="data:image/svg+xml,"#));
-    }
+    assert!(
+        !page.contains(r#"href="/""#),
+        "no link to the removed report"
+    );
+    assert!(page.contains("/api/drive"));
+    assert!(page.contains(r#"<link rel="icon" href="data:image/svg+xml,"#));
 
     // The default tab is Multi: only 31 (multi-axis, VR).
     let deck: Value = serde_json::from_slice(&get(port, "/api/deck?limit=2").2).unwrap();
@@ -332,20 +262,6 @@ fn swipes_through_the_deck() {
     assert_eq!(file["swipes"]["31"]["dir"], "right");
     assert_eq!(file["swipes"]["32"]["dir"], "left");
     assert!(file["swipes"]["31"]["at"].as_str().unwrap().ends_with('Z'));
-    let report: Value = serde_json::from_slice(&get(port, "/api/report").2).unwrap();
-    let swipe_of = |id: u64| {
-        report["posts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["id"] == id)
-            .unwrap()["swipe"]
-            .clone()
-    };
-    assert_eq!(
-        (swipe_of(31), swipe_of(32), swipe_of(33)),
-        (json!("right"), json!("left"), Value::Null)
-    );
 
     // Undo brings the card back and drops the entry.
     let (status, v) = post(port, "/api/swipe/undo", r#"{"id":32}"#);
