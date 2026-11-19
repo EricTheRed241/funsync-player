@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%233aa655'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='%23fff' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>FunSync status</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --panel: #ffffff;
+  --accent: #2f6fdf; --row: #f2f2f5; --up: #3aa655; --down: #e05252; --warn: #d08b2c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181b; --fg: #e6e6e9; --muted: #9a9aa3; --line: #34353b; --panel: #1f2024;
+    --accent: #7aa7ff; --row: #2a2b31;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { width: min(100% - 32px, 560px); margin: 0 auto; padding: calc(14px + env(safe-area-inset-top)) 0 24px; }
+header { display: flex; align-items: baseline; gap: 12px; }
+h1 { font-size: 20px; margin: 0; }
+#summary { margin-right: auto; color: var(--muted); }
+#summary.bad { color: var(--down); font-weight: 600; }
+#summary.good { color: var(--up); font-weight: 600; }
+button { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px;
+  color: var(--accent); font: inherit; cursor: pointer; }
+ul { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 2px 12px; align-items: center; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); grid-row: span 2; }
+.up .dot { background: var(--up); }
+.down .dot { background: var(--down); }
+.name { font-weight: 600; }
+.name a { color: inherit; text-decoration: none; }
+.name a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.detail { grid-column: 2 / 4; color: var(--muted); font-size: 13px; }
+.down .detail { color: var(--down); }
+.detail .warn { color: var(--warn); }
+code { font-size: 12px; padding: 1px 5px; border-radius: 5px; background: var(--row); color: var(--fg); }
+footer { margin-top: 14px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>FunSync status</h1>
+    <span id="summary">Checking…</span>
+    <button id="refresh" type="button">Check now</button>
+  </header>
+  <ul id="sites"></ul>
+  <footer id="footer"></footer>
+</main>
+<script>
+"use strict";
+const REFRESH_MS = 15000;
+const list = document.getElementById("sites");
+const summary = document.getElementById("summary");
+const footer = document.getElementById("footer");
+let timer = null;
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+// Links go to the host this page was opened on, so they work from a phone too.
+function link(site) {
+  return `${location.protocol}//${location.hostname}:${site.port}${site.open}`;
+}
+
+function onThisMac() {
+  return ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+}
+
+function render(data) {
+  list.replaceChildren();
+  let down = 0;
+  for (const s of data.sites) {
+    if (!s.up) down++;
+    const li = el("li", s.up ? "up" : "down");
+    li.append(el("span", "dot"));
+    const name = el("span", "name");
+    const a = el("a", null, s.name);
+    a.href = link(s);
+    name.append(a);
+    li.append(name);
+    li.append(el("span", "meta", s.http != null ? `${s.http} · ${s.ms} ms` : `:${s.port}`));
+    const detail = el("span", "detail");
+    if (s.up) {
+      detail.append(`Up on port ${s.port}`);
+      if (s.lan === false) {
+        detail.append(" · ");
+        detail.append(el("span", "warn", "this Mac only (started without --lan)"));
+      }
+    } else {
+      detail.append(`${s.error} · start: `);
+      detail.append(el("code", null, s.start));
+    }
+    li.append(detail);
+    list.append(li);
+  }
+  summary.className = down ? "bad" : "good";
+  summary.textContent = down ? `${down} of ${data.sites.length} down` : "All up";
+  document.title = down ? `(${down} down) FunSync status` : "FunSync status";
+  const at = new Date(data.checkedAt * 1000).toLocaleTimeString();
+  footer.textContent = `Checked ${at}` + (data.network && onThisMac()
+    ? ` · from other devices: http://${data.network}:${location.port || 80}/` : "");
+}
+
+async function load() {
+  clearTimeout(timer);
+  try {
+    const r = await fetch("/api/status", { cache: "no-store" });
+    if (r.status === 401) { location.href = "/login?next=/"; return; }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    render(await r.json());
+  } catch (e) {
+    summary.className = "bad";
+    summary.textContent = "Status page unreachable";
+    footer.textContent = String(e.message || e);
+  }
+  timer = setTimeout(load, REFRESH_MS);
+}
+
+document.getElementById("refresh").addEventListener("click", load);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+load();
+</script>
+</body>
+</html>
