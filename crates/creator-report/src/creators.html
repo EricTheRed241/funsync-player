@@ -36,8 +36,6 @@ code { font-size: 13px; padding: 1px 6px; border-radius: 5px; background: var(--
   overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
   line-height: 1; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
-.bar button.pill { font-size: 13px; font-weight: 600; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px;
-  align-self: center; color: var(--like); }
 .stacks { display: flex; gap: 0; width: min(100% - 32px, 528px); margin: 0 auto 8px; border: 1px solid var(--line);
   border-radius: 8px; overflow: hidden; }
 .stacks button { flex: 1; background: none; border: none; border-radius: 0; padding: 6px 4px; font: inherit; font-size: 13px;
@@ -56,6 +54,8 @@ code { font-size: 13px; padding: 1px 6px; border-radius: 5px; background: var(--
   transition: transform .3s ease, opacity .3s ease; will-change: transform; }
 .card.top { z-index: 2; cursor: grab; }
 .card.top:active { cursor: grabbing; }
+.card.view, .card.view:active { cursor: default; touch-action: manipulation; user-select: text; -webkit-user-select: text; }
+.card.view .media { cursor: pointer; }
 .card.next { z-index: 1; transform: scale(.95) translateY(12px); pointer-events: none; }
 .card.fly { z-index: 3; pointer-events: none; transition: transform .35s ease-in, opacity .35s ease-in; opacity: 0; }
 .card.drag { transition: none; }
@@ -87,6 +87,7 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 .b-score { --bc: #2f6fdf; } .b-time { --bc: #6b7280; } .b-cream { --bc: #e0529c; } .b-multi { --bc: #14b8a6; }
 .b-es { --bc: #d08b2c; } .b-paid { --bc: #8b8b93; } .b-ft { --bc: #a46ad6; }
 .b-fav { --bc: #e8a317; } .b-star { --bc: #e0529c; }
+.b-yes { --bc: var(--like); } .b-no { --bc: var(--nope); }
 .profiles { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
 .profiles a { color: var(--muted); }
 .follow { font-size: 11px; font-weight: 600; color: var(--like); margin-left: 4px; }
@@ -143,66 +144,82 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 .toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   background: var(--warn-bg); color: var(--warn-fg); padding: 8px 14px; border-radius: 8px; z-index: 40;
   box-shadow: 0 2px 10px rgba(0,0,0,.2); max-width: 90vw; }
-/* The Yes list: a sheet over the deck. */
-.sheet { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center;
-  background: rgba(0,0,0,.45); }
-.sheet .panel { width: min(100%, 560px); max-height: 82dvh; display: flex; flex-direction: column;
-  background: var(--panel); border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,.25);
-  padding-bottom: env(safe-area-inset-bottom); }
-@media (min-width: 600px) { .sheet { align-items: center; } .sheet .panel { border-radius: 16px; } }
-.sheet header { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px 8px; border-bottom: 1px solid var(--line); }
-.sheet h2 { margin: 0; font-size: 17px; }
-.sheet header .note { color: var(--muted); font-size: 12px; margin-right: auto; }
-.sheet header button { background: none; border: none; font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; }
-.sheet ul { list-style: none; margin: 0; padding: 6px 0; overflow-y: auto; overscroll-behavior: contain; }
-.sheet li { display: flex; align-items: center; gap: 12px; padding: 8px 16px; }
-.sheet li + li { border-top: 1px solid var(--line); }
-.sheet img, .sheet .noimg { flex: none; width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: var(--row); }
-.sheet .who { flex: 1; min-width: 0; }
-.sheet .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sheet .mt { color: var(--muted); font-size: 12px; }
-.sheet li.changed .nm { text-decoration: line-through; color: var(--muted); }
-.sheet li button { flex: none; font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 8px; cursor: pointer;
-  background: none; border: 1px solid var(--nope); color: var(--nope); touch-action: manipulation; }
-.sheet li.changed button { border-color: var(--like); color: var(--like); }
-.sheet .blank { color: var(--muted); padding: 18px 16px; text-align: center; }
+/* Swiped and Collection: a search / filter row, then a list of creators or one card. */
+.tools { display: flex; align-items: center; gap: 8px; width: min(100% - 32px, 528px); margin: 0 auto 8px; }
+.tools input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 5px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+.tools .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex: none; }
+.tools .seg button, .tools > button { background: none; border: none; padding: 5px 10px; font: inherit; font-size: 13px;
+  color: var(--muted); cursor: pointer; touch-action: manipulation; white-space: nowrap; }
+.tools .seg button + button { border-left: 1px solid var(--line); }
+.tools .seg button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); font-weight: 600; }
+.tools > button { border: 1px solid var(--line); border-radius: 8px; color: var(--accent); flex: none; }
+.list { flex: 1; min-height: 0; width: min(100% - 20px, 540px); margin: 0 auto; list-style: none; padding: 0 0 12px;
+  overflow-y: auto; overscroll-behavior: contain; }
+.list li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 6px; }
+.list li + li { border-top: 1px solid var(--line); }
+.list .thumb { flex: none; padding: 0; border: none; background: none; cursor: pointer; border-radius: 10px; }
+.list .thumb img, .list .thumb .noimg { display: block; width: 64px; height: 64px; border-radius: 10px; object-fit: cover;
+  background: var(--row); }
+.list .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.list .head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.list .nm { padding: 0; border: none; background: none; font: inherit; font-weight: 650; color: var(--fg); cursor: pointer;
+  text-align: left; overflow-wrap: anywhere; }
+.list .mt { color: var(--muted); font-size: 12px; }
+.list .profiles { font-size: 13px; }
+.list .profiles a { color: var(--accent); }
+.list li.changed .nm { text-decoration: line-through; color: var(--muted); }
+.list li > button.set { flex: none; align-self: center; font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 8px;
+  cursor: pointer; background: none; border: 1px solid var(--nope); color: var(--nope); touch-action: manipulation; }
+.list li > button.set.to-yes { border-color: var(--like); color: var(--like); }
+.list .blank { display: block; color: var(--muted); padding: 24px 16px; text-align: center; }
+.round.like.on { background: var(--like); color: #fff; border-color: var(--like); }
+.round.nope.on { background: var(--nope); color: #fff; border-color: var(--nope); }
+@media (min-width: 900px) { .tools { width: min(100% - 32px, 1248px); } .list { width: min(100% - 32px, 900px); } }
 </style>
 </head>
 <body>
 <header class="bar">
   <h1 id="title">Creators</h1>
   <span class="counter" id="counter">Loading…</span>
-  <button type="button" class="pill" id="yes-open" title="The creators you swiped yes; change one to no here" aria-haspopup="dialog">Yes list</button>
-  <button type="button" id="refresh" title="Refresh: load the deck again (skipped cards come back)" aria-label="Refresh">↻</button>
+  <button type="button" id="refresh" title="Refresh: load again (skipped cards come back)" aria-label="Refresh">↻</button>
   <button type="button" id="shuffle" title="Shuffle: deal the creators in a new order (each moves at most 2 score points)" aria-label="Shuffle">⇄</button>
 </header>
-<nav class="stacks" id="tabs" aria-label="Which deck">
+<nav class="stacks" id="tabs" aria-label="Which page">
   <button type="button" data-tab="creators" title="Content creators: yes or no">Creators</button>
   <button type="button" data-tab="posts" title="Downloadable posts of the creators you said yes to: want or hide">Posts</button>
+  <button type="button" data-tab="swiped" title="The creators you swiped: their cards, newest first; change yes or no">Swiped</button>
+  <button type="button" data-tab="collection" title="The creators you like (yes, favourites, pornstar list) and their socials">Collection</button>
 </nav>
 <div class="summary" id="summary" hidden></div>
 <div class="problems" id="problems" hidden></div>
+<div class="tools" id="tools" hidden>
+  <input type="search" id="search" placeholder="Search names and handles" aria-label="Search names and handles" autocomplete="off">
+  <div class="seg" id="filter" role="group" aria-label="Which swipes">
+    <button type="button" data-filter="all">All</button>
+    <button type="button" data-filter="yes">Yes</button>
+    <button type="button" data-filter="no">No</button>
+  </div>
+  <button type="button" id="layout"></button>
+</div>
 <main class="deck" id="deck">
   <div class="empty" id="empty">Loading…</div>
 </main>
-<div class="actions">
+<ul class="list" id="list" hidden></ul>
+<div class="actions" id="deck-actions">
   <button type="button" class="round nope" id="nope" aria-label="No">✕</button>
   <button type="button" class="round small undo" id="undo" title="Undo (Backspace)" aria-label="Undo">↺</button>
   <button type="button" class="round small skip" id="skip" title="Skip: it comes back later in the deck (↓)" aria-label="Skip">↷</button>
   <button type="button" class="round like" id="like" aria-label="Yes">♥</button>
 </div>
+<div class="actions" id="view-actions" hidden>
+  <button type="button" class="round small skip" id="prev" title="Previous (←)" aria-label="Previous">‹</button>
+  <button type="button" class="round nope" id="set-no" title="No: her posts leave the Posts tab (N)" aria-label="No">✕</button>
+  <button type="button" class="round like" id="set-yes" title="Yes: her posts come to the Posts tab (Y)" aria-label="Yes">♥</button>
+  <button type="button" class="round small skip" id="next" title="Next (→)" aria-label="Next">›</button>
+</div>
 <div class="hint" id="hint"></div>
 <div class="toast" id="toast" hidden></div>
-<div class="sheet" id="yes-sheet" role="dialog" aria-modal="true" aria-labelledby="yes-title" hidden>
-  <div class="panel">
-    <header>
-      <h2 id="yes-title">Swiped yes</h2>
-      <span class="note">Their posts fill the Posts tab</span>
-      <button type="button" id="yes-close" aria-label="Close">✕</button>
-    </header>
-    <ul id="yes-list"><li class="blank">Loading…</li></ul>
-  </div>
-</div>
 
 <script>
 'use strict';
@@ -212,13 +229,15 @@ const REFILL_AT = 5;
 // Shuffle (or a page reload) deals a new order. The posts deck is strictly by score.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
-let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
-let tab = location.pathname === '/posts' ? 'posts' : 'creators';
+let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older requests are dropped
+const PATHS = { '/creators': 'creators', '/posts': 'posts', '/swiped': 'swiped', '/collection': 'collection' };
+const tabFromPath = () => PATHS[location.pathname] || 'creators';
+let tab = tabFromPath();
 
 // Each tab's deck: its URL, API, words, a card's identity, and what a swipe sends.
 const TABS = {
   creators: {
-    path: '/', api: '/api/creators', title: 'Creators', yes: 'YES', no: 'NO',
+    path: '/creators', api: '/api/creators', title: 'Creators', yes: 'YES', no: 'NO',
     key: (c) => 'c:' + c.slug,
     name: (c) => c.name,
     swipe: (c, dir) => ({ slug: c.slug, choice: dir === 'right' ? 'yes' : 'no' }),
@@ -238,6 +257,19 @@ const TABS = {
     hint: '← hide · → want (downloads at the next daily run) · ↓ skip · Backspace undo · Space next picture',
   },
 };
+const isDeck = (t) => Object.hasOwn(TABS, t);
+// The two list tabs: every creator in one request, shown as a list or one card at a time.
+const LISTS = {
+  swiped: {
+    path: '/swiped', api: '/api/creators/swiped', title: 'Swiped', start: 'cards', filter: true,
+    none: 'Nobody swiped yet: swipe creators on the Creators tab.',
+  },
+  collection: {
+    path: '/collection', api: '/api/creators/collection', title: 'Collection', start: 'list', filter: false,
+    none: 'Nobody yet: swipe a creator right, or add favourite artists or pornstars.',
+  },
+};
+const pathOf = (t) => (TABS[t] || LISTS[t]).path;
 const SOURCES = { instagram: 'Instagram', eroscripts: 'EroScripts', faptap: 'FapTap', pornhub: 'Pornhub',
   onlyfans: 'OnlyFans', fansly: 'Fansly', x: 'X', reddit: 'Reddit', profile: 'Profile page', web: 'Web' };
 const SITES = { onlyfans: 'OnlyFans', fansly: 'Fansly', pornhub: 'Pornhub', x: 'X', reddit: 'Reddit',
@@ -347,9 +379,21 @@ function social(net, href, label, count, when, whenNone, whenTitle, followed) {
       : el('span', { class: 'when none' }, whenNone));
 }
 
+const igUrl = (h) => 'https://www.instagram.com/' + encodeURIComponent(h) + '/';
+const twUrl = (h) => 'https://www.twitch.tv/' + encodeURIComponent(h);
+const profileLabel = (p) => (SITES[p.site] || p.site) + (p.handle && p.site !== 'profile' ? ' ' + p.handle : '');
+
+/** Her swipe on the Swiped and Collection tabs (deck cards have none). */
+function choiceBadge(c) {
+  if (!c.choice) return null;
+  const yes = c.choice === 'yes';
+  return el('span', { class: 'badge ' + (yes ? 'b-yes' : 'b-no'), title: 'Swiped ' + c.choice + (c.at ? ' on ' + day(c.at) : '') },
+    yes ? 'Yes' : 'No');
+}
+
 function creatorInfo(c) {
   const n = c.counts || {};
-  const badges = [scoreBadge(c.score), ...sourceBadges(c.sources)];
+  const badges = [choiceBadge(c), scoreBadge(c.score), ...sourceBadges(c.sources)].filter(Boolean);
   if (n.eroscriptsFree) badges.push(el('span', { class: 'badge b-es', title: 'Free EroScripts posts with a downloadable video' }, `EroScripts ${n.eroscriptsFree} free`));
   if (n.eroscriptsPaid) badges.push(el('span', { class: 'badge b-paid', title: 'Paid EroScripts posts' }, `${n.eroscriptsPaid} paid`));
   if (n.faptap) badges.push(el('span', { class: 'badge b-ft', title: 'FapTap videos' }, `FapTap ${n.faptap}`));
@@ -360,12 +404,11 @@ function creatorInfo(c) {
     el('div', { class: 'ttl', title: c.name }, c.name),
     c.aliases && c.aliases.length ? el('div', { class: 'aka' }, 'aka ' + c.aliases.join(', ')) : null,
     el('div', { class: 'badges' }, badges),
-    ig && ig.handle ? social('IG', 'https://www.instagram.com/' + encodeURIComponent(ig.handle) + '/', '@' + ig.handle,
+    ig && ig.handle ? social('IG', igUrl(ig.handle), '@' + ig.handle,
       followers(ig.followers), ig.lastPostAt, 'no login yet', 'Last post', ig.followed) : null,
-    tw && tw.handle ? social('TW', 'https://www.twitch.tv/' + encodeURIComponent(tw.handle), tw.handle,
+    tw && tw.handle ? social('TW', twUrl(tw.handle), tw.handle,
       followers(tw.followers), tw.lastLive, 'never live', 'Last live') : null,
-    (c.profiles || []).length ? el('div', { class: 'profiles' }, c.profiles.map((p) =>
-      ext(p.url, (SITES[p.site] || p.site) + (p.handle && p.site !== 'profile' ? ' ' + p.handle : '')))) : null,
+    (c.profiles || []).length ? el('div', { class: 'profiles' }, c.profiles.map((p) => ext(p.url, profileLabel(p)))) : null,
     tops.length ? el('ol', { class: 'tops' }, tops.map((p) => el('li', {},
       el('span', { class: 'k', title: SOURCES[p.kind] || p.kind }, KIND_SHORT[p.kind] || ''),
       p.url ? ext(p.url, p.title || '(untitled)') : el('span', { class: 't' }, p.title || '(untitled)'),
@@ -419,12 +462,20 @@ function cardNode(c, isTop) {
   } else {
     media.append(el('div', { class: 'none' }, 'No picture'));
   }
-  const t = TABS[c._tab];
-  media.append(el('div', { class: 'stamp want' }, t.yes), el('div', { class: 'stamp hide' }, t.no));
-  const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
-    media,
+  const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') + (isDeck(c._tab) ? '' : ' view') }, media,
     el('div', { class: 'info' }, c._tab === 'posts' ? postInfo(c) : creatorInfo(c)));
-  if (isTop) drag(node);
+  if (isDeck(c._tab)) {
+    const t = TABS[c._tab];
+    media.append(el('div', { class: 'stamp want' }, t.yes), el('div', { class: 'stamp hide' }, t.no));
+    if (isTop) drag(node);
+  } else {
+    // A list tab's card: tap the picture's sides to browse it.
+    media.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      const r = media.getBoundingClientRect();
+      showImage(image + (e.clientX < r.left + r.width / 2 ? -1 : 1));
+    });
+  }
   return node;
 }
 
@@ -437,6 +488,7 @@ function preload(url) {
 const picSrc = (c, i) => ((c && c.pictures) || [])[i]?.src;
 
 function renderCounter() {
+  if (!isDeck(tab)) return;
   const word = tab === 'posts' ? 'wanted' : 'yes';
   $('counter').textContent = loaded ? `${remaining} left · ${liked} ${word}` : 'Loading…';
   $('undo').disabled = !undoStack.length;
@@ -452,7 +504,7 @@ function emptyState() {
   }
   if (tab === 'creators') {
     return [el('b', {}, 'No creators left to swipe'), el('span', {}, 'New ones come with the next daily run.'),
-      el('button', { type: 'button', class: 'linkish', onclick: openYes }, 'See the Yes list')];
+      el('button', { type: 'button', class: 'linkish', onclick: () => switchTab('collection') }, 'See the collection')];
   }
   if (summary && !summary.creators.yes) {
     return [el('b', {}, 'No posts yet'), el('span', {}, 'Swipe creators right (yes) on the Creators tab; their downloadable posts show up here.')];
@@ -462,6 +514,7 @@ function emptyState() {
 
 /** Redraw the top two cards (a card flying off stays until its animation ends). */
 function render(enterFrom) {
+  if (!isDeck(tab)) return;
   for (const n of deckEl.querySelectorAll('.card:not(.fly)')) n.remove();
   renderCounter();
   const empty = $('empty');
@@ -494,7 +547,7 @@ function topNode() {
 }
 
 function showImage(i) {
-  const c = queue[0];
+  const c = isDeck(tab) ? queue[0] : viewCard();
   const pics = (c && c.pictures) || [];
   if (pics.length < 2) return;
   image = (i + pics.length) % pics.length;
@@ -768,10 +821,18 @@ function renderSummary() {
   const c = summary.creators;
   const p = summary.posts;
   const b = (n) => el('b', {}, String(n));
-  const line = tab === 'creators'
-    ? [b(c.total), ' creators · ', b(c.yes), ' yes · ', b(c.no), ' no · ', b(c.unswiped), ' to swipe']
-    : [b(p.wanted), ' wanted · ', b(p.pendingDownload), ' to download · ', b(p.inLibrary), ' in library'];
-  if (tab === 'posts' && p.hidden) line.push(' · ', b(p.hidden), ' hidden');
+  let line;
+  if (tab === 'posts') {
+    line = [b(p.wanted), ' wanted · ', b(p.pendingDownload), ' to download · ', b(p.inLibrary), ' in library'];
+    if (p.hidden) line.push(' · ', b(p.hidden), ' hidden');
+  } else if (tab === 'collection') {
+    const all = lists.collection.entries || [];
+    const n = (f) => all.filter(f).length;
+    line = [b(c.yes), ' yes: ', b(n((e) => e.choice === 'yes')), ' swiped · ',
+      b(n((e) => !e.choice && e.from === 'favourite')), ' favourites · ', b(n((e) => !e.choice && e.from === 'pornstar')), ' pornstar list'];
+  } else {
+    line = [b(c.total), ' creators · ', b(c.yes), ' yes · ', b(c.no), ' no · ', b(c.unswiped), ' to swipe'];
+  }
   if (summary.updatedAt) {
     const hours = Math.max(0, (Date.now() - new Date(summary.updatedAt)) / 3600e3);
     const ago = hours < 1 ? 'under an hour ago' : hours < 48 ? `${Math.round(hours)} h ago` : `${Math.round(hours / 24)} days ago`;
@@ -779,7 +840,6 @@ function renderSummary() {
   }
   s.replaceChildren(...line);
   s.hidden = false;
-  $('yes-open').textContent = c.yes ? `Yes list (${c.yes})` : 'Yes list';
 }
 
 let summaryGen = 0;
@@ -791,32 +851,214 @@ function loadSummary() {
       if (!d || gen !== summaryGen) return;
       summary = d;
       renderSummary();
-      if (!queue.length && loaded && !loading) render();
+      if (isDeck(tab) && !queue.length && loaded && !loading) render();
     })
     .catch(() => {});
 }
 
+// The Swiped and Collection tabs: every creator in one request (newest swipe first, or by
+// name), shown as a list (picture, socials, yes / no) or one card at a time (‹ ›). A swipe
+// changed here stays in view (`pinned`) until the filter changes or the list is loaded again.
+const listState = (start) => ({ entries: null, missing: false, error: null, shown: start, slug: null,
+  filter: 'all', query: '', pinned: new Set() });
+const lists = { swiped: listState(LISTS.swiped.start), collection: listState(LISTS.collection.start) };
+const isYesEntry = (e) => (e.choice ? e.choice === 'yes' : !!e.from);
+
+function matches(e, q) {
+  if (!q) return true;
+  const handles = [e.instagram && e.instagram.handle, e.twitch && e.twitch.handle, ...(e.profiles || []).map((p) => p.handle)];
+  return [e.name, e.slug, ...(e.aliases || []), ...handles].some((s) => s && s.toLowerCase().includes(q));
+}
+
+/** This list tab's entries that pass its filter and search. */
+function visible() {
+  const ls = lists[tab];
+  const q = ls.query.trim().toLowerCase();
+  return (ls.entries || []).filter((e) =>
+    (ls.filter === 'all' || e.choice === ls.filter || ls.pinned.has(e.slug)) && matches(e, q));
+}
+
+/** The card shown on this list tab: the one picked, else the first. */
+function viewCard() {
+  const v = visible();
+  return v.find((e) => e.slug === lists[tab].slug) || v[0];
+}
+
+function listRow(e) {
+  const ls = lists[tab];
+  const open = () => { ls.shown = 'cards'; ls.slug = e.slug; image = 0; renderListTab(); };
+  const pic = (e.pictures || [])[0];
+  const yes = isYesEntry(e);
+  const ig = e.instagram;
+  const tw = e.twitch;
+  const count = (v) => (followers(v) ? ' · ' + followers(v) : '');
+  const socials = [
+    ig && ig.handle ? ext(igUrl(ig.handle), 'IG @' + ig.handle + count(ig.followers)) : null,
+    ig && ig.followed ? el('span', { class: 'follow' }, ig.followed === 'requested' ? 'Requested' : 'Following') : null,
+    tw && tw.handle ? ext(twUrl(tw.handle), 'Twitch ' + tw.handle + count(tw.followers)) : null,
+    ...(e.profiles || []).map((p) => ext(p.url, profileLabel(p))),
+  ].filter(Boolean);
+  const meta = [
+    e.choice ? (yes ? 'yes' : 'no') + (e.at ? ' since ' + day(e.at) : '') : FROM[e.from] || null,
+    yes && e.unswiped ? plural(e.unswiped, 'post') + ' to swipe' : null,
+    e.wanted ? e.wanted + ' wanted' : null,
+  ].filter(Boolean).join(' · ');
+  return el('li', { class: tab === 'collection' && !yes ? 'changed' : null },
+    el('button', { type: 'button', class: 'thumb', onclick: open, title: 'Open the card', 'aria-label': 'Open ' + e.name + '\'s card' },
+      pic ? el('img', { src: pic.src, alt: '', loading: 'lazy' }) : el('div', { class: 'noimg' })),
+    el('div', { class: 'who' },
+      el('div', { class: 'head' }, el('button', { type: 'button', class: 'nm', onclick: open }, e.name), choiceBadge(e),
+        ...sourceBadges(e.sources)),
+      socials.length ? el('div', { class: 'profiles' }, socials) : el('div', { class: 'mt' }, 'No socials found yet'),
+      meta ? el('div', { class: 'mt' }, meta) : null),
+    el('button', { type: 'button', class: 'set' + (yes ? '' : ' to-yes'),
+      onclick: (ev) => setChoice(e, yes ? 'no' : 'yes', ev.currentTarget) }, yes ? 'Change to no' : 'Change to yes'));
+}
+
+function renderListTab() {
+  const L = LISTS[tab];
+  const ls = lists[tab];
+  const all = ls.entries;
+  const v = visible();
+  const cards = ls.shown === 'cards';
+  $('filter').hidden = !L.filter;
+  for (const b of $('filter').querySelectorAll('button')) {
+    const f = b.dataset.filter;
+    b.classList.toggle('on', f === ls.filter);
+    const n = all ? all.filter((e) => f === 'all' || e.choice === f).length : null;
+    b.textContent = { all: 'All', yes: 'Yes', no: 'No' }[f] + (n == null ? '' : ' ' + n);
+  }
+  $('layout').textContent = cards ? '☰ List' : '▢ Cards';
+  $('layout').title = cards ? 'Show them as a list' : 'Show them one card at a time';
+  $('list').hidden = cards;
+  deckEl.hidden = !cards;
+  $('view-actions').hidden = !cards;
+  $('hint').textContent = cards ? '← → previous / next · Y yes · N no · Space next picture · Esc list' : '';
+  const blank = ls.error ? 'Could not load the list: ' + ls.error
+    : !all ? 'Loading…'
+      : ls.missing ? 'No creators yet: run npm run creators:scout -- --daily.'
+        : !all.length ? L.none
+          : !v.length ? 'Nobody matches.' : null;
+  if (!cards) {
+    $('list').replaceChildren(...(blank ? [el('li', { class: 'blank' }, blank)] : v.map(listRow)));
+    $('counter').textContent = all ? plural(v.length, 'creator') : 'Loading…';
+    return;
+  }
+  for (const n of deckEl.querySelectorAll('.card')) n.remove();
+  const c = viewCard();
+  const i = c ? v.indexOf(c) : -1;
+  $('counter').textContent = c ? `${i + 1} of ${v.length}` : all ? plural(v.length, 'creator') : 'Loading…';
+  $('prev').disabled = $('next').disabled = v.length < 2;
+  $('set-yes').disabled = $('set-no').disabled = !c;
+  $('set-yes').classList.toggle('on', !!c && isYesEntry(c));
+  $('set-no').classList.toggle('on', !!c && !isYesEntry(c));
+  $('empty').hidden = !!c;
+  if (!c) { $('empty').replaceChildren(blank || ''); return; }
+  ls.slug = c.slug;
+  c._tab = tab;
+  deckEl.append(cardNode(c, true));
+  preload(picSrc(c, image + 1));
+  preload(picSrc(v[(i + 1) % v.length], 0));
+}
+
+/** Show the card `d` places on (wrapping around). */
+function step(d) {
+  const v = visible();
+  const c = viewCard();
+  if (!c || v.length < 2) return;
+  lists[tab].slug = v[(v.indexOf(c) + d + v.length) % v.length].slug;
+  image = 0;
+  renderListTab();
+}
+
+/** Swipe entry `e` yes or no from a list tab. */
+function setChoice(e, choice, button) {
+  if (button) button.disabled = true;
+  const from = tab;
+  serial(() => post('/api/creators/swipe', { slug: e.slug, choice }))
+    .then((r) => {
+      e.choice = r.choice;
+      e.at = r.at;
+      e.from = null;
+      lists[from].pinned.add(e.slug);
+      if (tab === from) renderListTab();
+      loadSummary();
+    })
+    .catch((err) => toast('Not saved: ' + err.message))
+    .finally(() => { if (button) button.disabled = false; });
+}
+
+function choose(choice) {
+  const c = viewCard();
+  if (c && c.choice !== choice) setChoice(c, choice);
+}
+
+function loadList() {
+  const from = tab;
+  const gen = generation;
+  const ls = lists[from];
+  ls.error = null;
+  renderListTab();
+  fetch(LISTS[from].api, { cache: 'no-store' })
+    .then(async (r) => { if (!r.ok) throw new Error((await r.text()).trim() || r.status); return r.json(); })
+    .then((d) => {
+      if (gen !== generation) return;
+      ls.entries = d.cards;
+      ls.missing = d.missing;
+      ls.pinned = new Set();
+      $('problems').hidden = !d.problems.length;
+      $('problems').textContent = d.problems.join('\n');
+      renderListTab();
+      renderSummary();
+    })
+    .catch((e) => {
+      if (gen !== generation) return;
+      ls.error = e.message;
+      renderListTab();
+    });
+}
+
+/** Load this tab again: a new deal of the deck, or the list. */
+function refresh() {
+  if (isDeck(tab)) { restart(false); return; }
+  loadList();
+  loadSummary();
+}
+
 function showTab() {
-  const t = TABS[tab];
+  const deck = isDeck(tab);
+  const t = deck ? TABS[tab] : LISTS[tab];
   for (const b of $('tabs').querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === tab);
   $('title').textContent = t.title;
   document.title = tab === 'creators' ? 'Creators' : t.title + ' · Creators';
-  $('like').title = t.likeTitle;
-  $('nope').title = t.nopeTitle;
-  $('like').setAttribute('aria-label', tab === 'posts' ? 'Want' : 'Yes');
-  $('nope').setAttribute('aria-label', tab === 'posts' ? 'Hide' : 'No');
-  $('hint').textContent = t.hint;
+  $('deck-actions').hidden = !deck;
+  $('tools').hidden = deck;
   $('shuffle').hidden = tab !== 'creators';
-  $('yes-open').hidden = tab !== 'creators';
+  if (deck) {
+    $('list').hidden = true;
+    $('view-actions').hidden = true;
+    deckEl.hidden = false;
+    $('like').title = t.likeTitle;
+    $('nope').title = t.nopeTitle;
+    $('like').setAttribute('aria-label', tab === 'posts' ? 'Want' : 'Yes');
+    $('nope').setAttribute('aria-label', tab === 'posts' ? 'Hide' : 'No');
+    $('hint').textContent = t.hint;
+  } else {
+    $('search').value = lists[tab].query;
+  }
   renderSummary();
 }
 
 function switchTab(next) {
   if (next === tab) return;
   tab = next;
-  if (location.pathname !== TABS[tab].path) history.pushState(null, '', TABS[tab].path);
+  if (location.pathname !== pathOf(tab)) history.pushState(null, '', pathOf(tab));
+  generation++;
+  image = 0;
+  for (const n of deckEl.querySelectorAll('.card')) n.remove();
+  $('problems').hidden = true;
   showTab();
-  restart(false);
+  refresh();
 }
 $('tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -824,74 +1066,62 @@ $('tabs').addEventListener('click', (e) => {
   b.blur();
   switchTab(b.dataset.tab);
 });
-window.addEventListener('popstate', () => switchTab(location.pathname === '/posts' ? 'posts' : 'creators'));
+window.addEventListener('popstate', () => switchTab(tabFromPath()));
 
-// The Yes list: the creators swiped yes, and the favourites and pornstar-list ones not swiped
-// no; "Change to no" takes their posts off the Posts deck.
-function yesRow(y) {
-  const meta = el('div', { class: 'mt' });
-  const button = el('button', { type: 'button' });
-  const row = el('li', {},
-    y.picture ? el('img', { src: y.picture, alt: '', loading: 'lazy' }) : el('div', { class: 'noimg' }),
-    el('div', { class: 'who' }, el('div', { class: 'nm' }, y.name, ' ', ...sourceBadges(y.sources)), meta),
-    button);
-  const show = (isYes) => {
-    row.classList.toggle('changed', !isYes);
-    meta.textContent = isYes
-      ? [plural(y.unswiped, 'post') + ' to swipe', y.wanted ? y.wanted + ' wanted' : null,
-        y.at ? 'yes since ' + day(y.at) : FROM[y.from] || null].filter(Boolean).join(' · ')
-      : 'Changed to no: their posts left the Posts deck';
-    button.textContent = isYes ? 'Change to no' : 'Back to yes';
-    button.dataset.yes = isYes ? '1' : '';
-  };
-  show(true);
-  button.addEventListener('click', () => {
-    const toYes = !button.dataset.yes;
-    button.disabled = true;
-    serial(() => post('/api/creators/swipe', { slug: y.slug, choice: toYes ? 'yes' : 'no' }))
-      .then(() => {
-        show(toYes);
-        if (tab === 'creators') { liked = Math.max(0, liked + (toYes ? 1 : -1)); renderCounter(); }
-        loadSummary();
-      })
-      .catch((e) => toast('Not saved: ' + e.message))
-      .finally(() => { button.disabled = false; });
-  });
-  return row;
-}
+$('filter').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  b.blur();
+  const ls = lists[tab];
+  ls.filter = b.dataset.filter;
+  ls.pinned = new Set();
+  image = 0;
+  renderListTab();
+});
+$('search').addEventListener('input', (e) => {
+  lists[tab].query = e.target.value;
+  image = 0;
+  renderListTab();
+});
+$('layout').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  const ls = lists[tab];
+  ls.shown = ls.shown === 'cards' ? 'list' : 'cards';
+  image = 0;
+  renderListTab();
+});
 
-function openYes() {
-  $('yes-sheet').hidden = false;
-  $('yes-list').replaceChildren(el('li', { class: 'blank' }, 'Loading…'));
-  fetch('/api/creators/yes', { cache: 'no-store' })
-    .then(async (r) => { if (!r.ok) throw new Error((await r.text()).trim() || r.status); return r.json(); })
-    .then((d) => {
-      $('yes-list').replaceChildren(...(d.creators.length ? d.creators.map(yesRow)
-        : [el('li', { class: 'blank' }, 'Nobody yet: swipe a creator right to say yes.')]));
-    })
-    .catch((e) => $('yes-list').replaceChildren(el('li', { class: 'blank' }, 'Could not load the list: ' + e.message)));
-}
-function closeYes() {
-  $('yes-sheet').hidden = true;
-}
-$('yes-open').addEventListener('click', (e) => { e.currentTarget.blur(); openYes(); });
-$('yes-close').addEventListener('click', closeYes);
-$('yes-sheet').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeYes(); });
-
-$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); restart(false); });
+$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); refresh(); });
 $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
 // Buttons drop focus so Space keeps meaning "next picture".
 $('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left'); });
 $('like').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('right'); });
 $('undo').addEventListener('click', (e) => { e.currentTarget.blur(); undo(); });
 $('skip').addEventListener('click', (e) => { e.currentTarget.blur(); skip(); });
+$('prev').addEventListener('click', (e) => { e.currentTarget.blur(); step(-1); });
+$('next').addEventListener('click', (e) => { e.currentTarget.blur(); step(1); });
+$('set-no').addEventListener('click', (e) => { e.currentTarget.blur(); choose('no'); });
+$('set-yes').addEventListener('click', (e) => { e.currentTarget.blur(); choose('yes'); });
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (!$('yes-sheet').hidden) {
-    if (e.key === 'Escape') { closeYes(); e.preventDefault(); }
+  if (e.target.closest && e.target.closest('input, select, textarea')) {
+    if (e.key === 'Escape') e.target.blur();
     return;
   }
-  if (e.target.closest && e.target.closest('input, select, textarea')) return;
+  if (!isDeck(tab)) {
+    const ls = lists[tab];
+    if (ls.shown !== 'cards') return;
+    const k = e.key.toLowerCase();
+    if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+    else if (k === 'y') choose('yes');
+    else if (k === 'n') choose('no');
+    else if (e.key === ' ') showImage(image + 1);
+    else if (e.key === 'Escape') { ls.shown = 'list'; renderListTab(); }
+    else return;
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'ArrowLeft') swipe('left');
   else if (e.key === 'ArrowRight') swipe('right');
   else if (e.key === 'ArrowDown') skip();
@@ -902,7 +1132,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 showTab();
-reload();
+refresh();
 </script>
 </body>
 </html>

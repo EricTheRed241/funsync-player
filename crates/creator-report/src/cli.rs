@@ -19,26 +19,32 @@ Options:
   --lan                Serve the home network too (every interface, 0.0.0.0), not just this Mac
   -h, --help           This text
 
-The page is http://127.0.0.1:<port>/, bound to the loopback interface only; with
---lan it also answers on the Mac's network address, which the banner prints. With an
-access PIN set (npm run access:pin -- set <pin>, <userData>/access-pin.json, reread
-on every request) other devices first get the /login page (the scout report's); a
-login lasts 30 days. This Mac never needs the PIN.
+The page is http://127.0.0.1:<port>/ (it opens the Creators tab, /creators), bound to
+the loopback interface only; with --lan it also answers on the Mac's network address,
+which the banner prints. With an access PIN set (npm run access:pin -- set <pin>,
+<userData>/access-pin.json, reread on every request) other devices first get the
+/login page (the scout report's); a login lasts 30 days. This Mac never needs the PIN.
 
-Creators tab (/): one card per creator in <userData>/creators.json (written by
+Creators tab (/creators): one card per creator in <userData>/creators.json (written by
 npm run creators:scout; reread whenever it changes) not swiped yet, best score first,
 each deal shuffled by up to 2 score points either way (Shuffle deals a new order). A
 card shows the creator's pictures (Instagram first; tap the sides or Space to browse),
 Instagram and Twitch accounts with followers and last post / last live, and their
 EroScripts (free downloadable, paid) and FapTap counts, score and top posts.
 Right = yes, left = no, down = skip (back a few cards later), Backspace = undo.
-The Yes list (header button) lists the creators swiped yes; changing one to no takes
-their posts not swiped yet off the Posts tab.
 
 Posts tab (/posts): the posts of the creators swiped yes that can be downloaded
 (free EroScripts posts with a fetchable video, FapTap videos), not in the library and
 not swiped yet, best score first. Right = want: the next daily npm run creators:scout
 downloads it. Left = hide.
+
+Swiped tab (/swiped): the creators already swiped, newest first, with their full cards
+one at a time (left / right = previous / next, Y / N = change to yes / no) or as a
+list; filter All / Yes / No, search by name or handle.
+
+Collection tab (/collection): the creators you like (swiped yes, favourite artists,
+pornstar list) with their Instagram, Twitch and other confirmed profiles, as a list
+or cards; changing one to no takes her posts not swiped yet off the Posts tab.
 
 Swipes go to <userData>/creator-swipes.json (atomically, one at a time; the previous
 copy is kept as creator-swipes.json.bak), the only file the CLI writes. Pictures are
