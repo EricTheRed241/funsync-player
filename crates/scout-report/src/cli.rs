@@ -53,11 +53,12 @@ pmvhaven-scout-swipes.json and faptap-scout-swipes.json. These are the only file
 CLI writes. The VR tab also shows the SLR account's download quota slr:scout last read:
 videos left in the 7-day window, hand-crafted and AI scripts left this month.
 
-Above the tabs a bar shows the library drive's free space in GB (df on the library
+Under the tabs a bar shows the library drive's free space in GB (df on the library
 sources in config.json; with sources on several drives, the one with the least free).
 Below swipeDeck.minFreeGb free (renderer/js/content-preferences.json) the drive counts
-as full: the page turns swiping off and the swipe routes answer 507 until space is
-freed; skip and undo still work. The bar rereads /api/drive every minute.
+as full: Multi, VR and Flat take no swipes (the page turns them off, the swipe routes
+answer 507) until space is freed; skip, undo and the Free space tab still work. The
+bar rereads /api/drive every minute.
 
 A card's pictures are the post's or scene's images, then the preview frames the scouts
 took at 25, 50 and 75 % of a video (<userData>/scout-frames/eroscripts/<topic id>/,

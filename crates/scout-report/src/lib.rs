@@ -2,7 +2,7 @@
 //! EroScripts Discovery scout's waiting list (`npm run eroscripts:scout`) and the scenes the
 //! site scouts found (SexLikeReal, VRBangers / VRConk, PMVHaven, FapTap), in three tabs:
 //! Multi, VR and Flat, and a fourth, Free space: library videos to delete when a drive is
-//! full (crate::free_space, through the running app's backend). A bar above the tabs shows
+//! full (crate::free_space, through the running app's backend). A bar under the tabs shows
 //! the library drive's free space; while it's full the three download tabs take no swipes
 //! (crate::drive).
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
