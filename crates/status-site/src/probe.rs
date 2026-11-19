@@ -57,10 +57,10 @@ pub const SITES: &[Site] = &[
         start: "npm run creators:site -- --lan",
     },
     Site {
-        name: "Posts",
+        name: "Collection",
         port: 5132,
-        probe: "/api/posts/deck?limit=1",
-        open: "/posts",
+        probe: "/api/creators/collection",
+        open: "/collection",
         start: "npm run creators:site -- --lan",
     },
 ];

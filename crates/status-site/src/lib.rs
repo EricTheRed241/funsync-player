@@ -1,6 +1,6 @@
 //! `npm run status:site`: one page that says whether each of FunSync's local sites is
-//! up: the backend, the web remote, the swipe deck, the Creators deck and the Posts
-//! deck (crate::probe::SITES). Every load of `/api/status` probes them from this Mac
+//! up: the backend, the web remote, the swipe deck, the Creators deck and the
+//! Collection (crate::probe::SITES). Every load of `/api/status` probes them from this Mac
 //! (loopback, so the access PIN never gets in the way) and checks whether each port
 //! also answers on the Mac's network address, i.e. whether a phone can reach it.
 //! Bound to 127.0.0.1, or to every interface with `--lan`; other devices need the
