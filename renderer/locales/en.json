@@ -792,6 +792,7 @@
     "added": "Added",
     "addedTo": "Added to \"{name}\"",
     "rejectedDeleted": "Deleted {count} rejected video(s) from disk (rated 2 stars or lower)",
+    "duplicateDeleted": "Deleted duplicate \"{name}\" from disk (kept the other copy)",
     "removed": "Removed",
     "saved": "Saved",
     "copied": "Copied",

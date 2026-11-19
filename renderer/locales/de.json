@@ -1003,6 +1003,7 @@
     "added": "Hinzugefügt",
     "addedTo": "Zu „{name}\" hinzugefügt",
     "rejectedDeleted": "{count} abgelehnte(s) Video(s) von der Festplatte gelöscht (2 Sterne und weniger)",
+    "duplicateDeleted": "Duplikat „{name}\" von der Festplatte gelöscht (die andere Kopie bleibt)",
     "removed": "Entfernt",
     "saved": "Gespeichert",
     "copied": "Kopiert",

@@ -622,6 +622,7 @@
     "added": "Añadido",
     "addedTo": "Añadido a \"{name}\"",
     "rejectedDeleted": "Se eliminaron del disco {count} vídeo(s) rechazado(s) (2 estrellas o menos)",
+    "duplicateDeleted": "Se eliminó del disco el duplicado \"{name}\" (se conserva la otra copia)",
     "removed": "Eliminado",
     "saved": "Guardado",
     "copied": "Copiado",

@@ -1,23 +1,25 @@
 //! The HTTP side: one request at a time. `GET /` (redirects to the deck page),
 //! `GET /swipe` (the deck page),
-//! `GET /api/deck?stack=multi|vr|flat|free&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
+//! `GET /api/deck?stack=multi|vr|flat|free|dupes&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
 //! (the next cards of a tab, every source mixed, crate::deck; `free` is the Free space tab's
-//! library videos, crate::free_space), `GET /api/drive` (the library drive's free space and
-//! whether swiping is off, crate::drive),
+//! library videos, crate::free_space; `dupes` the Duplicates tab's pairs, crate::duplicates),
+//! `GET /api/drive` (the library drive's free space and whether swiping is off, crate::drive),
 //! `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview frames,
 //! crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (waiting
 //! posts), `POST /api/scenes/<slr|vrb|pmvhaven|faptap>/swipe {id, dir}` and `…/undo {id}`
 //! (that scout's scenes), `POST /api/free-space/swipe {id, dir}`, `…/undo {id}` (marks on
-//! library videos) and `POST /api/free-space/delete` (rates the left-marked ones for deletion
-//! through the app's backend). The swipes files are the only writes, crate::swipes. Post and
+//! library videos), `POST /api/free-space/delete` (rates the left-marked ones for deletion
+//! through the app's backend), `POST /api/duplicates/swipe {id, dir: left|right|up}`,
+//! `…/undo {id}` (marks on pairs) and `POST /api/duplicates/delete` (the app deletes each
+//! marked copy as a duplicate). The swipes files are the only writes, crate::swipes. Post and
 //! scene swipes are refused (507) while the library drive is full; undos and the Free space
-//! tab's marks never are. In front of them all, crate::gate: the access PIN, and `/login`
-//! and `/logout`.
+//! and Duplicates tabs' marks never are. In front of them all, crate::gate: the access PIN,
+//! and `/login` and `/logout`.
 
 use crate::gate::{self, Gate};
 use crate::scenes::{self, Source};
 use crate::swipes::{self, Dir, Store};
-use crate::{deck, drive, frames, free_space, report};
+use crate::{deck, drive, duplicates, frames, free_space, report};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -123,6 +125,9 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             Ok(d) if d.stack == deck::Stack::Free => {
                 json_ok(&free_space::load(user_data, d.limit, &d.exclude))
             }
+            Ok(d) if d.stack == deck::Stack::Dupes => {
+                json_ok(&duplicates::load(user_data, d.limit, &d.exclude))
+            }
             Ok(d) => json_ok(&deck::load(user_data, &d)),
             Err(e) => text(400, &e),
         },
@@ -151,6 +156,18 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             Ok(v) => json_ok(&v),
             Err((status, e)) => text(status, &format!("{e}\n")),
         },
+        ("POST", "/api/duplicates/swipe") => dupes_swipe(body, user_data),
+        ("POST", "/api/duplicates/swipe/undo") => match dupes_request(body) {
+            Ok((_, id)) => match duplicates::Marks::undo(user_data, &id) {
+                Ok(removed) => json_ok(&json!({"id": id, "removed": removed})),
+                Err(e) => text(500, &format!("{e}\n")),
+            },
+            Err(resp) => resp,
+        },
+        ("POST", "/api/duplicates/delete") => match duplicates::delete(user_data) {
+            Ok(v) => json_ok(&v),
+            Err((status, e)) => text(status, &format!("{e}\n")),
+        },
         _ => text(404, "Not found\n"),
     }
 }
@@ -159,7 +176,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 /// `seed=N` (shuffle a little), `jitter=N` (how much, in score points: 0 ..= MAX_JITTER;
 /// default the tab's), `exclude=<source>:<id>,…` (the cards the page holds: `eroscripts:<topic
 /// id>`, a scene source's `<source>:<id>` or `library:<video id>`; at most MAX_EXCLUDE), and
-/// `stack=multi|vr|flat|free` (default multi).
+/// `stack=multi|vr|flat|free|dupes` (default multi).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
@@ -203,8 +220,9 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
                 }
             }
             "stack" => {
-                d.stack = deck::Stack::parse(v)
-                    .ok_or_else(|| format!("stack is multi, vr, flat or free, got {v:?}\n"))?;
+                d.stack = deck::Stack::parse(v).ok_or_else(|| {
+                    format!("stack is multi, vr, flat, free or dupes, got {v:?}\n")
+                })?;
             }
             _ => {}
         }
@@ -213,8 +231,8 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
 }
 
 /// One `exclude` item as a card key (deck::DeckCard::key): `eroscripts:<topic id>` (plain
-/// digits, written back the way the deck writes it), `<scene source>:<id>` or
-/// `library:<video id>` (swipes::is_id).
+/// digits, written back the way the deck writes it), `<scene source>:<id>`,
+/// `library:<video id>` (swipes::is_id) or `dupes:<id>-<id>` (duplicates::parse_pair).
 fn exclude_key(item: &str) -> Option<String> {
     let (source, id) = item.split_once(':')?;
     if source == deck::EROSCRIPTS {
@@ -223,6 +241,9 @@ fn exclude_key(item: &str) -> Option<String> {
             .ok()
             .filter(|_| id.bytes().all(|b| b.is_ascii_digit()))?;
         return Some(format!("{source}:{id}"));
+    }
+    if source == duplicates::SOURCE {
+        return duplicates::parse_pair(id).map(|_| item.to_string());
     }
     let known = Source::parse(source).is_some() || source == free_space::SOURCE;
     (known && swipes::is_id(id)).then(|| item.to_string())
@@ -271,6 +292,41 @@ fn free_swipe(body: &[u8], user_data: &Path) -> Response {
         return text(400, "dir must be \"right\" or \"left\"\n");
     };
     match free_space::swipe(user_data, &id, dir) {
+        Ok(v) => json_ok(&v),
+        Err((status, e)) => text(status, &format!("{e}\n")),
+    }
+}
+
+/// A Duplicates POST's JSON object and its `id`: a pair (`<id>-<id>`, the smaller id first).
+fn dupes_request(body: &[u8]) -> Result<(Value, String), Response> {
+    let req: Value = serde_json::from_slice(body)
+        .ok()
+        .filter(Value::is_object)
+        .ok_or_else(|| text(400, "body must be a JSON object\n"))?;
+    let id = req
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| duplicates::parse_pair(s).is_some())
+        .map(str::to_string)
+        .ok_or_else(|| text(400, "id must be a pair <id>-<id>, the smaller id first\n"))?;
+    Ok((req, id))
+}
+
+/// `POST /api/duplicates/swipe {id, dir}`: left = keep the left video, right = keep the right
+/// one, up = not duplicates.
+fn dupes_swipe(body: &[u8], user_data: &Path) -> Response {
+    let (req, id) = match dupes_request(body) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let Some(dir) = req
+        .get("dir")
+        .and_then(Value::as_str)
+        .and_then(duplicates::Dir::parse)
+    else {
+        return text(400, "dir must be \"left\", \"right\" or \"up\"\n");
+    };
+    match duplicates::swipe(user_data, &id, dir) {
         Ok(v) => json_ok(&v),
         Err((status, e)) => text(status, &format!("{e}\n")),
     }
@@ -749,6 +805,7 @@ mod tests {
             ("stack=multi", deck::Stack::Multi),
             ("stack=vr", deck::Stack::Vr),
             ("stack=flat", deck::Stack::Flat),
+            ("stack=dupes", deck::Stack::Dupes),
         ] {
             assert_eq!(deal(q).map(|d| d.stack), Ok(stack));
         }
@@ -779,9 +836,40 @@ mod tests {
             ("vrb:", None),
             ("vrb:a:b", None),
             ("vrb:a/b", None),
+            ("dupes:a1b2-c3d4", Some("dupes:a1b2-c3d4")),
+            ("dupes:c3d4-a1b2", None),
+            ("dupes:a1b2", None),
+            ("library:a1b2-c3d4", Some("library:a1b2-c3d4")),
         ] {
             assert_eq!(exclude_key(item).as_deref(), key, "{item}");
         }
+    }
+
+    #[test]
+    fn duplicate_swipes_need_a_pair_and_a_direction() {
+        let dir = with_waiting("dupes");
+        for (body, why) in [
+            (&br#"{"id":"b2-a1","dir":"left"}"#[..], "pair"),
+            (br#"{"id":"a1","dir":"left"}"#, "pair"),
+            (br#"{"id":"a1-b2","dir":"down"}"#, "dir"),
+            (br#"[]"#, "JSON object"),
+        ] {
+            let r = route("POST", "/api/duplicates/swipe", body, &dir);
+            assert_eq!(r.status, 400, "{}", String::from_utf8_lossy(body));
+            assert!(String::from_utf8_lossy(&r.body).contains(why));
+        }
+        let r = route(
+            "POST",
+            "/api/duplicates/swipe/undo",
+            br#"{"id":"a1-b2"}"#,
+            &dir,
+        );
+        assert_eq!(r.status, 200);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&r.body).unwrap()["removed"],
+            false
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

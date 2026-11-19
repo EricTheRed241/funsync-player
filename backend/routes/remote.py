@@ -5,7 +5,8 @@ The SPA itself lives in `backend/web-remote/` and is served via a
 exposes the JSON endpoints the SPA calls: the flat video list, the
 collection/playlist/category/artist groupings, the shared play queue, and the
 triage writes (rating, favourite, add to / remove from a playlist, tag scores,
-favourite artists, queue add / remove / played / clear / auto-fill).
+favourite artists, queue add / remove / played / clear / auto-fill) and the
+swipe deck's delete-duplicate.
 
 The writes never touch the library here: the desktop owns it. Each becomes
 a library edit (`services.library_edits`) delivered to the desktop over the
@@ -423,6 +424,26 @@ async def add_video_to_playlist(payload: dict = Body(default={})):
 async def remove_video_from_playlist(payload: dict = Body(default={})):
     """Remove a video from a playlist: `{videoId, playlistId?, name?}`."""
     return await _submit(_playlist_edit(library_edits.KIND_PLAYLIST_REMOVE, payload))
+
+
+@router.post("/delete-duplicate")
+async def delete_duplicate(payload: dict = Body(default={})):
+    """Delete a duplicate copy from disk (the swipe deck's Duplicates tab):
+    `{videoId, keepId}`, the user keeps `keepId`. The desktop deletes
+    `videoId` as a duplicate, favourite or not (reason `duplicate`, so the
+    scouts skip that video but not its post). 400 when an id is missing or
+    both are the same, 404 on an unknown video."""
+    video_id, keep_id = payload.get("videoId"), payload.get("keepId")
+    if not isinstance(video_id, str) or not video_id or not isinstance(keep_id, str) or not keep_id:
+        raise HTTPException(status_code=400, detail="videoId and keepId required")
+    if video_id == keep_id:
+        raise HTTPException(status_code=400, detail="videoId and keepId are the same video")
+    path, keep_path = _video_path_or_404(video_id), _video_path_or_404(keep_id)
+    try:
+        edit = library_edits.make_delete_duplicate_edit(path, keep_path, source="remote")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await _submit(edit)
 
 
 @router.get("/tag-scores")

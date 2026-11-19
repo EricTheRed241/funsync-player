@@ -80,6 +80,39 @@ a:hover { text-decoration: underline; }
   font-size: 28px; letter-spacing: .06em; opacity: 0; background: rgba(0,0,0,.25); }
 .stamp.want { left: 18px; color: var(--like); transform: rotate(-14deg); }
 .stamp.hide { right: 18px; color: var(--nope); transform: rotate(14deg); }
+/* Duplicates: two library videos side by side, the confidence on top, the stats at the bottom of each. */
+.card.vs { flex-direction: column; }
+.vs-head { padding: 10px 14px 8px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--line); }
+.vs-conf { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.vs-conf b { font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.vs-conf b.hi { color: var(--like); } .vs-conf b.mid { color: var(--undo); } .vs-conf b.lo { color: var(--muted); }
+.vs-meter { flex: 1 1 80px; align-self: center; height: 6px; border-radius: 3px; background: var(--row); position: relative; overflow: hidden; }
+.vs-meter span { position: absolute; inset: 0 auto 0 0; background: currentColor; border-radius: 3px; }
+.vs-why { color: var(--muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 600px) {
+  .vs-head { padding: 8px 10px 6px; }
+  .vs-conf b { font-size: 22px; }
+  .vs-why, .vs-note { font-size: 12px; }
+  .vs-stats { font-size: 12px; gap: 1px 6px; padding: 4px 8px 8px; }
+  .vs-side .ttl { font-size: 13px; padding: 4px 8px 0; }
+  .vs-side .by { padding: 0 8px; }
+}
+.vs-note { align-self: flex-start; font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); }
+.vs-sides { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+.vs-side { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.vs-side + .vs-side { border-left: 1px solid var(--line); }
+.vs-side .media { flex: 1 1 auto; min-height: 80px; }
+.vs-side .ttl { font-size: 14px; line-height: 1.4; padding: 6px 10px 0; }
+.vs-side .by { padding: 0 10px; font-size: 12px; flex-wrap: wrap; gap: 2px 8px; }
+.vs-side .by a { margin-left: 0; }
+.vs-stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; padding: 6px 10px 10px; font-size: 13px; }
+.vs-stats dt { color: var(--muted); }
+.vs-stats dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.vs-stats dd.win { color: var(--like); font-weight: 650; }
+.vs-side .stamp { top: 14px; left: 50%; right: auto; transform: translateX(-50%) rotate(-8deg); font-size: 22px; }
+.vs-side .stamp.keep { color: var(--like); } .vs-side .stamp.del { color: var(--nope); }
+.stamp.distinct { left: 50%; top: 40%; transform: translate(-50%, -50%); color: var(--accent); font-size: 22px; white-space: nowrap; z-index: 1; }
+.round.distinct { color: var(--accent); }
 .info { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 6px; }
 .badges, .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .badge { padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
@@ -137,6 +170,9 @@ a.badge { color: var(--fg); }
   .stacks, .scanned, .quota, .drive { width: min(100% - 32px, 1248px); }
   .problems, .deck { width: min(100% - 32px, 1248px); }
   .card { flex-direction: row; }
+  .card.vs { flex-direction: column; }
+  .vs-side .ttl { font-size: 16px; }
+  .vs-stats { font-size: 14px; }
   .media { flex: 1 1 auto; min-width: 0; min-height: auto; }
   .info { flex: 0 0 clamp(340px, 34%, 460px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
     padding: 16px 18px; gap: 9px; border-left: 1px solid var(--line); }
@@ -186,6 +222,7 @@ a.badge { color: var(--fg); }
   <button type="button" data-stack="vr" title="Single-axis VR from every source: EroScripts posts, SLR, VRBangers / VRConk, PMVHaven and FapTap scenes">VR</button>
   <button type="button" data-stack="flat" title="Single-axis flat from every source: EroScripts posts, PMVHaven and FapTap videos">Flat</button>
   <button type="button" data-stack="free" title="Library videos to delete when a drive is full: the most GB per preference-score point first; favourites, 4★ and up, favourite artists and hand-made axes are never shown">Free space</button>
+  <button type="button" data-stack="dupes" title="Library videos that may be the same video, side by side, the likeliest first: keep one (← / →) and the other is deleted when you press Delete marked, or ↑ not duplicates">Duplicates</button>
 </nav>
 <div class="drive" id="drive" hidden>
   <div class="drive-line" id="drive-line"></div>
@@ -202,6 +239,7 @@ a.badge { color: var(--fg); }
   <button type="button" class="round nope" id="nope" title="Hide from the deck (←)" aria-label="Hide">✕</button>
   <button type="button" class="round small undo" id="undo" title="Undo (Backspace)" aria-label="Undo">↺</button>
   <button type="button" class="round small skip" id="skip" title="Skip: it comes back later in the deck (↓)" aria-label="Skip">↷</button>
+  <button type="button" class="round small distinct" id="distinct" title="Not duplicates: never shown together again (↑)" aria-label="Not duplicates" hidden>↑</button>
   <button type="button" class="round like" id="like" title="Want: the scout downloads it (→)" aria-label="Want">♥</button>
 </div>
 <div class="hint" id="hint">← hide · → want · ↓ or drag up skip · Backspace undo · Space next image · tap the image's sides to browse</div>
@@ -219,7 +257,7 @@ let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
 // Which tab is dealt (multi, vr, flat, free); remembered on this device. Any other stored value
 // (the old single-axis and SLR tabs) falls back to multi.
-const STACKS = ['multi', 'vr', 'flat', 'free'];
+const STACKS = ['multi', 'vr', 'flat', 'free', 'dupes'];
 let stack = STACKS.includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
 // Where a card comes from, and so where its swipe goes: an EroScripts post (source
 // "eroscripts") to /api/swipe and eroscripts-scout-swipes.json, a scout's scene (slr, vrb,
@@ -227,21 +265,26 @@ let stack = STACKS.includes(localStorage.getItem('swipeStack')) ? localStorage.g
 // (source "library", the Free space tab) to /api/free-space/swipe and free-space-swipes.json.
 const sourceOf = (c) => c.source || 'eroscripts';
 const isLibrary = (c) => sourceOf(c) === 'library';
-const isScene = (c) => sourceOf(c) !== 'eroscripts' && !isLibrary(c);
-const swipePath = (c) => (isLibrary(c) ? '/api/free-space/swipe'
+// A Duplicates pair (source "dupes"): /api/duplicates/swipe, duplicate-swipes.json.
+const isPair = (c) => sourceOf(c) === 'dupes';
+const isScene = (c) => sourceOf(c) !== 'eroscripts' && !isLibrary(c) && !isPair(c);
+const swipePath = (c) => (isLibrary(c) ? '/api/free-space/swipe' : isPair(c) ? '/api/duplicates/swipe'
   : isScene(c) ? `/api/scenes/${encodeURIComponent(c.source)}/swipe` : '/api/swipe');
 // Whether a swipe counts in the tab's second counter: a library video swiped left is marked for
-// deletion, anything else swiped right is wanted.
-const marks = (c, dir) => (isLibrary(c) ? dir === 'left' : dir === 'right');
+// deletion, a pair swiped either side marks its other video, anything else swiped right is wanted.
+const marks = (c, dir) => (isLibrary(c) ? dir === 'left' : isPair(c) ? dir === 'left' || dir === 'right' : dir === 'right');
+// The two tabs that delete library videos: they free space, so a full drive never stops them.
+const deletes = (s) => s === 'free' || s === 'dupes';
 // A card's identity across sources (two sources' ids may be equal); also the deck's exclude key.
 const keyOf = (c) => sourceOf(c) + ':' + c.id;
-const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat', free: 'Free space' };
+const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat', free: 'Free space', dupes: 'Duplicates' };
 // The scouts whose runs fill each tab: an empty tab names them.
 const TAB_SCOUTS = {
   multi: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout'],
   vr: ['eroscripts:scout', 'slr:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout'],
   flat: ['eroscripts:scout', 'pmvhaven:scout', 'faptap:scout'],
   free: [],
+  dupes: [],
 };
 // The source badge; VRBangers and VRConk share the vrb scout and differ by `site`.
 const SOURCE_NAMES = { eroscripts: 'EroScripts', slr: 'SLR', vrb: 'VRBangers', pmvhaven: 'PMVHaven', faptap: 'FapTap' };
@@ -297,7 +340,7 @@ let lastDeck = null;   // the last deck answer (Free space: the drives line)
 // and the Free space tab still work.
 let drive = null;
 const driveFull = () => Boolean(drive && drive.full);
-const swipeBlocked = () => driveFull() && stack !== 'free';
+const swipeBlocked = () => driveFull() && !deletes(stack);
 
 // Swipes, undos and deck fetches reach the server in order.
 let chain = Promise.resolve();
@@ -482,8 +525,90 @@ function libraryCardNode(c, isTop) {
   return node;
 }
 
+const AXES = { handmade: ['Multi-axis (hand-made)', 3], generated: ['Multi-axis (generated)', 2], single: ['Single-axis', 1] };
+/** "8K", "4K", "1080p" from a picture's size (VR by width, flat by height). */
+function qualityLabel(q) {
+  if (!q) return null;
+  const k = q.width >= 7600 ? '8K' : q.width >= 5700 ? '6K' : q.width >= 3800 ? '4K' : q.height + 'p';
+  return `${k} · ${q.width}×${q.height}` + (q.fps ? ` · ${Math.round(q.fps)} fps` : '');
+}
+/** "2 y 3 mo", "5 mo", "under a month" since an ISO time. */
+function age(iso) {
+  const months = Math.floor((Date.now() - new Date(iso)) / (30.44 * 864e5));
+  if (!(months >= 1)) return 'under a month';
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  return y ? `${y} y` + (m ? ` ${m} mo` : '') : `${m} mo`;
+}
+
+/**
+ * A Duplicates pair: the confidence, what it rests on, and both videos with their stats
+ * (score, axes, length, quality, post age, size); the better score, axes and quality in green.
+ */
+function pairCardNode(c, isTop) {
+  const conf = Math.round(c.confidence);
+  const band = conf >= 85 ? 'hi' : conf >= 65 ? 'mid' : 'lo';
+  const note = c.kind === 'compilation' ? 'PMV / compilation: probably not the same video, confirm'
+    : c.kind === 'versions' ? 'One VR, one flat: two versions of one scene, not the same file' : null;
+  const sides = [c.left, c.right];
+  const pick = (f) => {
+    const [a, b] = sides.map(f);
+    return a == null || b == null || a === b ? [false, false] : [a > b, b > a];
+  };
+  const wins = {
+    score: pick((s) => s.score),
+    axes: pick((s) => (AXES[s.axes] || [null, null])[1]),
+    quality: pick((s) => (s.quality ? s.quality.width * s.quality.height : null)),
+  };
+  const sideNode = (s, i) => {
+    const media = el('div', { class: 'media' });
+    if (s.image) {
+      const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: s.image });
+      img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
+      img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
+      if (!img.complete) media.classList.add('loading');
+      media.append(img);
+    } else {
+      media.append(el('div', { class: 'none' }, 'No image'));
+    }
+    media.append(el('div', { class: 'stamp keep' }, 'KEEP'), el('div', { class: 'stamp del' }, 'DELETE'));
+    const rated = s.rating > 0 ? '★'.repeat(Math.floor(s.rating)) + (s.rating % 1 ? '½' : '') : null;
+    const stat = (k, v, win) => [el('dt', {}, k), el('dd', { class: win ? 'win' : null }, v)];
+    const posted = s.posted ? `${age(s.posted)} (${s.postedFrom} ${day(s.posted)})` : '–';
+    return el('div', { class: 'vs-side', 'data-side': i ? 'right' : 'left' },
+      media,
+      el('div', { class: 'ttl', title: s.path }, s.title),
+      el('div', { class: 'by' },
+        s.author ? el('span', {}, s.author) : null,
+        s.library ? el('span', {}, s.library) : null,
+        s.favourite ? el('span', { class: 'badge b-fav' }, '♥ favourite') : null,
+        rated ? el('span', { title: 'Your rating' }, rated) : null,
+        s.postUrl ? el('a', { href: s.postUrl, target: '_blank', rel: 'noopener noreferrer' }, 'post ↗') : null),
+      el('dl', { class: 'vs-stats' },
+        stat('Score', s.score == null ? '–' : fmt(s.score), wins.score[i]),
+        stat('Axes', s.axes ? AXES[s.axes][0] : 'not checked yet', wins.axes[i]),
+        stat('Length', s.runtimeMs ? clock(s.runtimeMs) : '–'),
+        stat('Quality', (qualityLabel(s.quality) || '–') + (s.vr ? ' · VR' : ''), wins.quality[i]),
+        stat('Age', posted),
+        stat('Size', fmtBytes(s.size))));
+  };
+  const node = el('article', { class: 'card vs ' + (isTop ? 'top' : 'next') },
+    el('div', { class: 'vs-head' },
+      el('div', { class: 'vs-conf' },
+        el('b', { class: band }, conf + '%'),
+        el('span', {}, 'duplicate confidence'),
+        el('span', { class: 'vs-meter ' }, el('span', { style: `width:${conf}%;color:var(${band === 'hi' ? '--like' : band === 'mid' ? '--undo' : '--muted'})` }))),
+      el('div', { class: 'vs-why' }, (c.reasons || []).join(' · ')),
+      note ? el('div', { class: 'vs-note' }, note) : null),
+    el('div', { class: 'vs-sides' }, sides.map(sideNode)),
+    el('div', { class: 'stamp distinct' }, 'NOT DUPLICATES'));
+  if (isTop) drag(node);
+  return node;
+}
+
 function cardNode(c, isTop) {
   if (isLibrary(c)) return libraryCardNode(c, isTop);
+  if (isPair(c)) return pairCardNode(c, isTop);
   const imgs = c.images || [];
   const media = el('div', { class: 'media' });
   if (imgs.length) {
@@ -630,29 +755,37 @@ function renderScanned(d) {
   s.hidden = false;
 }
 
-/** The Free space tab's line: each library drive's free space, what's marked, and the delete button. */
+/** The Free space and Duplicates tabs' line: each library drive's free space, what's marked, and the delete button. */
 function renderDrives(d) {
   const line = $('drives');
-  if (stack !== 'free' || !d) { line.hidden = true; return; }
+  if (!deletes(stack) || !d) { line.hidden = true; return; }
   const parts = (d.drives || []).map((x) => [el('b', {}, fmtBytes(x.free)), ` free on ${x.mount.split('/').pop() || x.mount} (of ${fmtBytes(x.total)})`]);
+  const dupes = stack === 'dupes';
   const kept = Object.entries(d.protected || {}).map(([why, n]) => `${n} ${why}`).join(', ');
   line.replaceChildren(
     ...parts.flatMap((p, i) => (i ? [' · ', ...p] : p)),
+    dupes && d.bar != null ? ` · pairs at ${Math.round(d.bar)}%+ (${d.candidates} at ${Math.round(d.floorConfidence)}%+)` : '',
     el('button', { type: 'button', class: 'delete-marked', disabled: !wanted, onclick: deleteMarked,
-      title: 'Delete every video marked ← from disk, through the app (as a 2★ rating does)' },
+      title: dupes ? 'Delete every copy you didn\'t keep from disk, through the app (as a duplicate: the post stays wanted)'
+        : 'Delete every video marked ← from disk, through the app (as a 2★ rating does)' },
     wanted ? `Delete ${wanted} marked (${fmtBytes(markedBytes)})` : 'Nothing marked'));
-  line.title = kept ? 'Never shown: ' + kept : '';
+  line.title = dupes
+    ? `Pairs at ${Math.round(d.minConfidence)}% or more are always shown; when fewer than the target, the best ones down to ${Math.round(d.floorConfidence)}%. ${d.distinct || 0} pairs marked not duplicates.`
+    : kept ? 'Never shown: ' + kept : '';
   line.hidden = false;
 }
 
-/** Free space: rate every marked video for deletion; the app deletes them a moment later. */
+/** Free space / Duplicates: delete every marked video through the app; it removes them a moment later. */
 function deleteMarked(e) {
   e.currentTarget.blur();
-  if (!wanted || !confirm(`Delete ${wanted} video${wanted === 1 ? '' : 's'} (${fmtBytes(markedBytes)}) from disk, with their scripts? This can't be undone.`)) return;
-  serial(() => post('/api/free-space/delete', {})).then((r) => {
+  const dupes = stack === 'dupes';
+  const what = dupes ? `${wanted} duplicate cop${wanted === 1 ? 'y' : 'ies'}` : `${wanted} video${wanted === 1 ? '' : 's'}`;
+  if (!wanted || !confirm(`Delete ${what} (${fmtBytes(markedBytes)}) from disk, with their scripts?${dupes ? ' The copies you kept stay.' : ''} This can't be undone.`)) return;
+  serial(() => post(dupes ? '/api/duplicates/delete' : '/api/free-space/delete', {})).then((r) => {
     // Their marks are gone with them: undo can't bring a deleted video back.
     for (let i = undoStack.length - 1; i >= 0; i--) {
-      if (isLibrary(undoStack[i].card) && undoStack[i].dir === 'left') undoStack.splice(i, 1);
+      const u = undoStack[i];
+      if (dupes ? isPair(u.card) && u.dir !== 'skip' && u.dir !== 'up' : isLibrary(u.card) && u.dir === 'left') undoStack.splice(i, 1);
     }
     const left = [r.skipped.length ? `${r.skipped.length} skipped (${[...new Set(r.skipped.map((s) => s.why))].join(', ')})` : null,
       r.errors.length ? `${r.errors.length} failed: ${r.errors[0]}` : null].filter(Boolean).join(' · ');
@@ -738,15 +871,18 @@ async function loadDrive() {
 }
 
 function renderCounter() {
-  const marked = stack === 'free' ? ` · ${wanted} marked · ${fmtBytes(markedBytes)}` : ` · ${wanted} wanted`;
-  $('counter').textContent = loaded ? `${remaining} left${marked}` : 'Loading…';
+  const marked = deletes(stack) ? ` · ${wanted} marked · ${fmtBytes(markedBytes)}` : ` · ${wanted} wanted`;
+  $('counter').textContent = loaded ? `${remaining}${stack === 'dupes' ? ' pairs' : ''} left${marked}` : 'Loading…';
   $('undo').disabled = !undoStack.length;
   $('skip').disabled = !queue.length;
-  $('nope').disabled = $('like').disabled = !queue.length || swipeBlocked();
+  $('nope').disabled = $('like').disabled = $('distinct').disabled = !queue.length || swipeBlocked();
   const free = stack === 'free';
-  $('like').title = swipeBlocked() ? fullMessage() : free ? 'Keep: never offered again (→)' : 'Want: its scout downloads it (→)';
-  $('nope').title = swipeBlocked() ? fullMessage() : free ? 'Mark for deletion (←); nothing is deleted until Delete marked' : 'Hide from the deck (←)';
-  if (stack === 'free' && lastDeck) renderDrives(lastDeck);
+  const dupes = stack === 'dupes';
+  $('like').title = swipeBlocked() ? fullMessage() : dupes ? 'Keep the right video, delete the left one (→); nothing is deleted until Delete marked'
+    : free ? 'Keep: never offered again (→)' : 'Want: its scout downloads it (→)';
+  $('nope').title = swipeBlocked() ? fullMessage() : dupes ? 'Keep the left video, delete the right one (←); nothing is deleted until Delete marked'
+    : free ? 'Mark for deletion (←); nothing is deleted until Delete marked' : 'Hide from the deck (←)';
+  if (deletes(stack) && lastDeck) renderDrives(lastDeck);
 }
 
 /** Redraw the top two cards (a card flying off stays until its animation ends). */
@@ -761,6 +897,10 @@ function render(enterFrom) {
       : stack === 'free' ? ['Nothing left to offer on Free space.',
         el('span', {}, wanted ? 'Delete the marked videos above, or undo a swipe.' : 'Everything else is protected (hover the drive line to see why).'),
         el('a', { href: '/' }, 'Back to the report')]
+      : stack === 'dupes' ? ['No likely duplicates left.',
+        el('span', {}, (wanted ? 'Delete the marked copies above, or undo a swipe. ' : '')
+          + (lastDeck ? `Pairs under ${Math.round(lastDeck.floorConfidence)}% confidence aren't shown.` : '')),
+        el('span', {}, 'npm run dedupe:scenes measures frames of same-length videos, which makes the confidence surer.')]
       : [`Nothing left to swipe on ${STACK_NAMES[stack]}.`,
         el('span', {}, TAB_SCOUTS[stack].map((s) => 'npm run ' + s).join(', ') + ' find more.')]));
     return;
@@ -770,7 +910,7 @@ function render(enterFrom) {
   const top = cardNode(queue[0], true);
   if (enterFrom) {
     top.classList.add('drag');
-    top.style.transform = enterFrom === 'skip' ? 'translateY(-120%)'
+    top.style.transform = enterFrom === 'skip' || enterFrom === 'up' ? 'translateY(-120%)'
       : `translateX(${enterFrom === 'right' ? '' : '-'}120%) rotate(${enterFrom === 'right' ? 20 : -20}deg)`;
   }
   deckEl.append(top);
@@ -810,7 +950,17 @@ function threshold() {
   return Math.min(140, deckEl.clientWidth * 0.28);
 }
 
-function setStamps(node, t) {
+/** The drag's stamps: `t` -1 … 1 sideways (left / right), `up` 0 … 1 (Duplicates: not duplicates). */
+function setStamps(node, t, up) {
+  if (node.classList.contains('vs')) {
+    const [l, r] = ['left', 'right'].map((s) => node.querySelector(`.vs-side[data-side="${s}"]`));
+    l.querySelector('.stamp.keep').style.opacity = Math.max(0, -t);
+    l.querySelector('.stamp.del').style.opacity = Math.max(0, t);
+    r.querySelector('.stamp.keep').style.opacity = Math.max(0, t);
+    r.querySelector('.stamp.del').style.opacity = Math.max(0, -t);
+    node.querySelector('.stamp.distinct').style.opacity = Math.max(0, up || 0);
+    return;
+  }
   node.querySelector('.stamp.want').style.opacity = Math.max(0, t);
   node.querySelector('.stamp.hide').style.opacity = Math.max(0, -t);
 }
@@ -838,8 +988,10 @@ function drag(node) {
     dy = e.clientY - start.y;
     if (!moved && Math.hypot(dx, dy) < 8) return;
     moved = true;
-    node.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx * 0.06}deg)`;
-    setStamps(node, Math.max(-1, Math.min(1, dx / threshold())));
+    const pair = node.classList.contains('vs');
+    node.style.transform = `translate(${dx}px, ${dy * (pair ? 0.6 : 0.3)}px) rotate(${dx * 0.06}deg)`;
+    const up = pair && -dy > Math.abs(dx) ? Math.min(1, -dy / threshold()) : 0;
+    setStamps(node, up ? 0 : Math.max(-1, Math.min(1, dx / threshold())), up);
   });
   const end = (e) => {
     if (!start) return;
@@ -853,13 +1005,14 @@ function drag(node) {
       }
       return;
     }
-    if (Math.abs(dx) > threshold()) {
+    if (Math.abs(dx) > threshold() && Math.abs(dx) >= -dy) {
       swipe(dx > 0 ? 'right' : 'left', dy * 0.3);
     } else if (-dy > threshold()) {
-      skip();
+      // Duplicates: up is "not duplicates"; elsewhere it skips.
+      if (node.classList.contains('vs')) swipe('up'); else skip();
     } else {
       node.style.transform = '';
-      setStamps(node, 0);
+      setStamps(node, 0, 0);
     }
   };
   node.addEventListener('pointerup', end);
@@ -869,11 +1022,12 @@ function drag(node) {
 function fly(node, dir, dy) {
   node.classList.remove('drag');
   node.classList.add('fly');
-  if (dir === 'skip') {
+  if (dir === 'skip' || dir === 'up') {
+    if (dir === 'up') setStamps(node, 0, 1);
     node.style.transform = `translateY(${-1.2 * window.innerHeight}px)`;
   } else {
     const sign = dir === 'right' ? 1 : -1;
-    setStamps(node, sign);
+    setStamps(node, sign, 0);
     node.style.transform = `translate(${sign * 1.4 * window.innerWidth}px, ${dy || 0}px) rotate(${sign * 30}deg)`;
   }
   setTimeout(() => node.remove(), 400);
@@ -891,10 +1045,14 @@ function count(dRemaining, dWanted, dBytes) {
   }
 }
 
-/** A swipe's change to the counters (Free space's marked bytes too); `sign` -1 takes it back. */
+/** The video a Duplicates swipe deletes: left keeps the left one. */
+const doomedSide = (card, dir) => (dir === 'left' ? card.right : dir === 'right' ? card.left : null);
+
+/** A swipe's change to the counters (Free space's and Duplicates' marked bytes too); `sign` -1 takes it back. */
 function swipeCount(card, dir, sign) {
   const m = marks(card, dir);
-  count(-sign, m ? sign : 0, m && isLibrary(card) ? sign * (card.size || 0) : 0);
+  const bytes = !m ? 0 : isLibrary(card) ? card.size || 0 : isPair(card) ? doomedSide(card, dir).size || 0 : 0;
+  count(-sign, m ? sign : 0, sign * bytes);
 }
 
 function swipe(dir, dy) {
@@ -903,14 +1061,21 @@ function swipe(dir, dy) {
   if (swipeBlocked()) {
     // The download tabs are off while the drive is full: a dragged card springs back.
     const node = topNode();
-    if (node) { node.style.transform = ''; setStamps(node, 0); }
+    if (node) { node.style.transform = ''; setStamps(node, 0, 0); }
     toast(fullMessage());
     return;
   }
   const node = topNode();
   if (node) fly(node, dir, dy);
   queue.shift();
-  undoStack.push({ card, dir, stack });
+  // Duplicates: the deleted video's other pairs leave the deck with it (back on undo).
+  const doomed = isPair(card) ? doomedSide(card, dir) : null;
+  const dropped = doomed ? queue.filter((c) => isPair(c) && (c.left.id === doomed.id || c.right.id === doomed.id)) : [];
+  if (dropped.length) {
+    queue = queue.filter((c) => !dropped.includes(c));
+    count(-dropped.length, 0, 0);
+  }
+  undoStack.push({ card, dir, stack, dropped });
   swipeCount(card, dir, 1);
   image = 0;
   render();
@@ -923,7 +1088,8 @@ function swipe(dir, dy) {
     const i = undoStack.findIndex((u) => u.card === card);
     if (i >= 0) undoStack.splice(i, 1);
     if (stack !== from) { toast('Swipe not saved: ' + e.message); return; }
-    if (!queue.some((c) => keyOf(c) === keyOf(card))) queue.unshift(card);
+    if (!queue.some((c) => keyOf(c) === keyOf(card))) queue.unshift(card, ...dropped);
+    if (dropped.length) count(dropped.length, 0, 0);
     swipeCount(card, dir, -1);
     image = 0;
     render();
@@ -974,6 +1140,11 @@ function undo() {
   }
   queue = queue.filter((c) => keyOf(c) !== keyOf(last.card));
   queue.unshift(last.card);
+  const dropped = last.dropped || [];
+  if (dropped.length) {
+    queue.splice(1, 0, ...dropped.filter((c) => !queue.some((q) => keyOf(q) === keyOf(c))));
+    count(dropped.length, 0, 0);
+  }
   image = 0;
   if (last.dir === 'skip') {
     skipped = skipped.filter((c) => keyOf(c) !== keyOf(last.card));
@@ -984,7 +1155,8 @@ function undo() {
   render(last.dir);
   serial(() => post(swipePath(last.card) + '/undo', { id: last.card.id })).catch((e) => {
     // The swipe still stands: take the card off again.
-    queue = queue.filter((c) => keyOf(c) !== keyOf(last.card));
+    queue = queue.filter((c) => keyOf(c) !== keyOf(last.card) && !dropped.includes(c));
+    if (dropped.length) count(-dropped.length, 0, 0);
     undoStack.push(last);
     swipeCount(last.card, last.dir, 1);
     image = 0;
@@ -1022,6 +1194,9 @@ function more() {
     if (d.backendPort) backendPort = d.backendPort;
     for (const c of d.cards) {
       if (isLibrary(c)) c.images = c.thumb && backendPort ? [`${location.protocol}//${location.hostname}:${backendPort}${c.thumb}`] : [];
+      if (isPair(c)) {
+        for (const s of [c.left, c.right]) s.image = s.thumb && backendPort ? `${location.protocol}//${location.hostname}:${backendPort}${s.thumb}` : null;
+      }
     }
     exhausted = d.cards.length < BATCH;
     // Swiped cards (a swipe still on its way to the server) don't come back; skipped ones may.
@@ -1087,14 +1262,22 @@ function restart(newOrder) {
 $('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); loadDrive(); restart(false); });
 $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
 
-// Each tab's buttons and keys: Free space marks library videos for deletion (←) or keeps them (→).
+// Each tab's buttons and keys: Free space marks library videos for deletion (←) or keeps them (→);
+// Duplicates keeps the left (←) or right (→) video of a pair, ↑ says they aren't duplicates.
 const HINTS = {
   deck: '← hide · → want · ↓ or drag up skip · Backspace undo · Space next image · tap the image\'s sides to browse',
   free: '← mark for deletion · → keep · ↓ or drag up skip · Backspace undo · Delete marked (above the card) deletes them',
+  dupes: '← keep left · → keep right · ↑ or drag up not duplicates · ↓ skip · Backspace undo · Delete marked (above the card) deletes the other copies',
 };
 function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
-  $('hint').textContent = HINTS[stack === 'free' ? 'free' : 'deck'];
+  $('hint').textContent = HINTS[deletes(stack) ? stack : 'deck'];
+  const dupes = stack === 'dupes';
+  $('distinct').hidden = !dupes;
+  $('nope').textContent = dupes ? '◀' : '✕';
+  $('like').textContent = dupes ? '▶' : '♥';
+  $('nope').setAttribute('aria-label', dupes ? 'Keep left' : 'Hide');
+  $('like').setAttribute('aria-label', dupes ? 'Keep right' : 'Want');
   if (stack !== 'vr') renderQuota(null);
   renderScanned(null);
   lastDeck = null;
@@ -1157,6 +1340,7 @@ $('nope').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('left
 $('like').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('right'); });
 $('undo').addEventListener('click', (e) => { e.currentTarget.blur(); undo(); });
 $('skip').addEventListener('click', (e) => { e.currentTarget.blur(); skip(); });
+$('distinct').addEventListener('click', (e) => { e.currentTarget.blur(); swipe('up'); });
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Escape' && !$('settings').hidden) { toggleSettings(false); return; }
@@ -1164,6 +1348,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('input, select, textarea')) return;
   if (e.key === 'ArrowLeft') swipe('left');
   else if (e.key === 'ArrowRight') swipe('right');
+  else if (e.key === 'ArrowUp' && stack === 'dupes') swipe('up');
   else if (e.key === 'ArrowDown') skip();
   else if (e.key === 'Backspace') undo();
   else if (e.key === ' ') showImage(image + 1);

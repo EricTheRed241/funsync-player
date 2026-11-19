@@ -64,8 +64,9 @@ pub fn ratings() -> Ratings {
 pub struct Library {
     /// `/api/remote/videos`' `videos`.
     pub videos: Vec<Value>,
-    /// Ids of favourite artists' videos (`/api/remote/artists`, aliases applied there).
     pub favourite_artist_ids: HashSet<String>,
+    /// Video id → its artist's name (`/api/remote/artists`, aliases applied there).
+    pub artists: HashMap<String, String>,
     /// Path → `handmade` / `generated` / `single` (`/api/media/axis-flags`; a video still being
     /// checked is missing).
     pub axes: HashMap<String, String>,
@@ -86,19 +87,32 @@ impl Library {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let favourite_artist_ids = artists
+        let artist_list: Vec<&Value> = artists
             .get("artists")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
+            .collect();
+        let video_ids = |a: &&Value| {
+            a.get("videoIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(id_text)
+                .collect::<Vec<_>>()
+        };
+        let favourite_artist_ids = artist_list
+            .iter()
             .filter(|a| a.get("favourite").and_then(Value::as_bool) == Some(true))
-            .flat_map(|a| {
-                a.get("videoIds")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
+            .flat_map(video_ids)
+            .collect();
+        let artists = artist_list
+            .iter()
+            .filter_map(|a| {
+                let name = a.get("name").and_then(Value::as_str)?.to_string();
+                Some(video_ids(a).into_iter().map(move |id| (id, name.clone())))
             })
-            .filter_map(id_text)
+            .flatten()
             .collect();
         let axes = flags
             .get("flags")
@@ -110,12 +124,13 @@ impl Library {
         Library {
             videos,
             favourite_artist_ids,
+            artists,
             axes,
         }
     }
 }
 
-fn id_text(v: &Value) -> Option<String> {
+pub(crate) fn id_text(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -297,7 +312,7 @@ fn card(v: &Value, id: String, path: &str, source: &Path, size: u64) -> FreeCard
 
 /// The app's sources and backend from `config.json`. Without a readable one the backend isn't
 /// asked (it couldn't be the app's).
-fn app(user_data: &Path) -> Result<(Vec<PathBuf>, Backend, u16), String> {
+pub(crate) fn app(user_data: &Path) -> Result<(Vec<PathBuf>, Backend, u16), String> {
     let config = video_tags::config::read(user_data)?;
     let port = config.backend_port;
     let backend = Backend::new(&format!("http://127.0.0.1:{port}"))?
@@ -305,14 +320,14 @@ fn app(user_data: &Path) -> Result<(Vec<PathBuf>, Backend, u16), String> {
     Ok((config.sources, backend, port))
 }
 
-fn backend_problem(e: BackendError) -> String {
+pub(crate) fn backend_problem(e: BackendError) -> String {
     match e {
         BackendError::Down(m) => format!("FunSync isn't answering, start the app: {m}"),
         BackendError::Bad(m) => m,
     }
 }
 
-fn file_size(path: &str) -> Option<u64> {
+pub(crate) fn file_size(path: &str) -> Option<u64> {
     std::fs::metadata(path)
         .ok()
         .filter(|m| m.is_file())
@@ -514,6 +529,7 @@ mod tests {
         Library {
             videos,
             favourite_artist_ids: HashSet::new(),
+            artists: HashMap::new(),
             axes,
         }
     }

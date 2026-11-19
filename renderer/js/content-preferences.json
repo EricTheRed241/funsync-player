@@ -101,6 +101,23 @@
     "detailMaxAgeDays": 30
   },
   "swipeDeck": {
-    "minFreeGb": 50
+    "minFreeGb": 50,
+    "duplicates": {
+      "minConfidence": 70,
+      "floorConfidence": 40,
+      "target": 30,
+      "compilationWords": ["pmv", "hmv", "compilation", "compilations", "cockhero", "faphero", "megamix", "mix", "cock-hero", "fap-hero"]
+    }
+  },
+  "names": {
+    "noiseWords": [
+      "hq", "lq", "sd", "hd", "fhd", "qhd", "uhd", "upscale", "upscaled", "remaster", "remastered", "passthrough", "pt", "source",
+      "hmv", "pmv", "high", "low", "bitrate", "lowbitrate", "highbitrate", "version", "ver", "final", "fixed", "full",
+      "hevc", "h264", "h265", "x264", "x265", "av1", "mp4", "mkv", "compressed", "uncompressed", "edit",
+      "easy", "easier", "normal", "medium", "hard", "harder", "extreme", "intense", "soft", "beginner", "advanced", "alt", "alternative"
+    ],
+    "noiseToken": "^((\\d{3,4}p|\\d{1,2}k)(\\d{2,3}(fps)?)?|\\d{2,3}fps|fps\\d{2,3}|v\\d+(\\.\\d+)?|\\d+bit|\\d+mbps|480|540|720|1080|1440|2160|2880|4320)$",
+    "projectionWord": "vr|sbs|tb|ou|lr|rl|lrf|180|360|3dh|3dv|fisheye\\d*|mkx\\d+|vrca\\d+|rf52|equirect",
+    "genreWords": ["vam", "sfm", "mmd", "compilation", "compilations", "faphero", "cockhero", "pmv", "hmv", "pov", "vr"]
   }
 }

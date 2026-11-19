@@ -47,8 +47,9 @@ const TOP_TAGS: usize = 3;
 pub const EROSCRIPTS: &str = "eroscripts";
 
 /// Which cards a deck request deals: multi-axis scripts (posts and scenes alike), else VR,
-/// else flat. `Free` is the Free space tab: library videos to delete (crate::free_space), never
-/// a post or scene, so `build` deals it nothing.
+/// else flat. `Free` is the Free space tab: library videos to delete (crate::free_space);
+/// `Dupes` the Duplicates tab: pairs of library videos (crate::duplicates). Neither is ever a
+/// post or scene, so `build` deals them nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Stack {
     #[default]
@@ -56,6 +57,7 @@ pub enum Stack {
     Vr,
     Flat,
     Free,
+    Dupes,
 }
 
 impl Stack {
@@ -65,6 +67,7 @@ impl Stack {
             "vr" => Some(Stack::Vr),
             "flat" => Some(Stack::Flat),
             "free" => Some(Stack::Free),
+            "dupes" => Some(Stack::Dupes),
             _ => None,
         }
     }
@@ -75,7 +78,7 @@ impl Stack {
             Stack::Multi => MULTI_JITTER,
             Stack::Vr => VR_JITTER,
             Stack::Flat => FLAT_JITTER,
-            Stack::Free => 0.0,
+            Stack::Free | Stack::Dupes => 0.0,
         }
     }
 
@@ -1115,7 +1118,7 @@ mod tests {
                 match deal.stack {
                     Stack::Multi => c["axisType"] = json!("multi"),
                     Stack::Vr => c["vr"] = json!(true),
-                    Stack::Flat | Stack::Free => {}
+                    Stack::Flat | Stack::Free | Stack::Dupes => {}
                 }
                 c
             })
