@@ -1,4 +1,5 @@
-//! The HTTP side: one request at a time. `GET /` (redirects to the deck page),
+//! The HTTP side: one request at a time (big bodies are sent on their own thread, see handle).
+//! `GET /` (redirects to the deck page),
 //! `GET /swipe` (the deck page),
 //! `GET /api/deck?stack=multi|vr|flat|free|dupes&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
 //! (the next cards of a tab, every source mixed, crate::deck; `free` is the Free space tab's
@@ -42,6 +43,8 @@ pub const PAGES: &[&str] = &["/", "/swipe"];
 const MAX_HEAD: usize = 16 * 1024;
 /// Longest request body accepted (a swipe is a few dozen bytes).
 const MAX_BODY: usize = 4 * 1024;
+/// Bodies at least this big go out on their own thread (see handle).
+const BACKGROUND_WRITE: usize = 256 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Response {
@@ -56,8 +59,9 @@ pub struct Response {
 
 /// Everything but the frames: rebuilt from the files on every request.
 const NO_STORE: &str = "no-store";
-/// A frame changes only when its scout takes it again.
-const FRAME_CACHE: &str = "max-age=300";
+/// Frames and pictures change only when a scout takes them again: a day, so a reload of the
+/// page doesn't fetch the multi-MB card GIFs again.
+const FRAME_CACHE: &str = "max-age=86400";
 
 pub fn text(status: u16, body: &str) -> Response {
     Response {
@@ -656,15 +660,28 @@ fn handle(
     for (name, value) in &resp.headers {
         extra.push_str(&format!("{name}: {value}\r\n"));
     }
-    write!(
-        stream,
+    let reply_head = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: {}\r\n{extra}X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         resp.status,
         reason(resp.status),
         resp.content_type,
         resp.body.len(),
         resp.cache
-    )?;
+    );
+    if method != "HEAD" && resp.body.len() >= BACKGROUND_WRITE {
+        // A card picture (forum GIFs run to 8 MB) takes a phone a second or more to receive;
+        // sent from here it would hold up every request behind it, the other pictures the
+        // page is fetching ahead and the next deal included. The response is complete, so
+        // only the sending moves off the request loop; a client that goes away just ends it.
+        std::thread::spawn(move || {
+            let _ = stream
+                .write_all(reply_head.as_bytes())
+                .and_then(|()| stream.write_all(&resp.body))
+                .and_then(|()| stream.flush());
+        });
+        return Ok(());
+    }
+    stream.write_all(reply_head.as_bytes())?;
     if method != "HEAD" {
         stream.write_all(&resp.body)?;
     }
@@ -1268,7 +1285,7 @@ mod tests {
             let r = route(method, target, b"", &dir);
             assert_eq!(
                 (r.status, r.content_type, r.cache),
-                (200, "image/jpeg", "max-age=300"),
+                (200, "image/jpeg", "max-age=86400"),
                 "{method} {target}"
             );
             assert_eq!(r.body, body.as_bytes());

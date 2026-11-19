@@ -480,3 +480,44 @@ fn help_and_errors() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not found"));
 }
+
+#[test]
+fn a_slow_picture_download_does_not_hold_up_other_requests() {
+    let tmp = TempDir::new("slow");
+    let dir = tmp.0.join("creator-pictures/ann");
+    fs::create_dir_all(&dir).unwrap();
+    // Far more than the socket buffers hold, like the forum GIFs cards show.
+    let big = vec![7u8; 16 << 20];
+    fs::write(dir.join("es-1-0.jpg"), &big).unwrap();
+    let (_server, port) = start(&tmp.0);
+
+    // A client that asks for the picture and doesn't read it yet (a phone on slow Wi-Fi).
+    let mut slow = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        slow,
+        "GET /pictures/ann/es-1-0.jpg HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+    )
+    .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Everything else is still answered meanwhile.
+    let started = std::time::Instant::now();
+    assert_eq!(get(port, "/api/drive").0, 200);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "waited {:?}",
+        started.elapsed()
+    );
+
+    // And the slow client still gets the whole picture, with a day's caching.
+    let mut raw = Vec::new();
+    slow.read_to_end(&mut raw).unwrap();
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&raw[..split]);
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    assert!(
+        head.contains("\r\nCache-Control: max-age=86400\r\n"),
+        "{head}"
+    );
+    assert_eq!(raw.len() - split - 4, big.len());
+}

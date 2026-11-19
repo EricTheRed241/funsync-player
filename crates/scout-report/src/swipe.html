@@ -673,7 +673,8 @@ function cardNode(c, isTop) {
   const imgs = c.images || [];
   const media = el('div', { class: 'media' });
   if (imgs.length) {
-    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: imgs[isTop ? image : 0] });
+    // The shown picture outranks the lookahead's (set before src, so the fetch starts with it).
+    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', fetchpriority: isTop ? 'high' : null, src: imgs[isTop ? image : 0] });
     img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
     img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
     if (!img.complete) media.classList.add('loading');
@@ -890,11 +891,56 @@ function renderQuota(d) {
   q.hidden = false;
 }
 
-const preloaded = new Set();
+// Picture lookahead: upcoming cards' pictures are fetched in the background, nearest first and
+// PRELOAD_PARALLEL at a time, so they're in the browser's cache by the time a card comes up.
+// Forum GIFs run 3–8 MB (2–3 s each even on the Mac), so it's the first picture of the next
+// PRELOAD_CARDS cards plus the top card's next one, not every picture of every card: loading
+// all of those at once made swiping lag on a phone.
+const PRELOAD_CARDS = 5;
+const PRELOAD_PARALLEL = 2;
+const preloaded = new Set();   // fetched (or failed): the browser has them cached
+const preloading = new Map();  // url → Image still on its way (held so the fetch isn't dropped)
+let preloadFirst = [];         // asked for by browsing (preload): ahead of the lookahead
+let preloadNext = [];          // the lookahead (planPreload), nearest first
+
+/** A card's first pictures: a duplicate pair's two sides', else its own first. */
+function firstImages(c) {
+  if (isPair(c)) return [c.left, c.right].map((s) => s.image || (s.frames || [])[0]);
+  return [(c.images || [])[0]];
+}
+
+/** Fetch `url` next (the picture a tap shows next). */
 function preload(url) {
-  if (!url || preloaded.has(url)) return;
-  preloaded.add(url);
-  new Image().src = url;
+  if (!url || preloaded.has(url) || preloading.has(url)) return;
+  preloadFirst.unshift(url);
+  pumpPreload();
+}
+
+/** Line up the lookahead for the queue as it is now: the top card's next picture, then the first ones of the cards after it. */
+function planPreload() {
+  const urls = [];
+  if (queue[0] && !isPair(queue[0])) urls.push((queue[0].images || [])[image + 1]);
+  for (const c of queue.slice(1, 1 + PRELOAD_CARDS)) urls.push(...firstImages(c));
+  preloadNext = urls.filter((u) => u && !preloaded.has(u));
+  pumpPreload();
+}
+
+function pumpPreload() {
+  while (preloading.size < PRELOAD_PARALLEL) {
+    const url = preloadFirst.shift() || preloadNext.shift();
+    if (!url) return;
+    if (preloaded.has(url) || preloading.has(url)) continue;
+    const img = new Image();
+    img.decoding = 'async';
+    img.fetchPriority = 'low';
+    img.onload = img.onerror = () => {
+      preloading.delete(url);
+      preloaded.add(url);
+      pumpPreload();
+    };
+    preloading.set(url, img);
+    img.src = url;
+  }
 }
 
 /** "19.0 GB", "1,953 GB" (10^9 bytes). */
@@ -988,10 +1034,7 @@ function render(enterFrom) {
       top.style.transform = '';
     }));
   }
-  // Only what's shown next: the top card's next image and the next card's first. Forum GIFs run
-  // 3–7 MB each, so loading every image of a card up front made swiping lag on a phone.
-  preload((queue[0].images || [])[image + 1]);
-  if (queue[1]) preload((queue[1].images || [])[0]);
+  planPreload();
 }
 
 function topNode() {
@@ -1316,9 +1359,9 @@ function more() {
       // Keep the top card (and a drag in progress); add the card under it if it was missing.
       if (queue[1] && !deckEl.querySelector('.card.next:not(.fly)')) {
         deckEl.append(cardNode(queue[1], false));
-        preload((queue[1].images || [])[0]);
       }
       renderCounter();
+      planPreload();
     }
   }).catch((e) => {
     if (gen !== generation) return;
