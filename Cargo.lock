@@ -200,6 +200,7 @@ dependencies = [
 name = "scout-report"
 version = "0.1.0"
 dependencies = [
+ "age-screen",
  "serde",
  "serde_json",
  "video-tags",

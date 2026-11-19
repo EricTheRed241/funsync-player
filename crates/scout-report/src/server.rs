@@ -1,18 +1,21 @@
 //! The HTTP side: one request at a time. `GET /` (the report page),
 //! `GET /api/report` (the report, rebuilt from the files on every request),
 //! `GET /swipe` (the deck page),
-//! `GET /api/deck?stack=multi|vr|flat&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
-//! (the next cards of a tab, every source mixed, crate::deck),
+//! `GET /api/deck?stack=multi|vr|flat|free&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
+//! (the next cards of a tab, every source mixed, crate::deck; `free` is the Free space tab's
+//! library videos, crate::free_space),
 //! `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview frames,
 //! crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (waiting
-//! posts), and `POST /api/scenes/<slr|vrb|pmvhaven|faptap>/swipe {id, dir}` and `…/undo {id}`
-//! (that scout's scenes; the swipes files are the only writes, crate::swipes). In front of
+//! posts), `POST /api/scenes/<slr|vrb|pmvhaven|faptap>/swipe {id, dir}` and `…/undo {id}`
+//! (that scout's scenes), `POST /api/free-space/swipe {id, dir}`, `…/undo {id}` (marks on
+//! library videos) and `POST /api/free-space/delete` (rates the left-marked ones for deletion
+//! through the app's backend). The swipes files are the only writes, crate::swipes. In front of
 //! them all, crate::gate: the access PIN, and `/login` and `/logout`.
 
 use crate::gate::{self, Gate};
 use crate::scenes::{self, Source};
 use crate::swipes::{self, Dir, Store};
-use crate::{deck, frames, report};
+use crate::{deck, frames, free_space, report};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -113,6 +116,9 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
         ("GET" | "HEAD", "/swipe") => html(SWIPE_PAGE),
         ("GET" | "HEAD", "/api/report") => json_ok(&report::load(user_data)),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
+            Ok(d) if d.stack == deck::Stack::Free => {
+                json_ok(&free_space::load(user_data, d.limit, &d.exclude))
+            }
             Ok(d) => json_ok(&deck::load(user_data, &d)),
             Err(e) => text(400, &e),
         },
@@ -129,6 +135,18 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
                 _ => text(404, "Not found\n"),
             }
         }
+        ("POST", "/api/free-space/swipe") => free_swipe(body, user_data),
+        ("POST", "/api/free-space/swipe/undo") => match free_id(body) {
+            Ok(id) => match free_space::SWIPES.undo(user_data, &id) {
+                Ok(removed) => json_ok(&json!({"id": id, "removed": removed})),
+                Err(e) => text(500, &format!("{e}\n")),
+            },
+            Err(resp) => resp,
+        },
+        ("POST", "/api/free-space/delete") => match free_space::delete(user_data) {
+            Ok(v) => json_ok(&v),
+            Err((status, e)) => text(status, &format!("{e}\n")),
+        },
         _ => text(404, "Not found\n"),
     }
 }
@@ -136,8 +154,8 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 /// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
 /// `seed=N` (shuffle a little), `jitter=N` (how much, in score points: 0 ..= MAX_JITTER;
 /// default the tab's), `exclude=<source>:<id>,…` (the cards the page holds: `eroscripts:<topic
-/// id>` or a scene source's `<source>:<id>`; at most MAX_EXCLUDE), and
-/// `stack=multi|vr|flat` (default multi).
+/// id>`, a scene source's `<source>:<id>` or `library:<video id>`; at most MAX_EXCLUDE), and
+/// `stack=multi|vr|flat|free` (default multi).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
@@ -182,7 +200,7 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
             }
             "stack" => {
                 d.stack = deck::Stack::parse(v)
-                    .ok_or_else(|| format!("stack is multi, vr or flat, got {v:?}\n"))?;
+                    .ok_or_else(|| format!("stack is multi, vr, flat or free, got {v:?}\n"))?;
             }
             _ => {}
         }
@@ -191,7 +209,8 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
 }
 
 /// One `exclude` item as a card key (deck::DeckCard::key): `eroscripts:<topic id>` (plain
-/// digits, written back the way the deck writes it) or `<scene source>:<id>` (swipes::is_id).
+/// digits, written back the way the deck writes it), `<scene source>:<id>` or
+/// `library:<video id>` (swipes::is_id).
 fn exclude_key(item: &str) -> Option<String> {
     let (source, id) = item.split_once(':')?;
     if source == deck::EROSCRIPTS {
@@ -201,7 +220,8 @@ fn exclude_key(item: &str) -> Option<String> {
             .filter(|_| id.bytes().all(|b| b.is_ascii_digit()))?;
         return Some(format!("{source}:{id}"));
     }
-    (Source::parse(source).is_some() && swipes::is_id(id)).then(|| item.to_string())
+    let known = Source::parse(source).is_some() || source == free_space::SOURCE;
+    (known && swipes::is_id(id)).then(|| item.to_string())
 }
 
 /// The JSON object a POST carries, and its `id` as the swipes key: a topic id (number or
@@ -218,6 +238,38 @@ fn swipe_request(body: &[u8], source: Option<Source>) -> Result<(Value, String),
     }
     .ok_or_else(|| text(400, "id must be a topic or scene id\n"))?;
     Ok((req, id))
+}
+
+/// A Free space POST's JSON object and its `id`: a backend video id (swipes::id_key).
+fn free_request(body: &[u8]) -> Result<(Value, String), Response> {
+    let req: Value = serde_json::from_slice(body)
+        .ok()
+        .filter(Value::is_object)
+        .ok_or_else(|| text(400, "body must be a JSON object\n"))?;
+    let id = req
+        .get("id")
+        .and_then(swipes::id_key)
+        .ok_or_else(|| text(400, "id must be a video id\n"))?;
+    Ok((req, id))
+}
+
+fn free_id(body: &[u8]) -> Result<String, Response> {
+    free_request(body).map(|(_, id)| id)
+}
+
+/// `POST /api/free-space/swipe {id, dir}`: mark a library video (left = delete, right = keep).
+fn free_swipe(body: &[u8], user_data: &Path) -> Response {
+    let (req, id) = match free_request(body) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let Some(dir) = req.get("dir").and_then(Value::as_str).and_then(Dir::parse) else {
+        return text(400, "dir must be \"right\" or \"left\"\n");
+    };
+    match free_space::swipe(user_data, &id, dir) {
+        Ok(v) => json_ok(&v),
+        Err((status, e)) => text(status, &format!("{e}\n")),
+    }
 }
 
 fn store(source: Option<Source>) -> Store {
