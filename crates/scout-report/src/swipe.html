@@ -95,6 +95,9 @@ a.badge { color: var(--fg); }
   font-variant-numeric: tabular-nums; }
 .quota b { color: var(--fg); }
 .quota .err { color: var(--nope); }
+.quota .delete-marked { margin-left: 8px; font: inherit; font-size: 13px; padding: 2px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--nope); background: none; color: var(--nope); }
+.quota .delete-marked:disabled { opacity: .4; cursor: default; }
 .heat { display: block; width: 100%; height: 16px; border-radius: 4px; background: #000; image-rendering: pixelated; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
 .tag b { color: var(--like); font-variant-numeric: tabular-nums; }
@@ -172,9 +175,11 @@ a.badge { color: var(--fg); }
   <button type="button" data-stack="multi" title="Multi-axis scripts from every source: EroScripts posts and scenes with hand-made axes">Multi</button>
   <button type="button" data-stack="vr" title="Single-axis VR from every source: EroScripts posts, SLR, VRBangers / VRConk, PMVHaven and FapTap scenes">VR</button>
   <button type="button" data-stack="flat" title="Single-axis flat from every source: EroScripts posts, PMVHaven and FapTap videos">Flat</button>
+  <button type="button" data-stack="free" title="Library videos to delete when a drive is full: the most GB per preference-score point first; favourites, 4★ and up, favourite artists and hand-made axes are never shown">Free space</button>
 </nav>
 <div class="scanned" id="scanned" hidden></div>
 <div class="quota" id="quota" hidden></div>
+<div class="quota" id="drives" hidden></div>
 <div class="problems" id="problems" hidden></div>
 <main class="deck" id="deck">
   <div class="empty" id="empty">Loading…</div>
@@ -185,7 +190,7 @@ a.badge { color: var(--fg); }
   <button type="button" class="round small skip" id="skip" title="Skip: it comes back later in the deck (↓)" aria-label="Skip">↷</button>
   <button type="button" class="round like" id="like" title="Want: the scout downloads it (→)" aria-label="Want">♥</button>
 </div>
-<div class="hint">← hide · → want · ↓ or drag up skip · Backspace undo · Space next image · tap the image's sides to browse</div>
+<div class="hint" id="hint">← hide · → want · ↓ or drag up skip · Backspace undo · Space next image · tap the image's sides to browse</div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -198,24 +203,31 @@ const REFILL_AT = 5;
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
-// Which tab is dealt (multi, vr, flat); remembered on this device. Any other stored value
+// Which tab is dealt (multi, vr, flat, free); remembered on this device. Any other stored value
 // (the old single-axis and SLR tabs) falls back to multi.
-const STACKS = ['multi', 'vr', 'flat'];
+const STACKS = ['multi', 'vr', 'flat', 'free'];
 let stack = STACKS.includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
 // Where a card comes from, and so where its swipe goes: an EroScripts post (source
 // "eroscripts") to /api/swipe and eroscripts-scout-swipes.json, a scout's scene (slr, vrb,
-// pmvhaven, faptap) to /api/scenes/<source>/swipe and that scout's swipes file.
+// pmvhaven, faptap) to /api/scenes/<source>/swipe and that scout's swipes file, a library video
+// (source "library", the Free space tab) to /api/free-space/swipe and free-space-swipes.json.
 const sourceOf = (c) => c.source || 'eroscripts';
-const isScene = (c) => sourceOf(c) !== 'eroscripts';
-const swipePath = (c) => (isScene(c) ? `/api/scenes/${encodeURIComponent(c.source)}/swipe` : '/api/swipe');
+const isLibrary = (c) => sourceOf(c) === 'library';
+const isScene = (c) => sourceOf(c) !== 'eroscripts' && !isLibrary(c);
+const swipePath = (c) => (isLibrary(c) ? '/api/free-space/swipe'
+  : isScene(c) ? `/api/scenes/${encodeURIComponent(c.source)}/swipe` : '/api/swipe');
+// Whether a swipe counts in the tab's second counter: a library video swiped left is marked for
+// deletion, anything else swiped right is wanted.
+const marks = (c, dir) => (isLibrary(c) ? dir === 'left' : dir === 'right');
 // A card's identity across sources (two sources' ids may be equal); also the deck's exclude key.
 const keyOf = (c) => sourceOf(c) + ':' + c.id;
-const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat' };
+const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat', free: 'Free space' };
 // The scouts whose runs fill each tab: an empty tab names them.
 const TAB_SCOUTS = {
   multi: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout'],
   vr: ['eroscripts:scout', 'slr:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout'],
   flat: ['eroscripts:scout', 'pmvhaven:scout', 'faptap:scout'],
+  free: [],
 };
 // The source badge; VRBangers and VRConk share the vrb scout and differ by `site`.
 const SOURCE_NAMES = { eroscripts: 'EroScripts', slr: 'SLR', vrb: 'VRBangers', pmvhaven: 'PMVHaven', faptap: 'FapTap' };
@@ -256,13 +268,16 @@ let queue = [];         // cards not swiped yet; queue[0] is on top
 const undoStack = [];   // {card, dir, stack}, newest last; dir 'skip' never reached the server
 let skipped = [];       // skipped cards waiting to go back into the deck
 let remaining = 0;
-let wanted = 0;
+let wanted = 0;         // Free space: videos marked for deletion
+let markedBytes = 0;    // Free space: their size
+let backendPort = null; // Free space: thumbnails come from the app's backend
 let image = 0;          // the top card's image
 let loading = false;
 let exhausted = false;  // the server has no card beyond the queue
 let loadError = null;
 let loaded = false;    // the first deck arrived
 let since = null;      // counter changes since the deck request in flight was sent
+let lastDeck = null;   // the last deck answer (Free space: the drives line)
 
 // Swipes, undos and deck fetches reach the server in order.
 let chain = Promise.resolve();
@@ -293,7 +308,7 @@ const signed = (n) => (n > 0 ? '+' : '') + fmt(n);
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
 /** "2026-01-02…" → "01-2026". */
 const monthYear = (iso) => { const m = /^(\d{4})-(\d{2})/.exec(iso || ''); return m ? m[2] + '-' + m[1] : ''; };
-const fmtBytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
+const fmtBytes = (n) => (n >= 1e12 ? (n / 1e12).toFixed(2) + ' TB' : n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(0) + ' MB');
 
 /** m:ss, or h:mm:ss from an hour. */
 function clock(ms) {
@@ -396,7 +411,55 @@ function heatStrip(heat) {
   return canvas;
 }
 
+/** A library video (Free space tab): size, score, rating, length, VR or flat, its categories. */
+function libraryCardNode(c, isTop) {
+  const media = el('div', { class: 'media' });
+  if (c.images && c.images.length) {
+    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: c.images[0] });
+    img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
+    img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
+    if (!img.complete) media.classList.add('loading');
+    media.append(img);
+  } else {
+    media.append(el('div', { class: 'none' }, 'No image'));
+  }
+  media.append(el('div', { class: 'stamp want' }, 'KEEP'), el('div', { class: 'stamp hide' }, 'DELETE'));
+  const rated = c.rating > 0 ? '★'.repeat(Math.floor(c.rating)) + (c.rating % 1 ? '½' : '') : 'unrated';
+  const out = [
+    el('span', { class: 'badge b-src-library', title: 'Size on disk' }, fmtBytes(c.size)),
+    el('span', { class: 'badge b-score', title: 'Preference score' }, c.score == null ? 'score –' : 'score ' + fmt(c.score)),
+    el('span', { class: 'badge b-time', title: 'GB freed per score point' }, fmt(c.gbPerPoint) + ' GB/pt'),
+    el('span', { class: 'badge b-time', title: 'Your rating' }, rated),
+  ];
+  if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.runtimeMs)));
+  out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
+  const added = c.addedMs ? new Date(c.addedMs).toISOString() : null;
+  const facts = [
+    ['Size', fmtBytes(c.size)],
+    ['Score', c.score == null ? 'not scored yet' : fmt(c.score)],
+    ['GB per point', fmt(c.gbPerPoint)],
+    ['Rating', rated],
+    ['Added', day(added) || null],
+    ['File', c.path],
+  ].filter(([, v]) => v != null);
+  const tags = c.tags || [];
+  const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') },
+    media,
+    el('div', { class: 'info' },
+      el('div', { class: 'badges' }, out),
+      el('div', { class: 'ttl', title: c.path }, c.title),
+      el('div', { class: 'by' },
+        c.author ? el('span', {}, c.author) : null,
+        monthYear(added) ? el('span', { class: 'date', title: 'Added ' + day(added) }, monthYear(added)) : null),
+      tags.length ? el('div', { class: 'tags top-tags' }, tags.map((t) => el('span', { class: 'tag' }, t))) : null,
+      el('div', { class: 'sect' }, 'Video'), el('dl', { class: 'facts' }, facts.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])),
+      tags.length ? [el('div', { class: 'sect' }, 'Categories'), el('div', { class: 'tags all-tags' }, tags.map((t) => el('span', { class: 'tag' }, t)))] : null));
+  if (isTop) drag(node);
+  return node;
+}
+
 function cardNode(c, isTop) {
+  if (isLibrary(c)) return libraryCardNode(c, isTop);
   const imgs = c.images || [];
   const media = el('div', { class: 'media' });
   if (imgs.length) {
@@ -543,6 +606,37 @@ function renderScanned(d) {
   s.hidden = false;
 }
 
+/** The Free space tab's line: each library drive's free space, what's marked, and the delete button. */
+function renderDrives(d) {
+  const line = $('drives');
+  if (stack !== 'free' || !d) { line.hidden = true; return; }
+  const parts = (d.drives || []).map((x) => [el('b', {}, fmtBytes(x.free)), ` free on ${x.mount.split('/').pop() || x.mount} (of ${fmtBytes(x.total)})`]);
+  const kept = Object.entries(d.protected || {}).map(([why, n]) => `${n} ${why}`).join(', ');
+  line.replaceChildren(
+    ...parts.flatMap((p, i) => (i ? [' · ', ...p] : p)),
+    el('button', { type: 'button', class: 'delete-marked', disabled: !wanted, onclick: deleteMarked,
+      title: 'Delete every video marked ← from disk, through the app (as a 2★ rating does)' },
+    wanted ? `Delete ${wanted} marked (${fmtBytes(markedBytes)})` : 'Nothing marked'));
+  line.title = kept ? 'Never shown: ' + kept : '';
+  line.hidden = false;
+}
+
+/** Free space: rate every marked video for deletion; the app deletes them a moment later. */
+function deleteMarked(e) {
+  e.currentTarget.blur();
+  if (!wanted || !confirm(`Delete ${wanted} video${wanted === 1 ? '' : 's'} (${fmtBytes(markedBytes)}) from disk, with their scripts? This can't be undone.`)) return;
+  serial(() => post('/api/free-space/delete', {})).then((r) => {
+    // Their marks are gone with them: undo can't bring a deleted video back.
+    for (let i = undoStack.length - 1; i >= 0; i--) {
+      if (isLibrary(undoStack[i].card) && undoStack[i].dir === 'left') undoStack.splice(i, 1);
+    }
+    const left = [r.skipped.length ? `${r.skipped.length} skipped (${[...new Set(r.skipped.map((s) => s.why))].join(', ')})` : null,
+      r.errors.length ? `${r.errors.length} failed: ${r.errors[0]}` : null].filter(Boolean).join(' · ');
+    toast(`Deleting ${r.deleted} video${r.deleted === 1 ? '' : 's'} (${fmtBytes(r.bytes)}): the app removes them in a moment.` + (left ? ' ' + left : ''));
+    restart(false);
+  }).catch((err) => toast('Not deleted: ' + err.message));
+}
+
 /** The VR tab's line: the SLR account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
 function renderQuota(d) {
   const q = $('quota');
@@ -579,9 +673,11 @@ function preload(url) {
 }
 
 function renderCounter() {
-  $('counter').textContent = loaded ? `${remaining} left · ${wanted} wanted` : 'Loading…';
+  const marked = stack === 'free' ? ` · ${wanted} marked · ${fmtBytes(markedBytes)}` : ` · ${wanted} wanted`;
+  $('counter').textContent = loaded ? `${remaining} left${marked}` : 'Loading…';
   $('undo').disabled = !undoStack.length;
   $('nope').disabled = $('like').disabled = $('skip').disabled = !queue.length;
+  if (stack === 'free' && lastDeck) renderDrives(lastDeck);
 }
 
 /** Redraw the top two cards (a card flying off stays until its animation ends). */
@@ -593,6 +689,9 @@ function render(enterFrom) {
     empty.hidden = false;
     empty.replaceChildren(...(loadError ? ['Could not load the deck: ' + loadError, el('button', { type: 'button', class: 'round small', onclick: reload, title: 'Retry' }, '⟳')]
       : loading ? ['Loading…']
+      : stack === 'free' ? ['Nothing left to offer on Free space.',
+        el('span', {}, wanted ? 'Delete the marked videos above, or undo a swipe.' : 'Everything else is protected (hover the drive line to see why).'),
+        el('a', { href: '/' }, 'Back to the report')]
       : [`Nothing left to swipe on ${STACK_NAMES[stack]}.`,
         el('span', {}, TAB_SCOUTS[stack].map((s) => 'npm run ' + s).join(', ') + ' find more.'),
         el('a', { href: '/' }, 'Back to the report')]));
@@ -713,13 +812,21 @@ function fly(node, dir, dy) {
 }
 
 /** Change the counters; a deck request in flight hears of it too. */
-function count(dRemaining, dWanted) {
+function count(dRemaining, dWanted, dBytes) {
   remaining = Math.max(0, remaining + dRemaining);
   wanted = Math.max(0, wanted + dWanted);
+  markedBytes = Math.max(0, markedBytes + (dBytes || 0));
   if (since) {
     since.remaining += dRemaining;
     since.wanted += dWanted;
+    since.bytes += dBytes || 0;
   }
+}
+
+/** A swipe's change to the counters (Free space's marked bytes too); `sign` -1 takes it back. */
+function swipeCount(card, dir, sign) {
+  const m = marks(card, dir);
+  count(-sign, m ? sign : 0, m && isLibrary(card) ? sign * (card.size || 0) : 0);
 }
 
 function swipe(dir, dy) {
@@ -729,7 +836,7 @@ function swipe(dir, dy) {
   if (node) fly(node, dir, dy);
   queue.shift();
   undoStack.push({ card, dir, stack });
-  count(-1, dir === 'right' ? 1 : 0);
+  swipeCount(card, dir, 1);
   image = 0;
   render();
   const from = stack;
@@ -740,7 +847,7 @@ function swipe(dir, dy) {
     if (i >= 0) undoStack.splice(i, 1);
     if (stack !== from) { toast('Swipe not saved: ' + e.message); return; }
     if (!queue.some((c) => keyOf(c) === keyOf(card))) queue.unshift(card);
-    count(1, dir === 'right' ? -1 : 0);
+    swipeCount(card, dir, -1);
     image = 0;
     render();
     toast('Swipe not saved: ' + e.message);
@@ -796,13 +903,13 @@ function undo() {
     render('skip');
     return;
   }
-  count(1, last.dir === 'right' ? -1 : 0);
+  swipeCount(last.card, last.dir, -1);
   render(last.dir);
   serial(() => post(swipePath(last.card) + '/undo', { id: last.card.id })).catch((e) => {
     // The swipe still stands: take the card off again.
     queue = queue.filter((c) => keyOf(c) !== keyOf(last.card));
     undoStack.push(last);
-    count(-1, last.dir === 'right' ? 1 : 0);
+    swipeCount(last.card, last.dir, 1);
     image = 0;
     render();
     toast('Undo not saved: ' + e.message);
@@ -816,7 +923,7 @@ function undo() {
 function more() {
   if (loading || exhausted) return;
   loading = true;
-  since = { remaining: 0, wanted: 0 };
+  since = { remaining: 0, wanted: 0, bytes: 0 };
   const gen = generation;
   // The cards this page holds (on screen or skipped), as <source>:<id>: the server leaves them out.
   const held = [...queue, ...skipped].map(keyOf).join(',');
@@ -831,7 +938,14 @@ function more() {
     // The server answered before the swipes made since the request: count them on top.
     remaining = Math.max(0, d.remaining + since.remaining);
     wanted = Math.max(0, d.wanted + since.wanted);
+    markedBytes = Math.max(0, (d.markedBytes || 0) + since.bytes);
     since = null;
+    lastDeck = d;
+    // Free space: thumbnails come from the app's backend, on the host this page was reached on.
+    if (d.backendPort) backendPort = d.backendPort;
+    for (const c of d.cards) {
+      if (isLibrary(c)) c.images = c.thumb && backendPort ? [`${location.protocol}//${location.hostname}:${backendPort}${c.thumb}`] : [];
+    }
     exhausted = d.cards.length < BATCH;
     // Swiped cards (a swipe still on its way to the server) don't come back; skipped ones may.
     const swiped = undoStack.filter((u) => u.dir !== 'skip' && u.stack === stack).map((u) => u.card);
@@ -844,6 +958,7 @@ function more() {
     $('problems').textContent = d.problems.join('\n');
     renderQuota(d);
     renderScanned(d);
+    renderDrives(d);
     loading = false;
     if (wasEmpty) image = 0;
     loaded = true;
@@ -895,11 +1010,21 @@ function restart(newOrder) {
 $('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); restart(false); });
 $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
 
+// Each tab's buttons and keys: Free space marks library videos for deletion (←) or keeps them (→).
+const HINTS = {
+  deck: '← hide · → want · ↓ or drag up skip · Backspace undo · Space next image · tap the image\'s sides to browse',
+  free: '← mark for deletion · → keep · ↓ or drag up skip · Backspace undo · Delete marked (above the card) deletes them',
+};
 function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
-  $('like').title = 'Want: its scout downloads it (→)';
+  const free = stack === 'free';
+  $('like').title = free ? 'Keep: never offered again (→)' : 'Want: its scout downloads it (→)';
+  $('nope').title = free ? 'Mark for deletion (←); nothing is deleted until Delete marked' : 'Hide from the deck (←)';
+  $('hint').textContent = HINTS[free ? 'free' : 'deck'];
   if (stack !== 'vr') renderQuota(null);
   renderScanned(null);
+  lastDeck = null;
+  renderDrives(null);
 }
 $('stacks').addEventListener('click', (e) => {
   const b = e.target.closest('button');

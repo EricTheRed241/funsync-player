@@ -141,7 +141,8 @@ impl Backend {
         .map(drop)
     }
 
-    fn get(&self, path: &str) -> Result<Value, Error> {
+    /// `GET <path>` as JSON (null for an empty body).
+    pub fn get(&self, path: &str) -> Result<Value, Error> {
         self.request("GET", path, None)
     }
 

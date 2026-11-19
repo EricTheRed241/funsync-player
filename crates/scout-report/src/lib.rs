@@ -2,7 +2,9 @@
 //! Discovery scout (`npm run eroscripts:scout`) has judged, with its verdict,
 //! and the waiting list, plus a swipe deck (`/swipe`) over the waiting list and
 //! the scenes the site scouts found (SexLikeReal, VRBangers / VRConk, PMVHaven,
-//! FapTap), in three tabs: Multi, VR and Flat.
+//! FapTap), in three tabs: Multi, VR and Flat, and a fourth, Free space: library
+//! videos to delete when a drive is full (crate::free_space, through the running
+//! app's backend).
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
 //! `eroscripts-scout-rejected.json`, `eroscripts-scout-frames.json`,
 //! `slr-scout.json`, `vrb-scout.json`, `pmvhaven-scout.json` and
@@ -10,14 +12,17 @@
 //! preview frames (`scout-frames/`). The only files it writes are the deck's
 //! swipes, one per source: `eroscripts-scout-swipes.json`,
 //! `slr-scout-swipes.json`, `vrb-scout-swipes.json`, `pmvhaven-scout-swipes.json`
-//! and `faptap-scout-swipes.json` (which the scouts' `--fetch` reads; the
-//! previous copy of each kept as `.bak`). Bound to 127.0.0.1, or to every
+//! and `faptap-scout-swipes.json` (which the scouts' `--fetch` reads), and
+//! `free-space-swipes.json` (the Free space tab's marks); the previous copy of
+//! each kept as `.bak`. Videos are deleted only by the app, rated through its
+//! backend. Bound to 127.0.0.1, or to every
 //! interface with `--lan`; other devices need the access PIN when one is set
 //! (`access-pin.json`, crate::gate).
 
 pub mod cli;
 pub mod deck;
 pub mod frames;
+pub mod free_space;
 pub mod gate;
 pub mod library;
 pub mod report;

@@ -15,7 +15,8 @@
     "intervalDays": 7
   },
   "ratings": {
-    "deleteAtOrBelow": 2
+    "deleteAtOrBelow": 2,
+    "topRatedMin": 4
   },
   "libraryMaxVideos": 1000,
   "videoCaps": {

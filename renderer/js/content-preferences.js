@@ -16,9 +16,9 @@
 //
 // Values the Rust CLIs read too live in content-preferences.json next to this
 // file (the shared part of the preferences: Rust embeds it at compile time,
-// crates/age-screen, crates/pornstar-tags, crates/slr-scout, crates/pmvhaven-scout).
-// The ones the app uses are exported here like the rest (`pornstarTags`, `slrScout`
-// and `pmvhavenScout` are read by Rust only); change them there: the ratings threshold, the underage
+// crates/age-screen, crates/pornstar-tags, crates/slr-scout, crates/pmvhaven-scout,
+// crates/scout-report). The ones the app uses are exported here like the rest (`pornstarTags`,
+// `slrScout` and `pmvhavenScout` are read by Rust only); change them there: the ratings thresholds, the underage
 // screener, LIBRARY_MAX_VIDEOS, the VR / flat caps, FAVOURITES, RANKING,
 // TAG_SCORE_GROUPS (whose tag lists MUSIC_TAGS, POV_TAGS, MONSTER_TAGS,
 // FEET_TAGS and FFM_TAGS are), ANIMATION_TAGS and the screening values
@@ -231,8 +231,8 @@ export const GENRE_WORDS = new Set(['vam', 'sfm', 'mmd', 'compilation', 'compila
 
 /** Rated this or lower (and not a favourite): deleted from disk, scripts and axes too, and the scouts skip the post. Shared (content-preferences.json): the age screener skips these videos. */
 export const DELETE_AT_OR_BELOW = data.ratings.deleteAtOrBelow;
-/** "Top rated" filter and the headset's Top Rated section (mirrored in backend/services/vr_sections.py). */
-export const TOP_RATED_MIN = 4;
+/** "Top rated" filter and the headset's Top Rated section (mirrored in backend/services/vr_sections.py). Shared (content-preferences.json): the swipe deck's Free space tab never offers these videos. */
+export const TOP_RATED_MIN = data.ratings.topRatedMin;
 
 // ── Sorting and score lists ─────────────────────────────────────────────
 
