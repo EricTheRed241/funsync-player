@@ -270,6 +270,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "status-site"
+version = "0.1.0"
+dependencies = [
+ "scout-report",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

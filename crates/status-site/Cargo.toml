@@ -1,0 +1,21 @@
+[package]
+name = "status-site"
+version = "0.1.0"
+description = "One page that shows whether FunSync's local sites (backend, web remote, swipe deck, creators, posts) are up, for any device on the home network"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "status_site"
+path = "src/lib.rs"
+
+[[bin]]
+name = "status-site"
+path = "src/main.rs"
+
+[dependencies]
+# The access-PIN gate, the login page, the HTTP plumbing and the flags.
+scout-report = { path = "../scout-report" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

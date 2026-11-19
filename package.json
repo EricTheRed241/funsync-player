@@ -29,6 +29,7 @@
     "pmvhaven:scout": "cargo run -q --release -p pmvhaven-scout --",
     "creators:scout": "cargo run -q --release -p creator-scout --",
     "creators:site": "cargo run -q --release -p creator-report --",
+    "status:site": "cargo run -q --release -p status-site --",
     "jobs": "cargo run -q --release -p job-runner --",
     "library:thumbs": "cargo run -q --release -p library-thumbs --",
     "access:pin": "cargo run -q --release -p access-pin --",
