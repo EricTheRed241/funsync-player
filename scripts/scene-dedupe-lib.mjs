@@ -32,7 +32,7 @@
 // difference decides).
 
 import {
-  DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER, GENRE_WORDS, NAME_NOISE_TOKEN, NAME_NOISE_WORDS, VR_MAX_FPS, VR_MAX_HEIGHT,
+  DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER, GENRE_WORDS, NAME_NOISE_TOKEN, NAME_NOISE_WORDS, PROJECTION_WORD, VR_MAX_FPS, VR_MAX_HEIGHT,
 } from '../renderer/js/content-preferences.js';
 
 /** Any two titles: the same video lasts as long within this. */
@@ -67,7 +67,7 @@ export const END_ALIGN_MIN_S = 1;
 export const FRAME_W = 128;
 export const FRAME_H = 72;
 
-const VR_MARKER = /(^|[^a-z0-9])(vr|sbs|tb|ou|lr|rl|lrf|180|360|3dh|3dv|fisheye\d*|mkx\d+|vrca\d+|rf52|equirect)([^a-z0-9]|$)/i;
+const VR_MARKER = new RegExp(`(^|[^a-z0-9])(${PROJECTION_WORD})([^a-z0-9]|$)`, 'i');
 const COPY_TOKEN = /^\(\d+\)$/;
 const CJK = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u;
 

@@ -622,6 +622,7 @@
     "added": "Ajouté",
     "addedTo": "Ajouté à \"{name}\"",
     "rejectedDeleted": "{count} vidéo(s) rejetée(s) supprimée(s) du disque (2 étoiles ou moins)",
+    "duplicateDeleted": "Doublon « {name} » supprimé du disque (l'autre copie est conservée)",
     "removed": "Supprimé",
     "saved": "Enregistré",
     "copied": "Copié",

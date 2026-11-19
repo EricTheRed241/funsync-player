@@ -622,6 +622,7 @@
     "added": "추가됨",
     "addedTo": "\"{name}\"에 추가됨",
     "rejectedDeleted": "거부된 동영상 {count}개를 디스크에서 삭제함 (별점 2 이하)",
+    "duplicateDeleted": "중복 \"{name}\"을(를) 디스크에서 삭제함 (다른 사본은 유지)",
     "removed": "제거됨",
     "saved": "저장됨",
     "copied": "복사됨",

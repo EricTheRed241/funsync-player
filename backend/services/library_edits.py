@@ -20,6 +20,7 @@ cannot be stored here. It becomes an EDIT:
     {"seq": 16, "kind": "queue-played", "path": "/v/a.mp4", ...}
     {"seq": 17, "kind": "queue-clear", ...}
     {"seq": 18, "kind": "queue-auto-fill", "enabled": false, ...}
+    {"seq": 19, "kind": "delete-duplicate", "path": "/v/a.mp4", "keepPath": "/v/b.mp4", ...}
 
 A tag score is the user's weight for a post tag; the backend holds every
 tag's score as the desktop registers it (starting scores included, absent =
@@ -39,6 +40,12 @@ auto-filled one; `played` does both for a video that started playing;
 `clear` empties `manual`; `auto-fill` turns the auto part on or off.
 QUEUE_KINDS lists them.
 
+A delete-duplicate edit (the swipe deck's Duplicates tab: the user kept
+`keepPath`) deletes `path` from disk as a duplicate, favourite or not: the
+triage deletion with reason `duplicate` (electron/rejected-videos.js), so the
+scouts skip that one video, not its whole post. Nothing is overlaid while it
+waits; the desktop's rescan after the delete drops the video everywhere.
+
 Edits wait in one ordered queue (`queue`). The renderer's observer socket
 (`routes/remote_sync.py`) receives each as `{"type": "library-edit", "edit":
 ...}`, applies it through the data service (which persists it), re-registers
@@ -50,7 +57,8 @@ made while the desktop was down is lost.
 Every edit is idempotent (set a rating, add-if-missing, remove-if-present,
 create-by-name-if-missing, set a tag score, recalculate, set or clear a
 favourite artist, set the favourite bonus, queue add / remove / clear, set
-auto-fill), so a replay after a lost ack is harmless.
+auto-fill, delete a file unless it is already gone), so a replay after a
+lost ack is harmless.
 
 The queue is mirrored to `<userData>/pending-library-edits.json` when the
 backend knows the userData dir, so it also survives a backend restart. That
@@ -88,10 +96,11 @@ KIND_QUEUE_REMOVE = "queue-remove"
 KIND_QUEUE_PLAYED = "queue-played"
 KIND_QUEUE_CLEAR = "queue-clear"
 KIND_QUEUE_AUTO_FILL = "queue-auto-fill"
+KIND_DELETE_DUPLICATE = "delete-duplicate"
 QUEUE_KINDS = (KIND_QUEUE_ADD, KIND_QUEUE_REMOVE, KIND_QUEUE_PLAYED, KIND_QUEUE_CLEAR, KIND_QUEUE_AUTO_FILL)
 KINDS = (
     KIND_RATING, KIND_PLAYLIST_ADD, KIND_PLAYLIST_REMOVE, KIND_TAG_SCORE, KIND_RECALCULATE_SCORES,
-    KIND_FAVOURITE_ARTIST, KIND_FAVOURITE_SCORE,
+    KIND_FAVOURITE_ARTIST, KIND_FAVOURITE_SCORE, KIND_DELETE_DUPLICATE,
 ) + QUEUE_KINDS
 
 # Where `queue-add` puts a video that isn't queued yet.
@@ -490,6 +499,17 @@ def make_queue_edit(kind, path=None, position=None, enabled=None, source=""):
     if position not in QUEUE_POSITIONS:
         raise ValueError(f"invalid position {position!r}: end or next")
     return {"kind": kind, "path": path, "position": position, "source": source}
+
+
+def make_delete_duplicate_edit(path, keep_path, source=""):
+    """Validated delete-duplicate edit (without seq): delete `path`, the
+    user kept `keep_path`. Raises ValueError on a missing path or the same
+    video twice."""
+    if not isinstance(path, str) or not path or not isinstance(keep_path, str) or not keep_path:
+        raise ValueError("path and keepPath required")
+    if path == keep_path:
+        raise ValueError("a video can't be its own duplicate")
+    return {"kind": KIND_DELETE_DUPLICATE, "path": path, "keepPath": keep_path, "source": source}
 
 
 

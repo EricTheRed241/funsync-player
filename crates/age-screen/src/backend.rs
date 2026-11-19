@@ -131,6 +131,16 @@ impl Backend {
         .map(drop)
     }
 
+    /// `POST /api/remote/delete-duplicate {videoId, keepId}`: the desktop deletes `id` from
+    /// disk as a copy of `keep` (rejection reason `duplicate`, favourite or not).
+    pub fn delete_duplicate(&self, id: &Value, keep: &Value) -> Result<(), Error> {
+        self.post(
+            "/api/remote/delete-duplicate",
+            &serde_json::json!({ "videoId": id, "keepId": keep }),
+        )
+        .map(drop)
+    }
+
     /// `POST /api/remote/playlists/add-video {videoId, name}` (the desktop
     /// creates the playlist when no playlist has that name).
     pub fn add_to_playlist(&self, id: &Value, name: &str) -> Result<(), Error> {

@@ -191,6 +191,20 @@ describe('applyLibraryEdit', () => {
     await expect(applyLibraryEdit({ kind: 'playlist-add', path: '/a.mp4', playlistId: 'x' }, data)).rejects.toThrow();
   });
 
+  it('hands a delete-duplicate edit to the deleteDuplicate hook with (path, keepPath)', async () => {
+    const data = fakeData();
+    const deleteDuplicate = vi.fn(async () => ({ deleted: ['/dup.mp4', '/dup.funscript'] }));
+    const edit = { kind: 'delete-duplicate', path: '/dup.mp4', keepPath: '/keep.mp4' };
+    expect(await applyLibraryEdit(edit, data, { deleteDuplicate })).toMatch(/deleted duplicate \(2 file/);
+    expect(deleteDuplicate).toHaveBeenCalledWith('/dup.mp4', '/keep.mp4');
+    deleteDuplicate.mockResolvedValueOnce({ deleted: [] });
+    expect(await applyLibraryEdit(edit, data, { deleteDuplicate })).toBe('duplicate already deleted');
+    await expect(applyLibraryEdit({ ...edit, keepPath: '' }, data, { deleteDuplicate })).rejects.toThrow(/kept copy/);
+    await expect(applyLibraryEdit({ ...edit, path: undefined }, data, { deleteDuplicate })).rejects.toThrow(/path/);
+    await expect(applyLibraryEdit(edit, data)).rejects.toThrow(/no way to delete/);
+    expect(deleteDuplicate).toHaveBeenCalledTimes(2);
+  });
+
   it('findPlaylist prefers id, then name', () => {
     const lists = [{ id: 'a', name: 'One' }, { id: 'b', name: 'Two' }];
     expect(findPlaylist(lists, 'b', 'One').id).toBe('b');

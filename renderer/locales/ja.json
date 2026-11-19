@@ -622,6 +622,7 @@
     "added": "追加しました",
     "addedTo": "「{name}」に追加しました",
     "rejectedDeleted": "不要な動画 {count} 件をディスクから削除しました（星2以下）",
+    "duplicateDeleted": "重複「{name}」をディスクから削除しました（もう一方のコピーは残ります）",
     "removed": "削除しました",
     "saved": "保存しました",
     "copied": "コピーしました",

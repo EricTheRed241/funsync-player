@@ -527,6 +527,44 @@ class TestRemoteEndpoints:
         videos = {v["id"]: v for v in client.get("/api/remote/videos").json()["videos"]}
         assert videos[library["C"]]["rating"] == 1.5
 
+    def test_delete_duplicate_queues_the_edit(self, client, library):
+        r = client.post("/api/remote/delete-duplicate", json={"videoId": library["B"], "keepId": library["C"]})
+        assert r.status_code == 200
+        body = r.json()
+        assert (body["ok"], body["delivered"]) == (True, False)
+        [edit] = library_edits.queue.pending()
+        assert edit["seq"] == body["seq"]
+        assert {k: edit[k] for k in ("kind", "path", "keepPath", "source")} == {
+            "kind": "delete-duplicate", "path": B, "keepPath": C, "source": "remote",
+        }
+
+    def test_delete_duplicate_survives_a_backend_restart(self, tmp_path):
+        q = LibraryEditQueue(tmp_path)
+        q.enqueue(library_edits.make_delete_duplicate_edit(B, C, source="remote"))
+        assert [e["kind"] for e in LibraryEditQueue(tmp_path).pending()] == ["delete-duplicate"]
+
+    @pytest.mark.parametrize("payload", [
+        {},
+        {"videoId": "B"},
+        {"keepId": "C"},
+        {"videoId": "B", "keepId": 3},
+        {"videoId": "", "keepId": "C"},
+        {"videoId": "B", "keepId": "B"},
+    ])
+    def test_delete_duplicate_rejects_missing_or_same_ids(self, client, library, payload):
+        payload = {k: library.get(v, v) if isinstance(v, str) else v for k, v in payload.items()}
+        assert client.post("/api/remote/delete-duplicate", json=payload).status_code == 400
+        assert library_edits.queue.pending() == []
+
+    @pytest.mark.parametrize("payload", [
+        {"videoId": "nope", "keepId": "C"},
+        {"videoId": "B", "keepId": "nope"},
+    ])
+    def test_delete_duplicate_unknown_video_404(self, client, library, payload):
+        payload = {k: library.get(v, v) for k, v in payload.items()}
+        assert client.post("/api/remote/delete-duplicate", json=payload).status_code == 404
+        assert library_edits.queue.pending() == []
+
 
 # --- Tag scores and Recalculate scores ----------------------------------------
 

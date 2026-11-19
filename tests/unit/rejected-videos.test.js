@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sweepRejected, ratingVerdict, rejectVideo } from '../../renderer/js/reject-rule.js';
+import { deleteDuplicate, forgetDeletedVideo, sweepRejected, ratingVerdict, rejectVideo } from '../../renderer/js/reject-rule.js';
 
 const require = createRequire(import.meta.url);
 const { deleteRejectedVideo, readRejected, recordRejection, faptapRejectionKey } = require('../../electron/rejected-videos.js');
@@ -208,6 +208,62 @@ describe('sweepRejected', () => {
     expect(deleted).toEqual([['/fav.mp4', 'low-rating']]);
     expect(r.removed).toEqual([{ path: '/fav.mp4', reason: 'low-rating' }]);
     expect(playlists[0].videoPaths).toEqual(['/keep.mp4']);
+  });
+});
+
+describe('forgetDeletedVideo', () => {
+  it('takes the video out of every playlist and drops its rating and script association, nothing else', () => {
+    const playlists = [
+      { id: 'k', name: 'Keep Forever', videoPaths: ['/a.mp4', '/b.mp4'] },
+      { id: 'e', name: 'Evening', videoPaths: ['/c.mp4', '/a.mp4'] },
+    ];
+    const ratings = { '/a.mp4': { rating: 5, favorite: true }, '/b.mp4': { rating: 4 } };
+    const store = { 'library.associations': { '/a.mp4': { active: 'single', single: '/a.funscript' }, '/b.mp4': { active: 'single', single: '/b.funscript' } } };
+    forgetDeletedVideo(data(playlists, ratings, store), '/a.mp4');
+    expect(playlists.map((p) => p.videoPaths)).toEqual([['/b.mp4'], ['/c.mp4']]);
+    expect(Object.keys(ratings)).toEqual(['/b.mp4']);
+    expect(Object.keys(store['library.associations'])).toEqual(['/b.mp4']);
+  });
+});
+
+describe('deleteDuplicate', () => {
+  const realDelete = (p, reason) => ({ success: true, ...deleteRejectedVideo(p, { sources: [lib], userDataDir: userData, reason }) });
+
+  it('deletes the copy from disk as a duplicate, a favourite included, keeps the other and forgets the deleted one', async () => {
+    const dup = touch('A/S/S.mp4');
+    touch('A/S/S.funscript');
+    touch('A/S/eroscripts.json', JSON.stringify({ topicId: 7, video: 'v.mp4' }));
+    const keep = touch('B/S/S.mp4');
+    const playlists = [{ id: 'e', name: 'Evening', videoPaths: [dup, keep] }];
+    const ratings = { [dup]: { rating: 5, favorite: true } };
+    const store = { 'library.associations': { [dup]: { active: 'single', single: 'S.funscript' } } };
+    const r = await deleteDuplicate({ data: data(playlists, ratings, store), deleteVideo: realDelete, keepExists: async (p) => fs.existsSync(p), videoPath: dup, keepPath: keep });
+    expect(r.deleted).toHaveLength(2);
+    expect(exists('A')).toBe(false);
+    expect(exists('B/S/S.mp4')).toBe(true);
+    expect(readRejected(userData).entries.map((e) => [e.key, e.reason])).toEqual([['7|v.mp4', 'duplicate']]);
+    expect(playlists[0].videoPaths).toEqual([keep]);
+    expect(ratings).toEqual({});
+    expect(store['library.associations']).toEqual({});
+  });
+
+  it('a replay for a copy already gone deletes nothing and does no harm', async () => {
+    const keep = touch('B/S/S.mp4');
+    const r = await deleteDuplicate({ data: data([], {}), deleteVideo: realDelete, keepExists: async (p) => fs.existsSync(p), videoPath: path.join(lib, 'A/S/S.mp4'), keepPath: keep });
+    expect(r).toEqual({ deleted: [] });
+    expect(exists('B/S/S.mp4')).toBe(true);
+  });
+
+  it('refuses while the kept copy is gone, and keeps a video whose deletion fails', async () => {
+    const playlists = [{ id: 'e', name: 'Evening', videoPaths: ['/dup.mp4'] }];
+    const calls = [];
+    const deleteVideo = async (p, reason) => { calls.push([p, reason]); return { success: false, error: 'busy' }; };
+    await expect(deleteDuplicate({ data: data(playlists), deleteVideo, keepExists: async () => false, videoPath: '/dup.mp4', keepPath: '/keep.mp4' })).rejects.toThrow(/not on disk/);
+    expect(calls).toEqual([]);
+    await expect(deleteDuplicate({ data: data(playlists), deleteVideo, keepExists: async () => true, videoPath: '/dup.mp4', keepPath: '/dup.mp4' })).rejects.toThrow(/own duplicate/);
+    await expect(deleteDuplicate({ data: data(playlists), deleteVideo, keepExists: async () => true, videoPath: '/dup.mp4', keepPath: '/keep.mp4' })).rejects.toThrow(/busy/);
+    expect(calls).toEqual([['/dup.mp4', 'duplicate']]);
+    expect(playlists[0].videoPaths).toEqual(['/dup.mp4']);
   });
 });
 

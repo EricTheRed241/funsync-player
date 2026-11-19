@@ -622,6 +622,7 @@
     "added": "已添加",
     "addedTo": "已添加到 \"{name}\"",
     "rejectedDeleted": "已从磁盘删除 {count} 个被拒绝的视频（2 星及以下）",
+    "duplicateDeleted": "已从磁盘删除重复视频 \"{name}\"（保留了另一份）",
     "removed": "已移除",
     "saved": "已保存",
     "copied": "已复制",

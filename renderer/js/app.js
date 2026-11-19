@@ -30,7 +30,7 @@ import { autoFillQueue, applyQueueChange, reviewPlaylistPaths } from './play-que
 import { PREFERENCE_SCORES_KEY, tagScoreRegistration } from './library-scores.js';
 import { artistRegistration } from './favourite-artists.js';
 import { WATCHED_COLLECTION_ID, WATCHED_LAST_KEY, watchedRegistration } from './watched-lists.js';
-import { ratingVerdict, sweepRejected } from './reject-rule.js';
+import { deleteDuplicate, ratingVerdict, sweepRejected } from './reject-rule.js';
 import { createRatingControl, updateRatingControl } from './rating-stars.js';
 import { RemotePlaybackProxy } from './remote-playback-proxy.js';
 import { SessionTracker } from './session-tracker.js';
@@ -488,9 +488,10 @@ class App {
 
     // Library edits: ratings, playlists, tag scores, favourite artists and
     // the bonus from the phone and the headset (remote bridge), the shared
-    // play queue's edits from both, and the Overview's own changes, applied
-    // one after another (library-edits.js). Only remote edits carry a `seq`
-    // to ack. Queue edits are silent here (no toast).
+    // play queue's edits from both, the swipe deck's duplicate deletions and
+    // the Overview's own changes, applied one after another
+    // (library-edits.js). Only remote edits carry a `seq` to ack. Queue edits
+    // are silent here (no toast).
     this._libraryEdits = new LibraryEditApplier({
       data: this.settings,
       publish: () => this._publishTriageState(),
@@ -504,6 +505,7 @@ class App {
         clear: () => this._changeQueue({ kind: 'clear' }),
         setAutoFill: (enabled) => this._changeQueue({ kind: 'auto-fill', enabled }),
       },
+      deleteDuplicate: (path, keepPath) => this._deleteDuplicate(path, keepPath),
     });
 
     // Overview: capacity, ratings, favourite artists and tag scores.
@@ -2083,6 +2085,28 @@ class App {
       if (ratingVerdict(entry) === 'delete') sweep();
     });
     sweep();
+  }
+
+  /**
+   * The swipe deck's Duplicates tab (a `delete-duplicate` library edit):
+   * delete `path` from disk as a duplicate of `keepPath`, favourite or not,
+   * and forget it (reject-rule.js), then rescan like the triage sweep so it
+   * leaves the grid, the phone and the headset. Throws when it can't (the
+   * edit is rejected and logged, the video stays).
+   */
+  async _deleteDuplicate(path, keepPath) {
+    const result = await deleteDuplicate({
+      data: this.settings,
+      deleteVideo: (p, reason) => window.funsync.deleteRejectedVideo(p, reason),
+      keepExists: (p) => window.funsync.fileExists(p),
+      videoPath: path,
+      keepPath,
+    });
+    if (result.deleted.length) {
+      showToast(t('toast.duplicateDeleted', { name: path.split(/[\\/]/).pop() }), 'info');
+      await this._handleRescanRequest();
+    }
+    return result;
   }
 
   /**

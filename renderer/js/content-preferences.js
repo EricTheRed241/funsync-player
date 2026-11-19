@@ -201,6 +201,8 @@ export const DEDUPE_KEEP_ORDER = ['within VR caps', 'bigger video'];
 export const DEDUPE_SCRIPT_ORDER = ['hand-made axes', 'faster script'];
 
 // ── Names: words that don't tell videos apart ───────────────────────────
+// Shared (content-preferences.json `names`): the swipe deck's Duplicates tab
+// (crates/scout-report) compares titles by the same words.
 
 /**
  * Words in a video, script or post name that describe the encode, the cut or
@@ -208,26 +210,26 @@ export const DEDUPE_SCRIPT_ORDER = ['hand-made axes', 'faster script'];
  * compared: duplicate scenes (scripts/scene-dedupe-lib.mjs titleWords), the
  * scouts' library checks and their video / script pairing
  * (scripts/eroscripts-scout-lib.mjs coreName, sameVideo). Projection words
- * (`vr`, `sbs`, `180` …) are dropped too (VR_MARKER in scene-dedupe-lib).
+ * are dropped too (PROJECTION_WORD).
  */
-export const NAME_NOISE_WORDS = new Set([
-  'hq', 'lq', 'sd', 'hd', 'fhd', 'qhd', 'uhd', 'upscale', 'upscaled', 'remaster', 'remastered', 'passthrough', 'pt', 'source',
-  'hmv', 'pmv', 'high', 'low', 'bitrate', 'lowbitrate', 'highbitrate', 'version', 'ver', 'final', 'fixed', 'full',
-  'hevc', 'h264', 'h265', 'x264', 'x265', 'av1', 'mp4', 'mkv', 'compressed', 'uncompressed', 'edit',
-  'easy', 'easier', 'normal', 'medium', 'hard', 'harder', 'extreme', 'intense', 'soft', 'beginner', 'advanced', 'alt', 'alternative',
-]);
+export const NAME_NOISE_WORDS = new Set(data.names.noiseWords);
 /**
  * … and encode tokens, also run together: `1080p`, `4k`, `60fps`, `4k120fps`,
  * `1080p60`, `4k60`, a bare `1080` / `720` (`Title (1080)`), `v2`, `10bit`, `75mbps`.
  */
-export const NAME_NOISE_TOKEN = /^((\d{3,4}p|\d{1,2}k)(\d{2,3}(fps)?)?|\d{2,3}fps|fps\d{2,3}|v\d+(\.\d+)?|\d+bit|\d+mbps|480|540|720|1080|1440|2160|2880|4320)$/;
+export const NAME_NOISE_TOKEN = new RegExp(data.names.noiseToken);
+/**
+ * One projection word (`vr`, `sbs`, `180`, `3dh`, `fisheye190` …), as a regex
+ * alternation: scene-dedupe-lib's VR_MARKER looks for it in names.
+ */
+export const PROJECTION_WORD = data.names.projectionWord;
 /**
  * Genre words: they stay in a title but never tell two videos apart, so a
  * title needs another word to match anything (`newnew - VAM`, `Sulbas VR
  * Compilation`, an EroScripts post called `Fap Hero`). `fap hero` and `cock
  * hero` count as one word (`faphero`, `cockhero`).
  */
-export const GENRE_WORDS = new Set(['vam', 'sfm', 'mmd', 'compilation', 'compilations', 'faphero', 'cockhero', 'pmv', 'hmv', 'pov', 'vr']);
+export const GENRE_WORDS = new Set(data.names.genreWords);
 
 // ── Ratings and triage ──────────────────────────────────────────────────
 

@@ -1,26 +1,29 @@
 //! `npm run scout:report`: the swipe deck (`/swipe`; `/` redirects there) over the
 //! EroScripts Discovery scout's waiting list (`npm run eroscripts:scout`) and the scenes the
 //! site scouts found (SexLikeReal, VRBangers / VRConk, PMVHaven, FapTap), in three tabs:
-//! Multi, VR and Flat, and a fourth, Free space: library videos to delete when a drive is
-//! full (crate::free_space, through the running app's backend). A bar under the tabs shows
-//! the library drive's free space; while it's full the three download tabs take no swipes
-//! (crate::drive).
+//! Multi, VR and Flat, a fourth, Free space: library videos to delete when a drive is
+//! full (crate::free_space), and a fifth, Duplicates: pairs of library videos that may be one
+//! video, side by side, to keep one of (crate::duplicates); both through the running app's
+//! backend. A bar under the tabs shows the library drive's free space; while it's full the
+//! three download tabs take no swipes (crate::drive).
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
 //! `eroscripts-scout-frames.json`, `slr-scout.json`, `vrb-scout.json`,
 //! `pmvhaven-scout.json`, `faptap-scout.json` and `config.json` in userData on every
-//! request, and serves the scouts' preview frames (`scout-frames/`). The only files it
-//! writes are the deck's swipes, one per source: `eroscripts-scout-swipes.json`,
-//! `slr-scout-swipes.json`, `vrb-scout-swipes.json`, `pmvhaven-scout-swipes.json`
-//! and `faptap-scout-swipes.json` (which the scouts' `--fetch` reads), and
-//! `free-space-swipes.json` (the Free space tab's marks); the previous copy of
-//! each kept as `.bak`. Videos are deleted only by the app, rated through its
-//! backend. Bound to 127.0.0.1, or to every
+//! request (the Duplicates tab also `scene-frame-cache.json`, `scene-probe-cache.json`,
+//! `vr-dims-cache.json` and `eroscripts-links.json`), and serves the scouts' preview frames
+//! (`scout-frames/`). The only files it writes are the deck's swipes, one per source:
+//! `eroscripts-scout-swipes.json`, `slr-scout-swipes.json`, `vrb-scout-swipes.json`,
+//! `pmvhaven-scout-swipes.json` and `faptap-scout-swipes.json` (which the scouts' `--fetch`
+//! reads), `free-space-swipes.json` (the Free space tab's marks) and
+//! `duplicate-swipes.json` (the Duplicates tab's); the previous copy of each kept as `.bak`.
+//! Videos are deleted only by the app, through its backend. Bound to 127.0.0.1, or to every
 //! interface with `--lan`; other devices need the access PIN when one is set
 //! (`access-pin.json`, crate::gate).
 
 pub mod cli;
 pub mod deck;
 pub mod drive;
+pub mod duplicates;
 pub mod frames;
 pub mod free_space;
 pub mod gate;
