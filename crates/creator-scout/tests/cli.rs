@@ -747,3 +747,134 @@ fn follow_without_a_session_exits_3_without_a_browser() {
         text(&o)
     );
 }
+
+fn ft_post(id: &str) -> Value {
+    json!({"kind": "faptap", "id": id, "title": format!("Video {id}"),
+           "url": format!("{FAPTAP}/v/{id}"), "free": true, "downloadable": true,
+           "createdAt": "2026-11-10T00:00:00Z"})
+}
+
+#[test]
+fn post_images_fill_missing_thumbnails_and_remember_misses() {
+    let t = TempDir::new();
+    let mut owned = ft_post("103");
+    owned["inLibrary"] = json!(true);
+    let mut not_downloadable = ft_post("104");
+    not_downloadable["downloadable"] = json!(false);
+    let es = json!({"kind": "eroscripts", "id": "200", "title": "Script", "url": format!("{FORUM}/t/200"),
+                    "free": true, "downloadable": true, "hosts": ["pixeldrain"]});
+    fs::write(
+        t.ud().join("creators.json"),
+        json!({"version": 1, "creators": {
+            "a1": {"name": "A One", "posts": [ft_post("101"), ft_post("102"), owned, not_downloadable, ft_post("105"), es]},
+            "b2": {"name": "B Two", "posts": [ft_post("300")]}}})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        t.ud().join("creator-swipes.json"),
+        json!({"version": 1, "creators": {"b2": {"choice": "no"}},
+               "posts": {"faptap:102": {"choice": "want", "creator": "a1"}}})
+        .to_string(),
+    )
+    .unwrap();
+    let video = |id: &str, thumb: Option<&str>| json!({"body": {"data": {"id": id, "name": "x", "thumbnail_url": thumb}}});
+    let mut fixtures = serde_json::Map::new();
+    for (id, thumb) in [
+        ("101", Some("https://cdn.ft/101.jpg")),
+        ("102", Some("https://cdn.ft/102.jpg")),
+        ("103", Some("https://cdn.ft/103.jpg")),
+        ("104", Some("https://cdn.ft/104.jpg")),
+        ("105", None),
+        ("300", Some("https://cdn.ft/300.jpg")),
+    ] {
+        fixtures.insert(format!("GET {FAPTAP}/api/videos/{id}"), video(id, thumb));
+        if let Some(url) = thumb {
+            fixtures.insert(format!("GET {url}"), json!({"body": format!("T{id}")}));
+        }
+    }
+    fixtures.insert(
+        format!("GET {FORUM}/t/200.json"),
+        json!({"body": {"id": 200, "post_stream": {"posts": [{"cooked":
+            "<p><img src=\"/images/emoji/twitter/smile.png\" class=\"emoji\"><img src=\"https://cdn.es/200.jpg\"></p>"}]}}}),
+    );
+    fixtures.insert("GET https://cdn.es/200.jpg".into(), json!({"body": "E200"}));
+    let fixtures = t.write("fixtures.json", &Value::Object(fixtures).to_string());
+
+    // One post per run: the rest is work left.
+    let o = run(&t, &["--post-images", "1"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(2), "{out}");
+    assert!(out.contains("A One: faptap 101: ft-101.jpg"), "{out}");
+    assert!(
+        out.contains("1 filled") && out.contains("2 waiting"),
+        "{out}"
+    );
+    let dir = t.ud().join("creator-pictures/a1");
+    assert_eq!(fs::read_to_string(dir.join("ft-101.jpg")).unwrap(), "T101");
+    let f = t.creators();
+    let a1 = &f["creators"]["a1"];
+    assert_eq!(a1["posts"][0]["image"], "ft-101.jpg");
+    assert_eq!(a1["pictures"][0]["file"], "ft-101.jpg");
+    assert_eq!(a1["pictures"][0]["source"], "faptap");
+    assert_eq!(t.state()["lastRuns"]["post-images"]["code"], 2);
+
+    let o = run(&t, &["--post-images"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}");
+    assert!(out.contains("faptap 105: no thumbnail"), "{out}");
+    assert!(out.contains("eroscripts 200: es-200-0.jpg"), "{out}");
+    assert_eq!(
+        fs::read_to_string(dir.join("es-200-0.jpg")).unwrap(),
+        "E200"
+    );
+    let f = t.creators();
+    let posts = f["creators"]["a1"]["posts"].as_array().unwrap();
+    let image = |id: &str| posts.iter().find(|p| p["id"] == id).unwrap()["image"].clone();
+    assert_eq!(image("200"), "es-200-0.jpg");
+    // Swiped, in the library, not downloadable, missed, swiped-no creator: left alone.
+    for id in ["102", "103", "104", "105"] {
+        assert!(image(id).is_null(), "{id}");
+    }
+    assert!(f["creators"]["b2"]["posts"][0]["image"].is_null());
+    for f in ["ft-102.jpg", "ft-103.jpg", "ft-104.jpg"] {
+        assert!(!dir.join(f).exists(), "{f}");
+    }
+    assert!(!t.ud().join("creator-pictures/b2").exists());
+    let missed_at = t.state()["postImageMisses"]["faptap:105"].clone();
+    assert!(missed_at.is_string(), "{}", t.state());
+
+    // The miss isn't tried again for 7 days.
+    let o = run(&t, &["--post-images"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}");
+    assert!(!out.contains("105"), "{out}");
+    assert!(out.contains("0 filled"), "{out}");
+    assert_eq!(t.state()["postImageMisses"]["faptap:105"], missed_at);
+    let o = run(&t, &["--status"], None);
+    assert!(
+        text(&o).contains("Post images: 0 post(s) waiting for their picture (0 FapTap, 0 EroScripts), 1 without one"),
+        "{}",
+        text(&o)
+    );
+}
+
+#[test]
+fn post_images_without_a_forum_session_skip_eroscripts_posts_exit_3() {
+    let t = TempDir::new();
+    fs::write(t.ud().join("config.json"), "{}").unwrap();
+    let es = json!({"kind": "eroscripts", "id": "200", "title": "Script", "url": format!("{FORUM}/t/200"),
+                    "free": true, "downloadable": true});
+    fs::write(
+        t.ud().join("creators.json"),
+        json!({"version": 1, "creators": {"a1": {"name": "A One", "posts": [es]}}}).to_string(),
+    )
+    .unwrap();
+    let none = t.write("fixtures.json", "{}");
+    let o = run(&t, &["--post-images"], Some(&none));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(3), "{out}");
+    assert!(out.contains("no session cookie"), "{out}");
+    assert!(t.state()["postImageMisses"].as_object().unwrap().is_empty());
+    assert!(t.creators()["creators"]["a1"]["posts"][0]["image"].is_null());
+}

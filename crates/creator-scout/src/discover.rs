@@ -75,15 +75,18 @@ impl Discover<'_> {
     }
 }
 
-/// Download a post picture (forum ones with the cookie) unless it is there.
-fn save_image(
-    f: &Filing,
+/// Download a post picture (forum ones with the cookie) into her folder
+/// unless it is there.
+pub fn save_image(
+    http: &dyn Http,
+    user_data: &Path,
+    cookie: Option<&str>,
     pacer: &mut Pacer,
     url: &str,
     slug: &str,
     name: &str,
 ) -> Result<bool, String> {
-    let dir = store::pictures_dir(f.user_data, slug);
+    let dir = store::pictures_dir(user_data, slug);
     let dest = dir.join(name);
     if dest.is_file() {
         return Ok(false);
@@ -91,10 +94,10 @@ fn save_image(
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let part = dir.join(format!(".{name}.part"));
     let r = eroscripts::download_image(
-        f.http,
+        http,
         pacer,
         eroscripts::FORUM,
-        f.cookie.unwrap_or_default(),
+        cookie.unwrap_or_default(),
         url,
         &part,
     )
@@ -125,7 +128,7 @@ pub fn add_details(
     if let Some(url) = image {
         let name = store::eroscripts_picture(id, 0);
         // A picture that won't download leaves the post without one.
-        if save_image(f, forum, &url, slug, &name).is_ok() {
+        if save_image(f.http, f.user_data, f.cookie, forum, &url, slug, &name).is_ok() {
             post.image = Some(name);
         }
     }

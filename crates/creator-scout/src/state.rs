@@ -1,8 +1,9 @@
 //! `<userData>/creator-scout-state.json` (this CLI's own bookkeeping: when
 //! each creator's pictures were fetched, creators the judge named without a
 //! verifiable account, people and creators looked up without enough found,
-//! posts waiting for their details, fetch tries, Instagram follows) and
-//! `creator-swipes.json` (written by the Creators site, read here).
+//! posts waiting for their details, fetch tries, Instagram follows, posts
+//! without a picture to fill) and `creator-swipes.json` (written by the
+//! Creators site, read here).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -88,6 +89,10 @@ pub struct State {
     /// Creator slug → her Instagram follow (`--follow`; never undone).
     #[serde(default)]
     pub follows: BTreeMap<String, Follow>,
+    /// Post key (`faptap:21`) → when `--post-images` last found no picture
+    /// for it or couldn't download it (tried again after 7 days).
+    #[serde(default)]
+    pub post_image_misses: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

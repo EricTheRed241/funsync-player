@@ -221,6 +221,8 @@ pub struct Item {
     /// `/media/?size=l` redirect to its picture).
     pub image: String,
     pub taken_at: i64,
+    /// Its likes (`like_count`), when the node has them.
+    pub likes: Option<u64>,
 }
 
 /// A profile page as a logged-in browser gets it.
@@ -319,6 +321,7 @@ pub fn parse_timeline(page: &str) -> Option<Vec<Item>> {
                 shortcode: shortcode.to_string(),
                 image,
                 taken_at: n["taken_at"].as_i64()?,
+                likes: n["like_count"].as_u64(),
             })
         })
         .collect();
@@ -576,6 +579,7 @@ pub fn pictures(
                                 source: "instagram".into(),
                                 url: format!("{}/p/{}/", store::INSTAGRAM_SITE, item.shortcode),
                                 taken_at: Some(iso_of(item.taken_at)),
+                                likes: item.likes,
                             });
                         }
                         set_instagram_pictures(c, ig, pics);
@@ -645,6 +649,7 @@ pub fn pictures(
                                     source: "instagram".into(),
                                     url: format!("{}/{}/", store::INSTAGRAM_SITE, ig.handle),
                                     taken_at: None,
+                                    likes: None,
                                 });
                             }
                             Err(e) => {
@@ -732,7 +737,7 @@ mod tests {
 
     fn node(id: u64, t: i64) -> Value {
         json!({"node": {"code": format!("S{id}"), "pk": id.to_string(), "id": format!("{id}_9"),
-            "taken_at": t, "media_type": 1, "product_type": "feed", "timeline_pinned_user_ids": [],
+            "taken_at": t, "like_count": id * 10, "media_type": 1, "product_type": "feed", "timeline_pinned_user_ids": [],
             "owner_id": {"pk": "9"},
             "image_versions2": {"candidates": [
                 {"width": 1440, "height": 1800, "url": format!("https://cdn.ig/{id}_1440.jpg")},
@@ -765,7 +770,7 @@ mod tests {
         );
         edges.push(json!({"node": {"code": "CAR", "pk": "50", "taken_at": 1_800_000_000,
             "carousel_media": [{"image_versions2": {"candidates": [{"width": 720, "url": "https://cdn.ig/c.jpg"}]}}]}}));
-        edges.push(json!({"node": {"code": "BARE", "pk": "51", "taken_at": 1_799_999_999}}));
+        edges.push(json!({"node": {"code": "BARE", "pk": "51", "taken_at": 1_799_999_999, "like_count": "hidden"}}));
         edges.push(json!({"node": {"pk": "52", "taken_at": 1_900_000_000}}));
         let items = parse_timeline(&page("_9dls", &edges)).unwrap();
         assert_eq!(items.len(), TIMELINE_POSTS);
@@ -786,6 +791,9 @@ mod tests {
             ("14", "https://cdn.ig/14_1080.jpg")
         );
         assert_eq!(items[2].taken_at, 1_700_000_014);
+        assert_eq!(items[2].likes, Some(140));
+        // No like_count, or not a number: unknown.
+        assert_eq!((items[0].likes, items[1].likes), (None, None));
         assert_eq!(parse_timeline("<html><body>nothing</body></html>"), None);
         assert_eq!(
             json_span(r#"{"a":"}\"{","b":[1,{"c":2}]} tail"#),

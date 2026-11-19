@@ -21,6 +21,7 @@ pub mod instagram;
 pub mod judge;
 pub mod library;
 pub mod people;
+pub mod post_images;
 pub mod profiles;
 pub mod seed;
 pub mod state;
@@ -179,6 +180,9 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         })?,
         Mode::Pictures(n) => step("pictures", &env, &mut st, err, |st| {
             run_pictures(&env, n, &mut file, st, out)
+        })?,
+        Mode::PostImages(n) => step("post-images", &env, &mut st, err, |st| {
+            run_post_images(&env, n, &mut file, st, out)
         })?,
         Mode::Profiles(n) => step("profiles", &env, &mut st, err, |st| {
             run_profiles(&env, &opts, n, &mut file, st, out)
@@ -446,6 +450,54 @@ fn run_profiles(
     profiles::run(&f, &people, file, st, &swipes, out)
 }
 
+fn run_post_images(
+    env: &Env,
+    n: usize,
+    file: &mut store::CreatorsFile,
+    st: &mut state::State,
+    out: &mut dyn Write,
+) -> Result<i32, String> {
+    let swipes = state::read_swipes(&env.user_data)?;
+    let cookie = slr_scout::forum::session_cookie(&env.config);
+    let p = post_images::PostImages {
+        http: env.http.as_ref(),
+        user_data: &env.user_data,
+        cookie: cookie.as_deref(),
+        fake: env.fake,
+    };
+    let r = post_images::run(&p, file, st, &swipes, n, out)?;
+    writeln!(
+        out,
+        "Post images: {} filled, {} without a picture (tried again after {} days), {} failed, {} waiting.",
+        r.filled,
+        r.missed,
+        post_images::MISS_DAYS,
+        r.failed,
+        r.left + r.forum_skipped
+    )
+    .map_err(io)?;
+    Ok(r.code)
+}
+/// `--status`'s post images line.
+fn post_images_status(user_data: &Path) -> Result<String, String> {
+    let file = store::read(user_data)?.unwrap_or_else(store::CreatorsFile::empty);
+    let st = state::read(user_data)?;
+    let swipes = state::read_swipes(user_data)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let due = post_images::due(&file, &st, &swipes, now);
+    let of = |kind: &str| due.iter().filter(|w| w.kind == kind).count();
+    Ok(format!(
+        "Post images: {} post(s) waiting for their picture ({} FapTap, {} EroScripts), {} without one (tried again after {} days).",
+        due.len(),
+        of("faptap"),
+        of("eroscripts"),
+        post_images::missed(&st, now),
+        post_images::MISS_DAYS
+    ))
+}
+
 fn run_follow(
     env: &Env,
     n: usize,
@@ -643,6 +695,10 @@ fn status(user_data: &Path, out: &mut dyn Write) -> std::io::Result<()> {
     match profiles_status(user_data) {
         Ok(lines) => writeln!(out, "{lines}")?,
         Err(e) => writeln!(out, "Profiles: {e}")?,
+    }
+    match post_images_status(user_data) {
+        Ok(line) => writeln!(out, "{line}")?,
+        Err(e) => writeln!(out, "Post images: {e}")?,
     }
     match state::read(user_data) {
         Ok(st) => {

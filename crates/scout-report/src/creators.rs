@@ -12,14 +12,23 @@
 //! of creator-swipes.json (`<kind>:<id>`: right = want, left = hide, with the creator's
 //! slug), which `creators:scout --fetch` downloads; the Creators site writes only its
 //! `creators`, and both write the file whole (read, change one entry, write atomically).
+//!
+//! Every dealt card also names the creators in it (`people`, any creator in creators.json,
+//! yes or not; at most MAX_PEOPLE): the post is hers (its creator card's, then the yes
+//! creator's, then any creator's listing it), a scene's performer is her (name or alias,
+//! folded), or her name runs in the title as whole words (one-word names of MIN_TITLE_WORD
+//! letters or more only). Each comes with her best picture on disk (best_picture), which joins
+//! the card's images; a creator without one is left out.
 
 use crate::creator_pictures;
 use crate::deck::{self, Stack};
+use crate::duplicates::fold;
 use crate::report::{self, str_of, strings_of};
 use crate::scenes::{SceneCard, SceneTag};
 use crate::swipes::{self, Dir};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -31,6 +40,15 @@ pub const SWIPES_VERSION: u64 = 1;
 pub const SOURCE: &str = "creators";
 /// The post kinds creators.json lists, which are also their card ids' prefixes.
 const KINDS: [&str; 2] = ["eroscripts", "faptap"];
+/// The Instagram profile photo creator-scout saves (its `store::INSTAGRAM_PROFILE_PICTURE`).
+const INSTAGRAM_PROFILE: &str = "ig-profile.jpg";
+/// Creators named per card.
+pub const MAX_PEOPLE: usize = 2;
+/// A one-word name counts from a card's title only with this many letters or more: "Pupu" in
+/// a title can be anything, "Agapilord" can't.
+const MIN_TITLE_WORD: usize = 6;
+/// Shortest name (folded, words run together) matched at all.
+const MIN_NAME: usize = 3;
 
 const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
 
@@ -60,6 +78,20 @@ pub struct Who {
     pub name: String,
 }
 
+/// A creator in a card (`people`): her name and her best picture (best_picture).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Person {
+    pub name: String,
+    pub slug: String,
+    /// The picture's served URL, `/pictures/<slug>/<file>`.
+    pub picture: String,
+    /// Where it comes from: `instagram`, `profile`, `onlyfans`, `x`, ….
+    pub picture_source: String,
+    /// The page it comes from (https only).
+    pub picture_url: Option<String>,
+}
+
 /// creators.json and creator-swipes.json as the deck reads them (missing files: nobody).
 #[derive(Debug, Default)]
 pub struct Creators {
@@ -69,6 +101,90 @@ pub struct Creators {
     owners: HashMap<String, Who>,
     /// Score points a yes creator's card gets.
     pub bonus: f64,
+    /// Every creator, yes or not, by slug: who a card can name.
+    everyone: Vec<Who>,
+    /// `<kind>:<id>` → every creator listing that post (`everyone` indexes, by slug).
+    listed: HashMap<String, Vec<usize>>,
+    /// A name or alias, its folded words run together → each creator with it, and whether
+    /// her name there is a single word.
+    names: HashMap<String, Vec<(usize, bool)>>,
+    /// The longest `names` key, in bytes: a title's runs of words stop there.
+    longest: usize,
+}
+
+/// The words of `s` folded (crate::duplicates::fold: lower case, accents dropped): letters
+/// and digits only.
+fn words(s: &str) -> Vec<String> {
+    fold(s)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// How a picture shows her, best kind first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Kind {
+    /// One of her Instagram posts.
+    Timeline,
+    /// A profile-type picture: `profile`, `onlyfans`, `fansly`, `x`, `reddit`, `pornhub`, `web`, ….
+    Profile,
+    /// Her Instagram profile photo (INSTAGRAM_PROFILE).
+    InstagramProfile,
+    /// A post's picture (`eroscripts`, `faptap`): a scene, not her.
+    Post,
+}
+
+fn kind(p: &Value) -> Kind {
+    match p.get("source").and_then(Value::as_str) {
+        Some("instagram") if p.get("file").and_then(Value::as_str) == Some(INSTAGRAM_PROFILE) => {
+            Kind::InstagramProfile
+        }
+        Some("instagram") => Kind::Timeline,
+        Some("eroscripts" | "faptap") => Kind::Post,
+        _ => Kind::Profile,
+    }
+}
+
+/// Creator `c`'s pictures best first: her Instagram posts by most `likes`, then newest
+/// (`takenAt`); then profile-type pictures, her Instagram profile photo, and post pictures
+/// last, each in the file's order.
+fn ranked(c: &Value) -> Vec<&Value> {
+    let rank = |p: &&Value| {
+        let k = kind(p);
+        let timeline = |key: &str| p.get(key).filter(|_| k == Kind::Timeline);
+        (
+            k,
+            Reverse(timeline("likes").and_then(Value::as_u64)),
+            Reverse(
+                timeline("takenAt")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            ),
+        )
+    };
+    let mut pics: Vec<&Value> = c
+        .get("pictures")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    pics.sort_by_cached_key(rank);
+    pics
+}
+
+/// Creator `slug`'s best picture (`c` her creators.json entry) with its served URL: the first
+/// of `ranked` that is her (not a post's picture) and on disk under
+/// `<userData>/creator-pictures/<slug>/`; None without one.
+pub fn best_picture<'a>(user_data: &Path, slug: &str, c: &'a Value) -> Option<(&'a Value, String)> {
+    let dir = user_data.join(creator_pictures::DIR).join(slug);
+    ranked(c)
+        .into_iter()
+        .filter(|p| kind(p) != Kind::Post)
+        .find_map(|p| {
+            let file = p.get("file").and_then(Value::as_str)?;
+            let url = creator_pictures::url(slug, file)?;
+            dir.join(file).is_file().then_some((p, url))
+        })
 }
 
 /// A post's key in creator-swipes.json, `<kind>:<id>`; ids may be numbers in creators.json.
@@ -115,8 +231,8 @@ impl Creators {
         let mut c = Creators {
             file,
             swipes,
-            owners: HashMap::new(),
             bonus,
+            ..Creators::default()
         };
         let mut owners = HashMap::new();
         for (who, cr) in c.yes() {
@@ -124,18 +240,47 @@ impl Creators {
                 owners.entry(key).or_insert_with(|| who.clone());
             }
         }
+        let (mut everyone, mut listed, mut names) = (Vec::new(), HashMap::new(), HashMap::new());
+        let mut longest = 0;
+        for (i, (who, cr)) in c.all().enumerate() {
+            for key in posts(cr).filter_map(post_key_of) {
+                let list: &mut Vec<usize> = listed.entry(key).or_default();
+                if list.last() != Some(&i) {
+                    list.push(i);
+                }
+            }
+            let aliases = strings_of(cr, "aliases").unwrap_or_default();
+            for name in std::iter::once(&who.name).chain(&aliases) {
+                let w = words(name);
+                let key = w.concat();
+                if key.chars().count() < MIN_NAME {
+                    continue;
+                }
+                longest = longest.max(key.len());
+                let entry: &mut Vec<(usize, bool)> = names.entry(key).or_default();
+                match entry.iter_mut().find(|(j, _)| *j == i) {
+                    // A name of several words with the same letters lets titles match too.
+                    Some((_, one)) => *one &= w.len() == 1,
+                    None => entry.push((i, w.len() == 1)),
+                }
+            }
+            everyone.push(who);
+        }
         c.owners = owners;
+        c.everyone = everyone;
+        c.listed = listed;
+        c.names = names;
+        c.longest = longest;
         c
     }
 
-    /// The yes creators, by slug.
-    fn yes(&self) -> impl Iterator<Item = (Who, &Value)> {
+    /// Every creator, by slug, with the name her cards show (her slug when she has none).
+    fn all(&self) -> impl Iterator<Item = (Who, &Value)> {
         self.file
             .get("creators")
             .and_then(Value::as_object)
             .into_iter()
             .flatten()
-            .filter(|(slug, c)| self.is_yes(slug, c))
             .map(|(slug, c)| {
                 let name = str_of(c, "name").filter(|n| !n.is_empty());
                 let who = Who {
@@ -144,6 +289,110 @@ impl Creators {
                 };
                 (who, c)
             })
+    }
+
+    /// The yes creators, by slug.
+    fn yes(&self) -> impl Iterator<Item = (Who, &Value)> {
+        self.all().filter(|(who, c)| self.is_yes(&who.slug, c))
+    }
+
+    /// The creators in `card` (`everyone` indexes), in order of evidence: the post is hers
+    /// (the yes creator whose post it is first, as on her creator card, then every creator
+    /// listing it, by slug); a scene's performer (`actors`) is her name or an alias, folded;
+    /// her name or an alias runs in the title as whole words (one-word names of
+    /// MIN_TITLE_WORD letters or more only), in the title's order.
+    fn named(&self, card: &deck::DeckCard) -> Vec<usize> {
+        let (key, title, actors) = match card {
+            deck::DeckCard::Post(p) => (
+                Some(format!("eroscripts:{}", p.id)),
+                p.title.as_deref(),
+                &[][..],
+            ),
+            deck::DeckCard::Scene(s) => (
+                match s.source {
+                    "faptap" => Some(format!("faptap:{}", s.id)),
+                    SOURCE => post_key(&s.id),
+                    _ => None,
+                },
+                s.title.as_deref(),
+                s.actors.as_slice(),
+            ),
+        };
+        let mut out = Vec::new();
+        let mut add = |i: usize| {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        };
+        if let Some(key) = &key
+            && let Some(list) = self.listed.get(key)
+        {
+            let owner = self.owners.get(key).map(|w| w.slug.as_str());
+            let (first, rest): (Vec<usize>, Vec<usize>) = list
+                .iter()
+                .partition(|&&i| Some(self.everyone[i].slug.as_str()) == owner);
+            first.into_iter().chain(rest).for_each(&mut add);
+        }
+        for actor in actors {
+            if let Some(found) = self.names.get(&words(actor).concat()) {
+                found.iter().for_each(|&(i, _)| add(i));
+            }
+        }
+        let title = words(title.unwrap_or_default());
+        for start in 0..title.len() {
+            let mut run = String::new();
+            for w in &title[start..] {
+                run.push_str(w);
+                if run.len() > self.longest {
+                    break;
+                }
+                let Some(found) = self.names.get(&run) else {
+                    continue;
+                };
+                for &(i, one_word) in found {
+                    if !one_word || run.chars().count() >= MIN_TITLE_WORD {
+                        add(i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Creator `i` (an `everyone` index) as a card's person, with her best picture; None
+    /// without one on disk.
+    fn person(&self, user_data: &Path, i: usize) -> Option<Person> {
+        let who = &self.everyone[i];
+        let c = self.file.get("creators")?.get(&who.slug)?;
+        let (pic, picture) = best_picture(user_data, &who.slug, c)?;
+        Some(Person {
+            name: who.name.clone(),
+            slug: who.slug.clone(),
+            picture,
+            picture_source: str_of(pic, "source").unwrap_or_default(),
+            picture_url: str_of(pic, "url").filter(|u| u.starts_with("https://")),
+        })
+    }
+
+    /// Name the creators in a dealt `card` (`people`, at most MAX_PEOPLE; named) and add each
+    /// one's picture to its images (after its own, each once).
+    pub fn add_people(&self, user_data: &Path, card: &mut deck::DeckCard) {
+        let people: Vec<Person> = self
+            .named(card)
+            .into_iter()
+            .filter_map(|i| self.person(user_data, i))
+            .take(MAX_PEOPLE)
+            .collect();
+        let (images, slot) = match card {
+            deck::DeckCard::Post(p) => (&mut p.images, &mut p.people),
+            deck::DeckCard::Scene(s) => (&mut s.images, &mut s.people),
+        };
+        for p in &people {
+            if !images.contains(&p.picture) {
+                images.push(p.picture.clone());
+            }
+        }
+        *slot = people;
     }
 
     fn is_yes(&self, slug: &str, c: &Value) -> bool {
@@ -243,7 +492,8 @@ impl Creators {
         (cards, wanted)
     }
 
-    /// A creator card for post `p` (of `kind`) of creator `c`: the post's picture, then hers.
+    /// A creator card for post `p` (of `kind`) of creator `c`: the post's picture, then hers,
+    /// best first (ranked).
     fn card(&self, who: &Who, c: &Value, p: &Value, kind: &str, id: String, vr: bool) -> SceneCard {
         let slug = who.slug.as_str();
         let post_score = p.get("score").and_then(Value::as_f64);
@@ -251,16 +501,7 @@ impl Creators {
             .and_then(|f| creator_pictures::url(slug, &f))
             .into_iter()
             .collect();
-        // Her pictures, Instagram's first (as on the Creators site).
-        let pics: Vec<&Value> = c
-            .get("pictures")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().collect())
-            .unwrap_or_default();
-        let (ig, rest): (Vec<&Value>, Vec<&Value>) = pics
-            .into_iter()
-            .partition(|x| x.get("source").and_then(Value::as_str) == Some("instagram"));
-        for pic in ig.into_iter().chain(rest) {
+        for pic in ranked(c) {
             if images.len() == deck::MAX_IMAGES {
                 break;
             }
@@ -455,5 +696,202 @@ mod tests {
         Creators::read(&dir, &mut problems);
         assert_eq!(problems, [format!("{SWIPES_FILE}: not version 1")]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Write creator `slug`'s picture files under `dir`'s creator-pictures.
+    fn on_disk_pictures(dir: &Path, slug: &str, files: &[&str]) {
+        let pics = dir.join(creator_pictures::DIR).join(slug);
+        std::fs::create_dir_all(&pics).unwrap();
+        for f in files {
+            std::fs::write(pics.join(f), b"jpeg").unwrap();
+        }
+    }
+
+    fn scene(source: &'static str, id: &str, title: &str, actors: &[&str]) -> deck::DeckCard {
+        deck::DeckCard::Scene(SceneCard {
+            source,
+            id: id.into(),
+            title: Some(title.into()),
+            actors: actors.iter().map(|a| a.to_string()).collect(),
+            images: vec!["https://x.test/thumb.jpg".into()],
+            ..SceneCard::default()
+        })
+    }
+
+    #[test]
+    fn names_the_creators_in_a_card() {
+        let dir = temp("people");
+        let pic = |file: &str| json!([{"file": file, "source": "instagram", "url": "https://www.instagram.com/p/A/"}]);
+        let c = Creators::new(
+            json!({"creators": {
+                "agapilord": {"name": "Agapilord", "pictures": pic("ig-1.jpg")},
+                "ann": {"name": "Ann", "pictures": pic("ig-1.jpg"), "posts": [{"kind": "faptap", "id": "7"}]},
+                "bea": {"name": "Bea", "sources": ["favourite"], "pictures": pic("ig-1.jpg"),
+                        "posts": [{"kind": "faptap", "id": "7"}, {"kind": "eroscripts", "id": 5}]},
+                "kitty": {"name": "Kitty Sweet", "aliases": ["Zoë Löve"], "pictures": pic("ig-1.jpg")},
+                "nopic": {"name": "No Pic", "pictures": pic("gone.jpg")},
+                "pupu": {"name": "Pupu", "pictures": pic("ig-1.jpg")},
+                "sweetie": {"name": "Sweetie Fox", "pictures": pic("ig-1.jpg")}
+            }}),
+            json!({"version": 1, "creators": {"sweetie": {"choice": "no"}}}),
+            0.0,
+        );
+        for slug in ["agapilord", "ann", "bea", "kitty", "pupu", "sweetie"] {
+            on_disk_pictures(&dir, slug, &["ig-1.jpg"]);
+        }
+        let names = |mut card: deck::DeckCard| {
+            c.add_people(&dir, &mut card);
+            let deck::DeckCard::Scene(s) = card else {
+                unreachable!()
+            };
+            s.people.into_iter().map(|p| p.name).collect::<Vec<_>>()
+        };
+        // Her post first: the yes creator whose post it is, then the others listing it, by
+        // slug; at most two, so the title's Sweetie Fox is left out.
+        assert_eq!(
+            names(scene("faptap", "7", "Sweetie Fox and Kitty Sweet", &[])),
+            ["Bea", "Ann"]
+        );
+        assert_eq!(names(scene("creators", "eroscripts-5", "x", &[])), ["Bea"]);
+        // A performer by an alias, accents and case folded; one-word names count there.
+        assert_eq!(
+            names(scene("vrb", "v1", "Hot scene", &["ZOE LOVE", "Pupu"])),
+            ["Kitty Sweet", "Pupu"]
+        );
+        // In the title as whole words, or run together; any creator, swiped no too.
+        for title in [
+            "PMV …Sweetie Fox, Diana",
+            "sweetiefox compilation",
+            "SWEETIE-FOX",
+        ] {
+            assert_eq!(
+                names(scene("pmvhaven", "p", title, &[])),
+                ["Sweetie Fox"],
+                "{title}"
+            );
+        }
+        for title in ["Sweetie Foxes", "Asweetie Fox", "Pupu rides", "Bea and Ann"] {
+            assert!(
+                names(scene("pmvhaven", "p", title, &[])).is_empty(),
+                "{title}"
+            );
+        }
+        assert_eq!(
+            names(scene("slr", "1", "agapilord pov", &[])),
+            ["Agapilord"]
+        );
+        // A creator without a picture on disk is left out, and the next one counts.
+        assert_eq!(
+            names(scene(
+                "pmvhaven",
+                "p",
+                "No Pic, Agapilord and Sweetie Fox",
+                &[]
+            )),
+            ["Agapilord", "Sweetie Fox"]
+        );
+
+        // Her picture joins the card's images, once, with where it comes from.
+        let mut card = scene("vrb", "v1", "Sweetie Fox", &["Sweetie Fox"]);
+        c.add_people(&dir, &mut card);
+        let deck::DeckCard::Scene(s) = card else {
+            unreachable!()
+        };
+        assert_eq!(
+            s.images,
+            ["https://x.test/thumb.jpg", "/pictures/sweetie/ig-1.jpg"]
+        );
+        assert_eq!(
+            serde_json::to_value(&s.people).unwrap(),
+            json!([{"name": "Sweetie Fox", "slug": "sweetie", "picture": "/pictures/sweetie/ig-1.jpg",
+                    "pictureSource": "instagram", "pictureUrl": "https://www.instagram.com/p/A/"}])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn her_best_picture_is_her_most_liked_instagram_post_on_disk() {
+        let dir = temp("best");
+        let best = |pictures: Value| {
+            let c = json!({ "pictures": pictures });
+            best_picture(&dir, "eva", &c)
+                .map(|(p, url)| (p["file"].as_str().unwrap().to_string(), url))
+        };
+        let file = |pictures: Value| best(pictures).map(|(f, _)| f);
+        on_disk_pictures(
+            &dir,
+            "eva",
+            &[
+                "ig-new.jpg",
+                "ig-old.jpg",
+                "ig-profile.jpg",
+                "es-1-0.jpg",
+                "ft-2.jpg",
+                "of.jpg",
+                "x.jpg",
+            ],
+        );
+        let new = json!({"file": "ig-new.jpg", "source": "instagram", "takenAt": "2026-02-01T00:00:00.000Z", "likes": 10});
+        let old = json!({"file": "ig-old.jpg", "source": "instagram", "takenAt": "2025-01-01T00:00:00.000Z", "likes": 500});
+        let profile = json!({"file": "ig-profile.jpg", "source": "instagram"});
+        let es = json!({"file": "es-1-0.jpg", "source": "eroscripts", "takenAt": "2026-11-01T00:00:00.000Z"});
+        let ft = json!({"file": "ft-2.jpg", "source": "faptap"});
+        let of = json!({"file": "of.jpg", "source": "onlyfans"});
+        let x = json!({"file": "x.jpg", "source": "x"});
+        // Most likes wins over newer.
+        assert_eq!(
+            best(json!([es, profile, new, old])),
+            Some(("ig-old.jpg".into(), "/pictures/eva/ig-old.jpg".into()))
+        );
+        // No likes: the newest Instagram post.
+        let unliked = |v: &Value| {
+            let mut v = v.clone();
+            v.as_object_mut().unwrap().remove("likes");
+            v
+        };
+        assert_eq!(
+            file(json!([unliked(&old), profile, unliked(&new)])).as_deref(),
+            Some("ig-new.jpg")
+        );
+        // No Instagram post: her first profile-type picture, before her Instagram photo.
+        assert_eq!(file(json!([es, profile, of, x])).as_deref(), Some("of.jpg"));
+        assert_eq!(
+            file(json!([es, profile])).as_deref(),
+            Some("ig-profile.jpg")
+        );
+        // Never a post's picture.
+        assert_eq!(file(json!([es, ft])), None);
+        // A file missing on disk is skipped.
+        let gone = json!({"file": "ig-gone.jpg", "source": "instagram", "likes": 9000});
+        assert_eq!(file(json!([gone, new])).as_deref(), Some("ig-new.jpg"));
+        assert_eq!(file(json!([{"file": "../x.jpg", "source": "x"}])), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn creator_cards_show_her_post_then_her_pictures_best_first() {
+        let c = Creators::new(
+            json!({"creators": {"ann": {"name": "Ann", "sources": ["favourite"],
+                "pictures": [
+                    {"file": "es-1-0.jpg", "source": "eroscripts"},
+                    {"file": "ig-profile.jpg", "source": "instagram"},
+                    {"file": "p.jpg", "source": "profile"},
+                    {"file": "ig-a.jpg", "source": "instagram", "takenAt": "2026-01-01T00:00:00Z", "likes": 3},
+                    {"file": "ig-b.jpg", "source": "instagram", "takenAt": "2025-01-01T00:00:00Z", "likes": 30}],
+                "posts": [{"kind": "eroscripts", "id": 1, "image": "es-1-0.jpg", "downloadable": true}]}}}),
+            Value::Null,
+            0.0,
+        );
+        let (cards, _) = c.cards(Stack::Flat, &HashSet::new(), &HashMap::new());
+        assert_eq!(
+            cards[0].images,
+            [
+                "/pictures/ann/es-1-0.jpg",
+                "/pictures/ann/ig-b.jpg",
+                "/pictures/ann/ig-a.jpg",
+                "/pictures/ann/p.jpg",
+                "/pictures/ann/ig-profile.jpg"
+            ]
+        );
     }
 }

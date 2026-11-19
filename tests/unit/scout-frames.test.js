@@ -19,7 +19,7 @@ import {
   stereoLayout, layoutFromSize, frameFilter, frameTimes, frameArgs, imageArgs, probeArgs, parseProbe, imageKey, usableImages,
   imageCounts, framesQueue, frameSource, frameScene, pickVariant, minHeightFor, slrTrailer, vrbangersGallery, vrbangersPageImages,
   recordFrames, recordFramesFailed, recentlyFailed, postFramesDir, grabFrames, grabImages, startRangeProxy, httpSource, megaSource, megaRange,
-  readerFailure, postFrames, FrameError, FRAME_POINTS, FAILED_RETRY_MS, MAX_FRAME_WIDTH, SHARED_IMAGE_POSTS, FRAMES_WANTED,
+  readerFailure, postFrames, rule34videoPoster, FrameError, FRAME_POINTS, FAILED_RETRY_MS, MAX_FRAME_WIDTH, SHARED_IMAGE_POSTS, FRAMES_WANTED,
   jpegSize, isBlankFrame, FRAMES_FILE, emptyFramesFile, normalizeFramesFile, readFramesFile, writeFramesFile, framesOnDisk, migrateFrames,
 } from '../../scripts/scout-frames.mjs';
 import { markTopic, emptyScoutState, dropFrameRecords } from '../../scripts/eroscripts-scout-lib.mjs';
@@ -544,6 +544,35 @@ describe('paid and quota-counted hosts are never read', () => {
   });
   it('posts on other hosts are skipped', async () => {
     expect(await postFrames({ id: 1, scenes: [{ video: { name: 'x.mp4', host: 'gofile' } }] }, tempDir(), {})).toEqual({ skip: 'gofile' });
+  });
+});
+
+describe('rule34video poster when its frames fail', () => {
+  const c = { id: 1, scenes: [{ video: { name: 'Lara 360p.mp4', host: 'rule34video', url: 'https://rule34video.com/video/4104690/lara-croft-doggy/', duration: 60 } }] };
+  const page403 = { page: async (url) => { throw Object.assign(new Error(`rule34video: HTTP 403 for ${url}`), { status: 403 }); } };
+
+  it('poster URL from the page URL: the id rounded down to 1000; other URLs none', () => {
+    expect(rule34videoPoster('https://rule34video.com/video/4104690/lara/')).toBe('https://rule34video.com/contents/videos_screenshots/4104000/4104690/preview.jpg');
+    expect(rule34videoPoster('https://rule34video.com/video/999')).toBe('https://rule34video.com/contents/videos_screenshots/0/999/preview.jpg');
+    expect(rule34videoPoster('https://rule34video.com/videos/4104690/')).toBeNull();
+    expect(rule34videoPoster('https://evil.example/video/4104690/')).toBeNull();
+    expect(rule34videoPoster(undefined)).toBeNull();
+  });
+  it('a page that answers 403: the poster becomes the one frame, the failure in the source', async () => {
+    const dir = tempDir();
+    const calls = [];
+    const run = async (cmd, args) => { calls.push(args); fs.writeFileSync(args.at(-1), 'jpeg'); return { code: 0 }; };
+    const r = await postFrames(c, dir, { rule34video: page403, fetch: () => { throw new Error('no fetch'); }, run });
+    expect(calls).toHaveLength(1);
+    expect(calls[0][calls[0].indexOf('-i') + 1]).toBe('https://rule34video.com/contents/videos_screenshots/4104000/4104690/preview.jpg');
+    expect(calls[0][calls[0].indexOf('-headers') + 1]).toContain('Referer: https://rule34video.com/');
+    expect(r).toEqual({ files: ['25.jpg'], source: 'rule34video: Lara 360p.mp4 (poster; frames failed: rule34video: rule34video: HTTP 403 for https://rule34video.com/video/4104690/lara-croft-doggy/)', bytes: null });
+    expect(fs.readdirSync(dir)).toEqual(['25.jpg']);
+  });
+  it('the poster failing too: the frames failure is thrown', async () => {
+    const run = async () => ({ code: 1, stdout: '', stderr: 'HTTP error 404 Not Found\n', timedOut: false });
+    await expect(postFrames(c, tempDir(), { rule34video: page403, run }))
+      .rejects.toMatchObject({ reason: 'rule34video: rule34video: HTTP 403 for https://rule34video.com/video/4104690/lara-croft-doggy/' });
   });
 });
 

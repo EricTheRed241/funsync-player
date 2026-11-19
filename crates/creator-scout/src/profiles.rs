@@ -622,6 +622,7 @@ pub fn add_pictures(
                         source: f.source.clone(),
                         url: f.page.clone(),
                         taken_at: f.taken_at.clone(),
+                        likes: None,
                     });
                     added += 1;
                 }
@@ -1402,6 +1403,7 @@ mod tests {
             source: "web".into(),
             url: "u".into(),
             taken_at: None,
+            likes: None,
         };
         let mk = |name: &str, ig: bool, pics: usize| Creator {
             name: name.into(),
