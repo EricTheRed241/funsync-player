@@ -455,3 +455,20 @@ fn marks_round_trip_with_keep_and_delete() {
     assert!(Marks::set(&dir, "b2-a1", Dir::Left, "now".into()).is_err());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn frame_paths_name_a_video_and_a_share() {
+    assert_eq!(
+        frame_request("/dupes-frames/a1b2/40.jpg"),
+        Some(("a1b2", 40))
+    );
+    for bad in [
+        "/dupes-frames/a1b2/45.jpg",
+        "/dupes-frames/../40.jpg",
+        "/dupes-frames/a1b2/040.jpg",
+        "/dupes-frames/a1b2/40.png",
+        "/dupes-frames/a1b2/x/40.jpg",
+    ] {
+        assert_eq!(frame_request(bad), None, "{bad}");
+    }
+}
