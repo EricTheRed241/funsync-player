@@ -2,15 +2,17 @@
 //! waiting list's posts with no video in the library and no swipe yet, and the site scouts'
 //! scenes (crate::scenes: SexLikeReal, VRBangers / VRConk, PMVHaven, FapTap) not downloaded,
 //! not in the library, not swiped and not a video a waiting post brings (the post wins: its
-//! script is free). A card's tab: multi-axis (a post's `axisType` "multi", a scene's
-//! `script.axes`) → Multi, else VR or Flat by its `vr`.
+//! script is free), and the yes creators' posts no other card shows (crate::creators). A
+//! card's tab: multi-axis (a post's `axisType` "multi", a scene's `script.axes`) → Multi,
+//! else VR or Flat by its `vr`.
 //!
 //! Highest score first (the scouts' download order); with a `seed`, each card's score is
 //! shifted by up to the deal's jitter (the request's `jitter`, else the tab's MULTI_JITTER,
 //! VR_JITTER or FLAT_JITTER) either way, so the order wanders a little. Scores, tag scores and
-//! creampie come from the scouts' files (`score`, `tagScores`, `creampie`); Rust never
-//! computes them.
+//! creampie come from the scouts' files (`score`, `tagScores`, `creampie`); Rust only adds
+//! the yes-creator bonus (`swipeDeck.yesCreatorBonus`) to a yes creator's cards.
 
+use crate::creators::Creators;
 use crate::frames;
 use crate::report::{self, id_of, str_of, strings_of};
 use crate::scenes::{self, Covered, SceneCard};
@@ -260,6 +262,10 @@ pub struct Card {
     /// from there with the account's quota).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slr_video: Option<SlrVideo>,
+    /// The yes creator (crate::creators) whose post it is: the Creator badge; the score
+    /// includes the creator bonus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
 }
 
 /// A post's video on SexLikeReal (the scout's `scene.video` with `host: "slr"`).
@@ -321,6 +327,8 @@ pub struct Files {
     pub post_swipes: Swipes,
     /// Each scene scout's file with its swipes.
     pub scenes: Vec<(scenes::Source, Value, Swipes)>,
+    /// creators.json, creator-swipes.json and the yes-creator bonus.
+    pub creators: Creators,
 }
 
 impl Files {
@@ -340,12 +348,14 @@ impl Files {
                 (src, file, swipes)
             })
             .collect();
+        let creators = Creators::read(user_data, problems);
         Files {
             state,
             waiting,
             videos,
             post_swipes,
             scenes,
+            creators,
         }
     }
 
@@ -465,7 +475,9 @@ pub fn post_stack(cand: &Value) -> Stack {
     )
 }
 
-/// Every card of `stack`, in deck order (no frames; `problems` empty).
+/// Every card of `stack`, in deck order (no frames; `problems` empty). Yes creators' cards
+/// carry her name and the creator bonus, and her other posts come as creator cards
+/// (crate::creators).
 pub fn build(f: &Files, stack: Stack) -> Deck {
     let shared = image_counts(&f.state);
     let mut wanted = 0;
@@ -503,6 +515,20 @@ pub fn build(f: &Files, stack: Stack) -> Deck {
             }
         }
     }
+    for c in &mut cards {
+        f.creators.tag(c);
+    }
+    // Posts another card shows (or showed: swiped, in the library) never come as creator cards.
+    let shown: HashSet<String> = candidates(&f.waiting)
+        .map(|(id, _)| format!("eroscripts:{id}"))
+        .chain(
+            scenes::scenes(scenes::Source::Faptap, f.scene_file(scenes::Source::Faptap))
+                .map(|(id, _)| format!("faptap:{id}")),
+        )
+        .collect();
+    let (creator_cards, creator_wanted) = f.creators.cards(stack, &shown, &f.videos);
+    wanted += creator_wanted;
+    cards.extend(creator_cards.into_iter().map(DeckCard::Scene));
     sort(&mut cards, DeckCard::score);
     let slr = f.scene_file(scenes::Source::Slr);
     Deck {
@@ -555,6 +581,7 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>, shared: &HashMap<&str, usize
             scene_id: v.get("slrSceneId").and_then(id_of),
             url: str_of(v, "url").filter(|u| u.starts_with("https://")),
         }),
+        creator: None,
     }
 }
 
@@ -847,6 +874,7 @@ mod tests {
                 (Source::Pmvhaven, pmvhaven(), swipes(&[("p3", Dir::Right)])),
                 (Source::Faptap, faptap(), swipes(&[("f3", Dir::Right)])),
             ],
+            creators: Creators::default(),
         }
     }
 
@@ -1406,5 +1434,93 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn with_creators() -> Files {
+        let mut f = files();
+        f.creators = Creators::new(
+            json!({"creators": {
+                "ann": {"name": "Ann", "sources": ["favourite"],
+                    "pictures": [{"file": "es-9.jpg", "source": "eroscripts"}, {"file": "ig-1.jpg", "source": "instagram"}],
+                    "posts": [
+                        {"kind": "eroscripts", "id": 11, "downloadable": true},
+                        {"kind": "faptap", "id": "f1", "downloadable": true},
+                        {"kind": "eroscripts", "id": "500", "title": "Ann's own", "score": 6.0, "downloadable": true,
+                         "image": "es-500.jpg", "url": "https://discuss.eroscripts.com/t/500", "tags": ["pov"], "durationS": 90},
+                        {"kind": "eroscripts", "id": 501, "score": 2.0, "downloadable": false},
+                        {"kind": "faptap", "id": "700", "score": 1.0, "downloadable": true, "inLibrary": true},
+                        {"kind": "eroscripts", "id": 19, "score": 1.0, "downloadable": true},
+                        {"kind": "eroscripts", "id": 502, "score": 3.0, "downloadable": true},
+                        {"kind": "eroscripts", "id": 503, "score": 3.0, "downloadable": true, "multiAxis": true}]},
+                "bea": {"name": "Bea", "posts": [{"kind": "eroscripts", "id": 600, "score": 50.0, "downloadable": true}]},
+                "cat": {"name": "Cat", "sources": ["pornstar"],
+                    "posts": [{"kind": "eroscripts", "id": 601, "score": 1.0, "downloadable": true}]}
+            }}),
+            json!({"version": 1, "creators": {"cat": {"choice": "no", "at": "t"}},
+                "posts": {"eroscripts:502": {"choice": "want", "at": "t", "creator": "ann"}}}),
+            4.0,
+        );
+        f
+    }
+
+    #[test]
+    fn yes_creators_cards_get_her_badge_the_bonus_and_her_other_posts() {
+        let plain = build(&files(), Stack::Flat);
+        let d = build(&with_creators(), Stack::Flat);
+        // Her waiting post and FapTap scene: tagged, 4 points up.
+        let p11 = post(&d, 11);
+        assert_eq!(
+            (p11.creator.as_deref(), p11.score),
+            (Some("Ann"), Some(9.0))
+        );
+        let f1 = d
+            .cards
+            .iter()
+            .find_map(|c| match c {
+                DeckCard::Scene(s) if s.id == "f1" => Some(s),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((f1.creator.as_deref(), f1.score), (Some("Ann"), Some(8.0)));
+        assert_eq!(f1.score_parts["yes creator"], 4.0);
+        // Her post no other card shows comes as a creator card; not the undownloadable one,
+        // the one in the library (topic 19 has a video), the swiped one, nor anything of Bea
+        // (not yes) or Cat (swiped no).
+        let mine: Vec<_> = d
+            .cards
+            .iter()
+            .filter(|c| c.source() == crate::creators::SOURCE)
+            .map(DeckCard::key)
+            .collect();
+        assert_eq!(mine, ["creators:eroscripts-500"]);
+        let DeckCard::Scene(own) = d.cards.iter().find(|c| c.source() == "creators").unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(own.score, Some(10.0));
+        assert_eq!(own.site, "eroscripts");
+        assert_eq!(own.runtime_ms, Some(90_000));
+        assert_eq!(
+            own.images,
+            [
+                "/pictures/ann/es-500.jpg",
+                "/pictures/ann/ig-1.jpg",
+                "/pictures/ann/es-9.jpg"
+            ]
+        );
+        assert_eq!(d.remaining, plain.remaining + 1);
+        // The swiped want counts until it's in the library.
+        assert_eq!(d.wanted, plain.wanted + 1);
+        // Higher score, earlier card: the creator card now outranks post 11.
+        let at = |k: &str| keys(&d).iter().position(|x| x == k).unwrap();
+        assert!(at("creators:eroscripts-500") < at("eroscripts:11"));
+        // A multi-axis post goes to Multi.
+        let multi = build(&with_creators(), Stack::Multi);
+        assert!(keys(&multi).contains(&"creators:eroscripts-503".to_string()));
+        let v = serde_json::to_value(own).unwrap();
+        assert_eq!(
+            (&v["source"], &v["creator"]),
+            (&json!("creators"), &json!("Ann"))
+        );
     }
 }

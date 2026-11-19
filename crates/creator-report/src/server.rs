@@ -1,21 +1,20 @@
 //! The HTTP side, on scout-report's plumbing (scout_report::server::serve_site) behind its
 //! access-PIN gate and login page (scout_report::gate):
 //!
-//! - `GET /creators` (the Creators tab), `GET /posts` (Posts), `GET /swiped` (Swiped) and
-//!   `GET /collection` (Collection): the same page. `GET /` redirects to `/creators`.
-//! - `GET /api/creators/deck?seed=N&offset=N&limit=N` and `GET /api/posts/deck?offset=N&limit=N`:
-//!   a page of a deck (crate::deck).
+//! - `GET /creators` (the Creators tab), `GET /swiped` (Swiped) and `GET /collection`
+//!   (Collection): the same page. `GET /` redirects to `/creators`. The yes creators' posts
+//!   are swiped on the swipe deck (scout-report, scout_report::creators).
+//! - `GET /api/creators/deck?seed=N&offset=N&limit=N`: a page of the deck (crate::deck).
 //! - `GET /api/creators/swiped`: the swiped creators' cards, newest swipe first.
 //!   `GET /api/creators/collection`: the yes creators' cards. `GET /api/summary`: the counts.
-//! - `POST /api/creators/swipe {slug, choice: yes|no}`, `POST /api/creators/swipe/undo {slug}`,
-//!   `POST /api/posts/swipe {key, choice: want|hide, creator}`, `POST /api/posts/swipe/undo {key}`:
+//! - `POST /api/creators/swipe {slug, choice: yes|no}`, `POST /api/creators/swipe/undo {slug}`:
 //!   the only writes (crate::swipes).
-//! - `GET /pictures/<slug>/<file>`: a picture (crate::pictures).
+//! - `GET /pictures/<slug>/<file>`: a picture (scout_report::creator_pictures).
 
 use crate::creators::{self, Cache, Creators};
 use crate::deck::{self, Page};
-use crate::pictures;
-use crate::swipes::{self, Choice, PostChoice, Swipes};
+use crate::swipes::{self, Choice, Swipes};
+use scout_report::creator_pictures as pictures;
 use scout_report::gate::Gate;
 use scout_report::server::{Response, html, json_ok, serve_site, text};
 use serde_json::{Value, json};
@@ -27,7 +26,7 @@ use std::path::{Path, PathBuf};
 pub const PAGE: &str = include_str!("creators.html");
 /// The site's name (log lines) and its pages, for the gate.
 pub const NAME: &str = "creator-report";
-pub const PAGES: &[&str] = &["/", "/creators", "/posts", "/swiped", "/collection"];
+pub const PAGES: &[&str] = &["/", "/creators", "/swiped", "/collection"];
 /// A picture's name is new whenever creator-scout saves another one.
 const PICTURE_CACHE: &str = "max-age=86400";
 
@@ -61,18 +60,11 @@ impl App {
                 resp.headers.push(("Location", location));
                 resp
             }
-            ("GET" | "HEAD", "/creators" | "/posts" | "/swiped" | "/collection") => html(PAGE),
+            ("GET" | "HEAD", "/creators" | "/swiped" | "/collection") => html(PAGE),
             ("GET" | "HEAD", "/api/creators/deck") => match page(query) {
                 Ok(page) => {
                     let (creators, swipes, problems) = self.state();
                     json_ok(&deck::creator_deck(creators, &swipes, &page, problems))
-                }
-                Err(e) => text(400, &e),
-            },
-            ("GET" | "HEAD", "/api/posts/deck") => match page(query) {
-                Ok(page) => {
-                    let (creators, swipes, problems) = self.state();
-                    json_ok(&deck::post_deck(creators, &swipes, &page, problems))
                 }
                 Err(e) => text(400, &e),
             },
@@ -93,14 +85,6 @@ impl App {
             ("POST", "/api/creators/swipe/undo") => match field(body, "slug") {
                 Ok(slug) => match swipes::undo_creator(&self.user_data, &slug) {
                     Ok(removed) => json_ok(&json!({"slug": slug, "removed": removed})),
-                    Err(e) => text(500, &format!("{e}\n")),
-                },
-                Err(resp) => resp,
-            },
-            ("POST", "/api/posts/swipe") => self.post_swipe(body),
-            ("POST", "/api/posts/swipe/undo") => match field(body, "key") {
-                Ok(key) => match swipes::undo_post(&self.user_data, &key) {
-                    Ok(removed) => json_ok(&json!({"key": key, "removed": removed})),
                     Err(e) => text(500, &format!("{e}\n")),
                 },
                 Err(resp) => resp,
@@ -153,57 +137,9 @@ impl App {
             Err(e) => text(500, &format!("{e}\n")),
         }
     }
-
-    /// `POST /api/posts/swipe {key, choice, creator}`: a post of that creator in
-    /// creators.json, want (it must be downloadable) or hide.
-    fn post_swipe(&mut self, body: &[u8]) -> Response {
-        let parsed = (|| {
-            let key = field(body, "key")?;
-            let creator = field(body, "creator")?;
-            let choice = field(body, "choice")
-                .ok()
-                .and_then(|c| PostChoice::parse(&c))
-                .ok_or_else(|| text(400, "choice must be \"want\" or \"hide\"\n"))?;
-            Ok::<_, Response>((key, creator, choice))
-        })();
-        let (key, creator, choice) = match parsed {
-            Ok(r) => r,
-            Err(resp) => return resp,
-        };
-        let known = match self.creators.get(&self.user_data) {
-            Err(e) => return text(500, &format!("{e}\n")),
-            Ok(c) => c
-                .and_then(|c| c.post(&creator, &key))
-                .map(|p| p.downloadable),
-        };
-        match known {
-            None => {
-                return text(
-                    400,
-                    &format!("{key} is not a post of {creator} in {}\n", creators::FILE),
-                );
-            }
-            Some(false) if choice == PostChoice::Want => {
-                return text(400, &format!("{key} is not downloadable\n"));
-            }
-            Some(_) => {}
-        }
-        match swipes::set_post(
-            &self.user_data,
-            &key,
-            choice,
-            &creator,
-            video_tags::timefmt::now_iso(),
-        ) {
-            Ok(s) => {
-                json_ok(&json!({"key": key, "choice": s.choice, "at": s.at, "creator": s.creator}))
-            }
-            Err(e) => text(500, &format!("{e}\n")),
-        }
-    }
 }
 
-/// The deck request: `seed=N` (shuffle a little; the creators deck only), `offset=N`
+/// The deck request: `seed=N` (shuffle a little), `offset=N`
 /// (cards to skip), `limit=N` (default deck::DEFAULT_LIMIT, at most deck::MAX_LIMIT).
 fn page(query: &str) -> Result<Page, String> {
     let mut p = Page::default();
@@ -318,13 +254,7 @@ mod tests {
     fn serves_every_tab_the_same_page_and_redirects_the_root() {
         let dir = user_data("pages");
         let mut app = App::new(&dir);
-        for p in [
-            "/creators",
-            "/posts",
-            "/swiped",
-            "/collection",
-            "/posts?x=1#y",
-        ] {
+        for p in ["/creators", "/swiped", "/collection", "/swiped?x=1#y"] {
             let r = app.route("GET", p, b"");
             assert_eq!(
                 (r.status, r.content_type),
@@ -337,7 +267,10 @@ mod tests {
             assert_eq!(r.status, 303, "{target}");
             assert_eq!(r.headers, [("Location", to.to_string())]);
         }
-        assert_eq!(app.route("GET", "/nowhere", b"").status, 404);
+        // The Posts tab moved to the swipe deck.
+        for gone in ["/nowhere", "/posts", "/api/posts/deck"] {
+            assert_eq!(app.route("GET", gone, b"").status, 404, "{gone}");
+        }
         assert_eq!(app.route("POST", "/creators", b"").status, 404);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -346,7 +279,7 @@ mod tests {
     fn without_creators_json_the_decks_are_empty_and_say_so() {
         let dir = user_data("missing");
         let mut app = App::new(&dir);
-        for target in ["/api/creators/deck", "/api/posts/deck", "/api/summary"] {
+        for target in ["/api/creators/deck", "/api/summary"] {
             let v = get(&mut app, target);
             assert_eq!(v["missing"], true, "{target}");
             assert_eq!(v["problems"], json!([]));
@@ -382,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn swiping_creators_then_their_posts() {
+    fn swiping_creators_and_counting_their_posts() {
         let dir = with_sample("swipe");
         let mut app = App::new(&dir);
         let v = get(&mut app, "/api/creators/deck?seed=3&offset=0&limit=10");
@@ -400,7 +333,10 @@ mod tests {
             slugs(&get(&mut app, "/api/creators/deck?offset=1")),
             ["ann"]
         );
-        assert_eq!(get(&mut app, "/api/posts/deck")["remaining"], 0);
+        assert_eq!(
+            get(&mut app, "/api/creators/collection")["cards"],
+            json!([])
+        );
 
         let r = post(
             &mut app,
@@ -418,32 +354,28 @@ mod tests {
         assert_eq!(slugs(&v), ["bea"]);
         assert_eq!(v["yes"], 1);
 
-        // Ann's downloadable post is in the Posts deck.
-        let v = get(&mut app, "/api/posts/deck?offset=0");
-        assert_eq!(v["remaining"], 1);
-        assert_eq!(v["cards"][0]["key"], "eroscripts:1");
-        assert_eq!(v["cards"][0]["creator"], "ann");
+        // Ann's downloadable post is to swipe (on the swipe deck); the deck's want lands in
+        // the same file, which the site keeps when it writes.
+        let yes = get(&mut app, "/api/creators/collection");
         assert_eq!(
-            v["cards"][0]["pictures"][0]["src"],
-            "/pictures/ann/ig-1.jpg"
+            (&yes["cards"][0]["slug"], &yes["cards"][0]["unswiped"]),
+            (&json!("ann"), &json!(1))
         );
-        let r = post(
-            &mut app,
-            "/api/posts/swipe",
-            json!({"key": "eroscripts:1", "choice": "want", "creator": "ann"}),
-        );
-        assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
-        assert_eq!(get(&mut app, "/api/posts/deck")["remaining"], 0);
+        let mut file: Value =
+            serde_json::from_slice(&std::fs::read(dir.join(swipes::FILE)).unwrap()).unwrap();
+        file["posts"]["eroscripts:1"] = json!({"choice": "want", "at": "t", "creator": "ann"});
+        std::fs::write(dir.join(swipes::FILE), file.to_string()).unwrap();
         let sum = get(&mut app, "/api/summary");
         assert_eq!(
             sum["creators"],
             json!({"total": 2, "yes": 1, "no": 0, "unswiped": 1})
         );
-        assert_eq!(sum["posts"]["wanted"], 1);
-        assert_eq!(sum["posts"]["pendingDownload"], 1);
         let yes = get(&mut app, "/api/creators/collection");
         assert_eq!(yes["cards"][0]["slug"], "ann");
-        assert_eq!(yes["cards"][0]["wanted"], 1);
+        assert_eq!(
+            (&yes["cards"][0]["unswiped"], &yes["cards"][0]["wanted"]),
+            (&json!(0), &json!(1))
+        );
         let swiped = get(&mut app, "/api/creators/swiped");
         assert_eq!(slugs(&swiped), ["ann"]);
         assert_eq!(swiped["cards"][0]["choice"], "yes");
@@ -454,22 +386,19 @@ mod tests {
         assert_eq!(on_disk["creators"]["ann"]["choice"], "yes");
         assert_eq!(on_disk["posts"]["eroscripts:1"]["creator"], "ann");
 
-        // Undo both.
-        let r = post(
-            &mut app,
-            "/api/posts/swipe/undo",
-            json!({"key": "eroscripts:1"}),
-        );
-        let v: Value = serde_json::from_slice(&r.body).unwrap();
-        assert_eq!(v["removed"], true);
-        assert_eq!(get(&mut app, "/api/posts/deck")["remaining"], 1);
-        // Changing Ann to no takes her posts off the Posts deck.
+        // Changing Ann to no keeps her post's swipe; she leaves the collection.
         post(
             &mut app,
             "/api/creators/swipe",
             json!({"slug": "ann", "choice": "no"}),
         );
-        assert_eq!(get(&mut app, "/api/posts/deck")["remaining"], 0);
+        assert_eq!(
+            get(&mut app, "/api/creators/collection")["cards"],
+            json!([])
+        );
+        let on_disk: Value =
+            serde_json::from_slice(&std::fs::read(dir.join(swipes::FILE)).unwrap()).unwrap();
+        assert_eq!(on_disk["posts"]["eroscripts:1"]["choice"], "want");
         let r = post(&mut app, "/api/creators/swipe/undo", json!({"slug": "ann"}));
         let v: Value = serde_json::from_slice(&r.body).unwrap();
         assert_eq!(v["removed"], true);
@@ -496,27 +425,6 @@ mod tests {
             ("/api/creators/swipe", json!({"choice": "yes"})),
             ("/api/creators/swipe", json!(["ann"])),
             ("/api/creators/swipe/undo", json!({"slug": ""})),
-            (
-                "/api/posts/swipe",
-                json!({"key": "eroscripts:1", "choice": "yes", "creator": "ann"}),
-            ),
-            (
-                "/api/posts/swipe",
-                json!({"key": "eroscripts:1", "choice": "want", "creator": "bea"}),
-            ),
-            (
-                "/api/posts/swipe",
-                json!({"key": "eroscripts:2", "choice": "want", "creator": "ann"}),
-            ),
-            (
-                "/api/posts/swipe",
-                json!({"key": "eroscripts:9", "choice": "hide", "creator": "ann"}),
-            ),
-            (
-                "/api/posts/swipe",
-                json!({"key": "eroscripts:1", "choice": "want"}),
-            ),
-            ("/api/posts/swipe/undo", json!({})),
         ] {
             assert_eq!(
                 post(&mut app, target, body.clone()).status,
@@ -524,13 +432,6 @@ mod tests {
                 "{target} {body}"
             );
         }
-        // Hiding a post that can't be downloaded is fine.
-        let r = post(
-            &mut app,
-            "/api/posts/swipe",
-            json!({"key": "eroscripts:2", "choice": "hide", "creator": "ann"}),
-        );
-        assert_eq!(r.status, 200);
         for q in ["seed=x", "offset=-1", "limit=1.5"] {
             assert_eq!(
                 app.route("GET", &format!("/api/creators/deck?{q}"), b"")
@@ -624,7 +525,6 @@ mod tests {
         for (target, next) in [
             ("/", "/login?next=/"),
             ("/creators", "/login?next=/creators"),
-            ("/posts", "/login?next=/posts"),
             ("/swiped", "/login?next=/swiped"),
             ("/collection", "/login?next=/collection"),
         ] {
@@ -633,13 +533,12 @@ mod tests {
         }
         for (method, target) in [
             ("GET", "/api/creators/deck"),
-            ("GET", "/api/posts/deck"),
             ("GET", "/api/summary"),
             ("GET", "/api/creators/swiped"),
             ("GET", "/api/creators/collection"),
             ("GET", "/pictures/ann/ig-1.jpg"),
             ("POST", "/api/creators/swipe"),
-            ("POST", "/api/posts/swipe/undo"),
+            ("POST", "/api/creators/swipe/undo"),
         ] {
             assert_eq!(
                 send(lan, method, target, "").status,
@@ -648,13 +547,13 @@ mod tests {
             );
         }
         // The login page is scout-report's.
-        let r = send(lan, "GET", "/login?next=/posts", "");
+        let r = send(lan, "GET", "/login?next=/swiped", "");
         assert_eq!(r.status, 200);
         assert!(String::from_utf8_lossy(&r.body).contains("access PIN"));
         // With the cookie, or from this Mac, it's open.
         let cookie = format!("{}={}", access::COOKIE_NAME, pin.token(now));
         assert_eq!(send(lan, "GET", "/api/creators/deck", &cookie).status, 200);
-        assert_eq!(send(lan, "GET", "/posts", &cookie).status, 200);
+        assert_eq!(send(lan, "GET", "/collection", &cookie).status, 200);
         let local = IpAddr::V4(Ipv4Addr::LOCALHOST);
         assert_eq!(send(local, "GET", "/api/summary", "").status, 200);
         let _ = std::fs::remove_dir_all(&dir);

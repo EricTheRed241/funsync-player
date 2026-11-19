@@ -1,30 +1,27 @@
-//! The two decks, the Swiped and Collection lists and the summary, from creators.json
+//! The Creators deck, the Swiped and Collection lists and the summary, from creators.json
 //! and the swipes.
 //!
 //! A creator is yes when swiped yes, or, without a swipe, when she is a favourite
 //! artist or on the pornstar list (creators.json `sources`, set by creator-scout
-//! --favourites); swiped no wins over both.
+//! --favourites); swiped no wins over both (scout_report::creators applies the same rule:
+//! the swipe deck deals the yes creators' posts).
 //!
 //! - Creators deck: the creators without a swipe that aren't yes by source, best score
 //!   first (no score last), with a seed shifting every score by up to JITTER either way
 //!   (scout_report::deck::jitter, by the slug's hash), so each deal is a little different
 //!   but stays near score order.
-//! - Posts deck: the posts of the yes creators that are downloadable, not in the
-//!   library and not swiped, best score first (no score last); a post listed under two
-//!   creators comes once.
 //! - Swiped list: the swiped creators (yes, no or both), newest swipe first.
 //! - Collection: the yes creators, by name.
 //!
-//! A page of either deck is `offset` cards into the order, `limit` long; `remaining`
-//! counts the whole deck. The lists come whole, each entry with her full card.
+//! A page of the deck is `offset` cards into the order, `limit` long; `remaining` counts
+//! the whole deck. The lists come whole, each entry with her full card.
 
 use crate::creators::{Creator, Creators, Post};
-use crate::pictures;
 use crate::swipes::{Choice, PostChoice, Swipes};
+use scout_report::creator_pictures as pictures;
 use serde::Serialize;
 use serde_json::Value;
 use std::cmp::Ordering;
-use std::collections::HashSet;
 
 /// Score points a seeded creators deal moves each card by, at most, either way.
 pub const JITTER: f64 = 2.0;
@@ -125,31 +122,7 @@ pub struct CreatorCard {
     pub profiles: Vec<ProfileLink>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PostCard {
-    /// `<kind>:<id>`, its key in creator-swipes.json.
-    pub key: String,
-    pub kind: String,
-    pub id: String,
-    pub title: String,
-    pub url: String,
-    /// The creator's slug.
-    pub creator: String,
-    pub creator_name: String,
-    /// The post's image, else the creator's pictures.
-    pub pictures: Vec<Pic>,
-    pub hosts: Vec<String>,
-    pub creampie: bool,
-    pub multi_axis: bool,
-    pub score: Option<f64>,
-    pub likes: Option<u64>,
-    pub duration_s: Option<f64>,
-    pub tags: Vec<String>,
-    pub created_at: Option<String>,
-}
-
-/// What both decks send besides the cards.
+/// What the deck and the lists send besides the cards.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Meta {
@@ -168,18 +141,6 @@ pub struct CreatorDeck {
     pub remaining: usize,
     /// Yes creators (swiped yes, or a favourite / pornstar-list one without a swipe).
     pub yes: usize,
-    #[serde(flatten)]
-    pub meta: Meta,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PostDeck {
-    pub cards: Vec<PostCard>,
-    /// Posts in the deck (not swiped yet).
-    pub remaining: usize,
-    /// Posts swiped want.
-    pub wanted: usize,
     #[serde(flatten)]
     pub meta: Meta,
 }
@@ -221,24 +182,10 @@ pub struct CreatorCounts {
     pub unswiped: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PostCounts {
-    /// In the Posts deck.
-    pub unswiped: usize,
-    pub wanted: usize,
-    /// Wanted and not in the library yet: the next daily run downloads them.
-    pub pending_download: usize,
-    /// Wanted and in the library now.
-    pub in_library: usize,
-    pub hidden: usize,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub creators: CreatorCounts,
-    pub posts: PostCounts,
     #[serde(flatten)]
     pub meta: Meta,
 }
@@ -305,31 +252,10 @@ pub fn creator_order<'a>(
     list.into_iter().map(|(_, slug, c)| (slug, c)).collect()
 }
 
-/// Whether post `p` belongs in the Posts deck (for a yes creator).
-fn in_post_deck(p: &Post, swipes: &Swipes) -> bool {
+/// Whether post `p` of a yes creator is still to swipe: the swipe deck deals it (as her
+/// creator card, or as the waiting post or FapTap scene it is).
+fn to_swipe(p: &Post, swipes: &Swipes) -> bool {
     p.downloadable && !p.in_library && !swipes.posts.contains_key(&p.key())
-}
-
-/// The Posts deck, in order: (slug, creator, post).
-pub fn post_order<'a>(
-    creators: &'a Creators,
-    swipes: &Swipes,
-) -> Vec<(&'a str, &'a Creator, &'a Post)> {
-    let mut seen = HashSet::new();
-    let mut list: Vec<_> = creators
-        .creators
-        .iter()
-        .filter(|(slug, c)| is_yes(slug, c, swipes))
-        .flat_map(|(slug, c)| c.posts.iter().map(move |p| (slug.as_str(), c, p)))
-        .filter(|(_, _, p)| in_post_deck(p, swipes))
-        .collect();
-    list.sort_by(|(sa, _, a), (sb, _, b)| {
-        by_score(a.score, b.score)
-            .then_with(|| sa.cmp(sb))
-            .then_with(|| a.key().cmp(&b.key()))
-    });
-    list.retain(|(_, _, p)| seen.insert(p.key()));
-    list
 }
 
 /// A creator's pictures as served here: Instagram's first, then the rest, each in the file's order.
@@ -411,36 +337,6 @@ pub fn creator_card(slug: &str, c: &Creator) -> CreatorCard {
     }
 }
 
-pub fn post_card(slug: &str, c: &Creator, p: &Post) -> PostCard {
-    let image = p
-        .image
-        .as_deref()
-        .and_then(|f| pictures::url(slug, f))
-        .map(|src| Pic {
-            src,
-            source: p.kind.clone(),
-            link: Some(p.url.clone()).filter(|u| !u.is_empty()),
-        });
-    PostCard {
-        key: p.key(),
-        kind: p.kind.clone(),
-        id: p.id.clone(),
-        title: p.title.clone(),
-        url: p.url.clone(),
-        creator: slug.to_string(),
-        creator_name: display_name(slug, c).to_string(),
-        pictures: image.map_or_else(|| creator_pictures(slug, c), |i| vec![i]),
-        hosts: p.hosts.clone(),
-        creampie: p.creampie,
-        multi_axis: p.multi_axis,
-        score: p.score,
-        likes: p.likes,
-        duration_s: p.duration_s,
-        tags: p.tags.clone(),
-        created_at: p.created_at.clone(),
-    }
-}
-
 fn meta(creators: Option<&Creators>, problems: Vec<String>) -> Meta {
     Meta {
         missing: creators.is_none() && problems.is_empty(),
@@ -454,14 +350,6 @@ fn yes_count(creators: &Creators, swipes: &Swipes) -> usize {
         .creators
         .iter()
         .filter(|(s, c)| is_yes(s, c, swipes))
-        .count()
-}
-
-fn wanted_count(swipes: &Swipes) -> usize {
-    swipes
-        .posts
-        .values()
-        .filter(|s| s.choice == PostChoice::Want)
         .count()
 }
 
@@ -493,34 +381,6 @@ pub fn creator_deck(
     }
 }
 
-/// A page of the Posts deck.
-pub fn post_deck(
-    creators: Option<&Creators>,
-    swipes: &Swipes,
-    page: &Page,
-    problems: Vec<String>,
-) -> PostDeck {
-    let (cards, remaining) = match creators {
-        Some(all) => {
-            let order = post_order(all, swipes);
-            let cards = order
-                .iter()
-                .skip(page.offset)
-                .take(page.limit)
-                .map(|(slug, c, p)| post_card(slug, c, p))
-                .collect();
-            (cards, order.len())
-        }
-        None => (Vec::new(), 0),
-    };
-    PostDeck {
-        cards,
-        remaining,
-        wanted: wanted_count(swipes),
-        meta: meta(creators, problems),
-    }
-}
-
 /// Creator `slug` with her swipe and post counts.
 fn listed(slug: &str, c: &Creator, swipes: &Swipes) -> ListedCreator {
     let swipe = swipes.creators.get(slug);
@@ -530,7 +390,7 @@ fn listed(slug: &str, c: &Creator, swipes: &Swipes) -> ListedCreator {
         at: swipe.map(|s| s.at.clone()),
         from: swipe.map_or_else(|| yes_source(c), |_| None),
         unswiped: if is_yes(slug, c, swipes) {
-            c.posts.iter().filter(|p| in_post_deck(p, swipes)).count()
+            c.posts.iter().filter(|p| to_swipe(p, swipes)).count()
         } else {
             0
         },
@@ -599,23 +459,6 @@ pub fn summary(creators: Option<&Creators>, swipes: &Swipes, problems: Vec<Strin
                 Some(Choice::No) => c.no += 1,
                 _ if is_yes(slug, cr, swipes) => c.yes += 1,
                 _ => c.unswiped += 1,
-            }
-        }
-        s.posts.unswiped = post_order(all, swipes).len();
-    }
-    for (key, swipe) in &swipes.posts {
-        match swipe.choice {
-            PostChoice::Hide => s.posts.hidden += 1,
-            PostChoice::Want => {
-                s.posts.wanted += 1;
-                if creators
-                    .and_then(|c| c.find_post(key))
-                    .is_some_and(|p| p.in_library)
-                {
-                    s.posts.in_library += 1;
-                } else {
-                    s.posts.pending_download += 1;
-                }
             }
         }
     }
@@ -778,52 +621,27 @@ mod tests {
     }
 
     #[test]
-    fn posts_come_from_yes_creators_downloadable_not_in_library_not_swiped() {
+    fn a_yes_creators_posts_to_swipe_are_downloadable_not_in_library_not_swiped() {
         let all = sample();
-        // Nobody swiped yes: no posts.
-        assert!(post_order(&all, &Swipes::default()).is_empty());
+        let unswiped = |s: &Swipes| -> Vec<(String, usize)> {
+            collection(Some(&all), s, vec![])
+                .cards
+                .iter()
+                .map(|c| (c.card.slug.clone(), c.unswiped))
+                .collect()
+        };
+        // Paid, no-video and in-library posts don't count.
         let s = swipes(&[("ann", Choice::Yes), ("bea", Choice::No)], &[]);
-        let keys: Vec<_> = post_order(&all, &s)
-            .iter()
-            .map(|(_, _, p)| p.key())
-            .collect();
-        // Score order, null last; paid, no-video and in-library posts left out.
-        assert_eq!(keys, ["eroscripts:1", "faptap:100"]);
-
+        assert_eq!(unswiped(&s), [("ann".to_string(), 2)]);
+        // A swiped post (either way) doesn't either.
         let s = swipes(
             &[("ann", Choice::Yes), ("bea", Choice::Yes)],
             &[("faptap:100", PostChoice::Hide, "ann")],
         );
-        let order = post_order(&all, &s);
-        let got: Vec<_> = order.iter().map(|(slug, _, p)| (*slug, p.key())).collect();
-        // The collab (in both) comes once; swiped posts are gone.
         assert_eq!(
-            got,
-            [
-                ("bea", "eroscripts:5".to_string()),
-                ("ann", "eroscripts:1".to_string())
-            ]
+            unswiped(&s),
+            [("ann".to_string(), 1), ("bea".to_string(), 2)]
         );
-        let d = post_deck(Some(&all), &s, &Page::default(), vec![]);
-        assert_eq!((d.remaining, d.wanted), (2, 0));
-    }
-
-    #[test]
-    fn a_post_card_shows_its_image_else_the_creators_pictures() {
-        let all = sample();
-        let ann = &all.creators["ann"];
-        let c = post_card("ann", ann, &ann.posts[0]);
-        assert_eq!(c.key, "eroscripts:1");
-        assert_eq!(c.creator_name, "Ann");
-        assert_eq!(c.pictures.len(), 1);
-        assert_eq!(c.pictures[0].src, "/pictures/ann/es-1-0.jpg");
-        assert_eq!(
-            c.pictures[0].link.as_deref(),
-            Some("https://discuss.eroscripts.com/t/1")
-        );
-        let c = post_card("ann", ann, &ann.posts[3]);
-        let srcs: Vec<_> = c.pictures.iter().map(|p| p.src.as_str()).collect();
-        assert_eq!(srcs, ["/pictures/ann/ig-1.jpg", "/pictures/ann/es-1-0.jpg"]);
     }
 
     #[test]
@@ -864,18 +682,7 @@ mod tests {
                 unswiped: 2
             }
         );
-        assert_eq!(
-            sum.posts,
-            PostCounts {
-                unswiped: 1,
-                wanted: 3,
-                pending_download: 2,
-                in_library: 1,
-                hidden: 1
-            }
-        );
         let v = serde_json::to_value(&sum).unwrap();
-        assert_eq!(v["posts"]["pendingDownload"], 2);
         assert_eq!(v["updatedAt"], "2026-11-18T01:40:00Z");
         assert_eq!(v["missing"], false);
         assert!(summary(None, &Swipes::default(), vec![]).meta.missing);
@@ -901,12 +708,20 @@ mod tests {
         assert_eq!(slugs(&creator_order(&all, &s, None)), ["plain"]);
         let d = creator_deck(Some(&all), &s, &Page::default(), vec![]);
         assert_eq!((d.remaining, d.yes), (1, 3));
-        // Their downloadable posts are in the Posts deck; swiped no's aren't.
-        let keys: Vec<_> = post_order(&all, &s)
+        // Their downloadable posts are to swipe; swiped no's aren't listed.
+        let to_swipe: Vec<_> = collection(Some(&all), &s, vec![])
+            .cards
             .iter()
-            .map(|(_, _, p)| p.key())
+            .map(|c| (c.card.slug.clone(), c.unswiped))
             .collect();
-        assert_eq!(keys, ["faptap:1"]);
+        assert_eq!(
+            to_swipe,
+            [
+                ("fav".to_string(), 1),
+                ("star".to_string(), 0),
+                ("swiped".to_string(), 0)
+            ]
+        );
         let yes = collection(Some(&all), &s, vec![]).cards;
         let got: Vec<_> = yes
             .iter()
@@ -932,7 +747,6 @@ mod tests {
                 unswiped: 1
             }
         );
-        assert_eq!(sum.posts.unswiped, 1);
         // A card shows the sources.
         assert_eq!(
             creator_card("fav", &all.creators["fav"]).sources,

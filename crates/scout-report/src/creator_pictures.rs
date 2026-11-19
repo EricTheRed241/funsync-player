@@ -1,6 +1,7 @@
 //! The creators' pictures creator-scout saves under `<userData>/creator-pictures/<slug>/`,
-//! served read-only at `/pictures/<slug>/<file>`: both parts strictly `[A-Za-z0-9._-]`,
-//! not starting with a dot (so no `..`, no hidden files), and a picture extension.
+//! served read-only at `/pictures/<slug>/<file>` by both the Creators site and the swipe
+//! deck (its creator cards): both parts strictly `[A-Za-z0-9._-]`, not starting with a dot
+//! (so no `..`, no hidden files), and a picture extension.
 
 use std::path::{Path, PathBuf};
 

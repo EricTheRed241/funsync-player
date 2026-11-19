@@ -125,6 +125,7 @@ a:hover { text-decoration: underline; }
 .b-fav { --bc: #e0529c; }
 .b-src-eroscripts { --bc: #2f6fdf; } .b-src-slr { --bc: #e8743b; } .b-src-vrb { --bc: #d6336c; }
 .b-src-pmvhaven { --bc: #9b59d0; } .b-src-faptap { --bc: #f08c00; }
+.b-creator { --bc: #14b8a6; }
 a.badge { color: var(--fg); }
 /* The library drive's free space; red and swiping off below swipeDeck.minFreeGb. */
 .drive { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted);
@@ -263,7 +264,9 @@ const STACKS = ['multi', 'vr', 'flat', 'free', 'dupes'];
 let stack = STACKS.includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
 // Where a card comes from, and so where its swipe goes: an EroScripts post (source
 // "eroscripts") to /api/swipe and eroscripts-scout-swipes.json, a scout's scene (slr, vrb,
-// pmvhaven, faptap) to /api/scenes/<source>/swipe and that scout's swipes file, a library video
+// pmvhaven, faptap) to /api/scenes/<source>/swipe and that scout's swipes file, a yes
+// creator's post (source "creators", site eroscripts / faptap) to /api/scenes/creators/swipe
+// and creator-swipes.json (creators:scout --fetch downloads it), a library video
 // (source "library", the Free space tab) to /api/free-space/swipe and free-space-swipes.json.
 const sourceOf = (c) => c.source || 'eroscripts';
 const isLibrary = (c) => sourceOf(c) === 'library';
@@ -282,15 +285,16 @@ const keyOf = (c) => sourceOf(c) + ':' + c.id;
 const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat', free: 'Free space', dupes: 'Duplicates' };
 // The scouts whose runs fill each tab: an empty tab names them.
 const TAB_SCOUTS = {
-  multi: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout'],
-  vr: ['eroscripts:scout', 'slr:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout'],
-  flat: ['eroscripts:scout', 'pmvhaven:scout', 'faptap:scout'],
+  multi: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout', 'creators:scout'],
+  vr: ['eroscripts:scout', 'slr:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout', 'creators:scout'],
+  flat: ['eroscripts:scout', 'pmvhaven:scout', 'faptap:scout', 'creators:scout'],
   free: [],
   dupes: [],
 };
-// The source badge; VRBangers and VRConk share the vrb scout and differ by `site`.
+// The source badge; VRBangers and VRConk share the vrb scout and differ by `site`, and a
+// creator card's `site` is the post's: EroScripts or FapTap.
 const SOURCE_NAMES = { eroscripts: 'EroScripts', slr: 'SLR', vrb: 'VRBangers', pmvhaven: 'PMVHaven', faptap: 'FapTap' };
-const SITE_NAMES = { vrbangers: 'VRBangers', vrconk: 'VRConk' };
+const SITE_NAMES = { vrbangers: 'VRBangers', vrconk: 'VRConk', eroscripts: 'EroScripts', faptap: 'FapTap' };
 const sourceName = (c) => SITE_NAMES[c.site] || SOURCE_NAMES[sourceOf(c)] || sourceOf(c);
 // ⚙ shuffle amplitude per tab, in score points; unset = the server's default (deck.rs
 // MULTI_JITTER / VR_JITTER / FLAT_JITTER), shown as the placeholder. Remembered on this device.
@@ -389,9 +393,11 @@ function clock(ms) {
 }
 
 function badges(c) {
-  const src = el('span', { class: 'badge b-src-' + sourceOf(c), title: 'From ' + sourceName(c) }, sourceName(c));
-  if (isScene(c)) return [src, ...sceneBadges(c)];
-  const out = [src, el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
+  const kind = sourceOf(c) === 'creators' ? c.site : sourceOf(c);
+  const src = el('span', { class: 'badge b-src-' + kind, title: 'From ' + sourceName(c) }, sourceName(c));
+  const who = c.creator ? el('span', { class: 'badge b-creator', title: 'A creator you said yes to on the Creators site (score bonus)' }, '👤 ' + c.creator) : null;
+  if (isScene(c)) return [src, who, ...sceneBadges(c)].filter(Boolean);
+  const out = [src, who, el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))].filter(Boolean);
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: c.videos > 1 ? 'Length of the first video' : 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
   const multi = c.axisType ? c.axisType === 'multi' : typeof c.axes === 'number' && c.axes > 1;
@@ -432,6 +438,8 @@ function sceneBadges(c) {
   const axes = c.axes || [];
   if (axes.length) {
     out.push(el('span', { class: 'badge b-multi', title: 'Script axes: stroke, ' + axes.join(', ') }, `Multi-axis (${axes.length + 1})`));
+  } else if (c.multiAxis) {
+    out.push(el('span', { class: 'badge b-multi', title: 'Multi-axis script' }, 'Multi-axis'));
   } else if (c.source === 'slr') {
     const hand = c.handmade || [];
     const scripts = [...hand.map(handLabel), c.aiScript ? 'SLR AI script' : null].filter(Boolean).join('\n');
@@ -689,6 +697,7 @@ function details(c, best) {
   const tags = c.tags || [];
   if (tags.length) out.push(el('div', { class: 'sect' }, 'Tags'), tagChips(tags, best));
   const facts = [
+    ['Creator', c.creator],
     ['Likes', c.likes],
     ['Hosts', c.hosts && c.hosts.length ? c.hosts.join(', ') : null],
     ['Size', c.gb != null ? c.gb + ' GB' : null],
@@ -718,6 +727,7 @@ function details(c, best) {
 /** What a scene's script is: SLR's source, else stroke plus its axes, single-axis or none. */
 function sceneScript(c) {
   if (c.axes && c.axes.length) return 'stroke, ' + c.axes.join(', ');
+  if (c.multiAxis) return 'multi-axis';
   if (c.source === 'slr') return scriptLabel(c.scriptSource).slice('script: '.length);
   return c.script ? 'single-axis' : 'none';
 }
@@ -729,8 +739,9 @@ function sceneDetails(c, best) {
     ['Source', sourceName(c)],
     ['Script', sceneScript(c)],
     ['Performers', c.actors && c.actors.length ? c.actors.join(', ') : null],
+    ['Creator', c.creator],
     ['Favourite', c.favourite],
-    [c.source === 'slr' || c.source === 'vrb' ? 'Studio' : 'By', c.author],
+    [c.source === 'slr' || c.source === 'vrb' ? 'Studio' : 'By', c.source === 'creators' ? null : c.author],
     ['Released', c.date],
     [c.source === 'slr' ? 'Favourites' : 'Likes', c.likes],
     ['FPS', c.fps],

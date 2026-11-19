@@ -1,8 +1,9 @@
-//! `<userData>/creator-swipes.json`, the only file the site writes (creator-scout
-//! reads it: it downloads the `want` posts). Every change reads the file, changes
-//! one entry and writes it back atomically (video_tags::store::write_json_atomic:
-//! temp + rename, the previous copy kept as `creator-swipes.json.bak`); the server
-//! answers one request at a time, so changes never interleave. Undo removes the entry.
+//! `<userData>/creator-swipes.json`, the only file the site writes; it writes the
+//! `creators` (yes / no per creator). The `posts` (want / hide per post) come from the swipe
+//! deck (scout_report::creators), and creator-scout downloads the `want` ones; the site
+//! keeps them as they are. Every change reads the file, changes one entry and writes it
+//! back atomically (video_tags::store::write_json_atomic: temp + rename, the previous copy
+//! kept as `creator-swipes.json.bak`). Undo removes the entry.
 //!
 //! ```json
 //! { "version": 1,
@@ -39,16 +40,6 @@ impl Choice {
         match s {
             "yes" => Some(Choice::Yes),
             "no" => Some(Choice::No),
-            _ => None,
-        }
-    }
-}
-
-impl PostChoice {
-    pub fn parse(s: &str) -> Option<PostChoice> {
-        match s {
-            "want" => Some(PostChoice::Want),
-            "hide" => Some(PostChoice::Hide),
             _ => None,
         }
     }
@@ -127,39 +118,10 @@ pub fn set_creator(
     Ok(swipe)
 }
 
-/// Record `choice` for post `key` of `creator` and write the file.
-pub fn set_post(
-    user_data: &Path,
-    key: &str,
-    choice: PostChoice,
-    creator: &str,
-    at: String,
-) -> Result<PostSwipe, String> {
-    let mut swipes = read(user_data)?;
-    let swipe = PostSwipe {
-        choice,
-        at,
-        creator: creator.to_string(),
-    };
-    swipes.posts.insert(key.to_string(), swipe.clone());
-    write(user_data, &swipes)?;
-    Ok(swipe)
-}
-
 /// Forget creator `slug`'s swipe; whether there was one (the file is written only then).
 pub fn undo_creator(user_data: &Path, slug: &str) -> Result<bool, String> {
     let mut swipes = read(user_data)?;
     if swipes.creators.remove(slug).is_none() {
-        return Ok(false);
-    }
-    write(user_data, &swipes)?;
-    Ok(true)
-}
-
-/// Forget post `key`'s swipe; whether there was one.
-pub fn undo_post(user_data: &Path, key: &str) -> Result<bool, String> {
-    let mut swipes = read(user_data)?;
-    if swipes.posts.remove(key).is_none() {
         return Ok(false);
     }
     write(user_data, &swipes)?;
@@ -193,23 +155,15 @@ mod tests {
     fn records_and_undoes_swipes_in_the_contract_shape() {
         let dir = temp("roundtrip");
         assert_eq!(read(&dir).unwrap(), Swipes::default());
+        // The swipe deck's post swipes, already in the file, are kept as they are.
+        let posts = json!({"eroscripts:41415": {"choice": "want", "at": "t2", "creator": "sweetiefox"},
+                           "faptap:9": {"choice": "hide", "at": "t3", "creator": "sweetiefox"}});
+        std::fs::write(
+            dir.join(FILE),
+            json!({"version": 1, "creators": {}, "posts": posts}).to_string(),
+        )
+        .unwrap();
         set_creator(&dir, "sweetiefox", Choice::Yes, "t1".into()).unwrap();
-        set_post(
-            &dir,
-            "eroscripts:41415",
-            PostChoice::Want,
-            "sweetiefox",
-            "t2".into(),
-        )
-        .unwrap();
-        set_post(
-            &dir,
-            "faptap:9",
-            PostChoice::Hide,
-            "sweetiefox",
-            "t3".into(),
-        )
-        .unwrap();
         assert_eq!(
             on_disk(&dir),
             json!({"version": 1,
@@ -224,11 +178,10 @@ mod tests {
 
         assert!(undo_creator(&dir, "sweetiefox").unwrap());
         assert!(!undo_creator(&dir, "sweetiefox").unwrap());
-        assert!(undo_post(&dir, "faptap:9").unwrap());
-        assert!(!undo_post(&dir, "faptap:9").unwrap());
         let s = read(&dir).unwrap();
         assert!(s.creators.is_empty());
-        assert_eq!(s.posts.keys().collect::<Vec<_>>(), ["eroscripts:41415"]);
+        assert_eq!(s.posts["faptap:9"].choice, PostChoice::Hide);
+        assert_eq!(on_disk(&dir)["posts"], posts);
         // No temp file left behind.
         let names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -247,7 +200,7 @@ mod tests {
         assert_eq!(std::fs::read(dir.join(FILE)).unwrap(), b"{oops");
         std::fs::write(dir.join(FILE), r#"{"version":2}"#).unwrap();
         assert!(read(&dir).unwrap_err().contains("version 2"));
-        assert!(undo_post(&dir, "x").is_err());
+        assert!(undo_creator(&dir, "x").is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -256,8 +209,5 @@ mod tests {
         assert_eq!(Choice::parse("yes"), Some(Choice::Yes));
         assert_eq!(Choice::parse("no"), Some(Choice::No));
         assert_eq!(Choice::parse("want"), None);
-        assert_eq!(PostChoice::parse("want"), Some(PostChoice::Want));
-        assert_eq!(PostChoice::parse("hide"), Some(PostChoice::Hide));
-        assert_eq!(PostChoice::parse("yes"), None);
     }
 }

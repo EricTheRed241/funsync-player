@@ -160,25 +160,6 @@ impl Post {
     }
 }
 
-impl Creators {
-    /// The post `key` of creator `slug`.
-    pub fn post(&self, slug: &str, key: &str) -> Option<&Post> {
-        self.creators
-            .get(slug)?
-            .posts
-            .iter()
-            .find(|p| p.key() == key)
-    }
-
-    /// Post `key` under any creator.
-    pub fn find_post(&self, key: &str) -> Option<&Post> {
-        self.creators
-            .values()
-            .flat_map(|c| &c.posts)
-            .find(|p| p.key() == key)
-    }
-}
-
 /// The file: `Ok(None)` when it doesn't exist, `Err` when it can't be read or parsed.
 pub fn load(user_data: &Path) -> Result<Option<Creators>, String> {
     match std::fs::read(user_data.join(FILE)) {
@@ -268,12 +249,6 @@ mod tests {
         assert_eq!(fox.posts[0].duration_s, Some(675.0));
         assert_eq!(fox.posts[1].key(), "faptap:2122637633308856321");
         assert!(fox.posts[1].tags.is_empty());
-        assert_eq!(
-            c.post("sweetiefox", "eroscripts:41415").map(|p| p.likes),
-            Some(Some(108))
-        );
-        assert!(c.post("nobody", "eroscripts:41415").is_none());
-        assert!(c.find_post("faptap:2122637633308856321").is_some());
         std::fs::remove_dir_all(&d).unwrap();
     }
 

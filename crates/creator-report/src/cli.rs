@@ -7,7 +7,7 @@ pub const DEFAULT_PORT: u16 = 5132;
 
 pub const USAGE: &str = "\
 creator-report: swipe through the content creators npm run creators:scout found, and
-through the downloadable posts of the ones you like, on a webpage
+see the ones you like with their socials, on a webpage
 
 Usage:
   npm run creators:site [-- --lan] [-- --port N] [-- --user-data <dir>]
@@ -33,10 +33,9 @@ Instagram and Twitch accounts with followers and last post / last live, and thei
 EroScripts (free downloadable, paid) and FapTap counts, score and top posts.
 Right = yes, left = no, down = skip (back a few cards later), Backspace = undo.
 
-Posts tab (/posts): the posts of the creators swiped yes that can be downloaded
-(free EroScripts posts with a fetchable video, FapTap videos), not in the library and
-not swiped yet, best score first. Right = want: the next daily npm run creators:scout
-downloads it. Left = hide.
+Their downloadable posts (free EroScripts posts with a fetchable video, FapTap videos)
+are swiped on the swipe deck (npm run scout:report), with a Creator badge and a score
+bonus; a right swipe there downloads at the next daily npm run creators:scout.
 
 Swiped tab (/swiped): the creators already swiped, newest first, with their full cards
 one at a time (left / right = previous / next, Y / N = change to yes / no) or as a
@@ -44,10 +43,10 @@ list; filter All / Yes / No, search by name or handle.
 
 Collection tab (/collection): the creators you like (swiped yes, favourite artists,
 pornstar list) with their Instagram, Twitch and other confirmed profiles, as a list
-or cards; changing one to no takes her posts not swiped yet off the Posts tab.
+or cards; changing one to no takes her posts not swiped yet off the swipe deck.
 
-Swipes go to <userData>/creator-swipes.json (atomically, one at a time; the previous
-copy is kept as creator-swipes.json.bak), the only file the CLI writes. Pictures are
+Creator swipes go to <userData>/creator-swipes.json (atomically, one at a time; the
+previous copy is kept as creator-swipes.json.bak), the only file the CLI writes. Pictures are
 served from <userData>/creator-pictures/<slug>/ at /pictures/<slug>/<file> and nowhere
 else. Stop it with Ctrl-C.
 

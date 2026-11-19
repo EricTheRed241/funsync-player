@@ -1,20 +1,18 @@
-//! `npm run creators:site`: the Creators site. Four tabs on one page: the Creators
+//! `npm run creators:site`: the Creators site. Three tabs on one page: the Creators
 //! deck (`/creators`; `/` redirects there), one card per content creator in
-//! `creators.json` (written by `npm run creators:scout`), swiped yes or no; the Posts
-//! deck (`/posts`), the downloadable posts of the creators swiped yes, swiped want
-//! (the next daily `creators:scout` run downloads it) or hide; Swiped (`/swiped`), the
-//! cards of the creators already swiped; and Collection (`/collection`), the yes
-//! creators with their socials. Reads `creators.json` (again whenever its
-//! modification time or size changes) and serves the scout's pictures
-//! (`creator-pictures/`); the only file it writes is `creator-swipes.json`
-//! (crate::swipes). Bound to 127.0.0.1, or to every interface with `--lan`; other
-//! devices need the access PIN when one is set, through scout-report's gate and
-//! login page.
+//! `creators.json` (written by `npm run creators:scout`), swiped yes or no; Swiped
+//! (`/swiped`), the cards of the creators already swiped; and Collection (`/collection`),
+//! the yes creators with their socials. The yes creators' posts are swiped on the swipe
+//! deck (`npm run scout:report`, scout_report::creators). Reads `creators.json` (again
+//! whenever its modification time or size changes) and serves the scout's pictures
+//! (`creator-pictures/`, scout_report::creator_pictures); the only file it writes is
+//! `creator-swipes.json`'s `creators` (crate::swipes). Bound to 127.0.0.1, or to every
+//! interface with `--lan`; other devices need the access PIN when one is set, through
+//! scout-report's gate and login page.
 
 pub mod cli;
 pub mod creators;
 pub mod deck;
-pub mod pictures;
 pub mod server;
 pub mod swipes;
 
