@@ -164,6 +164,13 @@ pub fn list_new(
     Ok(out)
 }
 
+/// A topic's JSON request (`/t/<id>.json`, with the session cookie).
+pub fn topic_request(base: &str, cookie: &str, id: u64) -> Request {
+    Request::get(format!("{base}/t/{id}.json"))
+        .header("Cookie", format!("_t={cookie}"))
+        .header("Accept", "application/json")
+}
+
 /// A topic's JSON (`/t/<id>.json`).
 pub fn topic_json(
     http: &dyn Http,
@@ -173,10 +180,7 @@ pub fn topic_json(
     id: u64,
 ) -> Result<Value, NetError> {
     pacer.wait();
-    let req = Request::get(format!("{base}/t/{id}.json"))
-        .header("Cookie", format!("_t={cookie}"))
-        .header("Accept", "application/json");
-    http::json(http, &req)
+    http::json(http, &topic_request(base, cookie, id))
 }
 
 /// The script posts (Free / Paid Scripts, not AI-generated) among the

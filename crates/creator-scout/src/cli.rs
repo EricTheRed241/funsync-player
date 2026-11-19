@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub const DEFAULT_PICTURES: usize = 40;
 pub const DEFAULT_PROFILES: usize = 30;
 pub const DEFAULT_FOLLOWS: usize = 10;
+pub const DEFAULT_POST_IMAGES: usize = 300;
 
 pub const USAGE: &str = "\
 creator-scout: find independent creators (OnlyFans / Fansly / camgirls /
@@ -20,6 +21,7 @@ Usage:
   npm run creators:scout -- --discover             [options]
   npm run creators:scout -- --profiles [N]         [options]
   npm run creators:scout -- --pictures [N]         [--user-data <dir>]
+  npm run creators:scout -- --post-images [N]      [--user-data <dir>]
   npm run creators:scout -- --follow [N]           [--user-data <dir>]
   npm run creators:scout -- --login [--credentials <file>] [--user-data <dir>]
   npm run creators:scout -- --status               [--user-data <dir>]
@@ -69,6 +71,14 @@ Modes:
                         every 3 days, creators swiped no skipped; 8-15 s between
                         creators. Needs --login for the posts; without a session
                         only the profile photo is saved (exit 3).
+  --post-images [N]     Fill in the pictures of up to N posts (default 300) filed
+                        without one, so their cards show the scene: a FapTap
+                        video's thumbnail (its API), an EroScripts post's first
+                        image (the topic; needs the EroScripts session, without
+                        it those posts wait: exit 3). Only downloadable posts not
+                        in the library and not swiped, of creators not swiped no.
+                        A post without a picture, or whose picture won't
+                        download, is tried again after 7 days.
   --follow [N]          Follow on Instagram (the --login account) up to N creators
                         (default 10) with a confirmed Instagram account who are a
                         favourite or swiped yes: a Chrome (headless, the --login
@@ -84,7 +94,8 @@ Modes:
                         <userData>/instagram-session.json (0600) once it appears
                         (10 minutes at most).
   --status              Creators, posts, the Instagram session and its age, the
-                        cursors, the profiles step, the follows and the fetch queue.
+                        cursors, the profiles step, the follows, the posts waiting
+                        for their picture and the fetch queue.
   --fetch               Fetch the posts swiped \"want\" on the Creators site that
                         are downloadable and not in the library: EroScripts posts
                         through npm run eroscripts:scout (--add, then --fetch
@@ -126,6 +137,7 @@ pub enum Mode {
     ImportSeed(PathBuf),
     Discover,
     Pictures(usize),
+    PostImages(usize),
     Profiles(usize),
     Follow(usize),
     Login,
@@ -173,6 +185,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 | "--repo"
                 | "--npm"
                 | "--pictures"
+                | "--post-images"
                 | "--profiles"
                 | "--follow"
                 | "--credentials"
@@ -194,7 +207,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
         let mut set_mode = |m: Mode| -> Result<(), String> {
             if o.mode.is_some() {
                 return Err(
-                    "give one of --import-seed, --discover, --profiles, --pictures, --follow, --login, --status, --fetch, --daily"
+                    "give one of --import-seed, --discover, --profiles, --pictures, --post-images, --follow, --login, --status, --fetch, --daily"
                         .into(),
                 );
             }
@@ -205,7 +218,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
             "-h" | "--help" => o.help = true,
             "--import-seed" => set_mode(Mode::ImportSeed(PathBuf::from(value()?)))?,
             "--discover" => set_mode(Mode::Discover)?,
-            "--pictures" | "--profiles" | "--follow" => {
+            "--pictures" | "--post-images" | "--profiles" | "--follow" => {
                 // The count is optional: a following number is it.
                 let n = match inline.as_deref() {
                     Some(v) => Some(v.to_string()),
@@ -224,6 +237,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                     .transpose()?;
                 set_mode(match flag {
                     "--pictures" => Mode::Pictures(n.unwrap_or(DEFAULT_PICTURES)),
+                    "--post-images" => Mode::PostImages(n.unwrap_or(DEFAULT_POST_IMAGES)),
                     "--profiles" => Mode::Profiles(n.unwrap_or(DEFAULT_PROFILES)),
                     _ => Mode::Follow(n.unwrap_or(DEFAULT_FOLLOWS)),
                 })?
@@ -267,7 +281,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
     }
     let Some(mode) = &o.mode else {
         return Err(
-            "nothing to do: give --import-seed, --discover, --profiles, --pictures, --follow, --login, --status, --fetch or --daily (see --help)"
+            "nothing to do: give --import-seed, --discover, --profiles, --pictures, --post-images, --follow, --login, --status, --fetch or --daily (see --help)"
                 .into(),
         );
     };
@@ -322,6 +336,15 @@ mod tests {
             Some(Mode::Follow(DEFAULT_FOLLOWS))
         );
         assert_eq!(p(&["--follow=2"]).unwrap().mode, Some(Mode::Follow(2)));
+        assert_eq!(
+            p(&["--post-images"]).unwrap().mode,
+            Some(Mode::PostImages(DEFAULT_POST_IMAGES))
+        );
+        assert_eq!(
+            p(&["--post-images", "5"]).unwrap().mode,
+            Some(Mode::PostImages(5))
+        );
+        assert!(p(&["--post-images", "--npm", "x"]).is_err());
         assert!(p(&["--profiles=0"]).is_err());
         assert!(p(&["--profiles", "--pictures"]).is_err());
         assert!(p(&["--follow", "--judge-cmd", "j"]).is_err());

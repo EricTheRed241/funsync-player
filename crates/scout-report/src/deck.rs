@@ -10,9 +10,11 @@
 //! shifted by up to the deal's jitter (the request's `jitter`, else the tab's MULTI_JITTER,
 //! VR_JITTER or FLAT_JITTER) either way, so the order wanders a little. Scores, tag scores and
 //! creampie come from the scouts' files (`score`, `tagScores`, `creampie`); Rust only adds
-//! the yes-creator bonus (`swipeDeck.yesCreatorBonus`) to a yes creator's cards.
+//! the yes-creator bonus (`swipeDeck.yesCreatorBonus`) to a yes creator's cards. Dealt cards
+//! name the creators in them (`people`, crate::creators::Creators::add_people), each with her
+//! best picture, which also joins the card's images.
 
-use crate::creators::Creators;
+use crate::creators::{Creators, Person};
 use crate::frames;
 use crate::report::{self, id_of, str_of, strings_of};
 use crate::scenes::{self, Covered, SceneCard};
@@ -266,6 +268,9 @@ pub struct Card {
     /// includes the creator bonus.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<String>,
+    /// The creators in the post (crate::creators::Person), at most two, each with her picture.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub people: Vec<Person>,
 }
 
 /// A post's video on SexLikeReal (the scout's `scene.video` with `host: "slr"`).
@@ -369,7 +374,8 @@ impl Files {
 
 /// Read the files and deal the cards `deal` asks for. Dealt posts get their frames (the
 /// post's record in frames::EROSCRIPTS_FILE) and SLR scenes theirs (the scene's `frames` in
-/// slr-scout.json) after their images.
+/// slr-scout.json) after their images, then every dealt card the creators in it (`people`)
+/// and their pictures.
 pub fn load(user_data: &Path, deal: &Deal) -> Deck {
     let mut problems = Vec::new();
     let files = Files::read(user_data, &mut problems);
@@ -389,19 +395,19 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
                 ),
             ),
             DeckCard::Scene(s) if s.source == scenes::Source::Slr.name() => {
-                let Ok(id) = s.id.parse::<u64>() else {
-                    continue;
-                };
-                let rec = scenes::scenes(scenes::Source::Slr, slr)
-                    .find(|(sid, _)| *sid == s.id)
-                    .map_or(&Value::Null, |(_, rec)| rec);
-                frames::append(
-                    &mut s.images,
-                    frames::urls(user_data, frames::Source::Slr, id, rec),
-                );
+                if let Ok(id) = s.id.parse::<u64>() {
+                    let rec = scenes::scenes(scenes::Source::Slr, slr)
+                        .find(|(sid, _)| *sid == s.id)
+                        .map_or(&Value::Null, |(_, rec)| rec);
+                    frames::append(
+                        &mut s.images,
+                        frames::urls(user_data, frames::Source::Slr, id, rec),
+                    );
+                }
             }
             DeckCard::Scene(_) => {}
         }
+        files.creators.add_people(user_data, card);
     }
     deck.problems = problems;
     deck
@@ -582,6 +588,7 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>, shared: &HashMap<&str, usize
             url: str_of(v, "url").filter(|u| u.starts_with("https://")),
         }),
         creator: None,
+        people: Vec::new(),
     }
 }
 

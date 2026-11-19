@@ -106,6 +106,9 @@ pub struct Picture {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub taken_at: Option<String>,
+    /// An Instagram timeline post's likes (`like_count`), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub likes: Option<u64>,
 }
 
 impl Picture {
@@ -425,6 +428,7 @@ pub fn rebuild_pictures(c: &mut Creator) {
             source: post.kind.clone(),
             url: post.url.clone(),
             taken_at: post.created_at.clone(),
+            likes: None,
         });
     }
     // ISO times sort as text; None last.
@@ -530,6 +534,7 @@ mod tests {
                 source: "instagram".into(),
                 url: "i".into(),
                 taken_at: Some("2026-11-10T00:00:00Z".into()),
+                likes: Some(120),
             }],
             posts: vec![
                 Post {
@@ -554,6 +559,8 @@ mod tests {
         let files: Vec<&str> = c.pictures.iter().map(|p| p.file.as_str()).collect();
         assert_eq!(files, ["ig-1.jpg", "es-5-0.jpg", "ft-9.jpg"]);
         assert_eq!(c.pictures[1].source, "eroscripts");
+        assert_eq!(c.pictures[0].likes, Some(120), "likes survive a rebuild");
+        assert_eq!(c.pictures[1].likes, None);
         let pics = pictures_dir(&dir, "a");
         fs::create_dir_all(&pics).unwrap();
         for f in ["ig-1.jpg", "ig-old.jpg", "es-5-0.jpg", "ft-9.jpg"] {
@@ -572,6 +579,7 @@ mod tests {
             source: source.into(),
             url: "u".into(),
             taken_at: at.map(str::to_string),
+            likes: None,
         };
         let mut pictures = vec![
             pic("ig-1.jpg", "instagram", Some("2026-11-01T00:00:00Z")),

@@ -1543,4 +1543,52 @@ mod tests {
         assert_eq!(get_json("/api/deck?stack=flat", &dir)["remaining"], 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn dealt_cards_name_the_creators_in_them_with_her_picture() {
+        let dir = user_data("people");
+        std::fs::write(
+            dir.join(report::WAITING_FILE),
+            br#"{"candidates":[{"id":11,"score":2,"title":"Sweetie Fox POV"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(Source::Pmvhaven.file()),
+            json!({"version": 1, "scenes": [{"id": "p1", "score": 1, "title": "Tribute",
+                   "actors": ["Swéetie Fox"], "thumbnail": "https://pmvhaven.test/p1.jpg"}]})
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(creators::FILE),
+            br#"{"creators":{"sweetie":{"name":"Sweetie Fox","pictures":[
+                {"file":"ig-1.jpg","source":"instagram","url":"https://www.instagram.com/p/A/","likes":5}]}}}"#,
+        )
+        .unwrap();
+        let pics = dir.join(creator_pictures::DIR).join("sweetie");
+        std::fs::create_dir_all(&pics).unwrap();
+        std::fs::write(pics.join("ig-1.jpg"), b"jpeg").unwrap();
+        let deck = get_json("/api/deck?stack=flat", &dir);
+        assert_eq!(keys(&deck), ["eroscripts:11", "pmvhaven:p1"]);
+        let person = json!({"name": "Sweetie Fox", "slug": "sweetie", "picture": "/pictures/sweetie/ig-1.jpg",
+                            "pictureSource": "instagram", "pictureUrl": "https://www.instagram.com/p/A/"});
+        let post = &deck["cards"][0];
+        assert_eq!(post["people"], json!([person]));
+        assert_eq!(post["images"], json!(["/pictures/sweetie/ig-1.jpg"]));
+        let scene = &deck["cards"][1];
+        assert_eq!(scene["people"], json!([person]));
+        assert_eq!(
+            scene["images"],
+            json!(["https://pmvhaven.test/p1.jpg", "/pictures/sweetie/ig-1.jpg"])
+        );
+        // Without her picture, nobody: no `people` at all.
+        std::fs::remove_file(pics.join("ig-1.jpg")).unwrap();
+        let deck = get_json("/api/deck?stack=flat", &dir);
+        assert_eq!(deck["cards"][1].get("people"), None);
+        assert_eq!(
+            deck["cards"][1]["images"],
+            json!(["https://pmvhaven.test/p1.jpg"])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

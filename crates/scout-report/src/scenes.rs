@@ -243,6 +243,9 @@ pub struct SceneCard {
     /// A creator post's script is multi-axis (axes unknown; `axes` stays empty).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub multi_axis: bool,
+    /// The creators in the scene (crate::creators::Person), at most two, each with her picture.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub people: Vec<crate::creators::Person>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -360,6 +363,7 @@ pub fn card(source: Source, id: String, s: &Value) -> SceneCard {
         quality: s.get("quality").and_then(Value::as_u64),
         creator: None,
         multi_axis: false,
+        people: Vec::new(),
     }
 }
 

@@ -64,7 +64,7 @@ a:hover { text-decoration: underline; }
 .media { position: relative; flex: 1; min-height: 0; background: #000; }
 .media img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; -webkit-user-drag: none; }
 .media .none { height: 100%; display: flex; align-items: center; justify-content: center; color: #9a9aa3; }
-.media.broken img { visibility: hidden; }
+.media.broken > img { visibility: hidden; }
 .media.broken::after { content: 'Image unavailable'; position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: #9a9aa3; }
 /* An image still on its way: a spinner over the card (after a moment, so quick ones don't flash it). */
@@ -76,6 +76,18 @@ a:hover { text-decoration: underline; }
 .dots { position: absolute; top: 8px; left: 10px; right: 10px; display: flex; gap: 4px; }
 .dots span { flex: 1; height: 3px; border-radius: 2px; background: rgba(255,255,255,.35); box-shadow: 0 0 2px rgba(0,0,0,.5); }
 .dots span.on { background: #fff; }
+/* The creators in a card: her picture as a round portrait and her name, over the image's bottom-left corner; a tap
+   shows that picture in the gallery. */
+.people { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); z-index: 2; display: flex;
+  flex-direction: column; align-items: flex-start; gap: 6px; }
+.person { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 3px 14px 3px 3px; border-radius: 999px;
+  background: rgba(0,0,0,.62); color: #fff; font-size: 14px; font-weight: 600; line-height: 1.2; cursor: pointer;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.person:hover { background: rgba(0,0,0,.78); }
+.media .person img { flex: none; width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+  border: 2px solid rgba(255,255,255,.85); background: #333; }
+.person.on img { border-color: var(--accent); }
+.person span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stamp { position: absolute; top: 30px; padding: 2px 12px; border: 4px solid; border-radius: 8px; font-weight: 800;
   font-size: 28px; letter-spacing: .06em; opacity: 0; background: rgba(0,0,0,.25); }
 .stamp.want { left: 18px; color: var(--like); transform: rotate(-14deg); }
@@ -638,6 +650,23 @@ function showSideImage(sideEl, s, delta) {
   preload(imgs[(s.shown + 1) % imgs.length]);
 }
 
+/** A card's creators (`people`): a chip each, her picture and name; a tap shows her picture (see drag). */
+function peopleChips(c, isTop) {
+  const imgs = c.images || [];
+  const people = c.people || [];
+  if (!people.length) return null;
+  return el('div', { class: 'people' }, people.map((p) => el('div', {
+    class: isTop && imgs[image] === p.picture ? 'person on' : 'person',
+    'data-image': imgs.indexOf(p.picture),
+    title: p.name + ' · ' + p.pictureSource,
+  }, el('img', { alt: '', draggable: 'false', decoding: 'async', src: p.picture }), el('span', {}, p.name))));
+}
+
+/** A card's creators' names for its facts, or null. */
+function peopleNames(c) {
+  return c.people && c.people.length ? c.people.map((p) => p.name).join(', ') : null;
+}
+
 function cardNode(c, isTop) {
   if (isLibrary(c)) return libraryCardNode(c, isTop);
   if (isPair(c)) return pairCardNode(c, isTop);
@@ -656,6 +685,8 @@ function cardNode(c, isTop) {
     media.append(el('div', { class: 'none' }, 'No image'));
   }
   media.append(el('div', { class: 'stamp want' }, 'WANT'), el('div', { class: 'stamp hide' }, 'HIDE'));
+  const chips = peopleChips(c, isTop);
+  if (chips) media.append(chips);
   const scene = isScene(c);
   // A post's creation date, or a scene's release (upload) date.
   const posted = scene ? c.date : c.created;
@@ -698,6 +729,7 @@ function details(c, best) {
   if (tags.length) out.push(el('div', { class: 'sect' }, 'Tags'), tagChips(tags, best));
   const facts = [
     ['Creator', c.creator],
+    ['People', peopleNames(c)],
     ['Likes', c.likes],
     ['Hosts', c.hosts && c.hosts.length ? c.hosts.join(', ') : null],
     ['Size', c.gb != null ? c.gb + ' GB' : null],
@@ -739,6 +771,7 @@ function sceneDetails(c, best) {
     ['Source', sourceName(c)],
     ['Script', sceneScript(c)],
     ['Performers', c.actors && c.actors.length ? c.actors.join(', ') : null],
+    ['People', peopleNames(c)],
     ['Creator', c.creator],
     ['Favourite', c.favourite],
     [c.source === 'slr' || c.source === 'vrb' ? 'Studio' : 'By', c.source === 'creators' ? null : c.author],
@@ -973,11 +1006,12 @@ function showImage(i) {
   const node = topNode();
   if (!node) return;
   const media = node.querySelector('.media');
-  const img = media.querySelector('img');
+  const img = media.querySelector(':scope > img');
   img.src = imgs[image];
   media.classList.remove('broken');
   media.classList.toggle('loading', !img.complete);
   node.querySelectorAll('.dots span').forEach((d, j) => d.classList.toggle('on', j === image));
+  node.querySelectorAll('.person').forEach((p) => p.classList.toggle('on', Number(p.dataset.image) === image));
   preload(imgs[(image + 1) % imgs.length]);
 }
 
@@ -1000,12 +1034,14 @@ function setStamps(node, t, up) {
   node.querySelector('.stamp.hide').style.opacity = Math.max(0, -t);
 }
 
-/** Pointer drag with tilt; past the threshold it commits, a tap browses the gallery. */
+/** Pointer drag with tilt; past the threshold it commits, a tap browses the gallery (a tap on a creator's chip shows
+ *  her picture; a drag from it still drags the card). */
 function drag(node) {
   let start = null;
   let dx = 0;
   let dy = 0;
   let moved = false;
+  let chip = null;
   node.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('a, button')) return;
     // The side panel's scrollbar scrolls, it doesn't drag.
@@ -1014,6 +1050,8 @@ function drag(node) {
     start = { x: e.clientX, y: e.clientY };
     dx = dy = 0;
     moved = false;
+    // The card takes the pointer capture (so the tap's own click lands on the card): remember the chip pressed.
+    chip = e.target.closest('.person');
     node.setPointerCapture(e.pointerId);
     node.classList.add('drag');
   });
@@ -1043,6 +1081,12 @@ function drag(node) {
     if (!moved) {
       // The card holds the pointer capture, so locate the tap by its coordinates.
       if (e.type !== 'pointerup') return;
+      // A creator's chip: her picture, not the side-tap's next or previous one.
+      if (chip) {
+        const i = Number(chip.dataset.image);
+        if (i >= 0) showImage(i);
+        return;
+      }
       const inside = (r) => e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left && e.clientX <= r.right;
       if (node.classList.contains('vs')) {
         // Each side steps through its own thumbnail and frames.

@@ -702,17 +702,46 @@ export function readerFailure(host, err) {
 }
 
 /**
+ * A rule34video video's poster (`preview.jpg`, up to 1920×1080), from the id in its page URL
+ * (`/video/<id>/<slug>/`): a static file under `/contents/videos_screenshots/<id rounded down to 1000>/<id>/`,
+ * served without the page (which rate-limits with HTTP 403). Null for any other URL.
+ */
+export function rule34videoPoster(url) {
+  const id = Number(/^https:\/\/(?:www\.)?rule34video\.com\/video\/(\d+)(?:[/?#]|$)/.exec(url || '')?.[1]);
+  if (!(id > 0)) return null;
+  return `https://rule34video.com/contents/videos_screenshots/${Math.floor(id / 1000) * 1000}/${id}/preview.jpg`;
+}
+
+/**
  * Frames for one post (frameSource), into `dir`. `deps`: `fetch`, `File` (megajs), `rule34video`
  * (stream-hosts createRule34video: `page(url)`), `pmvhaven` (stream-hosts createPmvhaven: `fresh(file)`), `slr`
  * (slr-host createSlr: `scene(id)`), `forumHeaders`
  * (the session, forum host only), `run` (spawnRunner), `timeoutMs`, `maxBytes`.
  * Resolves `{files, source, bytes}` (files may be fewer than three), `{skip: host}` when the post has no
- * free source; throws FrameError when none came out.
+ * free source; throws FrameError when none came out. A rule34video video whose frames can't be read (its
+ * page answers 403 when rate-limited, a dead link) gets its poster instead (rule34videoPoster), as the one
+ * frame `25.jpg`; the failure is thrown only when the poster can't be saved either.
  */
 export async function postFrames(c, dir, deps) {
-  const { fetch = globalThis.fetch, run = spawnRunner, timeoutMs = FRAME_TIMEOUT_MS, maxBytes = MAX_POST_BYTES } = deps;
   const plan = frameSource(c);
   if (plan.skip) return { skip: plan.skip };
+  if (plan.kind !== 'rule34video') return videoFrames(plan, dir, deps);
+  try {
+    return await videoFrames(plan, dir, deps);
+  } catch (err) {
+    const poster = rule34videoPoster(plan.url);
+    if (!poster) throw err;
+    const { run = spawnRunner, timeoutMs = FRAME_TIMEOUT_MS } = deps;
+    const r = await grabImages({ urls: [poster], headers: { ...RULE34VIDEO_HEADERS }, dir, run, timeoutMs });
+    if (!r.files.length) throw err;
+    const why = err instanceof FrameError ? err.reason : String(err?.message || err);
+    return { files: r.files, source: `${plan.host}: ${plan.name} (poster; frames failed: ${why})`, bytes: null };
+  }
+}
+
+/** postFrames for a planned source (frameSource, not skipped). */
+async function videoFrames(plan, dir, deps) {
+  const { fetch = globalThis.fetch, run = spawnRunner, timeoutMs = FRAME_TIMEOUT_MS, maxBytes = MAX_POST_BYTES } = deps;
   let source = `${plan.host}: ${plan.name}`;
   if (plan.kind === 'vrbangers-gallery') {
     const resp = await fetch(plan.url, { headers: { 'User-Agent': UA, Accept: 'text/html' }, signal: AbortSignal.timeout(timeoutMs) });
