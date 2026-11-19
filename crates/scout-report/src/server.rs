@@ -132,6 +132,18 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             Err(e) => text(400, &e),
         },
         ("GET" | "HEAD", p) if p.starts_with("/frames/") => frame(p, user_data),
+        ("GET" | "HEAD", p) if p.starts_with("/dupes-frames/") => {
+            match duplicates::frame_image(user_data, p) {
+                Ok(body) => Response {
+                    status: 200,
+                    content_type: "image/jpeg",
+                    cache: FRAME_CACHE,
+                    body,
+                    headers: Vec::new(),
+                },
+                Err((status, e)) => text(status, &format!("{e}\n")),
+            }
+        }
         ("POST", "/api/swipe") => swipe(body, user_data, None),
         ("POST", "/api/swipe/undo") => undo(body, user_data, None),
         ("POST", p) if p.starts_with("/api/scenes/") => {

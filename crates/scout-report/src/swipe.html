@@ -98,11 +98,13 @@ a:hover { text-decoration: underline; }
   .vs-side .by { padding: 0 8px; }
 }
 .vs-note { align-self: flex-start; font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); }
-.vs-sides { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+.vs-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+.vs-sides { flex: 1 0 auto; display: grid; grid-template-columns: 1fr 1fr; }
 .vs-side { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .vs-side + .vs-side { border-left: 1px solid var(--line); }
-.vs-side .media { flex: 1 1 auto; min-height: 80px; }
-.vs-side .ttl { font-size: 14px; line-height: 1.4; padding: 6px 10px 0; }
+.vs-side .media { flex: none; height: clamp(150px, 34vh, 440px); }
+.vs-side .ttl { font-size: 14px; line-height: 1.4; padding: 6px 10px 0; display: block; -webkit-line-clamp: unset; overflow: visible; }
+.vs-side .file { padding: 0 10px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .vs-side .by { padding: 0 10px; font-size: 12px; flex-wrap: wrap; gap: 2px 8px; }
 .vs-side .by a { margin-left: 0; }
 .vs-stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; padding: 6px 10px 10px; font-size: 13px; }
@@ -562,12 +564,16 @@ function pairCardNode(c, isTop) {
   };
   const sideNode = (s, i) => {
     const media = el('div', { class: 'media' });
-    if (s.image) {
-      const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: s.image });
+    const imgs = [s.image, ...(s.frames || [])].filter(Boolean);
+    s.shown = 0;
+    if (imgs.length) {
+      const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: imgs[0] });
       img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
       img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
       if (!img.complete) media.classList.add('loading');
       media.append(img);
+      if (imgs.length > 1) media.append(el('div', { class: 'dots' }, imgs.map((_, j) => el('span', { class: j ? null : 'on' }))));
+      if (isTop) preload(imgs[1]);
     } else {
       media.append(el('div', { class: 'none' }, 'No image'));
     }
@@ -575,9 +581,12 @@ function pairCardNode(c, isTop) {
     const rated = s.rating > 0 ? '★'.repeat(Math.floor(s.rating)) + (s.rating % 1 ? '½' : '') : null;
     const stat = (k, v, win) => [el('dt', {}, k), el('dd', { class: win ? 'win' : null }, v)];
     const posted = s.posted ? `${age(s.posted)} (${s.postedFrom} ${day(s.posted)})` : '–';
+    const file = s.path.split('/').pop();
+    const stem = file.replace(/\.[^.]+$/, '');
     return el('div', { class: 'vs-side', 'data-side': i ? 'right' : 'left' },
       media,
       el('div', { class: 'ttl', title: s.path }, s.title),
+      stem !== s.title ? el('div', { class: 'file', title: s.path }, file) : null,
       el('div', { class: 'by' },
         s.author ? el('span', {}, s.author) : null,
         s.library ? el('span', {}, s.library) : null,
@@ -593,17 +602,32 @@ function pairCardNode(c, isTop) {
         stat('Size', fmtBytes(s.size))));
   };
   const node = el('article', { class: 'card vs ' + (isTop ? 'top' : 'next') },
-    el('div', { class: 'vs-head' },
-      el('div', { class: 'vs-conf' },
-        el('b', { class: band }, conf + '%'),
-        el('span', {}, 'duplicate confidence'),
-        el('span', { class: 'vs-meter ' }, el('span', { style: `width:${conf}%;color:var(${band === 'hi' ? '--like' : band === 'mid' ? '--undo' : '--muted'})` }))),
-      el('div', { class: 'vs-why' }, (c.reasons || []).join(' · ')),
-      note ? el('div', { class: 'vs-note' }, note) : null),
-    el('div', { class: 'vs-sides' }, sides.map(sideNode)),
+    el('div', { class: 'vs-scroll' },
+      el('div', { class: 'vs-head' },
+        el('div', { class: 'vs-conf' },
+          el('b', { class: band }, conf + '%'),
+          el('span', {}, 'duplicate confidence'),
+          el('span', { class: 'vs-meter ' }, el('span', { style: `width:${conf}%;color:var(${band === 'hi' ? '--like' : band === 'mid' ? '--undo' : '--muted'})` }))),
+        el('div', { class: 'vs-why' }, (c.reasons || []).join(' · ')),
+        note ? el('div', { class: 'vs-note' }, note) : null),
+      el('div', { class: 'vs-sides' }, sides.map(sideNode))),
     el('div', { class: 'stamp distinct' }, 'NOT DUPLICATES'));
   if (isTop) drag(node);
   return node;
+}
+
+/** Step one side of the top pair through its thumbnail and frames. */
+function showSideImage(sideEl, s, delta) {
+  const imgs = [s.image, ...(s.frames || [])].filter(Boolean);
+  if (imgs.length < 2) return;
+  s.shown = (s.shown + delta + imgs.length) % imgs.length;
+  const media = sideEl.querySelector('.media');
+  const img = media.querySelector('img');
+  img.src = imgs[s.shown];
+  media.classList.remove('broken');
+  media.classList.toggle('loading', !img.complete);
+  media.querySelectorAll('.dots span').forEach((d, j) => d.classList.toggle('on', j === s.shown));
+  preload(imgs[(s.shown + 1) % imgs.length]);
 }
 
 function cardNode(c, isTop) {
@@ -974,7 +998,7 @@ function drag(node) {
   node.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('a, button')) return;
     // The side panel's scrollbar scrolls, it doesn't drag.
-    const panel = e.target.closest('.info');
+    const panel = e.target.closest('.info, .vs-scroll');
     if (panel && e.clientX >= panel.getBoundingClientRect().left + panel.clientLeft + panel.clientWidth) return;
     start = { x: e.clientX, y: e.clientY };
     dx = dy = 0;
@@ -987,6 +1011,14 @@ function drag(node) {
     dx = e.clientX - start.x;
     dy = e.clientY - start.y;
     if (!moved && Math.hypot(dx, dy) < 8) return;
+    // A pair card scrolls on touch: a mostly vertical finger is the scroll's, not a drag
+    // (↑ not duplicates stays on the button and the key there).
+    if (!moved && e.pointerType === 'touch' && node.classList.contains('vs') && Math.abs(dy) > Math.abs(dx)) {
+      start = null;
+      node.classList.remove('drag');
+      if (node.hasPointerCapture(e.pointerId)) node.releasePointerCapture(e.pointerId);
+      return;
+    }
     moved = true;
     const pair = node.classList.contains('vs');
     node.style.transform = `translate(${dx}px, ${dy * (pair ? 0.6 : 0.3)}px) rotate(${dx * 0.06}deg)`;
@@ -999,10 +1031,19 @@ function drag(node) {
     node.classList.remove('drag');
     if (!moved) {
       // The card holds the pointer capture, so locate the tap by its coordinates.
-      const r = node.querySelector('.media').getBoundingClientRect();
-      if (e.type === 'pointerup' && e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left && e.clientX <= r.right) {
-        showImage(image + (e.clientX < r.left + r.width / 2 ? -1 : 1));
+      if (e.type !== 'pointerup') return;
+      const inside = (r) => e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left && e.clientX <= r.right;
+      if (node.classList.contains('vs')) {
+        // Each side steps through its own thumbnail and frames.
+        for (const sideEl of node.querySelectorAll('.vs-side')) {
+          const r = sideEl.querySelector('.media').getBoundingClientRect();
+          const s = sideEl.dataset.side === 'left' ? queue[0].left : queue[0].right;
+          if (inside(r)) showSideImage(sideEl, s, e.clientX < r.left + r.width / 2 ? -1 : 1);
+        }
+        return;
       }
+      const r = node.querySelector('.media').getBoundingClientRect();
+      if (inside(r)) showImage(image + (e.clientX < r.left + r.width / 2 ? -1 : 1));
       return;
     }
     if (Math.abs(dx) > threshold() && Math.abs(dx) >= -dy) {

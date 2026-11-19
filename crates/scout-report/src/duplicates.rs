@@ -934,6 +934,9 @@ pub struct Side {
     pub path: String,
     /// The library source folder's name (`EroScripts`, `FapTap`, `Other` …).
     pub library: Option<String>,
+    /// Frames of the video to tap through after the thumbnail (`/dupes-frames/<id>/<n>.jpg`,
+    /// taken on first request, crate::duplicates::frame_image).
+    pub frames: Vec<String>,
     pub size: u64,
     pub score: Option<f64>,
     /// 0 = unrated.
@@ -1010,6 +1013,10 @@ fn side(x: &Facts, lib: &Library, disk: &dyn Disk) -> Side {
     };
     Side {
         id: x.id.clone(),
+        frames: FRAME_SHARES
+            .iter()
+            .map(|n| format!("/dupes-frames/{}/{n}.jpg", x.id))
+            .collect(),
         title: v
             .get("name")
             .and_then(Value::as_str)
@@ -1323,6 +1330,80 @@ fn ffprobe(path: &str) -> Option<Quality> {
         height: s.get("height")?.as_u64()? as u32,
         fps,
     })
+}
+
+// ── Frames ───────────────────────────────────────────────────────────────
+
+/// Where the tap-through frames are taken, in % of the video's length.
+pub const FRAME_SHARES: [u32; 4] = [20, 40, 60, 80];
+/// Taken frames: `<userData>/scout-frames/library/<video id>/<n>.jpg`.
+pub const FRAMES_DIR: &str = "library";
+
+/// The video id and share a request path names: `/dupes-frames/<id>/<n>.jpg`, `n` one of
+/// FRAME_SHARES, the id letters and digits.
+pub fn frame_request(path: &str) -> Option<(&str, u32)> {
+    let rest = path.strip_prefix("/dupes-frames/")?;
+    let (id, name) = rest.split_once('/')?;
+    let n: u32 = name.strip_suffix(".jpg")?.parse().ok()?;
+    (swipe_id_ok(id) && FRAME_SHARES.contains(&n) && name == format!("{n}.jpg")).then_some((id, n))
+}
+
+/// `GET /dupes-frames/<id>/<n>.jpg`: the frame `n` % into a library video (the left eye of a
+/// VR one), 640 px wide, taken with ffmpeg the first time and kept in FRAMES_DIR. 404 for a
+/// path of another shape or a video the backend doesn't list.
+pub fn frame_image(user_data: &Path, path: &str) -> Result<Vec<u8>, (u16, String)> {
+    let (id, n) = frame_request(path).ok_or((404, "Not found".to_string()))?;
+    let dir = user_data.join(crate::frames::DIR).join(FRAMES_DIR).join(id);
+    let file = dir.join(format!("{n}.jpg"));
+    if let Ok(b) = std::fs::read(&file) {
+        return Ok(b);
+    }
+    let (_, backend, _) = free_space::app(user_data).map_err(|e| (500, e))?;
+    let videos = backend
+        .get("/api/remote/videos")
+        .map_err(|e| (503, free_space::backend_problem(e)))?;
+    let v = videos
+        .get("videos")
+        .unwrap_or(&videos)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|v| v.get("id").and_then(id_text).as_deref() == Some(id))
+        .ok_or((404, format!("{id} is not in the library")))?;
+    let video = v
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or((404, format!("{id} has no path")))?;
+    let duration = v.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+    let vr = v.get("isVR").and_then(Value::as_bool).unwrap_or(false);
+    std::fs::create_dir_all(&dir).map_err(|e| (500, format!("{}: {e}", dir.display())))?;
+    let tmp = dir.join(format!("{n}.{}.tmp.jpg", std::process::id()));
+    let filter = format!("{}scale=640:-2", if vr { "crop=iw/2:ih:0:0," } else { "" });
+    let at = format!("{:.2}", duration * n as f64 / 100.0);
+    let ok = Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-y",
+            "-ss",
+            &at,
+            "-i",
+            video,
+            "-frames:v",
+            "1",
+            "-vf",
+            &filter,
+            "-q:v",
+            "4",
+        ])
+        .arg(&tmp)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !ok || std::fs::rename(&tmp, &file).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err((502, format!("no frame at {at} s of {video}")));
+    }
+    std::fs::read(&file).map_err(|e| (500, e.to_string()))
 }
 
 // ── Requests ─────────────────────────────────────────────────────────────
