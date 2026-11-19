@@ -91,6 +91,17 @@ a:hover { text-decoration: underline; }
 .b-src-eroscripts { --bc: #2f6fdf; } .b-src-slr { --bc: #e8743b; } .b-src-vrb { --bc: #d6336c; }
 .b-src-pmvhaven { --bc: #9b59d0; } .b-src-faptap { --bc: #f08c00; }
 a.badge { color: var(--fg); }
+/* The library drive's free space; red and swiping off below swipeDeck.minFreeGb. */
+.drive { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.drive-line { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; margin-bottom: 4px; }
+.drive-line b { color: var(--fg); }
+.drive.full .drive-line b, .drive .err { color: var(--nope); }
+.meter { position: relative; height: 8px; border-radius: 4px; background: var(--row); }
+.meter .used { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--like); }
+.drive.low .meter .used { background: var(--undo); }
+.drive.full .meter .used { background: var(--nope); }
+.meter .limit { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--fg); opacity: .55; }
 .scanned, .quota { width: min(100% - 32px, 528px); margin: -2px auto 8px; font-size: 13px; color: var(--muted); text-align: center;
   font-variant-numeric: tabular-nums; }
 .quota b { color: var(--fg); }
@@ -123,7 +134,7 @@ a.badge { color: var(--fg); }
 /* Desktop and landscape tablets: the image large on the left, every detail in a scrolling panel beside it. */
 @media (min-width: 900px) {
   .bar { width: min(100%, 1280px); }
-  .stacks, .scanned, .quota { width: min(100% - 32px, 1248px); }
+  .stacks, .scanned, .quota, .drive { width: min(100% - 32px, 1248px); }
   .problems, .deck { width: min(100% - 32px, 1248px); }
   .card { flex-direction: row; }
   .media { flex: 1 1 auto; min-width: 0; min-height: auto; }
@@ -162,7 +173,6 @@ a.badge { color: var(--fg); }
   <button type="button" id="refresh" title="Refresh: load the deck again (new images, runtimes, heat strips; skipped cards come back)" aria-label="Refresh">↻</button>
   <button type="button" id="shuffle" title="Shuffle: deal the deck in a new order" aria-label="Shuffle">⇄</button>
   <button type="button" id="gear" title="Shuffle settings: how far each stack's order may wander" aria-label="Shuffle settings" aria-expanded="false" aria-controls="settings">⚙</button>
-  <a href="/">Report</a>
   <div class="settings" id="settings" hidden>
     <label>Multi shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
     <label>VR shuffle ± <input type="number" id="jitter-vr" data-stack="vr" min="0" max="30" step="0.5" inputmode="decimal"></label>
@@ -177,6 +187,10 @@ a.badge { color: var(--fg); }
   <button type="button" data-stack="flat" title="Single-axis flat from every source: EroScripts posts, PMVHaven and FapTap videos">Flat</button>
   <button type="button" data-stack="free" title="Library videos to delete when a drive is full: the most GB per preference-score point first; favourites, 4★ and up, favourite artists and hand-made axes are never shown">Free space</button>
 </nav>
+<div class="drive" id="drive" hidden>
+  <div class="drive-line" id="drive-line"></div>
+  <div class="meter" id="drive-meter"><span class="used" id="drive-used"></span><span class="limit" id="drive-limit"></span></div>
+</div>
 <div class="scanned" id="scanned" hidden></div>
 <div class="quota" id="quota" hidden></div>
 <div class="quota" id="drives" hidden></div>
@@ -278,6 +292,12 @@ let loadError = null;
 let loaded = false;    // the first deck arrived
 let since = null;      // counter changes since the deck request in flight was sent
 let lastDeck = null;   // the last deck answer (Free space: the drives line)
+// GET /api/drive: {drive: {mount, free, total} | null, minFreeBytes, full, problems}. While
+// `full`, the download tabs take no swipes (the server refuses them with 507 too); skip, undo
+// and the Free space tab still work.
+let drive = null;
+const driveFull = () => Boolean(drive && drive.full);
+const swipeBlocked = () => driveFull() && stack !== 'free';
 
 // Swipes, undos and deck fetches reach the server in order.
 let chain = Promise.resolve();
@@ -291,7 +311,11 @@ async function post(path, body) {
   const res = await fetch(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+  if (!res.ok) {
+    const e = new Error((await res.text()).trim() || res.status);
+    e.status = res.status;
+    throw e;
+  }
   return res.json();
 }
 
@@ -672,11 +696,56 @@ function preload(url) {
   new Image().src = url;
 }
 
+/** "19.0 GB", "1,953 GB" (10^9 bytes). */
+const gb = (b) => (b >= 100e9 ? Math.round(b / 1e9).toLocaleString('en-US') : (b / 1e9).toFixed(1)) + ' GB';
+const fullMessage = () => `Library drive full (${gb(drive.drive.free)} free): swiping is off until ${gb(drive.minFreeBytes)} is free. The Free space tab deletes videos.`;
+
+/** The drive bar: free space in GB, a meter of the used part with a mark where swiping stops. */
+function renderDrive() {
+  const box = $('drive');
+  if (!drive) { box.hidden = true; return; }
+  const d = drive.drive;
+  const min = drive.minFreeBytes;
+  box.hidden = false;
+  box.classList.toggle('full', driveFull());
+  box.classList.toggle('low', !driveFull() && Boolean(d && min != null && d.free < 2 * min));
+  $('drive-meter').hidden = !d;
+  if (!d) {
+    box.title = '';
+    $('drive-line').replaceChildren(el('span', {}, 'Library drive: ', el('span', { class: 'err' }, (drive.problems || []).join('; ') || 'not measured')));
+    return;
+  }
+  box.title = `${d.mount}: ${d.free.toLocaleString('en-US')} bytes free of ${d.total.toLocaleString('en-US')}`;
+  const used = d.total ? (d.total - d.free) / d.total : 0;
+  $('drive-used').style.width = (used * 100).toFixed(2) + '%';
+  $('drive-limit').hidden = min == null || !d.total;
+  if (min != null && d.total) $('drive-limit').style.left = (Math.max(0, d.total - min) / d.total * 100).toFixed(2) + '%';
+  $('drive-line').replaceChildren(
+    el('span', {}, driveFull() ? 'Drive full: ' : 'Library drive: ', el('b', {}, gb(d.free) + ' free'), ` of ${gb(d.total)}`),
+    min == null ? '' : el('span', {}, driveFull() ? `swiping is off until ${gb(min)} is free (Free space still works)` : `swiping stops under ${gb(min)}`));
+}
+
+async function loadDrive() {
+  try {
+    const res = await fetch('/api/drive', { cache: 'no-store' });
+    if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+    drive = await res.json();
+  } catch (e) {
+    drive = { drive: null, minFreeBytes: null, full: false, problems: ['could not read the drive: ' + e.message] };
+  }
+  renderDrive();
+  renderCounter();
+}
+
 function renderCounter() {
   const marked = stack === 'free' ? ` · ${wanted} marked · ${fmtBytes(markedBytes)}` : ` · ${wanted} wanted`;
   $('counter').textContent = loaded ? `${remaining} left${marked}` : 'Loading…';
   $('undo').disabled = !undoStack.length;
-  $('nope').disabled = $('like').disabled = $('skip').disabled = !queue.length;
+  $('skip').disabled = !queue.length;
+  $('nope').disabled = $('like').disabled = !queue.length || swipeBlocked();
+  const free = stack === 'free';
+  $('like').title = swipeBlocked() ? fullMessage() : free ? 'Keep: never offered again (→)' : 'Want: its scout downloads it (→)';
+  $('nope').title = swipeBlocked() ? fullMessage() : free ? 'Mark for deletion (←); nothing is deleted until Delete marked' : 'Hide from the deck (←)';
   if (stack === 'free' && lastDeck) renderDrives(lastDeck);
 }
 
@@ -693,8 +762,7 @@ function render(enterFrom) {
         el('span', {}, wanted ? 'Delete the marked videos above, or undo a swipe.' : 'Everything else is protected (hover the drive line to see why).'),
         el('a', { href: '/' }, 'Back to the report')]
       : [`Nothing left to swipe on ${STACK_NAMES[stack]}.`,
-        el('span', {}, TAB_SCOUTS[stack].map((s) => 'npm run ' + s).join(', ') + ' find more.'),
-        el('a', { href: '/' }, 'Back to the report')]));
+        el('span', {}, TAB_SCOUTS[stack].map((s) => 'npm run ' + s).join(', ') + ' find more.')]));
     return;
   }
   empty.hidden = true;
@@ -832,6 +900,13 @@ function swipeCount(card, dir, sign) {
 function swipe(dir, dy) {
   const card = queue[0];
   if (!card) return;
+  if (swipeBlocked()) {
+    // The download tabs are off while the drive is full: a dragged card springs back.
+    const node = topNode();
+    if (node) { node.style.transform = ''; setStamps(node, 0); }
+    toast(fullMessage());
+    return;
+  }
   const node = topNode();
   if (node) fly(node, dir, dy);
   queue.shift();
@@ -843,6 +918,8 @@ function swipe(dir, dy) {
   // Each card's own endpoint: a post to /api/swipe, a scene to /api/scenes/<source>/swipe.
   serial(() => post(swipePath(card), { id: card.id, dir })).catch((e) => {
     // Not saved: put the card back on top (unless the page moved to another tab meanwhile).
+    // 507: the drive filled up since the bar last looked; reread it, which turns swiping off.
+    if (e.status === 507) loadDrive();
     const i = undoStack.findIndex((u) => u.card === card);
     if (i >= 0) undoStack.splice(i, 1);
     if (stack !== from) { toast('Swipe not saved: ' + e.message); return; }
@@ -1007,7 +1084,7 @@ function restart(newOrder) {
   reload();
 }
 
-$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); restart(false); });
+$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); loadDrive(); restart(false); });
 $('shuffle').addEventListener('click', (e) => { e.currentTarget.blur(); restart(true); });
 
 // Each tab's buttons and keys: Free space marks library videos for deletion (←) or keeps them (→).
@@ -1017,10 +1094,7 @@ const HINTS = {
 };
 function showStack() {
   for (const b of $('stacks').querySelectorAll('button')) b.classList.toggle('on', b.dataset.stack === stack);
-  const free = stack === 'free';
-  $('like').title = free ? 'Keep: never offered again (→)' : 'Want: its scout downloads it (→)';
-  $('nope').title = free ? 'Mark for deletion (←); nothing is deleted until Delete marked' : 'Hide from the deck (←)';
-  $('hint').textContent = HINTS[free ? 'free' : 'deck'];
+  $('hint').textContent = HINTS[stack === 'free' ? 'free' : 'deck'];
   if (stack !== 'vr') renderQuota(null);
   renderScanned(null);
   lastDeck = null;
@@ -1097,6 +1171,9 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
 });
 
+loadDrive();
+setInterval(loadDrive, 60e3);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDrive(); });
 reload();
 </script>
 </body>

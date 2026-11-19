@@ -411,8 +411,8 @@ mod tests {
         let dir = user_data("open", None);
         let mut gate = gate();
         let mut c = client(&mut gate, &dir, LAN);
-        assert_eq!(c.get("/").status, 200);
-        assert_eq!(c.get("/api/report").status, 200);
+        assert_eq!(c.get("/swipe").status, 200);
+        assert_eq!(c.get("/api/deck").status, 200);
         let r = c.get("/login?next=%2Fswipe");
         assert_eq!((r.status, header(&r, "Location")), (303, Some("/swipe")));
         let r = c.login("0000", "/swipe");
@@ -431,8 +431,8 @@ mod tests {
             IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped()),
         ] {
             let mut c = client(&mut gate, &dir, ip);
-            assert_eq!(c.get("/").status, 200, "{ip}");
-            assert_eq!(c.get("/api/report").status, 200, "{ip}");
+            assert_eq!(c.get("/swipe").status, 200, "{ip}");
+            assert_eq!(c.get("/api/drive").status, 200, "{ip}");
             assert_eq!(c.get("/api/deck").status, 200, "{ip}");
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -446,7 +446,7 @@ mod tests {
         for (target, accept, location) in [
             ("/", "*/*", "/login?next=/"),
             ("/swipe?x=1#top", "", "/login?next=/swipe%3Fx%3D1"),
-            ("/api/report", HTML, "/login?next=/api/report"),
+            ("/api/deck", HTML, "/login?next=/api/deck"),
             ("/nowhere", HTML, "/login?next=/nowhere"),
         ] {
             let r = c.send("GET", target, accept, "");
@@ -455,7 +455,7 @@ mod tests {
             assert!(r.body.is_empty());
         }
         for (method, target) in [
-            ("GET", "/api/report"),
+            ("GET", "/api/drive"),
             ("GET", "/api/deck?limit=3"),
             ("GET", "/frames/eroscripts/1/25.jpg"),
             ("POST", "/api/swipe"),
@@ -513,16 +513,16 @@ mod tests {
         assert!(token.starts_with(&format!("v1.{}.", NOW + 30 * 86400)));
 
         c.cookie = format!("theme=dark; funsync_access={token}");
-        assert_eq!(c.get("/").status, 200);
+        assert_eq!(c.get("/swipe").status, 200);
         assert_eq!(c.get("/api/deck").status, 200);
         // The same token as k= (headsets' media fetches), without the cookie.
         c.cookie.clear();
-        assert_eq!(c.get(&format!("/api/report?k={token}")).status, 200);
-        assert!(is_pin_required(&c.get("/api/report")));
+        assert_eq!(c.get(&format!("/api/deck?k={token}")).status, 200);
+        assert!(is_pin_required(&c.get("/api/deck")));
         // 30 days later it has run out.
         c.cookie = format!("funsync_access={token}");
         c.now = NOW + 30 * 86400;
-        assert!(is_pin_required(&c.get("/api/report")));
+        assert!(is_pin_required(&c.get("/api/deck")));
         c.now = NOW;
 
         // Logging out clears the cookie.
@@ -531,13 +531,13 @@ mod tests {
         assert_eq!(header(&r, "Set-Cookie"), Some(access::CLEAR_COOKIE));
 
         // A new PIN (new secret) logs every device out, and is read without a restart.
-        assert_eq!(c.get("/api/report").status, 200);
+        assert_eq!(c.get("/api/deck").status, 200);
         set_pin(&dir, [2; 32]);
-        assert!(is_pin_required(&c.get("/api/report")));
+        assert!(is_pin_required(&c.get("/api/deck")));
         // Removing the PIN opens everything again.
         std::fs::remove_file(access::file_path(&dir)).unwrap();
         c.cookie.clear();
-        assert_eq!(c.get("/api/report").status, 200);
+        assert_eq!(c.get("/api/deck").status, 200);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -634,12 +634,12 @@ mod tests {
             (503, "text/plain; charset=utf-8")
         );
         assert!(body(&r).contains("access-pin.json"));
-        let r = send(LAN, "/api/report", "*/*");
+        let r = send(LAN, "/api/deck", "*/*");
         assert_eq!((r.status, r.content_type), (503, "application/json"));
         let v: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
         assert_eq!(v["error"], "access pin file unreadable");
         assert_eq!(send(LAN, "/login", HTML).status, 503);
-        assert_eq!(send(LOCAL, "/api/report", "*/*").status, 200);
+        assert_eq!(send(LOCAL, "/api/deck", "*/*").status, 200);
         // Logged once.
         let log = String::from_utf8(err).unwrap();
         assert_eq!(log.lines().count(), 1, "{log}");

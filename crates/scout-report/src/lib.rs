@@ -1,16 +1,15 @@
-//! `npm run scout:report`: a webpage listing every EroScripts post the
-//! Discovery scout (`npm run eroscripts:scout`) has judged, with its verdict,
-//! and the waiting list, plus a swipe deck (`/swipe`) over the waiting list and
-//! the scenes the site scouts found (SexLikeReal, VRBangers / VRConk, PMVHaven,
-//! FapTap), in three tabs: Multi, VR and Flat, and a fourth, Free space: library
-//! videos to delete when a drive is full (crate::free_space, through the running
-//! app's backend).
+//! `npm run scout:report`: the swipe deck (`/swipe`; `/` redirects there) over the
+//! EroScripts Discovery scout's waiting list (`npm run eroscripts:scout`) and the scenes the
+//! site scouts found (SexLikeReal, VRBangers / VRConk, PMVHaven, FapTap), in three tabs:
+//! Multi, VR and Flat, and a fourth, Free space: library videos to delete when a drive is
+//! full (crate::free_space, through the running app's backend). A bar under the tabs shows
+//! the library drive's free space; while it's full the three download tabs take no swipes
+//! (crate::drive).
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
-//! `eroscripts-scout-rejected.json`, `eroscripts-scout-frames.json`,
-//! `slr-scout.json`, `vrb-scout.json`, `pmvhaven-scout.json` and
-//! `faptap-scout.json` in userData on every request, and serves the scouts'
-//! preview frames (`scout-frames/`). The only files it writes are the deck's
-//! swipes, one per source: `eroscripts-scout-swipes.json`,
+//! `eroscripts-scout-frames.json`, `slr-scout.json`, `vrb-scout.json`,
+//! `pmvhaven-scout.json`, `faptap-scout.json` and `config.json` in userData on every
+//! request, and serves the scouts' preview frames (`scout-frames/`). The only files it
+//! writes are the deck's swipes, one per source: `eroscripts-scout-swipes.json`,
 //! `slr-scout-swipes.json`, `vrb-scout-swipes.json`, `pmvhaven-scout-swipes.json`
 //! and `faptap-scout-swipes.json` (which the scouts' `--fetch` reads), and
 //! `free-space-swipes.json` (the Free space tab's marks); the previous copy of
@@ -21,6 +20,7 @@
 
 pub mod cli;
 pub mod deck;
+pub mod drive;
 pub mod frames;
 pub mod free_space;
 pub mod gate;
