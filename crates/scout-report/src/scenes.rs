@@ -185,11 +185,11 @@ fn https(u: Option<String>) -> Option<String> {
     u.filter(|u| u.starts_with("https://"))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneCard {
-    /// `slr`, `vrb`, `pmvhaven` or `faptap`: where the swipe goes
-    /// (`/api/scenes/<source>/swipe`).
+    /// `slr`, `vrb`, `pmvhaven`, `faptap` or `creators` (crate::creators): where the swipe
+    /// goes (`/api/scenes/<source>/swipe`).
     pub source: &'static str,
     /// The site the scene is on (`vrbangers` or `vrconk` for vrb; else the source): the badge.
     pub site: String,
@@ -236,6 +236,13 @@ pub struct SceneCard {
     /// FapTap: the video's projection (`MONO_FLAT`, …) and the stream height `--fetch` takes.
     pub projection: Option<String>,
     pub quality: Option<u64>,
+    /// The yes creator (crate::creators) the scene belongs to: the card's Creator badge; its
+    /// score includes the creator bonus (`scoreParts` "yes creator").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    /// A creator post's script is multi-axis (axes unknown; `axes` stays empty).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub multi_axis: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -351,6 +358,8 @@ pub fn card(source: Source, id: String, s: &Value) -> SceneCard {
         ai_script: flag(s, "aiScript"),
         projection: str_of(s, "projection"),
         quality: s.get("quality").and_then(Value::as_u64),
+        creator: None,
+        multi_axis: false,
     }
 }
 

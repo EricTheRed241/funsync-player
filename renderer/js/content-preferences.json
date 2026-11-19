@@ -102,6 +102,7 @@
   },
   "swipeDeck": {
     "minFreeGb": 50,
+    "yesCreatorBonus": 4,
     "duplicates": {
       "minConfidence": 70,
       "floorConfidence": 40,

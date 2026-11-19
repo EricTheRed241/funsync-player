@@ -5,13 +5,17 @@
 //! library videos, crate::free_space; `dupes` the Duplicates tab's pairs, crate::duplicates),
 //! `GET /api/drive` (the library drive's free space and whether swiping is off, crate::drive),
 //! `GET /frames/<eroscripts|slr>/<id>/<25|50|75>.jpg` (the scouts' preview frames,
-//! crate::frames), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (waiting
+//! crate::frames), `GET /pictures/<slug>/<file>` (the creators' pictures,
+//! crate::creator_pictures), `POST /api/swipe {id, dir}` and `POST /api/swipe/undo {id}` (waiting
 //! posts), `POST /api/scenes/<slr|vrb|pmvhaven|faptap>/swipe {id, dir}` and `…/undo {id}`
-//! (that scout's scenes), `POST /api/free-space/swipe {id, dir}`, `…/undo {id}` (marks on
+//! (that scout's scenes), `POST /api/scenes/creators/swipe {id, dir}` and `…/undo {id}` (a yes
+//! creator's post, `<kind>-<id>`, into creator-swipes.json, crate::creators),
+//! `POST /api/free-space/swipe {id, dir}`, `…/undo {id}` (marks on
 //! library videos), `POST /api/free-space/delete` (rates the left-marked ones for deletion
 //! through the app's backend), `POST /api/duplicates/swipe {id, dir: left|right|up}`,
 //! `…/undo {id}` (marks on pairs) and `POST /api/duplicates/delete` (the app deletes each
-//! marked copy as a duplicate). The swipes files are the only writes, crate::swipes. Post and
+//! marked copy as a duplicate). The swipes files are the only writes, crate::swipes and
+//! crate::creators. Post and
 //! scene swipes are refused (507) while the library drive is full; undos and the Free space
 //! and Duplicates tabs' marks never are. In front of them all, crate::gate: the access PIN,
 //! and `/login` and `/logout`.
@@ -19,7 +23,7 @@
 use crate::gate::{self, Gate};
 use crate::scenes::{self, Source};
 use crate::swipes::{self, Dir, Store};
-use crate::{deck, drive, duplicates, frames, free_space, report};
+use crate::{creator_pictures, creators, deck, drive, duplicates, frames, free_space, report};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -132,6 +136,20 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             Err(e) => text(400, &e),
         },
         ("GET" | "HEAD", p) if p.starts_with("/frames/") => frame(p, user_data),
+        ("GET" | "HEAD", p) if p.starts_with("/pictures/") => {
+            match creator_pictures::file_for(user_data, p)
+                .map(|(file, kind)| (std::fs::read(file), kind))
+            {
+                Some((Ok(body), content_type)) => Response {
+                    status: 200,
+                    content_type,
+                    cache: FRAME_CACHE,
+                    body,
+                    headers: Vec::new(),
+                },
+                _ => text(404, "Not found\n"),
+            }
+        }
         ("GET" | "HEAD", p) if p.starts_with("/dupes-frames/") => {
             match duplicates::frame_image(user_data, p) {
                 Ok(body) => Response {
@@ -146,6 +164,8 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
         }
         ("POST", "/api/swipe") => swipe(body, user_data, None),
         ("POST", "/api/swipe/undo") => undo(body, user_data, None),
+        ("POST", "/api/scenes/creators/swipe") => creator_swipe(body, user_data),
+        ("POST", "/api/scenes/creators/swipe/undo") => creator_undo(body, user_data),
         ("POST", p) if p.starts_with("/api/scenes/") => {
             let action = p["/api/scenes/".len()..]
                 .split_once('/')
@@ -257,7 +277,9 @@ fn exclude_key(item: &str) -> Option<String> {
     if source == duplicates::SOURCE {
         return duplicates::parse_pair(id).map(|_| item.to_string());
     }
-    let known = Source::parse(source).is_some() || source == free_space::SOURCE;
+    let known = Source::parse(source).is_some()
+        || source == free_space::SOURCE
+        || source == creators::SOURCE;
     (known && swipes::is_id(id)).then(|| item.to_string())
 }
 
@@ -426,6 +448,60 @@ fn undo(body: &[u8], user_data: &Path, source: Option<Source>) -> Response {
     };
     match store(source).undo(user_data, &id) {
         Ok(removed) => json_ok(&json!({"id": id_json(&id, source), "removed": removed})),
+        Err(e) => text(500, &format!("{e}\n")),
+    }
+}
+
+/// A creator card POST's JSON object, its card `id` and that id's post key (`<kind>:<id>`).
+fn creator_request(body: &[u8]) -> Result<(Value, String, String), Response> {
+    let req: Value = serde_json::from_slice(body)
+        .ok()
+        .filter(Value::is_object)
+        .ok_or_else(|| text(400, "body must be a JSON object\n"))?;
+    let (id, key) = req
+        .get("id")
+        .and_then(swipes::id_key)
+        .and_then(|id| creators::post_key(&id).map(|key| (id, key)))
+        .ok_or_else(|| text(400, "id must be <eroscripts|faptap>-<id>\n"))?;
+    Ok((req, id, key))
+}
+
+/// `POST /api/scenes/creators/swipe {id, dir}`: a yes creator's post into creator-swipes.json
+/// (right = want, left = hide), refused (507) while the library drive is full.
+fn creator_swipe(body: &[u8], user_data: &Path) -> Response {
+    let (req, id, key) = match creator_request(body) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let Some(dir) = req.get("dir").and_then(Value::as_str).and_then(Dir::parse) else {
+        return text(400, "dir must be \"right\" or \"left\"\n");
+    };
+    let mut problems = Vec::new();
+    let all = creators::Creators::read(user_data, &mut problems);
+    if !problems.is_empty() {
+        return text(500, &format!("{}\n", problems.join("\n")));
+    }
+    let Some(who) = all.owner(&key) else {
+        return text(400, &format!("{key} is not a post of a yes creator\n"));
+    };
+    if let Some(refused) = refuse_when_full(&drive::status(user_data)) {
+        return refused;
+    }
+    let at = video_tags::timefmt::now_iso();
+    match creators::set_post(user_data, &key, &who.slug, dir, at) {
+        Ok(at) => json_ok(&json!({"id": id, "dir": dir, "at": at})),
+        Err(e) => text(500, &format!("{e}\n")),
+    }
+}
+
+/// `POST /api/scenes/creators/swipe/undo {id}`: forget a creator post's swipe.
+fn creator_undo(body: &[u8], user_data: &Path) -> Response {
+    let (id, key) = match creator_request(body) {
+        Ok((_, id, key)) => (id, key),
+        Err(resp) => return resp,
+    };
+    match creators::undo_post(user_data, &key) {
+        Ok(removed) => json_ok(&json!({"id": id, "removed": removed})),
         Err(e) => text(500, &format!("{e}\n")),
     }
 }
@@ -1390,5 +1466,81 @@ mod tests {
         assert!(l.local_addr().unwrap().ip().is_loopback());
         let l = bind(0, true).unwrap();
         assert!(l.local_addr().unwrap().ip().is_unspecified());
+    }
+
+    #[test]
+    fn creator_cards_swipe_into_creator_swipes_json_and_serve_her_pictures() {
+        let dir = user_data("creator-cards");
+        std::fs::write(
+            dir.join(creators::FILE),
+            br#"{"creators":{"ann":{"name":"Ann","sources":["favourite"],
+                "pictures":[{"file":"ig-1.jpg","source":"instagram"}],
+                "posts":[{"kind":"eroscripts","id":500,"title":"Own","score":6,"downloadable":true}]},
+              "bea":{"name":"Bea","posts":[{"kind":"faptap","id":"9","score":1,"downloadable":true}]}}}"#,
+        )
+        .unwrap();
+        let pics = dir.join(creator_pictures::DIR).join("ann");
+        std::fs::create_dir_all(&pics).unwrap();
+        std::fs::write(pics.join("ig-1.jpg"), b"jpeg").unwrap();
+        let deck = get_json("/api/deck?stack=flat", &dir);
+        assert_eq!(deck["cards"][0]["source"], "creators");
+        assert_eq!(deck["cards"][0]["id"], "eroscripts-500");
+        assert_eq!(deck["cards"][0]["creator"], "Ann");
+        assert_eq!(deck["cards"][0]["images"][0], "/pictures/ann/ig-1.jpg");
+        let r = route("GET", "/pictures/ann/ig-1.jpg", b"", &dir);
+        assert_eq!(
+            (r.status, r.content_type, r.body.as_slice()),
+            (200, "image/jpeg", &b"jpeg"[..])
+        );
+        assert_eq!(
+            route("GET", "/pictures/ann/../x.jpg", b"", &dir).status,
+            404
+        );
+        // The page leaves out the cards it holds, creator cards too.
+        let left = get_json("/api/deck?stack=flat&exclude=creators:eroscripts-500", &dir);
+        assert_eq!(left["cards"], json!([]));
+
+        let post = |path: &str, body: &str| route("POST", path, body.as_bytes(), &dir).status;
+        assert_eq!(
+            post(
+                "/api/scenes/creators/swipe",
+                r#"{"id":"eroscripts-500","dir":"right"}"#
+            ),
+            200
+        );
+        let on_disk: Value =
+            serde_json::from_slice(&std::fs::read(dir.join(creators::SWIPES_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(on_disk["posts"]["eroscripts:500"]["choice"], "want");
+        assert_eq!(on_disk["posts"]["eroscripts:500"]["creator"], "ann");
+        let deck = get_json("/api/deck?stack=flat", &dir);
+        assert_eq!(
+            (deck["remaining"].as_u64(), deck["wanted"].as_u64()),
+            (Some(0), Some(1))
+        );
+        // Bea isn't yes; a bad id is no card.
+        assert_eq!(
+            post(
+                "/api/scenes/creators/swipe",
+                r#"{"id":"faptap-9","dir":"right"}"#
+            ),
+            400
+        );
+        assert_eq!(
+            post(
+                "/api/scenes/creators/swipe",
+                r#"{"id":"slr-1","dir":"right"}"#
+            ),
+            400
+        );
+        assert_eq!(
+            post(
+                "/api/scenes/creators/swipe/undo",
+                r#"{"id":"eroscripts-500"}"#
+            ),
+            200
+        );
+        assert_eq!(get_json("/api/deck?stack=flat", &dir)["remaining"], 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -30,6 +30,9 @@
 // backend/web-remote/sort-default.js (the phone can't import this file).
 // `swipeDeck.minFreeGb` (JSON only, read by crates/scout-report): the swipe deck's download
 // tabs stop swiping while the library drive has less free space than this.
+// `swipeDeck.yesCreatorBonus` (JSON only, read by crates/scout-report): score points the swipe
+// deck adds to cards of the creators you said yes to on the Creators site (swiped yes,
+// favourites, pornstar list).
 
 import data from './content-preferences.json' with { type: 'json' };
 

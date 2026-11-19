@@ -1,6 +1,6 @@
 //! End to end through the binary: serve a temp userData with a sample creators.json and
-//! pictures on a free loopback port; fetch both tabs, the decks, a picture; swipe and undo,
-//! over raw HTTP.
+//! pictures on a free loopback port; fetch the tabs, the deck, the lists, a picture;
+//! swipe and undo, over raw HTTP.
 
 use serde_json::{Value, json};
 use std::fs;
@@ -139,7 +139,7 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
 
     let (_server, port) = start(&ud);
 
-    for page in ["/creators", "/posts", "/swiped", "/collection"] {
+    for page in ["/creators", "/swiped", "/collection"] {
         let (status, head, body) = request(port, "GET", page, None);
         assert_eq!(status, 200, "{page}");
         assert!(head.contains("Content-Type: text/html; charset=utf-8"));
@@ -186,8 +186,11 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
     );
     assert_eq!(status, 404);
 
-    // Nobody said yes yet: no posts.
-    assert_eq!(get_json(port, "/api/posts/deck")["remaining"], 0);
+    // Nobody said yes yet: an empty collection.
+    assert_eq!(
+        get_json(port, "/api/creators/collection")["cards"],
+        json!([])
+    );
     let (status, v) = post(
         port,
         "/api/creators/swipe",
@@ -202,43 +205,16 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
     assert_eq!(status, 200);
     assert_eq!(get_json(port, "/api/creators/deck")["remaining"], 0);
 
-    let posts = get_json(port, "/api/posts/deck?offset=0");
-    let keys: Vec<_> = posts["cards"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["key"].as_str().unwrap())
-        .collect();
-    assert_eq!(keys, ["eroscripts:41415", "faptap:2122637633308856321"]);
-    assert_eq!(
-        posts["cards"][0]["pictures"][0]["src"],
-        "/pictures/sweetiefox/es-41415-0.jpg"
-    );
-    assert_eq!(posts["cards"][0]["creatorName"], "Sweetie Fox");
-
-    let (status, v) = post(
-        port,
-        "/api/posts/swipe",
-        json!({"key": "eroscripts:41415", "choice": "want", "creator": "sweetiefox"}),
-    );
-    assert_eq!(status, 200, "{v}");
-    let (status, _) = post(
-        port,
-        "/api/posts/swipe",
-        json!({"key": "faptap:2122637633308856321", "choice": "hide", "creator": "sweetiefox"}),
-    );
-    assert_eq!(status, 200);
     let sum = get_json(port, "/api/summary");
     assert_eq!(
         sum["creators"],
         json!({"total": 2, "yes": 1, "no": 1, "unswiped": 0})
     );
-    assert_eq!(sum["posts"]["wanted"], 1);
-    assert_eq!(sum["posts"]["pendingDownload"], 1);
-    assert_eq!(sum["posts"]["hidden"], 1);
     let collection = get_json(port, "/api/creators/collection");
     assert_eq!(collection["cards"][0]["slug"], "sweetiefox");
     assert_eq!(collection["cards"][0]["instagram"]["handle"], "swfx_real");
+    // Her two downloadable posts are on the swipe deck.
+    assert_eq!(collection["cards"][0]["unswiped"], 2);
     let swiped = get_json(port, "/api/creators/swiped");
     let got: Vec<_> = swiped["cards"]
         .as_array()
@@ -258,20 +234,8 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
         serde_json::from_slice(&fs::read(ud.join("creator-swipes.json")).unwrap()).unwrap();
     assert_eq!(on_disk["version"], 1);
     assert_eq!(on_disk["creators"]["sweetiefox"]["choice"], "yes");
-    assert_eq!(on_disk["posts"]["eroscripts:41415"]["choice"], "want");
-    assert_eq!(
-        on_disk["posts"]["eroscripts:41415"]["creator"],
-        "sweetiefox"
-    );
+    assert_eq!(on_disk["posts"], json!({}));
 
-    // Undo puts the post back in the deck.
-    let (status, v) = post(
-        port,
-        "/api/posts/swipe/undo",
-        json!({"key": "faptap:2122637633308856321"}),
-    );
-    assert_eq!((status, &v["removed"]), (200, &json!(true)));
-    assert_eq!(get_json(port, "/api/posts/deck")["remaining"], 1);
     let (status, v) = post(port, "/api/creators/swipe/undo", json!({"slug": "annie"}));
     assert_eq!((status, &v["removed"]), (200, &json!(true)));
     assert_eq!(get_json(port, "/api/creators/deck")["remaining"], 1);
@@ -291,7 +255,7 @@ fn says_when_creators_json_is_missing() {
     let deck = get_json(port, "/api/creators/deck");
     assert_eq!(deck["missing"], true);
     assert_eq!(deck["cards"], json!([]));
-    assert_eq!(get_json(port, "/api/posts/deck")["missing"], true);
+    assert_eq!(get_json(port, "/api/creators/collection")["missing"], true);
     let (status, _, body) = request(port, "GET", "/creators", None);
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&body).contains("npm run creators:scout -- --daily"));

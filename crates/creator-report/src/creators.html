@@ -81,18 +81,16 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 .stamp.want { left: 18px; color: var(--like); transform: rotate(-14deg); }
 .stamp.hide { right: 18px; color: var(--nope); transform: rotate(14deg); }
 .info { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 5px; }
-.badges, .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .badge { padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
   background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); }
-.b-score { --bc: #2f6fdf; } .b-time { --bc: #6b7280; } .b-cream { --bc: #e0529c; } .b-multi { --bc: #14b8a6; }
+.b-score { --bc: #2f6fdf; }
 .b-es { --bc: #d08b2c; } .b-paid { --bc: #8b8b93; } .b-ft { --bc: #a46ad6; }
 .b-fav { --bc: #e8a317; } .b-star { --bc: #e0529c; }
 .b-yes { --bc: var(--like); } .b-no { --bc: var(--nope); }
 .profiles { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
 .profiles a { color: var(--muted); }
 .follow { font-size: 11px; font-weight: 600; color: var(--like); margin-left: 4px; }
-.tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--row); white-space: nowrap; }
-.tags.one-line { flex-wrap: nowrap; overflow: hidden; }
 .ttl { font-weight: 650; font-size: 16px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .aka { color: var(--muted); font-size: 12px; margin-top: -3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -107,11 +105,6 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 .tops .k { flex: none; width: 22px; font-size: 11px; font-weight: 700; color: var(--muted); }
 .tops a, .tops span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--fg); }
 .tops .s { margin-left: auto; flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.by { display: flex; gap: 10px; color: var(--muted); font-size: 13px; min-width: 0; }
-.by .who { color: var(--fg); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.by .hosts { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.by a { margin-left: auto; font-size: 12px; white-space: nowrap; }
-.by .date { font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Desktop and landscape tablets: the picture large on the left, the details beside it. */
 @media (min-width: 900px) {
   .bar { width: min(100%, 1280px); }
@@ -122,7 +115,6 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
   .info { flex: 0 0 clamp(340px, 34%, 460px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
     padding: 16px 18px; gap: 9px; border-left: 1px solid var(--line); }
   .info .ttl { font-size: 19px; -webkit-line-clamp: 4; }
-  .tags.one-line { flex-wrap: wrap; }
   .tops a, .tops span.t { white-space: normal; }
 }
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -187,7 +179,6 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 </header>
 <nav class="stacks" id="tabs" aria-label="Which page">
   <button type="button" data-tab="creators" title="Content creators: yes or no">Creators</button>
-  <button type="button" data-tab="posts" title="Downloadable posts of the creators you said yes to: want or hide">Posts</button>
   <button type="button" data-tab="swiped" title="The creators you swiped: their cards, newest first; change yes or no">Swiped</button>
   <button type="button" data-tab="collection" title="The creators you like (yes, favourites, pornstar list) and their socials">Collection</button>
 </nav>
@@ -214,8 +205,8 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 </div>
 <div class="actions" id="view-actions" hidden>
   <button type="button" class="round small skip" id="prev" title="Previous (←)" aria-label="Previous">‹</button>
-  <button type="button" class="round nope" id="set-no" title="No: her posts leave the Posts tab (N)" aria-label="No">✕</button>
-  <button type="button" class="round like" id="set-yes" title="Yes: her posts come to the Posts tab (Y)" aria-label="Yes">♥</button>
+  <button type="button" class="round nope" id="set-no" title="No: her posts leave the swipe deck (N)" aria-label="No">✕</button>
+  <button type="button" class="round like" id="set-yes" title="Yes: her posts come to the swipe deck (Y)" aria-label="Yes">♥</button>
   <button type="button" class="round small skip" id="next" title="Next (→)" aria-label="Next">›</button>
 </div>
 <div class="hint" id="hint"></div>
@@ -226,15 +217,16 @@ a.src:hover { text-decoration: none; background: rgba(0,0,0,.75); }
 const BATCH = 20;
 const REFILL_AT = 5;
 // The creators deal's shuffle: the server shifts every score by up to ±2 for this seed;
-// Shuffle (or a page reload) deals a new order. The posts deck is strictly by score.
+// Shuffle (or a page reload) deals a new order.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older requests are dropped
-const PATHS = { '/creators': 'creators', '/posts': 'posts', '/swiped': 'swiped', '/collection': 'collection' };
+const PATHS = { '/creators': 'creators', '/swiped': 'swiped', '/collection': 'collection' };
 const tabFromPath = () => PATHS[location.pathname] || 'creators';
 let tab = tabFromPath();
 
-// Each tab's deck: its URL, API, words, a card's identity, and what a swipe sends.
+// The deck tab: its URL, API, words, a card's identity, and what a swipe sends. The yes
+// creators' posts are swiped on the swipe deck (scout-report), with a Creator badge.
 const TABS = {
   creators: {
     path: '/creators', api: '/api/creators', title: 'Creators', yes: 'YES', no: 'NO',
@@ -242,19 +234,9 @@ const TABS = {
     name: (c) => c.name,
     swipe: (c, dir) => ({ slug: c.slug, choice: dir === 'right' ? 'yes' : 'no' }),
     undo: (c) => ({ slug: c.slug }),
-    likeTitle: 'Yes: their posts come to the Posts tab (→)',
+    likeTitle: 'Yes: their posts come to the swipe deck (→)',
     nopeTitle: 'No (←)',
     hint: '← no · → yes · ↓ or drag up skip · Backspace undo · Space next picture · tap the picture\'s sides to browse',
-  },
-  posts: {
-    path: '/posts', api: '/api/posts', title: 'Posts', yes: 'WANT', no: 'HIDE',
-    key: (c) => 'p:' + c.key,
-    name: (c) => c.title || c.key,
-    swipe: (c, dir) => ({ key: c.key, creator: c.creator, choice: dir === 'right' ? 'want' : 'hide' }),
-    undo: (c) => ({ key: c.key }),
-    likeTitle: 'Want: downloads at the next daily run (→)',
-    nopeTitle: 'Hide (←)',
-    hint: '← hide · → want (downloads at the next daily run) · ↓ skip · Backspace undo · Space next picture',
   },
 };
 const isDeck = (t) => Object.hasOwn(TABS, t);
@@ -344,17 +326,7 @@ function toast(msg, ms) {
 
 const fmt = (n) => String(Math.round(n * 10) / 10);
 const day = (iso) => (iso ? iso.slice(0, 10) : '');
-const monthYear = (iso) => { const m = /^(\d{4})-(\d{2})/.exec(iso || ''); return m ? m[2] + '-' + m[1] : ''; };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
-
-/** m:ss, or h:mm:ss from an hour. */
-function clock(secs) {
-  const s = Math.round(secs);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = String(s % 60).padStart(2, '0');
-  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
-}
 
 /** Followers as given ("5M") or a number shortened (9225 → 9.2K). */
 function followers(v) {
@@ -416,25 +388,6 @@ function creatorInfo(c) {
   ];
 }
 
-function postInfo(c) {
-  const badges = [scoreBadge(c.score)];
-  if (c.durationS) badges.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.durationS)));
-  badges.push(el('span', { class: 'badge ' + (c.kind === 'faptap' ? 'b-ft' : 'b-es') }, SOURCES[c.kind] || c.kind));
-  if (c.creampie) badges.push(el('span', { class: 'badge b-cream' }, 'Creampie'));
-  if (c.multiAxis) badges.push(el('span', { class: 'badge b-multi' }, 'Multi-axis'));
-  const link = c.kind === 'eroscripts' ? '#' + c.id + ' ↗' : (SOURCES[c.kind] || 'Open') + ' ↗';
-  return [
-    el('div', { class: 'badges' }, badges),
-    el('div', { class: 'ttl', title: c.title || null }, c.title || c.key),
-    el('div', { class: 'by' },
-      el('span', { class: 'who' }, c.creatorName),
-      c.hosts && c.hosts.length ? el('span', { class: 'hosts', title: 'Video on' }, c.hosts.join(', ')) : null,
-      c.url ? ext(c.url, link) : null,
-      monthYear(c.createdAt) ? el('span', { class: 'date', title: 'Posted ' + day(c.createdAt) }, monthYear(c.createdAt)) : null),
-    c.tags && c.tags.length ? el('div', { class: 'tags one-line' }, c.tags.map((t) => el('span', { class: 'tag' }, t))) : null,
-  ];
-}
-
 /** The chip naming where the shown picture comes from (a link to it there, when known). */
 function sourceChip(p) {
   if (!p) return null;
@@ -463,7 +416,7 @@ function cardNode(c, isTop) {
     media.append(el('div', { class: 'none' }, 'No picture'));
   }
   const node = el('article', { class: 'card ' + (isTop ? 'top' : 'next') + (isDeck(c._tab) ? '' : ' view') }, media,
-    el('div', { class: 'info' }, c._tab === 'posts' ? postInfo(c) : creatorInfo(c)));
+    el('div', { class: 'info' }, creatorInfo(c)));
   if (isDeck(c._tab)) {
     const t = TABS[c._tab];
     media.append(el('div', { class: 'stamp want' }, t.yes), el('div', { class: 'stamp hide' }, t.no));
@@ -489,8 +442,7 @@ const picSrc = (c, i) => ((c && c.pictures) || [])[i]?.src;
 
 function renderCounter() {
   if (!isDeck(tab)) return;
-  const word = tab === 'posts' ? 'wanted' : 'yes';
-  $('counter').textContent = loaded ? `${remaining} left · ${liked} ${word}` : 'Loading…';
+  $('counter').textContent = loaded ? `${remaining} left · ${liked} yes` : 'Loading…';
   $('undo').disabled = !undoStack.length;
   $('nope').disabled = $('like').disabled = $('skip').disabled = !queue.length;
 }
@@ -502,14 +454,8 @@ function emptyState() {
     return [el('b', {}, 'No creators yet'),
       el('span', {}, 'Run ', el('code', {}, 'npm run creators:scout -- --daily'), ' to find them; they show up here when it\'s done.')];
   }
-  if (tab === 'creators') {
-    return [el('b', {}, 'No creators left to swipe'), el('span', {}, 'New ones come with the next daily run.'),
-      el('button', { type: 'button', class: 'linkish', onclick: () => switchTab('collection') }, 'See the collection')];
-  }
-  if (summary && !summary.creators.yes) {
-    return [el('b', {}, 'No posts yet'), el('span', {}, 'Swipe creators right (yes) on the Creators tab; their downloadable posts show up here.')];
-  }
-  return [el('b', {}, 'No posts left to swipe'), el('span', {}, 'New ones come with the next daily run.')];
+  return [el('b', {}, 'No creators left to swipe'), el('span', {}, 'New ones come with the next daily run.'),
+    el('button', { type: 'button', class: 'linkish', onclick: () => switchTab('collection') }, 'See the collection')];
 }
 
 /** Redraw the top two cards (a card flying off stays until its animation ends). */
@@ -658,7 +604,6 @@ function swipe(dir, dy) {
   render();
   const t = TABS[card._tab];
   serial(() => post(t.api + '/swipe', t.swipe(card, dir))).then(() => {
-    if (card._tab === 'posts' && dir === 'right') toast('Wanted: downloads at the next daily run', 2500);
     loadSummary();
   }).catch((e) => {
     // Not saved: put the card back on top (unless the page moved to the other tab meanwhile).
@@ -754,7 +699,7 @@ function more() {
     if (gen !== generation) return;
     loadError = null;
     remaining = Math.max(0, d.remaining + since.remaining);
-    liked = Math.max(0, (from === 'posts' ? d.wanted : d.yes) + since.liked);
+    liked = Math.max(0, d.yes + since.liked);
     since = null;
     missing = d.missing;
     exhausted = d.cards.length < BATCH;
@@ -819,13 +764,9 @@ function renderSummary() {
   const s = $('summary');
   if (!summary || summary.missing) { s.hidden = true; return; }
   const c = summary.creators;
-  const p = summary.posts;
   const b = (n) => el('b', {}, String(n));
   let line;
-  if (tab === 'posts') {
-    line = [b(p.wanted), ' wanted · ', b(p.pendingDownload), ' to download · ', b(p.inLibrary), ' in library'];
-    if (p.hidden) line.push(' · ', b(p.hidden), ' hidden');
-  } else if (tab === 'collection') {
+  if (tab === 'collection') {
     const all = lists.collection.entries || [];
     const n = (f) => all.filter(f).length;
     line = [b(c.yes), ' yes: ', b(n((e) => e.choice === 'yes')), ' swiped · ',
@@ -1040,8 +981,8 @@ function showTab() {
     deckEl.hidden = false;
     $('like').title = t.likeTitle;
     $('nope').title = t.nopeTitle;
-    $('like').setAttribute('aria-label', tab === 'posts' ? 'Want' : 'Yes');
-    $('nope').setAttribute('aria-label', tab === 'posts' ? 'Hide' : 'No');
+    $('like').setAttribute('aria-label', 'Yes');
+    $('nope').setAttribute('aria-label', 'No');
     $('hint').textContent = t.hint;
   } else {
     $('search').value = lists[tab].query;
