@@ -139,13 +139,16 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
 
     let (_server, port) = start(&ud);
 
-    for page in ["/", "/posts"] {
+    for page in ["/creators", "/posts", "/swiped", "/collection"] {
         let (status, head, body) = request(port, "GET", page, None);
         assert_eq!(status, 200, "{page}");
         assert!(head.contains("Content-Type: text/html; charset=utf-8"));
         assert!(head.contains("Cache-Control: no-store"));
-        assert!(String::from_utf8_lossy(&body).contains("Yes list"));
+        assert!(String::from_utf8_lossy(&body).contains("data-tab=\"collection\""));
     }
+    let (status, head, _) = request(port, "GET", "/", None);
+    assert_eq!(status, 303);
+    assert!(head.contains("Location: /creators\r\n"), "{head}");
 
     let deck = get_json(port, "/api/creators/deck?seed=1&offset=0");
     let slugs: Vec<_> = deck["cards"]
@@ -233,9 +236,21 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
     assert_eq!(sum["posts"]["wanted"], 1);
     assert_eq!(sum["posts"]["pendingDownload"], 1);
     assert_eq!(sum["posts"]["hidden"], 1);
+    let collection = get_json(port, "/api/creators/collection");
+    assert_eq!(collection["cards"][0]["slug"], "sweetiefox");
+    assert_eq!(collection["cards"][0]["instagram"]["handle"], "swfx_real");
+    let swiped = get_json(port, "/api/creators/swiped");
+    let got: Vec<_> = swiped["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["slug"].as_str().unwrap(), c["choice"].as_str().unwrap()))
+        .collect();
+    // Newest swipe first: Annie was swiped after Sweetie Fox.
+    assert_eq!(got, [("annie", "no"), ("sweetiefox", "yes")]);
     assert_eq!(
-        get_json(port, "/api/creators/yes")["creators"][0]["slug"],
-        "sweetiefox"
+        swiped["cards"][1]["pictures"][0]["src"],
+        "/pictures/sweetiefox/ig-3456789.jpg"
     );
 
     // The file creator-scout reads, in the contract's shape.
@@ -277,7 +292,7 @@ fn says_when_creators_json_is_missing() {
     assert_eq!(deck["missing"], true);
     assert_eq!(deck["cards"], json!([]));
     assert_eq!(get_json(port, "/api/posts/deck")["missing"], true);
-    let (status, _, body) = request(port, "GET", "/", None);
+    let (status, _, body) = request(port, "GET", "/creators", None);
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&body).contains("npm run creators:scout -- --daily"));
     assert!(!tmp.0.join("creator-swipes.json").exists());

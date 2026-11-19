@@ -1,10 +1,12 @@
 //! The HTTP side, on scout-report's plumbing (scout_report::server::serve_site) behind its
 //! access-PIN gate and login page (scout_report::gate):
 //!
-//! - `GET /` (the Creators tab) and `GET /posts` (the Posts tab): the same page.
+//! - `GET /creators` (the Creators tab), `GET /posts` (Posts), `GET /swiped` (Swiped) and
+//!   `GET /collection` (Collection): the same page. `GET /` redirects to `/creators`.
 //! - `GET /api/creators/deck?seed=N&offset=N&limit=N` and `GET /api/posts/deck?offset=N&limit=N`:
 //!   a page of a deck (crate::deck).
-//! - `GET /api/creators/yes`: the Yes list. `GET /api/summary`: the counts.
+//! - `GET /api/creators/swiped`: the swiped creators' cards, newest swipe first.
+//!   `GET /api/creators/collection`: the yes creators' cards. `GET /api/summary`: the counts.
 //! - `POST /api/creators/swipe {slug, choice: yes|no}`, `POST /api/creators/swipe/undo {slug}`,
 //!   `POST /api/posts/swipe {key, choice: want|hide, creator}`, `POST /api/posts/swipe/undo {key}`:
 //!   the only writes (crate::swipes).
@@ -21,11 +23,11 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
-/// The page: both tabs, HTML, CSS and JS in one file, no external scripts.
+/// The page: every tab, HTML, CSS and JS in one file, no external scripts.
 pub const PAGE: &str = include_str!("creators.html");
 /// The site's name (log lines) and its pages, for the gate.
 pub const NAME: &str = "creator-report";
-pub const PAGES: &[&str] = &["/", "/posts"];
+pub const PAGES: &[&str] = &["/", "/creators", "/posts", "/swiped", "/collection"];
 /// A picture's name is new whenever creator-scout saves another one.
 const PICTURE_CACHE: &str = "max-age=86400";
 
@@ -49,7 +51,17 @@ impl App {
         let target = target.split('#').next().unwrap_or("");
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         match (method, path) {
-            ("GET" | "HEAD", "/" | "/posts") => html(PAGE),
+            ("GET" | "HEAD", "/") => {
+                let mut resp = text(303, "");
+                let location = if query.is_empty() {
+                    "/creators".to_string()
+                } else {
+                    format!("/creators?{query}")
+                };
+                resp.headers.push(("Location", location));
+                resp
+            }
+            ("GET" | "HEAD", "/creators" | "/posts" | "/swiped" | "/collection") => html(PAGE),
             ("GET" | "HEAD", "/api/creators/deck") => match page(query) {
                 Ok(page) => {
                     let (creators, swipes, problems) = self.state();
@@ -64,10 +76,13 @@ impl App {
                 }
                 Err(e) => text(400, &e),
             },
-            ("GET" | "HEAD", "/api/creators/yes") => {
+            ("GET" | "HEAD", "/api/creators/swiped") => {
                 let (creators, swipes, problems) = self.state();
-                let list = creators.map_or_else(Vec::new, |c| deck::yes_list(c, &swipes));
-                json_ok(&json!({"creators": list, "problems": problems}))
+                json_ok(&deck::swiped_list(creators, &swipes, problems))
+            }
+            ("GET" | "HEAD", "/api/creators/collection") => {
+                let (creators, swipes, problems) = self.state();
+                json_ok(&deck::collection(creators, &swipes, problems))
             }
             ("GET" | "HEAD", "/api/summary") => {
                 let (creators, swipes, problems) = self.state();
@@ -300,10 +315,16 @@ mod tests {
     }
 
     #[test]
-    fn serves_both_tabs_the_same_page() {
+    fn serves_every_tab_the_same_page_and_redirects_the_root() {
         let dir = user_data("pages");
         let mut app = App::new(&dir);
-        for p in ["/", "/posts", "/posts?x=1#y"] {
+        for p in [
+            "/creators",
+            "/posts",
+            "/swiped",
+            "/collection",
+            "/posts?x=1#y",
+        ] {
             let r = app.route("GET", p, b"");
             assert_eq!(
                 (r.status, r.content_type),
@@ -311,8 +332,13 @@ mod tests {
             );
             assert_eq!(r.body, PAGE.as_bytes());
         }
+        for (target, to) in [("/", "/creators"), ("/?k=v1.1.ab", "/creators?k=v1.1.ab")] {
+            let r = app.route("GET", target, b"");
+            assert_eq!(r.status, 303, "{target}");
+            assert_eq!(r.headers, [("Location", to.to_string())]);
+        }
         assert_eq!(app.route("GET", "/nowhere", b"").status, 404);
-        assert_eq!(app.route("POST", "/", b"").status, 404);
+        assert_eq!(app.route("POST", "/creators", b"").status, 404);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -325,7 +351,10 @@ mod tests {
             assert_eq!(v["missing"], true, "{target}");
             assert_eq!(v["problems"], json!([]));
         }
-        assert_eq!(get(&mut app, "/api/creators/yes")["creators"], json!([]));
+        for target in ["/api/creators/swiped", "/api/creators/collection"] {
+            let v = get(&mut app, target);
+            assert_eq!((&v["cards"], &v["missing"]), (&json!([]), &json!(true)));
+        }
         let r = post(
             &mut app,
             "/api/creators/swipe",
@@ -412,9 +441,13 @@ mod tests {
         );
         assert_eq!(sum["posts"]["wanted"], 1);
         assert_eq!(sum["posts"]["pendingDownload"], 1);
-        let yes = get(&mut app, "/api/creators/yes");
-        assert_eq!(yes["creators"][0]["slug"], "ann");
-        assert_eq!(yes["creators"][0]["wanted"], 1);
+        let yes = get(&mut app, "/api/creators/collection");
+        assert_eq!(yes["cards"][0]["slug"], "ann");
+        assert_eq!(yes["cards"][0]["wanted"], 1);
+        let swiped = get(&mut app, "/api/creators/swiped");
+        assert_eq!(slugs(&swiped), ["ann"]);
+        assert_eq!(swiped["cards"][0]["choice"], "yes");
+        assert!(swiped["cards"][0]["at"].is_string());
 
         let on_disk: Value =
             serde_json::from_slice(&std::fs::read(dir.join(swipes::FILE)).unwrap()).unwrap();
@@ -588,7 +621,13 @@ mod tests {
                 .find(|(n, _)| *n == "Location")
                 .map(|(_, v)| v.clone())
         };
-        for (target, next) in [("/", "/login?next=/"), ("/posts", "/login?next=/posts")] {
+        for (target, next) in [
+            ("/", "/login?next=/"),
+            ("/creators", "/login?next=/creators"),
+            ("/posts", "/login?next=/posts"),
+            ("/swiped", "/login?next=/swiped"),
+            ("/collection", "/login?next=/collection"),
+        ] {
             let r = send(lan, "GET", target, "");
             assert_eq!((r.status, location(&r).as_deref()), (303, Some(next)));
         }
@@ -596,7 +635,8 @@ mod tests {
             ("GET", "/api/creators/deck"),
             ("GET", "/api/posts/deck"),
             ("GET", "/api/summary"),
-            ("GET", "/api/creators/yes"),
+            ("GET", "/api/creators/swiped"),
+            ("GET", "/api/creators/collection"),
             ("GET", "/pictures/ann/ig-1.jpg"),
             ("POST", "/api/creators/swipe"),
             ("POST", "/api/posts/swipe/undo"),
