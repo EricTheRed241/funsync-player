@@ -9,27 +9,31 @@
 // The original stroke file is never written. An axis whose companion already
 // exists is skipped. A script with any hand-made axes (see handmade-axes.js)
 // gets nothing at all: hand-made axis scripts always win.
+//
+// Twist comes from twist-generator.js (guided by the stroke, shaped like the
+// liked scenes' twist, seeded randomness); roll and pitch from motion-source.js.
 
 import { generateAxisActions, shapeGeneratedValue, axisPhase, createNoise1D } from './motion-source.js';
 import { getBaseName, detectCompanionFiles } from './multi-axis.js';
 import { buildCompanionFiles } from './embedded-multi-axis.js';
+import { generateTwist } from './twist-generator.js';
 
 /**
  * Default extra axes for OSR / MiraBot Lite.
  *
- * None of them is a full copy of L0. Each keyframe is scaled to one of
- * 0 / 25 / 50 / 75 / 100% around centre. Twist's odds rise through the
- * video; roll and pitch fall. On top of that, smooth noise changes the
- * result by 10–60% of that scaled motion, so the build stays visible
- * and the path is not a schedule. A 0% rest is centre, and it cannot
- * last more than 10 seconds.
+ * Twist (`guided`): twist-generator.js, with VR and flat settings of its own.
+ * Roll and pitch: none is a full copy of L0. Each keyframe is scaled to one
+ * of 0 / 25 / 50 / 75 / 100% around centre, with odds that fall through the
+ * video. On top of that, smooth noise changes the result by 10–60% of that
+ * scaled motion, so the build stays visible and the path is not a schedule.
+ * A 0% rest is centre, and it cannot last more than 10 seconds.
  */
 export const DEPTH_STEPS = Object.freeze([0, 25, 50, 75, 100]);
 export const REST_LIMIT_MS = 10_000;
 const HOLD_MS = 4_000;
 
 export const DEFAULT_UPGRADE_AXES = Object.freeze([
-  { suffix: 'twist', tcode: 'R0', mode: 'link', ramp: 'up' },
+  { suffix: 'twist', tcode: 'R0', mode: 'guided' },
   { suffix: 'roll',  tcode: 'R1', mode: 'random', ramp: 'down' },
   { suffix: 'pitch', tcode: 'R2', mode: 'pattern', pattern: 'sine', speed: 0.5, ramp: 'down' },
 ]);
@@ -188,8 +192,10 @@ function applyDepth(actions, segments, noise, phase) {
  *        suffixes (`handmadeAxisSuffixes`); any → no writes, error 'handmade-axes'
  * @param {Iterable<string>|Set<string>} [opts.enabledTcodes]
  * @param {(t:number)=>number} [opts.noise] — inject a seeded field; do not use Math.random
+ * @param {boolean} [opts.vr] — the video is VR (twist has VR and flat settings)
+ * @param {number} [opts.seed] — seeds the twist's randomness (one per scene)
  * @returns {{
- *   writes: Array<{suffix:string, tcode:string, mode:string, path:string, actions:Array<{at:number, pos:number}>, segments:Array}>,
+ *   writes: Array<{suffix:string, tcode:string, mode:string, path:string, actions:Array<{at:number, pos:number}>, segments:Array|null, generator?:string}>,
  *   skipped: Array<{suffix:string, tcode:string, path:string, reason:string}>,
  *   error: string|null,
  * }}
@@ -201,6 +207,8 @@ export function planUpgrade({
   handmadeAxes,
   enabledTcodes,
   noise,
+  vr = false,
+  seed = 1337,
 } = {}) {
   const stroke = Array.isArray(strokeActions) ? strokeActions : [];
   const existing = existingSuffixes instanceof Set
@@ -228,6 +236,15 @@ export function planUpgrade({
     const path = companionPathForScript(primaryPath, axis.suffix);
     if (existing.has(axis.suffix)) {
       skipped.push({ suffix: axis.suffix, tcode: axis.tcode, path, reason: 'exists' });
+      continue;
+    }
+    if (axis.mode === 'guided') {
+      const twist = generateTwist(stroke, { vr, seed });
+      if (twist.actions.length < 2) {
+        skipped.push({ suffix: axis.suffix, tcode: axis.tcode, path, reason: 'too-short' });
+        continue;
+      }
+      writes.push({ suffix: axis.suffix, tcode: axis.tcode, mode: axis.mode, path, actions: twist.actions, segments: null, generator: twist.generator });
       continue;
     }
     const phase = axisPhase(axis.tcode);

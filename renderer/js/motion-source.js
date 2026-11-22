@@ -82,7 +82,7 @@ export function patternValue(pattern, phase) {
 }
 
 /** Deterministic 32-bit PRNG — seeded so a session is reproducible in a bug report. */
-function mulberry32(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return function next() {
     a = (a + 0x6D2B79F5) >>> 0;
