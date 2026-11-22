@@ -1366,6 +1366,13 @@ _custom_thumbs_dir: str | None = None
 
 _IMAGE_MIME = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
+# A thumbnail URL with `?v=` (thumb_url) names one version of the picture for good: a new
+# poster or a re-pinned frame gets a new `v`. So those are kept a year and never revalidated,
+# not even on a page reload (`immutable`); a URL without one keeps the old limits.
+_THUMB_CACHE_VERSIONED = "public, max-age=31536000, immutable"
+_THUMB_CACHE_POSTER = "public, max-age=3600"
+_THUMB_CACHE_FRAME = "public, max-age=86400"
+
 
 def _custom_thumb_for(filepath: str):
     """Return this video's custom-thumbnail entry, or None."""
@@ -1448,7 +1455,7 @@ def thumb_url(video_id: str, video: dict, base_url: str = "") -> str:
 
 
 @router.get("/thumb/{video_id}")
-async def get_thumbnail(video_id: str):
+async def get_thumbnail(video_id: str, v: str | None = None):
     """Serve a thumbnail for a video (generated via ffmpeg, cached).
 
     A cached thumbnail is served immediately. On a cache miss the request
@@ -1463,7 +1470,8 @@ async def get_thumbnail(video_id: str):
     (path-validated inside the desktop's custom-thumbs dir); a pinned frame
     generates at the picked timestamp (frame-accurate). Clients see a new
     poster or a re-pinned frame because the listings' URLs carry a version
-    (`thumb_url`); this route ignores the `?v=` query itself.
+    (`thumb_url`). The route picks the picture without it; `?v=` only makes
+    the answer cacheable for good (_THUMB_CACHE_VERSIONED).
     """
     video = _video_registry.get(video_id)
     if not video:
@@ -1483,7 +1491,7 @@ async def get_thumbnail(video_id: str):
         mime = _IMAGE_MIME.get(os.path.splitext(image_path)[1].lower(), "image/jpeg")
         return FileResponse(image_path, media_type=mime,
                             headers={"Access-Control-Allow-Origin": "*",
-                                     "Cache-Control": "public, max-age=3600"})
+                                     "Cache-Control": _THUMB_CACHE_VERSIONED if v else _THUMB_CACHE_POSTER})
 
     if not os.path.isfile(thumb_path):
         # Not cached — generate now (or join the in-flight job) and wait.
@@ -1503,7 +1511,7 @@ async def get_thumbnail(video_id: str):
 
     return FileResponse(thumb_path, media_type="image/jpeg",
                         headers={"Access-Control-Allow-Origin": "*",
-                                 "Cache-Control": "public, max-age=86400"})
+                                 "Cache-Control": _THUMB_CACHE_VERSIONED if v else _THUMB_CACHE_FRAME})
 
 
 def _thumb_unavailable(detail: str):

@@ -30,10 +30,24 @@ use serde_json::{Value, json};
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
+/// The picture lookahead both sites' pages share; see preload.js.
+pub const PRELOAD_JS: &str = include_str!("preload.js");
+/// The line of a page's script that becomes PRELOAD_JS.
+const PRELOAD_MARK: &str = "// @preload.js";
+
+/// `page` with PRELOAD_JS inlined at its `// @preload.js` line, so each page stays one
+/// self-contained file (no external scripts).
+pub fn with_preloader(page: &str) -> String {
+    debug_assert!(page.contains(PRELOAD_MARK), "page lacks {PRELOAD_MARK}");
+    page.replacen(PRELOAD_MARK, PRELOAD_JS, 1)
+}
+
 /// The swipe deck page: HTML, CSS and JS in one file, no external scripts.
-pub const SWIPE_PAGE: &str = include_str!("swipe.html");
+pub static SWIPE_PAGE: LazyLock<String> =
+    LazyLock::new(|| with_preloader(include_str!("swipe.html")));
 
 /// This site's name (log lines) and its pages, for the gate.
 pub const NAME: &str = "scout-report";
@@ -57,11 +71,12 @@ pub struct Response {
     pub headers: Vec<(&'static str, String)>,
 }
 
-/// Everything but the frames: rebuilt from the files on every request.
+/// Everything but the pictures: rebuilt from the files on every request.
 const NO_STORE: &str = "no-store";
-/// Frames and pictures change only when a scout takes them again: a day, so a reload of the
-/// page doesn't fetch the multi-MB card GIFs again.
-const FRAME_CACHE: &str = "max-age=86400";
+/// Frames and pictures (both sites) change only when a scout takes them again: a day, and
+/// `immutable` so a page reload (Safari revalidates on reload, and these have no validators)
+/// doesn't fetch the multi-MB card GIFs again either.
+pub const PICTURE_CACHE: &str = "max-age=86400, immutable";
 
 pub fn text(status: u16, body: &str) -> Response {
     Response {
@@ -109,7 +124,7 @@ fn frame(path: &str, user_data: &Path) -> Response {
         Some(Ok(body)) => Response {
             status: 200,
             content_type: "image/jpeg",
-            cache: FRAME_CACHE,
+            cache: PICTURE_CACHE,
             body,
             headers: Vec::new(),
         },
@@ -127,7 +142,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
             resp.headers.push(("Location", "/swipe".into()));
             resp
         }
-        ("GET" | "HEAD", "/swipe") => html(SWIPE_PAGE),
+        ("GET" | "HEAD", "/swipe") => html(&SWIPE_PAGE),
         ("GET" | "HEAD", "/api/drive") => json_ok(&drive::status(user_data)),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
             Ok(d) if d.stack == deck::Stack::Free => {
@@ -147,7 +162,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
                 Some((Ok(body), content_type)) => Response {
                     status: 200,
                     content_type,
-                    cache: FRAME_CACHE,
+                    cache: PICTURE_CACHE,
                     body,
                     headers: Vec::new(),
                 },
@@ -159,7 +174,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
                 Ok(body) => Response {
                     status: 200,
                     content_type: "image/jpeg",
-                    cache: FRAME_CACHE,
+                    cache: PICTURE_CACHE,
                     body,
                     headers: Vec::new(),
                 },
@@ -1285,7 +1300,7 @@ mod tests {
             let r = route(method, target, b"", &dir);
             assert_eq!(
                 (r.status, r.content_type, r.cache),
-                (200, "image/jpeg", "max-age=86400"),
+                (200, "image/jpeg", PICTURE_CACHE),
                 "{method} {target}"
             );
             assert_eq!(r.body, body.as_bytes());

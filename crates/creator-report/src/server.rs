@@ -16,19 +16,21 @@ use crate::deck::{self, Page};
 use crate::swipes::{self, Choice, Swipes};
 use scout_report::creator_pictures as pictures;
 use scout_report::gate::Gate;
-use scout_report::server::{Response, html, json_ok, serve_site, text};
+use scout_report::server::{
+    PICTURE_CACHE, Response, html, json_ok, serve_site, text, with_preloader,
+};
 use serde_json::{Value, json};
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-/// The page: every tab, HTML, CSS and JS in one file, no external scripts.
-pub const PAGE: &str = include_str!("creators.html");
+/// The page: every tab, HTML, CSS and JS in one file (the shared picture lookahead inlined),
+/// no external scripts.
+pub static PAGE: LazyLock<String> = LazyLock::new(|| with_preloader(include_str!("creators.html")));
 /// The site's name (log lines) and its pages, for the gate.
 pub const NAME: &str = "creator-report";
 pub const PAGES: &[&str] = &["/", "/creators", "/swiped", "/collection"];
-/// A picture's name is new whenever creator-scout saves another one.
-const PICTURE_CACHE: &str = "max-age=86400";
 
 /// The site's state between requests: userData and creators.json as last read.
 #[derive(Debug)]
@@ -60,7 +62,7 @@ impl App {
                 resp.headers.push(("Location", location));
                 resp
             }
-            ("GET" | "HEAD", "/creators" | "/swiped" | "/collection") => html(PAGE),
+            ("GET" | "HEAD", "/creators" | "/swiped" | "/collection") => html(&PAGE),
             ("GET" | "HEAD", "/api/creators/deck") => match page(query) {
                 Ok(page) => {
                     let (creators, swipes, problems) = self.state();
