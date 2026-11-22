@@ -1400,19 +1400,19 @@ mod tests {
                 "https://x/8b.jpg",
                 "https://x/8c.jpg",
                 "https://x/8d.jpg",
-                "/frames/eroscripts/8/25.jpg"
+                "frames/eroscripts/8/25.jpg"
             ])
         );
         assert_eq!(images(&v, 1), json!(["https://x/9.jpg"]));
         assert_eq!(
             images(&v, 2),
-            json!(["/frames/eroscripts/7/25.jpg", "/frames/eroscripts/7/75.jpg"])
+            json!(["frames/eroscripts/7/25.jpg", "frames/eroscripts/7/75.jpg"])
         );
 
         // The VR tab: post 40 (its video on SLR) and SLR scenes with their own frames.
         let v = get_json("/api/deck?stack=vr", &dir);
         assert_eq!(v["cards"][0]["id"], 40);
-        assert_eq!(images(&v, 0), json!(["/frames/eroscripts/40/50.jpg"]));
+        assert_eq!(images(&v, 0), json!(["frames/eroscripts/40/50.jpg"]));
         assert_eq!(
             (&v["cards"][1]["id"], &v["cards"][1]["source"]),
             (&json!("77"), &json!("slr"))
@@ -1421,8 +1421,8 @@ mod tests {
             images(&v, 1),
             json!([
                 "https://cdn/77.webp",
-                "/frames/slr/77/25.jpg",
-                "/frames/slr/77/50.jpg"
+                "frames/slr/77/25.jpg",
+                "frames/slr/77/50.jpg"
             ])
         );
         // 78's frame isn't on disk.
@@ -1518,7 +1518,7 @@ mod tests {
         assert_eq!(deck["cards"][0]["source"], "creators");
         assert_eq!(deck["cards"][0]["id"], "eroscripts-500");
         assert_eq!(deck["cards"][0]["creator"], "Ann");
-        assert_eq!(deck["cards"][0]["images"][0], "/pictures/ann/ig-1.jpg");
+        assert_eq!(deck["cards"][0]["images"][0], "pictures/ann/ig-1.jpg");
         let r = route("GET", "/pictures/ann/ig-1.jpg", b"", &dir);
         assert_eq!(
             (r.status, r.content_type, r.body.as_slice()),
@@ -1602,16 +1602,16 @@ mod tests {
         std::fs::write(pics.join("ig-1.jpg"), b"jpeg").unwrap();
         let deck = get_json("/api/deck?stack=flat", &dir);
         assert_eq!(keys(&deck), ["eroscripts:11", "pmvhaven:p1"]);
-        let person = json!({"name": "Sweetie Fox", "slug": "sweetie", "picture": "/pictures/sweetie/ig-1.jpg",
+        let person = json!({"name": "Sweetie Fox", "slug": "sweetie", "picture": "pictures/sweetie/ig-1.jpg",
                             "pictureSource": "instagram", "pictureUrl": "https://www.instagram.com/p/A/"});
         let post = &deck["cards"][0];
         assert_eq!(post["people"], json!([person]));
-        assert_eq!(post["images"], json!(["/pictures/sweetie/ig-1.jpg"]));
+        assert_eq!(post["images"], json!(["pictures/sweetie/ig-1.jpg"]));
         let scene = &deck["cards"][1];
         assert_eq!(scene["people"], json!([person]));
         assert_eq!(
             scene["images"],
-            json!(["https://pmvhaven.test/p1.jpg", "/pictures/sweetie/ig-1.jpg"])
+            json!(["https://pmvhaven.test/p1.jpg", "pictures/sweetie/ig-1.jpg"])
         );
         // Without her picture, nobody: no `people` at all.
         std::fs::remove_file(pics.join("ig-1.jpg")).unwrap();

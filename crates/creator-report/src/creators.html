@@ -221,15 +221,21 @@ const REFILL_AT = 5;
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older requests are dropped
-const PATHS = { '/creators': 'creators', '/swiped': 'swiped', '/collection': 'collection' };
-const tabFromPath = () => PATHS[location.pathname] || 'creators';
+// Each tab's URL, relative so it works standalone (pages at /creators, /swiped, /collection)
+// and behind the app's proxy (<base href="/creators/">, home /creators/). Behind a <base> the
+// Creators tab is the home itself (`./`), not /creators/creators.
+const PATHS = { creators: document.querySelector('base') ? './' : 'creators', swiped: 'swiped', collection: 'collection' };
+const pathOf = (t) => PATHS[t];
+const urlPathOf = (t) => new URL(pathOf(t), document.baseURI).pathname;
+const tabFromPath = () => (location.pathname.endsWith('/') ? 'creators'
+  : Object.keys(PATHS).find((t) => urlPathOf(t) === location.pathname) || 'creators');
 let tab = tabFromPath();
 
 // The deck tab: its URL, API, words, a card's identity, and what a swipe sends. The yes
 // creators' posts are swiped on the swipe deck (scout-report), with a Creator badge.
 const TABS = {
   creators: {
-    path: '/creators', api: '/api/creators', title: 'Creators', yes: 'YES', no: 'NO',
+    api: 'api/creators', title: 'Creators', yes: 'YES', no: 'NO',
     key: (c) => 'c:' + c.slug,
     name: (c) => c.name,
     swipe: (c, dir) => ({ slug: c.slug, choice: dir === 'right' ? 'yes' : 'no' }),
@@ -243,15 +249,14 @@ const isDeck = (t) => Object.hasOwn(TABS, t);
 // The two list tabs: every creator in one request, shown as a list or one card at a time.
 const LISTS = {
   swiped: {
-    path: '/swiped', api: '/api/creators/swiped', title: 'Swiped', start: 'cards', filter: true,
+    api: 'api/creators/swiped', title: 'Swiped', start: 'cards', filter: true,
     none: 'Nobody swiped yet: swipe creators on the Creators tab.',
   },
   collection: {
-    path: '/collection', api: '/api/creators/collection', title: 'Collection', start: 'list', filter: false,
+    api: 'api/creators/collection', title: 'Collection', start: 'list', filter: false,
     none: 'Nobody yet: swipe a creator right, or add favourite artists or pornstars.',
   },
 };
-const pathOf = (t) => (TABS[t] || LISTS[t]).path;
 const SOURCES = { instagram: 'Instagram', eroscripts: 'EroScripts', faptap: 'FapTap', pornhub: 'Pornhub',
   onlyfans: 'OnlyFans', fansly: 'Fansly', x: 'X', reddit: 'Reddit', profile: 'Profile page', web: 'Web' };
 const SITES = { onlyfans: 'OnlyFans', fansly: 'Fansly', pornhub: 'Pornhub', x: 'X', reddit: 'Reddit',
@@ -797,7 +802,7 @@ function renderSummary() {
 let summaryGen = 0;
 function loadSummary() {
   const gen = ++summaryGen;
-  fetch('/api/summary', { cache: 'no-store' })
+  fetch('api/summary', { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : null))
     .then((d) => {
       if (!d || gen !== summaryGen) return;
@@ -927,7 +932,7 @@ function step(d) {
 function setChoice(e, choice, button) {
   if (button) button.disabled = true;
   const from = tab;
-  serial(() => post('/api/creators/swipe', { slug: e.slug, choice }))
+  serial(() => post('api/creators/swipe', { slug: e.slug, choice }))
     .then((r) => {
       e.choice = r.choice;
       e.at = r.at;
@@ -1004,7 +1009,7 @@ function showTab() {
 function switchTab(next) {
   if (next === tab) return;
   tab = next;
-  if (location.pathname !== pathOf(tab)) history.pushState(null, '', pathOf(tab));
+  if (location.pathname !== urlPathOf(tab)) history.pushState(null, '', pathOf(tab));
   generation++;
   image = 0;
   for (const n of deckEl.querySelectorAll('.card')) n.remove();

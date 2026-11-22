@@ -84,7 +84,7 @@ pub struct Who {
 pub struct Person {
     pub name: String,
     pub slug: String,
-    /// The picture's served URL, `/pictures/<slug>/<file>`.
+    /// The picture's served URL, relative: `pictures/<slug>/<file>`.
     pub picture: String,
     /// Where it comes from: `instagram`, `profile`, `onlyfans`, `x`, ….
     pub picture_source: String,
@@ -799,11 +799,11 @@ mod tests {
         };
         assert_eq!(
             s.images,
-            ["https://x.test/thumb.jpg", "/pictures/sweetie/ig-1.jpg"]
+            ["https://x.test/thumb.jpg", "pictures/sweetie/ig-1.jpg"]
         );
         assert_eq!(
             serde_json::to_value(&s.people).unwrap(),
-            json!([{"name": "Sweetie Fox", "slug": "sweetie", "picture": "/pictures/sweetie/ig-1.jpg",
+            json!([{"name": "Sweetie Fox", "slug": "sweetie", "picture": "pictures/sweetie/ig-1.jpg",
                     "pictureSource": "instagram", "pictureUrl": "https://www.instagram.com/p/A/"}])
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -841,7 +841,7 @@ mod tests {
         // Most likes wins over newer.
         assert_eq!(
             best(json!([es, profile, new, old])),
-            Some(("ig-old.jpg".into(), "/pictures/eva/ig-old.jpg".into()))
+            Some(("ig-old.jpg".into(), "pictures/eva/ig-old.jpg".into()))
         );
         // No likes: the newest Instagram post.
         let unliked = |v: &Value| {
@@ -886,11 +886,11 @@ mod tests {
         assert_eq!(
             cards[0].images,
             [
-                "/pictures/ann/es-1-0.jpg",
-                "/pictures/ann/ig-b.jpg",
-                "/pictures/ann/ig-a.jpg",
-                "/pictures/ann/p.jpg",
-                "/pictures/ann/ig-profile.jpg"
+                "pictures/ann/es-1-0.jpg",
+                "pictures/ann/ig-b.jpg",
+                "pictures/ann/ig-a.jpg",
+                "pictures/ann/p.jpg",
+                "pictures/ann/ig-profile.jpg"
             ]
         );
     }

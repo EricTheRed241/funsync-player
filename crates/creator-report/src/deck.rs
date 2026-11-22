@@ -600,7 +600,7 @@ mod tests {
         let c = creator_card("ann", &all.creators["ann"]);
         let srcs: Vec<_> = c.pictures.iter().map(|p| p.src.as_str()).collect();
         // Instagram first; the bad file name is left out.
-        assert_eq!(srcs, ["/pictures/ann/ig-1.jpg", "/pictures/ann/es-1-0.jpg"]);
+        assert_eq!(srcs, ["pictures/ann/ig-1.jpg", "pictures/ann/es-1-0.jpg"]);
         assert_eq!(
             c.pictures[0].link.as_deref(),
             Some("https://www.instagram.com/p/a/")
@@ -667,7 +667,7 @@ mod tests {
             (yes[0].card.slug.as_str(), yes[0].unswiped, yes[0].wanted),
             ("ann", 1, 2)
         );
-        assert_eq!(yes[0].card.pictures[0].src, "/pictures/ann/ig-1.jpg");
+        assert_eq!(yes[0].card.pictures[0].src, "pictures/ann/ig-1.jpg");
         assert_eq!(yes[0].card.instagram.as_ref().unwrap().handle, "ann");
         let v = serde_json::to_value(&yes[0]).unwrap();
         assert_eq!((&v["slug"], &v["choice"]), (&json!("ann"), &json!("yes")));

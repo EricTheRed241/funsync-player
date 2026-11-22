@@ -1,0 +1,8 @@
+{
+  "_comment": "The local sites the app runs and the backend serves on its own port (5123): each Rust site runs on 127.0.0.1:<port> (electron/sites.js starts it) and the backend relays <prefix>/… to it (backend/routes/sites.py); <prefix>/ is the site's <home> page. The nav bar on every page lists them after the web remote.",
+  "sites": [
+    { "name": "Swipe", "prefix": "/swipe", "package": "scout-report", "port": 5131, "home": "/swipe" },
+    { "name": "Creators", "prefix": "/creators", "package": "creator-report", "port": 5132, "home": "/creators" },
+    { "name": "Status", "prefix": "/status", "package": "status-site", "port": 5130, "home": "/" }
+  ]
+}
