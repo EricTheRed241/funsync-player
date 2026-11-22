@@ -156,6 +156,22 @@ async def test_cached_thumbnail_is_served_without_generating(client, thumbs):
 
 
 @pytest.mark.anyio
+async def test_only_a_versioned_url_is_cached_for_good(client, thumbs):
+    # thumb_url's `?v=` changes with a new poster or a re-pinned frame, so that URL may be
+    # kept forever; a bare URL can show a different picture later and must expire.
+    video = thumbs.make_video("a.mp4")
+    (vid,) = _register([video])
+    with open(_served_file(video), "wb") as f:
+        f.write(JPEG)
+
+    versioned = await client.get(f"/api/media/thumb/{vid}?v=1a2b3c4d&_r=2")
+    bare = await client.get(f"/api/media/thumb/{vid}")
+
+    assert versioned.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert bare.headers["cache-control"] == "public, max-age=86400"
+
+
+@pytest.mark.anyio
 async def test_generation_failure_is_logged_and_not_cacheable(client, thumbs, caplog):
     video = thumbs.make_video("broken.mp4")
     (vid,) = _register([video])

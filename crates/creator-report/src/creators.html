@@ -402,7 +402,8 @@ function cardNode(c, isTop) {
   const at = isTop ? image : 0;
   const media = el('div', { class: 'media' });
   if (pics.length) {
-    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', src: pics[at].src });
+    // The shown picture outranks the lookahead's (set before src, so the fetch starts with it).
+    const img = el('img', { alt: '', draggable: 'false', decoding: 'async', fetchpriority: isTop ? 'high' : null, src: pics[at].src });
     img.addEventListener('error', () => { media.classList.remove('loading'); media.classList.add('broken'); });
     img.addEventListener('load', () => media.classList.remove('loading', 'broken'));
     if (!img.complete) media.classList.add('loading');
@@ -432,13 +433,24 @@ function cardNode(c, isTop) {
   return node;
 }
 
-const preloaded = new Set();
-function preload(url) {
-  if (!url || preloaded.has(url)) return;
-  preloaded.add(url);
-  new Image().src = url;
-}
+// @preload.js
+
+// The lookahead (picturePreloader above): the shown card's next picture, then the first
+// picture of each of the next PRELOAD_CARDS cards, PRELOAD_PARALLEL at a time.
+const PRELOAD_CARDS = 5;
+const PRELOAD_PARALLEL = 2;
+const preloader = picturePreloader(PRELOAD_PARALLEL);
 const picSrc = (c, i) => ((c && c.pictures) || [])[i]?.src;
+
+/** Fetch `url` next (the picture a tap shows next). */
+function preload(url) {
+  preloader.soon(url);
+}
+
+/** Line up the lookahead: `cards` are the shown card, then the ones after it. */
+function planPreload(cards) {
+  preloader.plan([picSrc(cards[0], image + 1), ...cards.slice(1, 1 + PRELOAD_CARDS).map((c) => picSrc(c, 0))]);
+}
 
 function renderCounter() {
   if (!isDeck(tab)) return;
@@ -484,8 +496,7 @@ function render(enterFrom) {
       top.style.transform = '';
     }));
   }
-  preload(picSrc(queue[0], image + 1));
-  if (queue[1]) preload(picSrc(queue[1], 0));
+  planPreload(queue);
 }
 
 function topNode() {
@@ -721,9 +732,9 @@ function more() {
     } else {
       if (queue[1] && !deckEl.querySelector('.card.next:not(.fly)')) {
         deckEl.append(cardNode(queue[1], false));
-        preload(picSrc(queue[1], 0));
       }
       renderCounter();
+      planPreload(queue);
     }
   }).catch((e) => {
     if (gen !== generation) return;
@@ -898,8 +909,8 @@ function renderListTab() {
   ls.slug = c.slug;
   c._tab = tab;
   deckEl.append(cardNode(c, true));
-  preload(picSrc(c, image + 1));
-  preload(picSrc(v[(i + 1) % v.length], 0));
+  // The cards after this one, wrapping around as ← → do.
+  planPreload([...v.slice(i), ...v.slice(0, i)]);
 }
 
 /** Show the card `d` places on (wrapping around). */

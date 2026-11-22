@@ -516,7 +516,7 @@ fn a_slow_picture_download_does_not_hold_up_other_requests() {
     let head = String::from_utf8_lossy(&raw[..split]);
     assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
     assert!(
-        head.contains("\r\nCache-Control: max-age=86400\r\n"),
+        head.contains("\r\nCache-Control: max-age=86400, immutable\r\n"),
         "{head}"
     );
     assert_eq!(raw.len() - split - 4, big.len());
