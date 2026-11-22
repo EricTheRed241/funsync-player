@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 // One-shot: stroke funscript (+ optional video) → twist / roll / pitch companions.
 //
-// Each axis is scaled to 0 / 25 / 50 / 75 / 100% around centre. Twist's
-// odds rise later; roll and pitch fall. Smooth noise then changes that
-// scaled motion by 10–60%, so the build stays visible.
-// A 0% rest sits at centre and cannot last more than 10 seconds.
+// Twist is guided by the stroke and shaped like the twist of the scenes you
+// like, with seeded randomness (renderer/js/twist-generator.js; VR and flat
+// have their own settings). VR is decided as in `dedupe:scenes`: the
+// backend's stereo check when it has looked at the file, else the filename or
+// a VR-shaped frame (ffprobe). Each scene gets its own seed (from its name and
+// --seed), so a re-run writes the same twist.
+// Roll and pitch are scaled to 0 / 25 / 50 / 75 / 100% around centre, with
+// odds that fall later. Smooth noise then changes that scaled motion by
+// 10–60%, so the build stays visible. A 0% rest sits at centre and cannot last
+// more than 10 seconds.
 //
 // The stroke file is never overwritten. An existing companion for an axis is
 // skipped. A folder where any stroke script has hand-made axes (a companion
@@ -45,9 +51,12 @@ const {
 } = await import('../renderer/js/upgrade-multi-axis.js');
 const { pairUpgradeJobs } = await import('./upgrade-pairing.mjs');
 const { VIDEO_EXTS, groupScenes, folderStrokeScripts, readStrokeScript, sceneHandmadeAxes } = await import('./handmade-scenes.mjs');
+const { readProbeCache, readStereoCache, stereoVr, probeVideo } = await import('./scene-probe.mjs');
+const { projectionOf } = await import('./scene-dedupe-lib.mjs');
+const { defaultUserDataDir } = await import('./host-env.mjs');
 
 const MODE_LABEL = {
-  link: 'stroke, quieter early',
+  guided: 'guided by the stroke, styled like your liked scenes',
   random: 'smooth noise, quieter late',
   pattern: 'slow sine, quieter late',
 };
@@ -139,6 +148,24 @@ function outputAnchor(video, script) {
   return path.join(path.dirname(video), `${stem}.funscript`);
 }
 
+/** A scene's seed: FNV-1a of its file name (NFC) mixed with --seed, so a re-run writes the same twist. */
+function sceneSeed(anchor) {
+  let h = 0x811c9dc5;
+  for (const ch of path.basename(anchor).normalize('NFC')) {
+    h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+  }
+  return (h ^ seed) >>> 0;
+}
+
+/** VR as `dedupe:scenes` decides it: the backend's stereo check, else the name or a VR-shaped frame. */
+async function sceneVr(file, caches) {
+  let stat = null;
+  try { stat = await fs.stat(file); } catch { /* script without a video, or gone */ }
+  const isVideo = stat && VIDEO_EXTS.has(path.extname(file).toLowerCase());
+  const info = isVideo ? await probeVideo(file, caches.probe, stat) : {};
+  return projectionOf({ name: path.basename(file), ...info, vr: isVideo ? stereoVr(caches.stereo, file, stat) : undefined }).vr;
+}
+
 async function listDir(dir) {
   try {
     return await fs.readdir(dir);
@@ -197,7 +224,8 @@ async function main() {
   if (paths.length === 0 || flags.has('--help') || flags.has('-h')) {
     console.log(`Usage: node scripts/upgrade-multi-axis.mjs [--dry-run] [--seed=N] [--surge] [--sway] [--valve] <video|funscript|dir>...
 
-Twist is a fraction of the stroke, quieter early. Roll and pitch are quieter late.
+Twist is guided by the stroke and styled like the twist of your liked scenes (VR and flat
+settings of its own), with randomness seeded per scene. Roll and pitch are quieter late.
 A 0% rest sits at centre and cannot last more than 10 seconds.
 Does not overwrite the stroke file. Skips an axis whose companion already exists.
 Skips a folder where any script has hand-made axes (companion files or axes embedded in the script).`);
@@ -221,6 +249,8 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
   }
 
   const noise = createNoise1D(seed);
+  const userData = defaultUserDataDir();
+  const caches = { probe: readProbeCache(userData), stereo: readStereoCache(userData) };
   const planned = [];
   let handmadeSkips = 0;
   for (const job of jobs) {
@@ -241,6 +271,7 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
     const anchor = outputAnchor(job.video, job.script);
     const existing = await existingSuffixes(anchor);
     const handmade = await jobHandmadeAxes(anchor, job.script, parsed);
+    const vr = await sceneVr(job.video || job.script, caches);
     const plan = planUpgrade({
       primaryPath: anchor,
       strokeActions: parsed.actions,
@@ -248,6 +279,8 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
       handmadeAxes: handmade.all,
       enabledTcodes: enabled,
       noise,
+      vr,
+      seed: sceneSeed(anchor),
     });
     if (plan.error === 'handmade-axes') {
       if (handmade.own.length > 0) {
@@ -277,13 +310,13 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
     process.exit(1);
   }
 
-  console.log('Twist rises on average, roll and pitch fall. Noise is 10–60% of that motion.');
+  console.log('Twist is guided by the stroke and styled like your liked scenes. Roll and pitch fall; noise is 10–60% of their motion.');
   console.log('Stroke files are not modified.\n');
   for (const w of writes) {
-    console.log(`write  ${w.path}  (${MODE_LABEL[w.mode] || w.mode})`);
+    console.log(`write  ${w.path}  (${MODE_LABEL[w.mode] || w.mode}${w.generator ? `: ${w.generator}` : ''})`);
   }
   for (const s of skipped) {
-    console.log(`skip   ${s.path}  (already exists)`);
+    console.log(`skip   ${s.path}  (${s.reason === 'exists' ? 'already exists' : 'stroke too short'})`);
   }
   if (dryRun) {
     console.log(`\n${writes.length} to write, ${skipped.length} skipped (dry run)`);
@@ -298,7 +331,7 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
   for (const p of planned) {
     for (const file of serialiseUpgradeWrites(p.plan.writes)) {
       const target = companionPathForScript(p.anchor, file.suffix);
-      const mode = p.plan.writes.find((w) => w.suffix === file.suffix)?.mode;
+      const write = p.plan.writes.find((w) => w.suffix === file.suffix);
       byPath.set(target, {
         ...file.content,
         inverted: false,
@@ -306,8 +339,9 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
         metadata: {
           creator: 'funsync upgrade-multi-axis',
           type: 'generated',
-          mode,
-          seed,
+          mode: write?.mode,
+          ...(write?.generator ? { generator: write.generator } : {}),
+          seed: write?.generator ? sceneSeed(p.anchor) : seed,
         },
       });
     }

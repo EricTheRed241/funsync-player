@@ -45,7 +45,7 @@ describe('planUpgrade', () => {
     expect(result.error).toBeNull();
     expect(result.writes.map((w) => w.suffix)).toEqual(['twist', 'roll', 'pitch']);
     expect(result.writes.map((w) => w.tcode)).toEqual(['R0', 'R1', 'R2']);
-    expect(result.writes.map((w) => w.mode)).toEqual(['link', 'random', 'pattern']);
+    expect(result.writes.map((w) => w.mode)).toEqual(['guided', 'random', 'pattern']);
   });
 
   it('does not invent surge/sway/valve unless those axes are enabled', () => {
@@ -61,22 +61,6 @@ describe('planUpgrade', () => {
     expect(stroke).toEqual(snapshot);
     expect(result.writes.some((w) => w.path === PRIMARY)).toBe(false);
     expect(result.writes.every((w) => w.path !== PRIMARY)).toBe(true);
-  });
-
-  it('twist keeps stroke timestamps and a stepped depth', () => {
-    const twist = plan().writes.find((w) => w.suffix === 'twist');
-    expect(twist.actions.map((a) => a.at)).toEqual(STROKE.map((a) => a.at));
-    expect(twist.segments.every((s) => [0, 25, 50, 75, 100].includes(s.depth))).toBe(true);
-  });
-
-  it('lays smooth noise on twist so it is not a pure scale of the stroke', () => {
-    const twist = planUpgrade({
-      primaryPath: PRIMARY,
-      strokeActions: STROKE.map((a) => ({ ...a })),
-      noise: () => 0.5,
-    }).writes.find((w) => w.suffix === 'twist');
-    const pure = STROKE.map((a) => 50 + (a.pos - 50) * (twist.segments[0].depth / 100));
-    expect(twist.actions.map((a) => a.pos)).not.toEqual(pure);
   });
 
   it('does not clobber an existing twist file on a second run', () => {
@@ -102,11 +86,16 @@ describe('planUpgrade', () => {
 
   it('clamps every generated position to 0-100', () => {
     for (const w of plan().writes) {
-      expect(w.actions.length).toBe(STROKE.length);
       for (const a of w.actions) {
         expect(a.pos).toBeGreaterThanOrEqual(0);
         expect(a.pos).toBeLessThanOrEqual(100);
       }
+    }
+  });
+
+  it('roll and pitch keep the stroke timestamps', () => {
+    for (const w of plan().writes.filter((x) => x.suffix !== 'twist')) {
+      expect(w.actions.map((a) => a.at)).toEqual(STROKE.map((a) => a.at));
     }
   });
 
