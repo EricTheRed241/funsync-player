@@ -12,6 +12,12 @@ PIN regenerates the secret, which logs every device out. The Rust server
 (port 5131) reads the same file and accepts the same tokens, so one login
 unlocks both ports.
 
+Thumbnail URLs handed to headsets carry a thumbnail-only key instead,
+`t1.<hex HMAC-SHA256(secret, "t1.thumbs")>` (make_thumb_token): it never
+expires and opens `GET /api/media/thumb/…` and nothing else, so those URLs
+stay the same until the PIN changes and the headset's thumbnail cache keeps
+working (a media token's URLs change every day).
+
 Requests from this computer (127.0.0.1, ::1) never need the PIN: the
 desktop app, the CLIs and the scheduled jobs.
 """
@@ -143,11 +149,26 @@ def make_token(secret: bytes, now: float | None = None, expiry: int | None = Non
 
 
 def make_media_token(secret: bytes, now: float | None = None) -> str:
-    """Token for the `k` on URLs handed to headsets. The expiry is rounded
-    down to a whole UTC day (29-30 days left), so the URLs stay the same all
-    day and the headset's thumbnail cache keeps working."""
+    """Token for the `k` on media URLs handed to headsets (videos, scripts,
+    subtitles, events). The expiry is rounded down to a whole UTC day (29-30
+    days left), so the URLs stay the same all day."""
     now = time.time() if now is None else now
     return make_token(secret, expiry=int(now + TOKEN_LIFETIME) // 86400 * 86400)
+
+
+THUMB_PATH_PREFIX = "/api/media/thumb/"
+_THUMB_TOKEN_RE = re.compile(r"t1\.([0-9a-f]{64})")
+
+
+def make_thumb_token(secret: bytes) -> str:
+    """The `k` for thumbnail URLs handed to headsets: no expiry, valid for
+    thumbnails only (verify_thumb_token), the same until the PIN changes."""
+    return "t1." + hmac.new(secret, b"t1.thumbs", hashlib.sha256).hexdigest()
+
+
+def verify_thumb_token(secret: bytes, token: str | None) -> bool:
+    return bool(token and _THUMB_TOKEN_RE.fullmatch(token)) and hmac.compare_digest(
+        make_thumb_token(secret), token)
 
 
 def verify_token(secret: bytes, token: str | None, now: float | None = None) -> bool:

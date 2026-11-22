@@ -347,17 +347,50 @@ def test_heresphere_password_opens_the_library_with_keyed_urls(pin, lan, video):
 
     scene = lan.post(f"/heresphere/{video}", json=creds).json()
     assert scene["access"] == 1
-    keyed = [scene["media"][0]["sources"][0]["url"], scene["scripts"][0]["url"], scene["thumbnailImage"],
-             scene["eventServer"]]
+    keyed = [scene["media"][0]["sources"][0]["url"], scene["scripts"][0]["url"], scene["eventServer"]]
     for url in keyed:
         k = parse_qs(urlsplit(url).query)["k"][0]
         assert access_pin.verify_token(SECRET, k)
         parts = urlsplit(url)
         res = lan.request("POST" if url == scene["eventServer"] else "GET", f"{parts.path}?{parts.query}")
-        # Past the gate (the fake video has no real thumbnail to make: 503).
         assert res.status_code != 401
         if url == keyed[0]:
             assert res.status_code in (200, 206)
+    # The thumbnail carries the thumbnail-only key, and it gets past the gate (the fake
+    # video has no real thumbnail to make: 503).
+    thumb = urlsplit(scene["thumbnailImage"])
+    assert parse_qs(thumb.query)["k"] == [access_pin.make_thumb_token(SECRET)]
+    assert lan.get(f"{thumb.path}?{thumb.query}").status_code != 401
+
+
+def test_headset_thumbnail_urls_stay_the_same_until_the_pin_changes(pin, user_data, lan, video, monkeypatch):
+    creds = {"username": "anyone", "password": PIN}
+    scene_today = lan.post(f"/heresphere/{video}", json=creds).json()
+    today = scene_today["thumbnailImage"]
+    deovr_creds = {"login": "anyone", "password": PIN}
+    deovr_today = lan.post(f"/deovr/{video}", data=deovr_creds).json()["thumbnailUrl"]
+    real_time = time.time
+    monkeypatch.setattr(time, "time", lambda: real_time() + 5 * 86400)
+    later = lan.post(f"/heresphere/{video}", json=creds).json()
+    assert later["thumbnailImage"] == today, "the headset would download every thumbnail again"
+    assert lan.post(f"/deovr/{video}", data=deovr_creds).json()["thumbnailUrl"] == deovr_today
+    # Videos keep the expiring key.
+    assert later["media"][0]["sources"][0]["url"] != scene_today["media"][0]["sources"][0]["url"]
+    monkeypatch.setattr(time, "time", real_time)
+    write_pin(user_data, pin="2468", secret="ef" * 32)
+    thumb = urlsplit(today)
+    assert lan.get(f"{thumb.path}?{thumb.query}").status_code == 401
+
+
+def test_thumbnail_key_opens_thumbnails_only(pin, lan, video):
+    k = access_pin.make_thumb_token(SECRET)
+    assert lan.get(f"/api/media/thumb/{video}?v=1&k={k}").status_code != 401
+    for method, path in [("GET", f"/api/media/stream/{video}"), ("GET", f"/api/media/script/{video}"),
+                         ("GET", "/api/remote/sources"), ("POST", f"/api/media/thumb/{video}")]:
+        assert lan.request(method, f"{path}?k={k}").status_code == 401, f"{method} {path}"
+    assert lan.get("/remote/", headers=cookie(k)).status_code == 303
+    # It doesn't log a headset in either.
+    assert lan.post(f"/heresphere/{video}?k={k}", json={}).json()["access"] == 0
 
 
 def test_heresphere_cookie_or_k_is_enough(pin, lan, video):
@@ -400,15 +433,17 @@ def test_deovr_password_opens_the_library_with_keyed_urls(pin, lan, video):
     assert lib["authorized"] == "1"
     items = [item for section in lib["scenes"] for item in section["list"]]
     assert items
+    thumb_key = [access_pin.make_thumb_token(SECRET)]
     for item in items:
-        assert access_pin.verify_token(SECRET, parse_qs(urlsplit(item["thumbnailUrl"]).query)["k"][0])
+        assert parse_qs(urlsplit(item["thumbnailUrl"]).query)["k"] == thumb_key
         assert "k=" not in item["video_url"]
 
     scene = lan.post(f"/deovr/{video}", data=creds).json()
     stream = scene["encodings"][0]["videoSources"][0]["url"]
     script = scene["fleshlight"][0]["url"]
-    for url in (stream, script, scene["thumbnailUrl"]):
+    for url in (stream, script):
         assert access_pin.verify_token(SECRET, parse_qs(urlsplit(url).query)["k"][0])
+    assert parse_qs(urlsplit(scene["thumbnailUrl"]).query)["k"] == thumb_key
     parts = urlsplit(stream)
     assert lan.get(f"{parts.path}?{parts.query}").status_code in (200, 206)
 
