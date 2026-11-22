@@ -73,6 +73,16 @@ def _has_valid_token(conn: HTTPConnection, secret: bytes) -> bool:
     )
 
 
+def _thumb_key_fits(conn: HTTPConnection, secret: bytes) -> bool:
+    """A headset's thumbnail-only `k` (access_pin.make_thumb_token) on a thumbnail GET."""
+    return (
+        conn.scope["type"] == "http"
+        and conn.scope["method"] in ("GET", "HEAD")
+        and conn.url.path.startswith(access_pin.THUMB_PATH_PREFIX)
+        and access_pin.verify_thumb_token(secret, conn.query_params.get(access_pin.QUERY_KEY))
+    )
+
+
 def _client_ip(conn: HTTPConnection) -> str:
     return conn.client.host if conn.client else ""
 
@@ -98,7 +108,7 @@ class AccessGate:
             invalid = False
             if pin is None:
                 return await self.app(scope, receive, send)
-            if _has_valid_token(conn, pin.secret):
+            if _has_valid_token(conn, pin.secret) or _thumb_key_fits(conn, pin.secret):
                 return await self.app(scope, receive, send)
         path = conn.url.path
         if scope["type"] == "http" and _is_headset_route(path):
@@ -247,9 +257,11 @@ async def logout():
 @dataclass(frozen=True)
 class HeadsetAccess:
     """`state`: 1 allowed, 0 login required, -1 login failed. `token`: the
-    `k` to append to media URLs (None when no PIN or on this computer)."""
+    `k` to append to media URLs, `thumb_token` the one for thumbnail URLs
+    (both None when no PIN or on this computer)."""
     state: int
     token: str | None = None
+    thumb_token: str | None = None
 
     @property
     def message(self) -> str:
@@ -269,13 +281,17 @@ def headset_access(request: Request, password: str | None) -> HeadsetAccess:
     if pin is None:
         return HeadsetAccess(1)
     if _has_valid_token(request, pin.secret):
-        return HeadsetAccess(1, access_pin.make_media_token(pin.secret))
+        return _headset_allowed(pin.secret)
     if not password:
         return HeadsetAccess(0)
     if access_pin.limiter.retry_after(ip) > 0:
         return HeadsetAccess(-1)
     if access_pin.pin_matches(pin, password.strip()):
         access_pin.limiter.reset(ip)
-        return HeadsetAccess(1, access_pin.make_media_token(pin.secret))
+        return _headset_allowed(pin.secret)
     access_pin.limiter.record_failure(ip)
     return HeadsetAccess(-1)
+
+
+def _headset_allowed(secret: bytes) -> HeadsetAccess:
+    return HeadsetAccess(1, access_pin.make_media_token(secret), access_pin.make_thumb_token(secret))

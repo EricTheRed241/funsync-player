@@ -436,6 +436,7 @@ async function loadLibrary() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     library = adoptVideoList(data);
+    warmThumbnails(library);
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
@@ -4470,6 +4471,33 @@ function formatDuration(seconds) {
   const ss = s % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
   return `${m}:${String(ss).padStart(2, '0')}`;
+}
+
+// Thumbnail warm-up (2026-11-22): once the library has loaded, every
+// thumbnail is fetched in the background, WARM_PARALLEL at a time at low
+// priority and after a short delay (the screen's own tiles go first), so
+// scrolling finds them in the browser's cache instead of loading tiles as
+// they come into view. Thumbnail URLs carry the server's `?v=` version and
+// are cached for a year, so after the first visit this is cache hits only;
+// the first time it's ~20 KB per video (~18 MB for 900) on the home network.
+const WARM_PARALLEL = 4;
+const WARM_DELAY_MS = 1500;
+const warmedThumbs = new Set();
+const warmingThumbs = new Set(); // held so a fetch in flight isn't dropped
+function warmThumbnails(videos) {
+  const urls = videos.map((v) => v.thumbUrl).filter((u) => u && !warmedThumbs.has(u));
+  for (const u of urls) warmedThumbs.add(u);
+  let next = 0;
+  const pump = () => {
+    if (next >= urls.length) return;
+    const img = new Image();
+    img.fetchPriority = 'low';
+    // A thumbnail the server can't make yet (503) is wireThumb's to retry when shown.
+    img.onload = img.onerror = () => { warmingThumbs.delete(img); pump(); };
+    warmingThumbs.add(img);
+    img.src = urls[next++];
+  };
+  setTimeout(() => { for (let i = 0; i < WARM_PARALLEL; i++) pump(); }, WARM_DELAY_MS);
 }
 
 /**

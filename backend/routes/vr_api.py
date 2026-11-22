@@ -825,7 +825,7 @@ async def deovr_library(request: Request):
         item = {
             'title': os.path.splitext(video.get('name', ''))[0],
             'videoLength': _get_duration(video),
-            'thumbnailUrl': with_key(thumb_url(vid_id, video, base_url), access.token),
+            'thumbnailUrl': with_key(thumb_url(vid_id, video, base_url), access.thumb_token),
             'video_url': f'{base_url}/deovr/{vid_id}',
         }
         entries.append((item, video, is_3d))
@@ -918,7 +918,7 @@ async def deovr_scene(video_id: str, request: Request):
         'screenType': screen_type,
         'stereoMode': stereo_mode,
         'videoLength': duration,
-        'thumbnailUrl': with_key(thumb_url(video_id, video, base_url), access.token),
+        'thumbnailUrl': with_key(thumb_url(video_id, video, base_url), access.thumb_token),
         'encodings': encodings,
         'fleshlight': fleshlight,
         'timeStamps': timestamps,
@@ -1108,7 +1108,7 @@ async def heresphere_scene(video_id: str, request: Request):
         'access': 1,
         'title': title,
         'description': '',
-        'thumbnailImage': with_key(thumb_url(video_id, video, base_url), access.token),
+        'thumbnailImage': with_key(thumb_url(video_id, video, base_url), access.thumb_token),
         'dateReleased': '',
         'dateAdded': '',
         'duration': duration * 1000,  # HereSphere uses milliseconds
