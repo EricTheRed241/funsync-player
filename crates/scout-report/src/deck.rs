@@ -1510,9 +1510,9 @@ mod tests {
         assert_eq!(
             own.images,
             [
-                "/pictures/ann/es-500.jpg",
-                "/pictures/ann/ig-1.jpg",
-                "/pictures/ann/es-9.jpg"
+                "pictures/ann/es-500.jpg",
+                "pictures/ann/ig-1.jpg",
+                "pictures/ann/es-9.jpg"
             ]
         );
         assert_eq!(d.remaining, plain.remaining + 1);

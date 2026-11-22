@@ -20,6 +20,7 @@ from routes.locale import router as locale_router, set_user_data_dir
 from routes.status import router as status_router
 from routes.device import router as device_router
 from routes.access import router as access_router, AccessGate
+from routes.sites import router as sites_router
 from services import access_pin, library_edits, stereo_detect, video_info
 import access_log
 
@@ -61,6 +62,9 @@ app.include_router(device_router, tags=["device"])
 # Access PIN (routes/access.py): /login, /logout, and the gate in front of
 # everything else for other devices once a PIN is set.
 app.include_router(access_router, tags=["access"])
+# The local sites (deploy/sites.json) under their prefix (/swipe/, /creators/, /status/)
+# and the nav bar script every page loads (routes/sites.py).
+app.include_router(sites_router, tags=["sites"])
 
 # Web remote SPA served at /remote/ — static files live in backend/web-remote/.
 _remote_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web-remote")

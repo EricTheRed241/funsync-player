@@ -326,10 +326,7 @@ mod tests {
             (v["remaining"].as_u64(), v["yes"].as_u64()),
             (Some(2), Some(0))
         );
-        assert_eq!(
-            v["cards"][1]["pictures"][0]["src"],
-            "/pictures/ann/ig-1.jpg"
-        );
+        assert_eq!(v["cards"][1]["pictures"][0]["src"], "pictures/ann/ig-1.jpg");
         assert_eq!(v["cards"][1]["counts"]["eroscriptsPaid"], 1);
         assert_eq!(
             slugs(&get(&mut app, "/api/creators/deck?offset=1")),
