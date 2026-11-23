@@ -224,7 +224,7 @@ fn swipes_through_the_deck() {
                "tags": [{"tag": "pov", "score": 3.0}, {"tag": "anal", "score": -2.0}],
                "runtimeMs": null, "heat": [], "likes": null, "hosts": [], "gb": null,
                "created": null, "bumped": null,
-               "scenes": [{"name": null, "host": null, "size": null, "runtimeMs": null, "axes": ["twist"]}],
+               "scenes": [{"name": null, "host": null, "url": null, "size": null, "runtimeMs": null, "axes": ["twist"]}],
                "moreScenes": 0})
     );
     // A shuffle wider than MAX_JITTER is refused, and so is the old single-axis tab.

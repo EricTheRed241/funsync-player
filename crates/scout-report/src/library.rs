@@ -2,12 +2,14 @@
 //! topic, from the scouts' `eroscripts.json` sidecars in the library sources,
 //! the app's `library.scriptTags` (posts linked by `eroscripts:sync` or
 //! downloaded in the app) and `eroscripts-links.json`. Only videos that still
-//! exist count, so a deleted scene no longer marks its post.
+//! exist count, so a deleted scene no longer marks its post. When a post came
+//! in is its newest video file's modification time (topic_downloaded).
 
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub const LINKS_FILE: &str = "eroscripts-links.json";
 const SIDECAR: &str = "eroscripts.json";
@@ -21,6 +23,34 @@ pub fn topic_videos(
     links: &Value,
     problems: &mut Vec<String>,
 ) -> HashMap<u64, usize> {
+    count_existing(topic_pairs(config, links, problems), |p| p.is_file())
+}
+
+/// Per topic id with a library video, when the newest of them was written (its file's
+/// modification time: when the download finished). Problems as topic_videos.
+pub fn topic_downloaded(
+    config: &Value,
+    links: &Value,
+    problems: &mut Vec<String>,
+) -> HashMap<u64, SystemTime> {
+    let mut newest: HashMap<u64, SystemTime> = HashMap::new();
+    for (topic, path) in topic_pairs(config, links, problems) {
+        let Some(t) = fs::metadata(&path)
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .and_then(|m| m.modified().ok())
+        else {
+            continue;
+        };
+        let e = newest.entry(topic).or_insert(t);
+        *e = (*e).max(t);
+    }
+    newest
+}
+
+/// Every (topic, video) the library links, whether the video exists or not: the sidecars
+/// in the sources, `library.scriptTags` and `eroscripts-links.json`.
+fn topic_pairs(config: &Value, links: &Value, problems: &mut Vec<String>) -> Vec<(u64, PathBuf)> {
     let settings = config.get("settings").unwrap_or(config);
     let mut pairs: Vec<(u64, PathBuf)> = Vec::new();
     for source in settings
@@ -47,7 +77,7 @@ pub fn topic_videos(
     };
     pairs.extend(by_path(settings.pointer("/library/scriptTags")));
     pairs.extend(by_path(links.get("links")));
-    count_existing(pairs, |p| p.is_file())
+    pairs
 }
 
 /// One count per distinct (topic, video) whose video `exists`.

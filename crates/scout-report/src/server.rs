@@ -1,6 +1,7 @@
 //! The HTTP side: one request at a time (big bodies are sent on their own thread, see handle).
 //! `GET /` (redirects to the deck page),
-//! `GET /swipe` (the deck page),
+//! `GET /swipe` (the deck page), `GET /downloads` and `GET /api/downloads` (every right swipe:
+//! waiting, downloaded lately or turned down, and the download job, crate::downloads),
 //! `GET /api/deck?stack=multi|vr|flat|free|dupes&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
 //! (the next cards of a tab, every source mixed, crate::deck; `free` is the Free space tab's
 //! library videos, crate::free_space; `dupes` the Duplicates tab's pairs, crate::duplicates),
@@ -24,7 +25,9 @@
 use crate::gate::{self, Gate};
 use crate::scenes::{self, Source};
 use crate::swipes::{self, Dir, Store};
-use crate::{creator_pictures, creators, deck, drive, duplicates, frames, free_space, report};
+use crate::{
+    creator_pictures, creators, deck, downloads, drive, duplicates, frames, free_space, report,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::io::{self, Read, Write};
@@ -49,9 +52,12 @@ pub fn with_preloader(page: &str) -> String {
 pub static SWIPE_PAGE: LazyLock<String> =
     LazyLock::new(|| with_preloader(include_str!("swipe.html")));
 
+/// The Downloads page, likewise self-contained.
+pub const DOWNLOADS_PAGE: &str = include_str!("downloads.html");
+
 /// This site's name (log lines) and its pages, for the gate.
 pub const NAME: &str = "scout-report";
-pub const PAGES: &[&str] = &["/", "/swipe"];
+pub const PAGES: &[&str] = &["/", "/swipe", "/downloads"];
 
 /// Longest request head read before giving up on a request.
 const MAX_HEAD: usize = 16 * 1024;
@@ -144,6 +150,8 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
         }
         ("GET" | "HEAD", "/swipe") => html(&SWIPE_PAGE),
         ("GET" | "HEAD", "/api/drive") => json_ok(&drive::status(user_data)),
+        ("GET" | "HEAD", "/downloads") => html(DOWNLOADS_PAGE),
+        ("GET" | "HEAD", "/api/downloads") => json_ok(&downloads::load(user_data)),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
             Ok(d) if d.stack == deck::Stack::Free => {
                 json_ok(&free_space::load(user_data, d.limit, &d.exclude))

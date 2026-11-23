@@ -78,6 +78,16 @@ pub struct Who {
     pub name: String,
 }
 
+/// A post swiped want (Creators::wanted).
+#[derive(Debug, Clone)]
+pub struct WantedPost<'a> {
+    /// `<kind>:<id>`.
+    pub key: String,
+    pub at: Option<String>,
+    pub who: Option<Who>,
+    pub post: Option<&'a Value>,
+}
+
 /// A creator in a card (`people`): her name and her best picture (best_picture).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -421,6 +431,39 @@ impl Creators {
             .and_then(Value::as_str)
     }
 
+    /// Every post swiped want (creator-swipes.json `posts`), newest swipe first: its key
+    /// (`<kind>:<id>`), when, and its creator and the post as creators.json lists them (None
+    /// when the post isn't listed any more).
+    pub fn wanted(&self) -> Vec<WantedPost<'_>> {
+        let mut listed: HashMap<String, (Who, &Value)> = HashMap::new();
+        for (who, c) in self.all() {
+            for p in posts(c) {
+                if let Some(key) = post_key_of(p) {
+                    listed.entry(key).or_insert_with(|| (who.clone(), p));
+                }
+            }
+        }
+        let mut out: Vec<WantedPost> = self
+            .swipes
+            .get("posts")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(_, s)| s.get("choice").and_then(Value::as_str) == Some("want"))
+            .map(|(key, s)| {
+                let (who, post) = listed.remove(key).unzip();
+                WantedPost {
+                    key: key.clone(),
+                    at: str_of(s, "at"),
+                    who,
+                    post,
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| b.at.cmp(&a.at));
+        out
+    }
+
     /// Mark a deck card that is a yes creator's post: her name, and the bonus on its score.
     pub fn tag(&self, card: &mut deck::DeckCard) {
         let key = match card {
@@ -516,6 +559,7 @@ impl Creators {
             site: kind.to_string(),
             id,
             url: str_of(p, "url").filter(|u| u.starts_with("https://")),
+            video_url: first_video_page(p),
             title: str_of(p, "title"),
             author: Some(who.name.clone()),
             images,
@@ -545,6 +589,14 @@ impl Creators {
             ..SceneCard::default()
         }
     }
+}
+
+/// A post's first https video page (`videoPages`): where its video plays.
+pub fn first_video_page(p: &Value) -> Option<String> {
+    strings_of(p, "videoPages")
+        .unwrap_or_default()
+        .into_iter()
+        .find(|u| u.starts_with("https://"))
 }
 
 fn posts(c: &Value) -> impl Iterator<Item = &Value> {

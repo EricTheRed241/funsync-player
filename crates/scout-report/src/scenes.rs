@@ -197,6 +197,10 @@ pub struct SceneCard {
     pub id: String,
     /// The scene's page (https only), or null.
     pub url: Option<String>,
+    /// The video itself when the scout lists it (PMVHaven's `videoUrl`; a creator post's first
+    /// video page; https only): the card's Watch link, else the scene page is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_url: Option<String>,
     pub title: Option<String>,
     /// The studio, uploader or FapTap author: shown where a post shows its author.
     pub author: Option<String>,
@@ -318,6 +322,7 @@ pub fn card(source: Source, id: String, s: &Value) -> SceneCard {
         source: source.name(),
         site: str_of(s, "site").unwrap_or_else(|| source.name().to_string()),
         url: scene_url(source, &id, s),
+        video_url: https(str_of(s, "videoUrl")),
         id,
         title: str_of(s, "title"),
         author: str_of(s, "studio").or_else(|| str_of(s, "author")),
