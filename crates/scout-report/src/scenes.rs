@@ -100,16 +100,15 @@ fn script_axes(s: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The deck tab a scene goes to: a script with axes besides stroke → Multi, else VR or Flat by
-/// `vr`. FapTap scripts are always single-axis.
+/// The deck tab a scene goes to: SexLikeReal's → Slr (its downloads cost the quota); else a
+/// script with axes besides stroke → Multi, else VR or Flat by `vr`. FapTap scripts are always
+/// single-axis.
 pub fn stack_of(source: Source, s: &Value) -> Stack {
-    if source != Source::Faptap && !script_axes(s).is_empty() {
-        Stack::Multi
-    } else if flag(s, "vr") {
-        Stack::Vr
-    } else {
-        Stack::Flat
-    }
+    Stack::of(
+        source == Source::Slr,
+        source != Source::Faptap && !script_axes(s).is_empty(),
+        flag(s, "vr"),
+    )
 }
 
 /// The videos waiting EroScripts posts bring (swiped, in the library or not): their scenes
@@ -391,15 +390,19 @@ mod tests {
     }
 
     #[test]
-    fn tabs_by_script_axes_then_vr() {
+    fn tabs_slr_then_script_axes_then_vr() {
         let multi = json!({"vr": true, "script": {"url": "https://x/a.funscript", "axes": ["twist", "roll"]}});
         let vr = json!({"vr": true, "script": {"axes": []}});
         let flat = json!({"vr": false, "script": null});
-        for src in [Source::Slr, Source::Vrb, Source::Pmvhaven] {
+        for src in [Source::Vrb, Source::Pmvhaven] {
             assert_eq!(stack_of(src, &multi), Stack::Multi, "{src:?}");
             assert_eq!(stack_of(src, &vr), Stack::Vr, "{src:?}");
             assert_eq!(stack_of(src, &flat), Stack::Flat, "{src:?}");
             assert_eq!(stack_of(src, &json!({"vr": true})), Stack::Vr);
+        }
+        // Every SLR scene costs the quota: the SLR tab, whatever its script or VR.
+        for s in [&multi, &vr, &flat] {
+            assert_eq!(stack_of(Source::Slr, s), Stack::Slr);
         }
         // FapTap is always single-axis, whatever its list says.
         assert_eq!(stack_of(Source::Faptap, &multi), Stack::Vr);

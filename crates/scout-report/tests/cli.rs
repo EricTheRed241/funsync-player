@@ -368,19 +368,22 @@ fn every_source_deals_into_the_tabs_and_swipes_into_its_own_file() {
         json!(["https://content/7b.jpg", "https://content/7b-2.jpg"])
     );
     assert_eq!(multi["cards"][1]["axes"], json!(["twist", "roll"]));
-    // VR: the posts win over SLR 66249 and VRBangers same-scene; 70001 is downloaded, 8c in
-    // the library.
+    // VR: VRBangers same-scene loses to its post; 8c is in the library; nothing from SLR.
     let vr = deck("/api/deck?stack=vr");
-    assert_eq!(cards(&vr), ["slr:51207", "eroscripts:34", "eroscripts:35"]);
+    assert_eq!(cards(&vr), ["eroscripts:35"]);
     assert_eq!(
         (vr["remaining"].as_u64(), vr["wanted"].as_u64()),
-        (Some(3), Some(0))
+        (Some(1), Some(0))
     );
-    assert_eq!(vr["quota"]["videos"]["remaining"], 30);
     assert_eq!(vr["generatedAt"]["vrb"], "2026-11-17T18:00:00.000Z");
-    assert_eq!(vr["cards"][0]["scriptSource"], "slr-handcrafted");
+    // SLR: everything that downloads from SexLikeReal; post 34 wins over SLR 66249, 70001 is
+    // downloaded.
+    let slr_tab = deck("/api/deck?stack=slr");
+    assert_eq!(cards(&slr_tab), ["slr:51207", "eroscripts:34"]);
+    assert_eq!(slr_tab["quota"]["videos"]["remaining"], 30);
+    assert_eq!(slr_tab["cards"][0]["scriptSource"], "slr-handcrafted");
     assert_eq!(
-        vr["cards"][1]["slrVideo"]["url"],
+        slr_tab["cards"][1]["slrVideo"]["url"],
         "https://www.sexlikereal.com/scenes/b-66249"
     );
     // Flat: FapTap and PMVHaven.
@@ -429,7 +432,7 @@ fn every_source_deals_into_the_tabs_and_swipes_into_its_own_file() {
         read("faptap-scout-swipes.json")["swipes"]["1957860091331874817"]["dir"],
         "right"
     );
-    for (tab, left, wanted) in [("multi", 1, 1), ("vr", 1, 2), ("flat", 0, 2)] {
+    for (tab, left, wanted) in [("multi", 1, 1), ("vr", 1, 0), ("slr", 0, 2), ("flat", 0, 2)] {
         let d = deck(&format!("/api/deck?stack={tab}"));
         assert_eq!(
             (d["remaining"].as_u64(), d["wanted"].as_u64()),
@@ -449,7 +452,7 @@ fn every_source_deals_into_the_tabs_and_swipes_into_its_own_file() {
     );
     assert!(read("vrb-scout-swipes.json")["swipes"].get("7b").is_none());
     assert_eq!(cards(&deck("/api/deck?stack=multi")).len(), 2);
-    assert_eq!(cards(&deck("/api/deck?stack=vr")).len(), 2);
+    assert_eq!(cards(&deck("/api/deck?stack=slr")).len(), 1);
     // The old SLR tab's routes are gone.
     assert_eq!(get(port, "/api/slr/deck").0, 404);
     assert_eq!(
