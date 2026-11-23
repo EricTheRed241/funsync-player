@@ -33,9 +33,11 @@ pub const MAX_EXCLUDE: usize = 1000;
 /// scripts are a smaller, more valued pool, so the deck stays close to score order.
 pub const MULTI_JITTER: f64 = 4.0;
 /// Score points a seeded VR deal moves each card by, at most, either way: VR posts and the
-/// hand-picked studio scenes (SLR, VRBangers) cost a download quota or many GB each, so the
-/// order stays close to the score, a little looser than SLR's old ±2 so the sources mix.
+/// studio scenes (VRBangers) cost many GB each, so the order stays close to the score.
 pub const VR_JITTER: f64 = 3.0;
+/// Score points a seeded SLR deal moves each card by, at most, either way: every SLR download
+/// costs the account's quota, so the order stays closest to the score.
+pub const SLR_JITTER: f64 = 2.0;
 /// Score points a seeded Flat deal moves each card by, at most, either way: wide enough
 /// (scores run about -4 … 24) that low-scoring posts and videos surface too and the whole
 /// stack gets swiped.
@@ -50,16 +52,19 @@ const TOP_TAGS: usize = 3;
 /// The source name of a post card (and of its `exclude` entries).
 pub const EROSCRIPTS: &str = "eroscripts";
 
-/// Which cards a deck request deals: multi-axis scripts (posts and scenes alike), else VR,
-/// else flat. `Free` is the Free space tab: library videos to delete (crate::free_space);
-/// `Dupes` the Duplicates tab: pairs of library videos (crate::duplicates). Neither is ever a
-/// post or scene, so `build` deals them nothing.
+/// Which cards a deck request deals: anything whose video comes from SexLikeReal (an SLR
+/// scene, a post whose video is on SLR) → Slr, since those downloads cost the account's
+/// quota; else multi-axis scripts (posts and scenes alike), else VR, else flat. `Free` is the
+/// Free space tab: library videos to delete (crate::free_space); `Dupes` the Duplicates tab:
+/// pairs of library videos (crate::duplicates). Neither is ever a post or scene, so `build`
+/// deals them nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Stack {
     #[default]
     Multi,
     Vr,
     Flat,
+    Slr,
     Free,
     Dupes,
 }
@@ -70,6 +75,7 @@ impl Stack {
             "multi" => Some(Stack::Multi),
             "vr" => Some(Stack::Vr),
             "flat" => Some(Stack::Flat),
+            "slr" => Some(Stack::Slr),
             "free" => Some(Stack::Free),
             "dupes" => Some(Stack::Dupes),
             _ => None,
@@ -82,13 +88,16 @@ impl Stack {
             Stack::Multi => MULTI_JITTER,
             Stack::Vr => VR_JITTER,
             Stack::Flat => FLAT_JITTER,
+            Stack::Slr => SLR_JITTER,
             Stack::Free | Stack::Dupes => 0.0,
         }
     }
 
-    /// The tab a card goes to: multi-axis first, then VR or flat.
-    pub fn of(multi: bool, vr: bool) -> Stack {
-        if multi {
+    /// The tab a card goes to: SLR first (quota), then multi-axis, then VR or flat.
+    pub fn of(slr: bool, multi: bool, vr: bool) -> Stack {
+        if slr {
+            Stack::Slr
+        } else if multi {
             Stack::Multi
         } else if vr {
             Stack::Vr
@@ -475,10 +484,12 @@ fn slr_videos(cand: &Value) -> impl Iterator<Item = &Value> {
         .filter(|v| v.get("host").and_then(Value::as_str) == Some("slr"))
 }
 
-/// A waiting post's tab: the scout's `axisType` "multi" (packed archives count as multi) →
-/// Multi, else VR or Flat by `vr`. Where the video comes from (SLR, MEGA, …) doesn't matter.
+/// A waiting post's tab: its video on SexLikeReal (a scene's `video.host` "slr") → Slr,
+/// else the scout's `axisType` "multi" (packed archives count as multi) → Multi, else VR or
+/// Flat by `vr`.
 pub fn post_stack(cand: &Value) -> Stack {
     Stack::of(
+        slr_videos(cand).next().is_some(),
         cand.get("axisType").and_then(Value::as_str) == Some("multi"),
         cand.get("vr").and_then(Value::as_bool).unwrap_or(false),
     )
@@ -924,24 +935,22 @@ mod tests {
 
     #[test]
     fn every_source_lands_in_its_tab_best_first() {
-        // Multi: multi-axis posts (one with its video on SLR) and a scene with script axes.
+        // SLR: whatever downloads from SexLikeReal, whatever its axes or VR: post 17 (multi-axis,
+        // its video on SLR) and the SLR scene; post 18 (swiped right) and 902 are its wanted.
+        let d = build(&files(), Stack::Slr);
+        assert_eq!(keys(&d), ["eroscripts:17", "slr:900"]);
+        assert_eq!((d.remaining, d.wanted), (2, 2));
+        // Multi: multi-axis posts and a scene with script axes, none of them on SLR.
         let d = build(&files(), Stack::Multi);
-        assert_eq!(keys(&d), ["eroscripts:17", "vrb:a2", "eroscripts:10"]);
-        assert_eq!((d.remaining, d.wanted), (3, 0));
-        // VR: single-axis VR posts and VR scenes of every source.
+        assert_eq!(keys(&d), ["vrb:a2", "eroscripts:10"]);
+        assert_eq!((d.remaining, d.wanted), (2, 0));
+        // VR: single-axis VR posts and VR scenes of every source but SLR.
         let d = build(&files(), Stack::Vr);
         assert_eq!(
             keys(&d),
-            [
-                "faptap:f2",
-                "slr:900",
-                "eroscripts:20",
-                "vrb:a4",
-                "pmvhaven:p2"
-            ]
+            ["faptap:f2", "eroscripts:20", "vrb:a4", "pmvhaven:p2"]
         );
-        // 902 is wanted; 66249 (a post brings it) and 901 (downloaded) don't count.
-        assert_eq!((d.remaining, d.wanted), (5, 1));
+        assert_eq!((d.remaining, d.wanted), (4, 0));
         // Flat: the rest; a topic and a FapTap video may share an id.
         let d = build(&files(), Stack::Flat);
         assert_eq!(
@@ -955,15 +964,15 @@ mod tests {
                 "eroscripts:15"
             ]
         );
-        // Posts 13 and 18 and FapTap f3 are wanted; 12 is in the library, p3 downloaded.
-        assert_eq!((d.remaining, d.wanted), (6, 3));
+        // Post 13 and FapTap f3 are wanted; 12 is in the library, p3 downloaded.
+        assert_eq!((d.remaining, d.wanted), (6, 2));
         assert_eq!(d.last_scan_at.as_deref(), Some("2026-11-17T00:00:00.000Z"));
         assert_eq!(
             serde_json::to_value(&d.generated_at).unwrap(),
             json!({"slr": "2026-11-16T00:00:00.000Z", "vrb": "2026-11-17T18:00:00.000Z",
                    "pmvhaven": null, "faptap": "2026-11-15T00:00:00.000Z"})
         );
-        // The SLR quota rides along on every tab (the page shows it on VR).
+        // The SLR quota rides along on every tab (the page shows it on SLR).
         assert_eq!(d.quota["videos"]["remaining"], 30);
         assert_eq!(d.quota_error.as_deref(), Some("session expired"));
     }
@@ -972,7 +981,7 @@ mod tests {
     fn a_waiting_post_wins_over_its_scene() {
         // SLR 66249 and 51207 come with posts 17 and 18, VRBangers a1 with post 20 (same slug):
         // in no tab, whatever their swipes.
-        for stack in [Stack::Multi, Stack::Vr, Stack::Flat] {
+        for stack in [Stack::Multi, Stack::Vr, Stack::Flat, Stack::Slr] {
             let k = keys(&build(&files(), stack));
             for gone in ["slr:66249", "slr:51207", "vrb:a1"] {
                 assert!(!k.contains(&gone.to_string()), "{stack:?} {gone}");
@@ -981,15 +990,15 @@ mod tests {
         // Without the posts they stand on their own.
         let mut f = files();
         f.waiting = json!({"candidates": []});
-        let k = keys(&build(&f, Stack::Vr));
-        assert_eq!(&k[..2], ["slr:51207", "vrb:a1"]);
+        assert_eq!(&keys(&build(&f, Stack::Slr))[..2], ["slr:51207", "slr:900"]);
+        assert_eq!(keys(&build(&f, Stack::Vr))[0], "vrb:a1");
         // 66249's right swipe counts once no post brings it.
-        assert_eq!(build(&f, Stack::Vr).wanted, 2);
+        assert_eq!(build(&f, Stack::Slr).wanted, 2);
     }
 
     #[test]
     fn fetched_in_library_and_swiped_scenes_stay_hidden() {
-        let all: Vec<String> = [Stack::Multi, Stack::Vr, Stack::Flat]
+        let all: Vec<String> = [Stack::Multi, Stack::Vr, Stack::Flat, Stack::Slr]
             .into_iter()
             .flat_map(|s| keys(&build(&files(), s)))
             .collect();
@@ -1013,7 +1022,7 @@ mod tests {
 
     #[test]
     fn posts_on_slr_keep_their_video_link() {
-        let d = build(&files(), Stack::Multi);
+        let d = build(&files(), Stack::Slr);
         let c = serde_json::to_value(&d.cards[0]).unwrap();
         assert_eq!(
             (c["source"].as_str(), c["id"].as_u64()),
@@ -1027,7 +1036,7 @@ mod tests {
         // Only https links.
         let mut f = files();
         f.post_swipes = Swipes::default();
-        let d = build(&f, Stack::Flat);
+        let d = build(&f, Stack::Slr);
         assert_eq!(
             post(&d, 18).slr_video,
             Some(SlrVideo {
@@ -1036,7 +1045,7 @@ mod tests {
             })
         );
         // A scene card: its id a string, its source where the swipe goes.
-        let d = build(&files(), Stack::Vr);
+        let d = build(&files(), Stack::Slr);
         let c = serde_json::to_value(&d.cards[1]).unwrap();
         assert_eq!(
             (c["source"].as_str(), c["id"].as_str(), c.get("slrVideo")),
@@ -1045,8 +1054,14 @@ mod tests {
     }
 
     #[test]
-    fn posts_go_by_axis_type_then_vr() {
+    fn posts_go_by_slr_then_axis_type_then_vr() {
+        let on_slr = json!([{"video": {"host": "MEGA"}}, {"video": {"host": "slr"}}]);
         for (cand, stack) in [
+            (
+                json!({"axisType": "multi", "vr": true, "scenes": on_slr}),
+                Stack::Slr,
+            ),
+            (json!({"axisType": "single", "scenes": on_slr}), Stack::Slr),
             (json!({"axisType": "multi", "vr": true}), Stack::Multi),
             (json!({"axisType": "multi"}), Stack::Multi),
             (json!({"axisType": "single", "vr": true}), Stack::Vr),
@@ -1178,6 +1193,7 @@ mod tests {
                 match deal.stack {
                     Stack::Multi => c["axisType"] = json!("multi"),
                     Stack::Vr => c["vr"] = json!(true),
+                    Stack::Slr => c["scenes"] = json!([{"video": {"host": "slr"}}]),
                     Stack::Flat | Stack::Free | Stack::Dupes => {}
                 }
                 c
@@ -1192,11 +1208,11 @@ mod tests {
         d
     }
 
-    const STACKS: [Stack; 3] = [Stack::Multi, Stack::Vr, Stack::Flat];
+    const STACKS: [Stack; 4] = [Stack::Multi, Stack::Vr, Stack::Flat, Stack::Slr];
 
     #[test]
     fn jitter_stays_within_bounds_and_repeats_per_seed() {
-        for amp in [MULTI_JITTER, VR_JITTER, FLAT_JITTER] {
+        for amp in [MULTI_JITTER, VR_JITTER, FLAT_JITTER, SLR_JITTER] {
             let shifts: Vec<f64> = (0..10_000).map(|id| jitter(7, id, amp)).collect();
             assert!(shifts.iter().all(|s| (-amp..=amp).contains(s)));
             // Spread over the whole range, both ways.
@@ -1209,6 +1225,7 @@ mod tests {
         assert_eq!(Stack::Multi.jitter(), MULTI_JITTER);
         assert_eq!(Stack::Vr.jitter(), VR_JITTER);
         assert_eq!(Stack::Flat.jitter(), FLAT_JITTER);
+        assert_eq!(Stack::Slr.jitter(), SLR_JITTER);
     }
 
     #[test]
@@ -1304,13 +1321,7 @@ mod tests {
         sort(&mut tie.cards, |_| 1.0);
         assert_eq!(
             keys(&tie),
-            [
-                "eroscripts:20",
-                "slr:900",
-                "vrb:a4",
-                "pmvhaven:p2",
-                "faptap:f2"
-            ]
+            ["eroscripts:20", "vrb:a4", "pmvhaven:p2", "faptap:f2"]
         );
         // The default VR jitter: a card only passes ones within 2 × VR_JITTER points, and
         // some seed reorders the sources.
@@ -1343,7 +1354,8 @@ mod tests {
         assert_eq!(Stack::parse("multi"), Some(Stack::Multi));
         assert_eq!(Stack::parse("vr"), Some(Stack::Vr));
         assert_eq!(Stack::parse("flat"), Some(Stack::Flat));
-        for bad in ["single", "slr", "Multi", "VR", "both", ""] {
+        assert_eq!(Stack::parse("slr"), Some(Stack::Slr));
+        for bad in ["single", "SLR", "Multi", "VR", "both", ""] {
             assert_eq!(Stack::parse(bad), None, "{bad}");
         }
         assert_eq!(Stack::default(), Stack::Multi);
@@ -1438,9 +1450,9 @@ mod tests {
                 ..Deal::default()
             },
         );
-        // The default Multi tab: posts 17 and 10 and scene a2, two of them dealt.
-        assert_eq!(d.remaining, 3);
-        assert_eq!(keys(&d), ["eroscripts:17", "vrb:a2"]);
+        // The default Multi tab: post 10 and scene a2 (post 17 is on SLR), both dealt.
+        assert_eq!(d.remaining, 2);
+        assert_eq!(keys(&d), ["vrb:a2", "eroscripts:10"]);
 
         // Broken files are problems; the rest still deals.
         std::fs::write(dir.join(swipes::EROSCRIPTS.file), b"nope").unwrap();
@@ -1453,7 +1465,7 @@ mod tests {
                 ..Deal::default()
             },
         );
-        assert_eq!((d.remaining, d.cards.len()), (3, 0));
+        assert_eq!((d.remaining, d.cards.len()), (2, 0));
         for file in [
             swipes::EROSCRIPTS.file,
             Source::Pmvhaven.file(),

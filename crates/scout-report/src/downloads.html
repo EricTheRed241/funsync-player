@@ -34,6 +34,9 @@ a:hover { text-decoration: underline; }
 .bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
   line-height: 1; cursor: pointer; }
 .job { padding: 8px 12px; border-radius: 8px; background: var(--row); font-size: 13px; margin-bottom: 10px; }
+.quota { font-size: 13px; color: var(--muted); margin: -2px 2px 10px; font-variant-numeric: tabular-nums; }
+.quota b { color: var(--fg); }
+.quota .err { color: var(--nope); }
 .job b { color: var(--fg); }
 .job.running { box-shadow: inset 3px 0 0 var(--like); }
 .job .line { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
@@ -75,16 +78,18 @@ a:hover { text-decoration: underline; }
 <div class="job" id="job" hidden></div>
 <div class="problems" id="problems" hidden></div>
 <nav class="tabs" id="tabs">
-  <button type="button" data-tab="waiting" title="Swiped right, not downloaded yet: the next download run takes them">Waiting</button>
+  <button type="button" data-tab="waiting" title="Swiped right, not downloaded yet: the next download run takes them (SLR apart)">Waiting</button>
+  <button type="button" data-tab="slr" title="Swiped right on SexLikeReal (SLR scenes, posts whose video is on SLR): each download costs the account's quota">SLR</button>
   <button type="button" data-tab="recent" title="Swiped right and downloaded in the last 30 days, newest first">Downloaded</button>
   <button type="button" data-tab="wont" title="Swiped right, but the scout turned it down or it left its list">Won't download</button>
 </nav>
+<div class="quota" id="quota" hidden></div>
 <ul class="list" id="list"></ul>
 </div>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
-const TABS = ['waiting', 'recent', 'wont'];
+const TABS = ['waiting', 'slr', 'recent', 'wont'];
 let tab = TABS.includes(localStorage.getItem('downloadsTab')) ? localStorage.getItem('downloadsTab') : 'waiting';
 let data = null;
 let error = null;
@@ -165,12 +170,28 @@ function itemNode(i) {
         el('a', { href: i.videoUrl, target: '_blank', rel: 'noopener noreferrer' }, `▶ Watch on ${hostName(i.videoUrl)} ↗`)) : null));
 }
 
-const LABELS = { waiting: 'Waiting', recent: 'Downloaded', wont: "Won't download" };
+const LABELS = { waiting: 'Waiting', slr: 'SLR', recent: 'Downloaded', wont: "Won't download" };
 const EMPTY = {
   waiting: 'Nothing waiting: every right swipe is downloaded.',
+  slr: 'Nothing waiting on SLR.',
   recent: 'Nothing downloaded in the last 30 days.',
   wont: 'Nothing turned down.',
 };
+
+/** The SLR tab's line: what the account has left, as slr:scout last read it. */
+function renderQuota() {
+  const q = $('quota');
+  if (tab !== 'slr' || !data) { q.hidden = true; return; }
+  const left = (x) => (x && x.total != null ? el('b', {}, `${x.remaining} of ${x.total}`) : '?');
+  const quota = data.quota || {};
+  const parts = data.quota
+    ? ['SLR left: videos ', left(quota.videos), ' (7 days) · hand-crafted scripts ', left(quota.scripts),
+      ' · AI scripts ', left(quota.aiScripts), ' (this month)', quota.checkedAt ? ` · checked ${ago(quota.checkedAt)}` : '']
+    : ['SLR quota not read yet (npm run slr:scout).'];
+  if (data.quotaError) parts.push(' ', el('span', { class: 'err' }, `(${data.quotaError})`));
+  q.replaceChildren(...parts);
+  q.hidden = false;
+}
 
 function render() {
   for (const b of $('tabs').querySelectorAll('button')) {
@@ -179,6 +200,7 @@ function render() {
     b.textContent = LABELS[b.dataset.tab] + (n == null ? '' : ` (${n})`);
   }
   renderJob();
+  renderQuota();
   $('problems').hidden = !(data && data.problems.length);
   $('problems').textContent = data ? data.problems.join('\n') : '';
   if (!data) {
@@ -186,7 +208,7 @@ function render() {
     $('list').replaceChildren(el('li', { class: 'empty' }, error ? `Could not load: ${error}` : 'Loading…'));
     return;
   }
-  $('counter').textContent = `${data.waiting.length} waiting · ${data.recent.length} downloaded`;
+  $('counter').textContent = `${data.waiting.length} waiting · ${data.slr.length} on SLR · ${data.recent.length} downloaded`;
   const items = data[tab];
   $('list').replaceChildren(...(items.length ? items.map(itemNode) : [el('li', { class: 'empty' }, EMPTY[tab])]));
 }

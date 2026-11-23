@@ -218,6 +218,15 @@ fn flag(v: &Value, key: &str) -> bool {
     v.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+/// A creator post whose video is on SexLikeReal (`hosts` has "slr"): its download costs the
+/// account's quota, so it goes to the SLR tab.
+pub fn on_slr(p: &Value) -> bool {
+    strings_of(p, "hosts")
+        .unwrap_or_default()
+        .iter()
+        .any(|h| h == "slr")
+}
+
 impl Creators {
     /// Read both files and the bonus; problems go to `problems`. A swipes file of another
     /// version is a problem and read as no swipes.
@@ -520,7 +529,7 @@ impl Creators {
                         && id
                             .parse()
                             .is_ok_and(|n: u64| in_library.get(&n).is_some_and(|&v| v > 0)))
-                    || Stack::of(flag(p, "multiAxis"), vr) != stack
+                    || Stack::of(on_slr(p), flag(p, "multiAxis"), vr) != stack
                     || !seen.insert(key.clone())
                 {
                     continue;

@@ -3,6 +3,9 @@
 //!
 //! - **Waiting**: swiped right and not in the library yet; the next download run takes it
 //!   (an EroScripts post still on the waiting list, a scene not fetched, a creator's post).
+//! - **SLR**: the same for whatever downloads from SexLikeReal (SLR scenes, posts and creator
+//!   posts whose video is on SLR): those wait on the account's quota, which comes along
+//!   (`slr-scout.json`'s `quota` / `quotaError`), so they're kept apart from Waiting.
 //! - **Downloaded**: swiped right and in the library, within the last RECENT_DAYS, newest
 //!   first (at most MAX_RECENT). A post's time is its newest library video's modification
 //!   time (crate::library::topic_downloaded), a scene's its scout's `fetchedAt`.
@@ -38,8 +41,14 @@ const MAX_LOG_LINE: usize = 300;
 #[serde(rename_all = "camelCase")]
 pub struct Downloads {
     pub waiting: Vec<Item>,
+    /// Waiting items that download from SexLikeReal (`Item::slr`).
+    pub slr: Vec<Item>,
     pub recent: Vec<Item>,
     pub wont: Vec<Item>,
+    /// slr:scout's last quota read (`{checkedAt, videos, scripts, aiScripts}`), and why the
+    /// last read failed.
+    pub quota: Value,
+    pub quota_error: Option<String>,
     pub job: Job,
     /// Files that exist but couldn't be read, library sources that can't be.
     pub problems: Vec<String>,
@@ -63,6 +72,8 @@ pub struct Item {
     /// The video: its host's page, or the file itself (PMVHaven).
     pub video_url: Option<String>,
     pub vr: bool,
+    /// Its video downloads from SexLikeReal (costs the account's quota).
+    pub slr: bool,
     /// Size of the video(s) when known, in GB (10^9 bytes).
     pub gb: Option<f64>,
     pub swiped_at: Option<String>,
@@ -136,6 +147,10 @@ pub fn load(user_data: &Path) -> Downloads {
     // Each scene scout's scenes.
     for src in Source::ALL {
         let file = report::read_json(user_data, src.file(), &mut problems);
+        if src == Source::Slr {
+            d.quota = file.get("quota").cloned().unwrap_or(Value::Null);
+            d.quota_error = str_of(&file, "quotaError");
+        }
         let by_id: HashMap<String, &Value> = scenes::scenes(src, &file).collect();
         let swipes = report::read_swipes(user_data, src.swipes(), &mut problems);
         for (id, at) in rights(&swipes) {
@@ -186,6 +201,7 @@ pub fn load(user_data: &Path) -> Downloads {
                 .unwrap_or_default()
                 .iter()
                 .any(|t| t.eq_ignore_ascii_case("vr")),
+            slr: crate::creators::on_slr(post),
             swiped_at: w.at.clone(),
             ..Item::default()
         };
@@ -206,6 +222,7 @@ pub fn load(user_data: &Path) -> Downloads {
     }
 
     d.waiting.sort_by(|a, b| b.swiped_at.cmp(&a.swiped_at));
+    d.slr.sort_by(|a, b| b.swiped_at.cmp(&a.swiped_at));
     d.wont.sort_by(|a, b| b.swiped_at.cmp(&a.swiped_at));
     d.recent.retain(|i| {
         i.downloaded_at
@@ -220,8 +237,8 @@ pub fn load(user_data: &Path) -> Downloads {
     d
 }
 
-/// File `item`: downloaded (at that time) → recent; else still wanted → waiting; else → won't,
-/// with `why`.
+/// File `item`: downloaded (at that time) → recent; else still wanted → slr (on SLR) or
+/// waiting; else → won't, with `why`.
 fn place(
     d: &mut Downloads,
     mut item: Item,
@@ -232,6 +249,8 @@ fn place(
     if let Some(at) = downloaded {
         item.downloaded_at = Some(at);
         d.recent.push(item);
+    } else if wanted && item.slr {
+        d.slr.push(item);
     } else if wanted {
         d.waiting.push(item);
     } else {
@@ -330,6 +349,9 @@ fn post_item(
             .and_then(|c| c.get("vr"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        slr: scenes
+            .iter()
+            .any(|s| s.pointer("/video/host").and_then(Value::as_str) == Some("slr")),
         gb: report::total_gb(scenes),
         ..Item::default()
     }
@@ -349,6 +371,7 @@ fn scene_item(src: Source, id: String, s: &Value) -> Item {
         video_url: https(str_of(s, "videoUrl")).or_else(|| url.clone()),
         url,
         vr: flag(s, "vr"),
+        slr: src == Source::Slr,
         gb: s
             .get("fileSize")
             .and_then(Value::as_f64)
@@ -455,7 +478,8 @@ mod tests {
             &dir,
             report::WAITING_FILE,
             json!({"candidates": [
-            {"id": 11, "vr": true, "scenes": [{"video": {"url": "https://rule34video.com/video/1/", "size": 2e9}}]}]}),
+            {"id": 11, "vr": true, "scenes": [{"video": {"url": "https://rule34video.com/video/1/", "size": 2e9}}]},
+            {"id": 15, "scenes": [{"video": {"host": "slr", "url": "https://www.sexlikereal.com/scenes/x-15"}}]}]}),
         );
         write(
             &dir,
@@ -471,7 +495,8 @@ mod tests {
             "11": {"dir": "right", "at": "2026-11-21T00:00:00.000Z"},
             "12": {"dir": "right", "at": "2026-11-19T00:00:00.000Z"},
             "13": {"dir": "right", "at": "2026-11-18T00:00:00.000Z"},
-            "14": {"dir": "left", "at": "2026-11-22T00:00:00.000Z"}}}),
+            "14": {"dir": "left", "at": "2026-11-22T00:00:00.000Z"},
+            "15": {"dir": "right", "at": "2026-11-17T00:00:00.000Z"}}}),
         );
         let recent = video_tags::timefmt::now_iso();
         write(
@@ -504,8 +529,26 @@ mod tests {
             json!({"version": 1, "swipes": {"c1": {"dir": "right", "at": "2026-11-15T00:00:00.000Z"}}}),
         );
 
+        // What downloads from SexLikeReal waits apart, with the quota: an SLR scene and a post
+        // whose video is on SLR.
+        write(
+            &dir,
+            Source::Slr.file(),
+            json!({"quota": {"videos": {"remaining": 26, "total": 35}}, "quotaError": "x",
+                   "scenes": [{"id": 900, "title": "SLR scene"}]}),
+        );
+        write(
+            &dir,
+            swipes::SLR.file,
+            json!({"version": 1, "swipes": {"900": {"dir": "right", "at": "2026-11-16T00:00:00.000Z"}}}),
+        );
         let d = load(&dir);
         assert_eq!(ids(&d.waiting), ["pmvhaven:p3", "eroscripts:11", "vrb:c1"]);
+        assert_eq!(ids(&d.slr), ["eroscripts:15", "slr:900"]);
+        assert_eq!(
+            (&d.quota["videos"]["remaining"], d.quota_error.as_deref()),
+            (&json!(26), Some("x"))
+        );
         assert_eq!(ids(&d.recent), ["pmvhaven:p1", "eroscripts:10"]);
         assert_eq!(
             ids(&d.wont),

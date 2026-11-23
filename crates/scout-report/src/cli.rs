@@ -33,12 +33,14 @@ highest score first, from every source: the EroScripts waiting posts not in the
 library, and the scenes of slr-scout.json (npm run slr:scout), vrb-scout.json
 (VRBangers and VRConk, npm run vrb:scout), pmvhaven-scout.json (npm run pmvhaven:scout)
 and faptap-scout.json (npm run faptap:scout) not downloaded (fetchedAt) and not in the
-library (inLibrary). Three tabs pick the stack: Multi (default: multi-axis posts and
-scenes whose script has axes besides stroke), VR (the rest that's VR) and Flat (the
-rest). A scene a waiting post brings (the same SLR scene id, or the same VRBangers page)
-only shows as the post: its script is free. Each deal shifts every score by up to 4
-either way on Multi (MULTI_JITTER: it stays close to score order), up to 3 on VR
-(VR_JITTER) and up to 10 on Flat (FLAT_JITTER: low scorers come up too); the page's ⚙
+library (inLibrary). Four tabs pick the stack: SLR (everything that downloads from
+SexLikeReal, so costs the account's quota: SLR scenes, posts and creator posts whose video
+is on SLR), Multi (default: multi-axis posts and scenes whose script has axes besides
+stroke), VR (the rest that's VR) and Flat (the rest); no other tab shows SLR videos. A
+scene a waiting post brings (the same SLR scene id, or the same VRBangers page) only shows
+as the post: its script is free. Each deal shifts every score by up to 4 either way on
+Multi (MULTI_JITTER: it stays close to score order), up to 3 on VR (VR_JITTER), 2 on SLR
+(SLR_JITTER) and up to 10 on Flat (FLAT_JITTER: low scorers come up too); the page's ⚙
 sets each amplitude from 0 (strictly by score) to 30, per device (/api/deck?jitter=N).
 On a wide window (900 px and up) the card puts the image on the left and every
 detail beside it: all tags with their tag scores, likes, hosts, size, dates and the
@@ -50,13 +52,13 @@ nothing. Undo forgets the swipe or skip, on any tab. Swipes go to the source's o
 by the site's id (atomically; the previous copy is kept as .bak):
 eroscripts-scout-swipes.json, slr-scout-swipes.json, vrb-scout-swipes.json,
 pmvhaven-scout-swipes.json and faptap-scout-swipes.json. These are the only files the
-CLI writes. The VR tab also shows the SLR account's download quota slr:scout last read:
+CLI writes. The SLR tab also shows the SLR account's download quota slr:scout last read:
 videos left in the 7-day window, hand-crafted and AI scripts left this month.
 
 Under the tabs a bar shows the library drive's free space in GB (df on the library
 sources in config.json; with sources on several drives, the one with the least free).
 Below swipeDeck.minFreeGb free (renderer/js/content-preferences.json) the drive counts
-as full: Multi, VR and Flat take no swipes (the page turns them off, the swipe routes
+as full: Multi, VR, Flat and SLR take no swipes (the page turns them off, the swipe routes
 answer 507) until space is freed; skip, undo and the Free space tab still work. The
 bar rereads /api/drive every minute.
 

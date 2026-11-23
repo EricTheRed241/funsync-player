@@ -236,14 +236,16 @@ a.badge { color: var(--fg); }
     <label>Multi shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
     <label>VR shuffle ± <input type="number" id="jitter-vr" data-stack="vr" min="0" max="30" step="0.5" inputmode="decimal"></label>
     <label>Flat shuffle ± <input type="number" id="jitter-flat" data-stack="flat" min="0" max="30" step="0.5" inputmode="decimal"></label>
-    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 Multi, ±3 VR, ±10 Flat). Saved on this device.</div>
+    <label>SLR shuffle ± <input type="number" id="jitter-slr" data-stack="slr" min="0" max="30" step="0.5" inputmode="decimal"></label>
+    <div class="note">Score points each card may move either way, 0–30 (0 = strictly by score). Empty = the default (±4 Multi, ±3 VR, ±10 Flat, ±2 SLR). Saved on this device.</div>
     <button type="button" class="reset" id="jitter-reset">Reset to defaults</button>
   </div>
 </header>
 <nav class="stacks" id="stacks" aria-label="Which cards">
   <button type="button" data-stack="multi" title="Multi-axis scripts from every source: EroScripts posts and scenes with hand-made axes">Multi</button>
-  <button type="button" data-stack="vr" title="Single-axis VR from every source: EroScripts posts, SLR, VRBangers / VRConk, PMVHaven and FapTap scenes">VR</button>
-  <button type="button" data-stack="flat" title="Single-axis flat from every source: EroScripts posts, PMVHaven and FapTap videos">Flat</button>
+  <button type="button" data-stack="vr" title="Single-axis VR from every source but SLR: EroScripts posts, VRBangers / VRConk, PMVHaven and FapTap scenes">VR</button>
+  <button type="button" data-stack="flat" title="Single-axis flat from every source but SLR: EroScripts posts, PMVHaven and FapTap videos">Flat</button>
+  <button type="button" data-stack="slr" title="Everything that downloads from SexLikeReal and so costs the account's quota: SLR scenes, and posts whose video is on SLR">SLR</button>
   <button type="button" data-stack="free" title="Library videos to delete when a drive is full: the most GB per preference-score point first; favourites, 4★ and up, favourite artists and hand-made axes are never shown">Free space</button>
   <button type="button" data-stack="dupes" title="Library videos that may be the same video, side by side, the likeliest first: keep one (← / →) and the other is deleted when you press Delete marked, or ↑ not duplicates">Duplicates</button>
 </nav>
@@ -278,9 +280,9 @@ const REFILL_AT = 5;
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
-// Which tab is dealt (multi, vr, flat, free); remembered on this device. Any other stored value
-// (the old single-axis and SLR tabs) falls back to multi.
-const STACKS = ['multi', 'vr', 'flat', 'free', 'dupes'];
+// Which tab is dealt (multi, vr, flat, slr, free, dupes); remembered on this device. Any
+// other stored value (the old single-axis tab) falls back to multi.
+const STACKS = ['multi', 'vr', 'flat', 'slr', 'free', 'dupes'];
 let stack = STACKS.includes(localStorage.getItem('swipeStack')) ? localStorage.getItem('swipeStack') : 'multi';
 // Where a card comes from, and so where its swipe goes: an EroScripts post (source
 // "eroscripts") to /api/swipe and eroscripts-scout-swipes.json, a scout's scene (slr, vrb,
@@ -302,12 +304,13 @@ const marks = (c, dir) => (isLibrary(c) ? dir === 'left' : isPair(c) ? dir === '
 const deletes = (s) => s === 'free' || s === 'dupes';
 // A card's identity across sources (two sources' ids may be equal); also the deck's exclude key.
 const keyOf = (c) => sourceOf(c) + ':' + c.id;
-const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat', free: 'Free space', dupes: 'Duplicates' };
+const STACK_NAMES = { multi: 'Multi', vr: 'VR', flat: 'Flat', slr: 'SLR', free: 'Free space', dupes: 'Duplicates' };
 // The scouts whose runs fill each tab: an empty tab names them.
 const TAB_SCOUTS = {
   multi: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout', 'creators:scout'],
-  vr: ['eroscripts:scout', 'slr:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout', 'creators:scout'],
+  vr: ['eroscripts:scout', 'vrb:scout', 'pmvhaven:scout', 'faptap:scout', 'creators:scout'],
   flat: ['eroscripts:scout', 'pmvhaven:scout', 'faptap:scout', 'creators:scout'],
+  slr: ['slr:scout', 'eroscripts:scout', 'creators:scout'],
   free: [],
   dupes: [],
 };
@@ -317,8 +320,8 @@ const SOURCE_NAMES = { eroscripts: 'EroScripts', slr: 'SLR', vrb: 'VRBangers', p
 const SITE_NAMES = { vrbangers: 'VRBangers', vrconk: 'VRConk', eroscripts: 'EroScripts', faptap: 'FapTap' };
 const sourceName = (c) => SITE_NAMES[c.site] || SOURCE_NAMES[sourceOf(c)] || sourceOf(c);
 // ⚙ shuffle amplitude per tab, in score points; unset = the server's default (deck.rs
-// MULTI_JITTER / VR_JITTER / FLAT_JITTER), shown as the placeholder. Remembered on this device.
-const JITTER_DEFAULT = { multi: 4, vr: 3, flat: 10 };
+// MULTI_JITTER / VR_JITTER / FLAT_JITTER / SLR_JITTER), shown as the placeholder. Remembered on this device.
+const JITTER_DEFAULT = { multi: 4, vr: 3, flat: 10, slr: 2 };
 const JITTER_MAX = 30;
 const validJitter = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= JITTER_MAX;
 let jitters = (() => {
@@ -895,10 +898,10 @@ function deleteMarked(e) {
   }).catch((err) => toast('Not deleted: ' + err.message));
 }
 
-/** The VR tab's line: the SLR account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
+/** The SLR tab's line: the SLR account's downloads left, as slr:scout last read them (videos count for EroScripts posts on SLR too). */
 function renderQuota(d) {
   const q = $('quota');
-  if (stack !== 'vr' || !d) { q.hidden = true; return; }
+  if (stack !== 'slr' || !d) { q.hidden = true; return; }
   const left = (x) => (x && x.total != null ? el('b', {}, `${x.remaining} of ${x.total}`) : null);
   const quota = d.quota || {};
   const line = [];
@@ -1424,7 +1427,7 @@ function showStack() {
   $('like').textContent = dupes ? '▶' : '♥';
   $('nope').setAttribute('aria-label', dupes ? 'Keep left' : 'Hide');
   $('like').setAttribute('aria-label', dupes ? 'Keep right' : 'Want');
-  if (stack !== 'vr') renderQuota(null);
+  if (stack !== 'slr') renderQuota(null);
   renderScanned(null);
   lastDeck = null;
   renderDrives(null);

@@ -2,7 +2,7 @@
 //! `GET /` (redirects to the deck page),
 //! `GET /swipe` (the deck page), `GET /downloads` and `GET /api/downloads` (every right swipe:
 //! waiting, downloaded lately or turned down, and the download job, crate::downloads),
-//! `GET /api/deck?stack=multi|vr|flat|free|dupes&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
+//! `GET /api/deck?stack=multi|vr|flat|slr|free|dupes&limit=N&seed=N&jitter=N&exclude=<source>:<id>,…`
 //! (the next cards of a tab, every source mixed, crate::deck; `free` is the Free space tab's
 //! library videos, crate::free_space; `dupes` the Duplicates tab's pairs, crate::duplicates),
 //! `GET /api/drive` (the library drive's free space and whether swiping is off, crate::drive),
@@ -235,7 +235,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 /// `seed=N` (shuffle a little), `jitter=N` (how much, in score points: 0 ..= MAX_JITTER;
 /// default the tab's), `exclude=<source>:<id>,…` (the cards the page holds: `eroscripts:<topic
 /// id>`, a scene source's `<source>:<id>` or `library:<video id>`; at most MAX_EXCLUDE), and
-/// `stack=multi|vr|flat|free|dupes` (default multi).
+/// `stack=multi|vr|flat|slr|free|dupes` (default multi).
 fn deal(query: &str) -> Result<deck::Deal, String> {
     let mut d = deck::Deal::default();
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
@@ -280,7 +280,7 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
             }
             "stack" => {
                 d.stack = deck::Stack::parse(v).ok_or_else(|| {
-                    format!("stack is multi, vr, flat, free or dupes, got {v:?}\n")
+                    format!("stack is multi, vr, flat, slr, free or dupes, got {v:?}\n")
                 })?;
             }
             _ => {}
@@ -890,7 +890,7 @@ mod tests {
             "/api/deck?exclude=vrb:a%20b",
             "/api/deck?exclude=vrb:a:b",
             "/api/deck?stack=single",
-            "/api/deck?stack=slr",
+            "/api/deck?stack=SLR",
             "/api/deck?stack=VR",
             "/api/deck?stack=",
             "/api/deck?jitter=",
@@ -1111,19 +1111,15 @@ mod tests {
             keys(&get_json("/api/deck", &dir)),
             ["vrb:b2", "eroscripts:8", "eroscripts:9", "eroscripts:7"]
         );
-        let v = get_json("/api/deck?stack=vr", &dir);
-        assert_eq!(
-            keys(&v),
-            [
-                "slr:66249",
-                "vrb:6accfc2cff316f0c39086f52",
-                "faptap:f2",
-                "slr:8"
-            ]
-        );
+        let v = get_json("/api/deck?stack=slr", &dir);
+        assert_eq!(keys(&v), ["slr:66249", "slr:8"]);
         assert_eq!(v["quota"]["scripts"]["remaining"], 1);
         assert_eq!(v["quotaError"], "session expired");
         assert_eq!(v["cards"][0]["id"], "66249", "scene ids are strings");
+        assert_eq!(
+            keys(&get_json("/api/deck?stack=vr", &dir)),
+            ["vrb:6accfc2cff316f0c39086f52", "faptap:f2"]
+        );
         assert_eq!(
             keys(&get_json("/api/deck?stack=flat", &dir)),
             ["faptap:1957860091331874817", "pmvhaven:p1"]
@@ -1134,7 +1130,11 @@ mod tests {
                 "/api/deck?stack=vr&exclude=slr:66249,vrb:6accfc2cff316f0c39086f52,eroscripts:8",
                 &dir
             )),
-            ["faptap:f2", "slr:8"]
+            ["faptap:f2"]
+        );
+        assert_eq!(
+            keys(&get_json("/api/deck?stack=slr&exclude=slr:66249", &dir)),
+            ["slr:8"]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1197,8 +1197,10 @@ mod tests {
         let v = get_json("/api/deck?stack=vr", &dir);
         assert_eq!(
             (keys(&v), v["wanted"].as_u64()),
-            (vec!["faptap:f2".to_string()], Some(2))
+            (vec!["faptap:f2".to_string()], Some(1))
         );
+        let v = get_json("/api/deck?stack=slr", &dir);
+        assert_eq!((keys(&v).len(), v["wanted"].as_u64()), (0, Some(1)));
         assert_eq!(get_json("/api/deck?stack=flat", &dir)["wanted"], 1);
 
         let (status, v) = post("/api/scenes/slr/swipe/undo", r#"{"id":"66249"}"#);
@@ -1417,8 +1419,8 @@ mod tests {
             json!(["frames/eroscripts/7/25.jpg", "frames/eroscripts/7/75.jpg"])
         );
 
-        // The VR tab: post 40 (its video on SLR) and SLR scenes with their own frames.
-        let v = get_json("/api/deck?stack=vr", &dir);
+        // The SLR tab: post 40 (its video on SLR) and SLR scenes with their own frames.
+        let v = get_json("/api/deck?stack=slr", &dir);
         assert_eq!(v["cards"][0]["id"], 40);
         assert_eq!(images(&v, 0), json!(["frames/eroscripts/40/50.jpg"]));
         assert_eq!(
