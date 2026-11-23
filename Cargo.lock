@@ -239,6 +239,7 @@ name = "scout-report"
 version = "0.1.0"
 dependencies = [
  "age-screen",
+ "job-runner",
  "regex",
  "serde",
  "serde_json",

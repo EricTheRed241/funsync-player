@@ -6,7 +6,8 @@
 //! full (crate::free_space), and a fifth, Duplicates: pairs of library videos that may be one
 //! video, side by side, to keep one of (crate::duplicates); both through the running app's
 //! backend. A bar under the tabs shows the library drive's free space; while it's full the
-//! three download tabs take no swipes (crate::drive).
+//! three download tabs take no swipes (crate::drive). The Downloads page (`/downloads`,
+//! crate::downloads) lists every right swipe: waiting, downloaded lately, or turned down.
 //! Reads `eroscripts-scout-state.json`, `eroscripts-scout.json`,
 //! `eroscripts-scout-frames.json`, `slr-scout.json`, `vrb-scout.json`,
 //! `pmvhaven-scout.json`, `faptap-scout.json`, `creators.json` and `config.json` in userData on every
@@ -27,6 +28,7 @@ pub mod cli;
 pub mod creator_pictures;
 pub mod creators;
 pub mod deck;
+pub mod downloads;
 pub mod drive;
 pub mod duplicates;
 pub mod frames;

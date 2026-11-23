@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='1.5' width='24' height='29' rx='5' fill='%23e0529c'/%3E%3Cpath d='M16 25.5C8.5 20.4 6.5 16.6 6.5 13.4 6.5 10.6 8.7 8.5 11.3 8.5c2 0 3.6 1.1 4.7 2.8 1.1-1.7 2.7-2.8 4.7-2.8 2.6 0 4.8 2.1 4.8 4.9 0 3.2-2 7-9.5 12.1z' fill='%23fff'/%3E%3C/svg%3E">
+<title>Downloads</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --panel: #ffffff;
+  --accent: #2f6fdf; --row: #f2f2f5; --warn-bg: #fff4d6; --warn-fg: #6b4e00;
+  --like: #3aa655; --nope: #e05252; --undo: #d08b2c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181b; --fg: #e6e6e9; --muted: #9a9aa3; --line: #34353b; --panel: #1f2024;
+    --accent: #7aa7ff; --row: #2a2b31; --warn-bg: #3d3214; --warn-fg: #ffd98a;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { width: min(100% - 24px, 900px); margin: 0 auto; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.bar { display: flex; align-items: baseline; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 4px 8px; }
+.bar h1 { font-size: 18px; margin: 0; }
+.bar .counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; }
+.bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
+  line-height: 1; cursor: pointer; }
+.job { padding: 8px 12px; border-radius: 8px; background: var(--row); font-size: 13px; margin-bottom: 10px; }
+.job b { color: var(--fg); }
+.job.running { box-shadow: inset 3px 0 0 var(--like); }
+.job .line { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  overflow-wrap: anywhere; margin-top: 3px; }
+.problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
+  white-space: pre-wrap; font-size: 13px; margin-bottom: 10px; }
+.tabs { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+.tabs button { flex: 1; background: none; border: none; padding: 7px 4px; font: inherit; font-size: 13px;
+  color: var(--muted); cursor: pointer; }
+.tabs button + button { border-left: 1px solid var(--line); }
+.tabs button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); font-weight: 600; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.item { display: flex; gap: 12px; padding: 8px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+.thumb { flex: none; width: 128px; height: 72px; border-radius: 6px; object-fit: cover; background: #000; }
+.noimg { flex: none; width: 128px; height: 72px; border-radius: 6px; background: var(--row); }
+.body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.ttl { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: 12px; align-items: center; }
+.note { font-size: 12px; color: var(--warn-fg); background: var(--warn-bg); border-radius: 4px; padding: 1px 6px; align-self: flex-start; }
+.badge { padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: color-mix(in srgb, var(--bc, #888) 22%, transparent); border: 1px solid var(--bc, #888); color: var(--fg); }
+.b-eroscripts { --bc: #2f6fdf; } .b-slr { --bc: #e8743b; } .b-vrbangers, .b-vrconk { --bc: #d6336c; }
+.b-pmvhaven { --bc: #9b59d0; } .b-faptap { --bc: #f08c00; } .b-vr { --bc: #a46ad6; }
+.links { display: flex; gap: 12px; font-size: 13px; }
+.empty { color: var(--muted); text-align: center; padding: 30px 10px; }
+@media (max-width: 520px) {
+  .thumb, .noimg { width: 96px; height: 54px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="bar">
+  <h1>Downloads</h1>
+  <span class="counter" id="counter">Loading…</span>
+  <button type="button" id="refresh" title="Load again" aria-label="Refresh">↻</button>
+  <a href="swipe">Swipe</a>
+</header>
+<div class="job" id="job" hidden></div>
+<div class="problems" id="problems" hidden></div>
+<nav class="tabs" id="tabs">
+  <button type="button" data-tab="waiting" title="Swiped right, not downloaded yet: the next download run takes them">Waiting</button>
+  <button type="button" data-tab="recent" title="Swiped right and downloaded in the last 30 days, newest first">Downloaded</button>
+  <button type="button" data-tab="wont" title="Swiped right, but the scout turned it down or it left its list">Won't download</button>
+</nav>
+<ul class="list" id="list"></ul>
+</div>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const TABS = ['waiting', 'recent', 'wont'];
+let tab = TABS.includes(localStorage.getItem('downloadsTab')) ? localStorage.getItem('downloadsTab') : 'waiting';
+let data = null;
+let error = null;
+let timer = 0;
+
+const SITE_NAMES = { eroscripts: 'EroScripts', slr: 'SLR', vrb: 'VRBangers', vrbangers: 'VRBangers', vrconk: 'VRConk',
+  pmvhaven: 'PMVHaven', faptap: 'FapTap' };
+// Where a video link goes, by its host's address.
+const HOSTS = [['rule34video', 'rule34video'], ['pixeldrain', 'pixeldrain'], ['mega.nz', 'MEGA'], ['sexlikereal', 'SLR'],
+  ['vrbangers', 'VRBangers'], ['vrconk', 'VRConk'], ['pmvhaven', 'PMVHaven'], ['faptap', 'FapTap'], ['pornhub', 'Pornhub']];
+const hostName = (url) => (HOSTS.find(([k]) => url.includes(k)) || [null, 'video'])[1];
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    n.append(c instanceof Node ? c : String(c));
+  }
+  return n;
+}
+
+/** "3 h ago" / "2 days ago" from an ISO time or unix seconds. */
+function ago(at) {
+  const t = typeof at === 'number' ? at * 1000 : new Date(at).getTime();
+  const min = Math.max(0, (Date.now() - t) / 60000);
+  if (min < 60) return `${Math.round(min)} min ago`;
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} days ago`;
+}
+const when = (at) => (typeof at === 'number' ? new Date(at * 1000) : new Date(at)).toLocaleString();
+
+function renderJob() {
+  const j = data && data.job;
+  const box = $('job');
+  if (!j) { box.hidden = true; return; }
+  box.hidden = false;
+  box.title = '';
+  box.classList.toggle('running', j.running);
+  const parts = [];
+  if (j.running) {
+    parts.push('Download run ', el('b', {}, 'running'), j.started ? ` since ${new Date(j.started * 1000).toLocaleTimeString()} (${ago(j.started)})` : '');
+  } else if (j.started) {
+    parts.push('Last download run ', el('b', {}, j.result || '?'), ` ${ago(j.ended || j.started)}`,
+      j.exit != null ? ` (exit ${j.exit})` : '');
+    box.title = `Started ${when(j.started)}` + (j.ended ? `, ended ${when(j.ended)}` : '');
+  } else {
+    parts.push('No download run yet (job ', el('code', {}, j.name), ').');
+  }
+  box.replaceChildren(el('div', {}, parts), ...(j.lastLine ? [el('div', { class: 'line' }, j.lastLine)] : []));
+}
+
+function itemNode(i) {
+  const site = SITE_NAMES[i.site] || SITE_NAMES[i.source] || i.source;
+  const img = i.image
+    ? el('img', { class: 'thumb', src: i.image, alt: '', loading: 'lazy', decoding: 'async' })
+    : el('div', { class: 'noimg' });
+  if (i.image) img.addEventListener('error', () => img.replaceWith(el('div', { class: 'noimg' })));
+  const title = i.title || `#${i.id}`;
+  return el('li', { class: 'item' },
+    i.url ? el('a', { href: i.url, target: '_blank', rel: 'noopener noreferrer' }, img) : img,
+    el('div', { class: 'body' },
+      el('div', { class: 'ttl', title }, i.url ? el('a', { href: i.url, target: '_blank', rel: 'noopener noreferrer' }, title) : title),
+      el('div', { class: 'meta' },
+        el('span', { class: `badge b-${i.site in SITE_NAMES ? i.site : i.source}` }, site),
+        i.vr ? el('span', { class: 'badge b-vr' }, 'VR') : null,
+        i.author ? el('span', {}, i.author) : null,
+        i.gb != null ? el('span', {}, `${i.gb} GB`) : null,
+        i.downloadedAt ? el('span', { title: when(i.downloadedAt) }, `downloaded ${ago(i.downloadedAt)}`) : null,
+        i.swipedAt ? el('span', { title: when(i.swipedAt) }, `swiped ${ago(i.swipedAt)}`) : null),
+      i.note ? el('span', { class: 'note' }, i.note) : null,
+      i.videoUrl ? el('div', { class: 'links' },
+        el('a', { href: i.videoUrl, target: '_blank', rel: 'noopener noreferrer' }, `▶ Watch on ${hostName(i.videoUrl)} ↗`)) : null));
+}
+
+const LABELS = { waiting: 'Waiting', recent: 'Downloaded', wont: "Won't download" };
+const EMPTY = {
+  waiting: 'Nothing waiting: every right swipe is downloaded.',
+  recent: 'Nothing downloaded in the last 30 days.',
+  wont: 'Nothing turned down.',
+};
+
+function render() {
+  for (const b of $('tabs').querySelectorAll('button')) {
+    const n = data ? data[b.dataset.tab].length : null;
+    b.classList.toggle('on', b.dataset.tab === tab);
+    b.textContent = LABELS[b.dataset.tab] + (n == null ? '' : ` (${n})`);
+  }
+  renderJob();
+  $('problems').hidden = !(data && data.problems.length);
+  $('problems').textContent = data ? data.problems.join('\n') : '';
+  if (!data) {
+    $('counter').textContent = error ? '' : 'Loading…';
+    $('list').replaceChildren(el('li', { class: 'empty' }, error ? `Could not load: ${error}` : 'Loading…'));
+    return;
+  }
+  $('counter').textContent = `${data.waiting.length} waiting · ${data.recent.length} downloaded`;
+  const items = data[tab];
+  $('list').replaceChildren(...(items.length ? items.map(itemNode) : [el('li', { class: 'empty' }, EMPTY[tab])]));
+}
+
+async function load() {
+  clearTimeout(timer);
+  try {
+    const res = await fetch('api/downloads', { cache: 'no-store' });
+    if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+    data = await res.json();
+    error = null;
+  } catch (e) {
+    error = e.message;
+  }
+  render();
+  // Follow a run while it downloads; otherwise now and then.
+  timer = setTimeout(load, data && data.job.running ? 20000 : 120000);
+}
+
+$('tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  tab = b.dataset.tab;
+  localStorage.setItem('downloadsTab', tab);
+  render();
+});
+$('refresh').addEventListener('click', (e) => { e.currentTarget.blur(); load(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+render();
+load();
+</script>
+</body>
+</html>

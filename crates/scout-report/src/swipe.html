@@ -31,6 +31,7 @@ a:hover { text-decoration: underline; }
 .bar { position: relative; display: flex; align-items: baseline; gap: 12px;
   padding: calc(10px + env(safe-area-inset-top)) 16px 6px; width: min(100%, 560px); margin: 0 auto; }
 .bar h1 { font-size: 18px; margin: 0; }
+.bar .downloads { font-size: 14px; white-space: nowrap; }
 .counter { color: var(--muted); margin-right: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bar button { background: none; border: none; padding: 0 4px; color: var(--accent); font: inherit; font-size: 20px;
   line-height: 1; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
@@ -168,6 +169,11 @@ a.badge { color: var(--fg); }
 .by { display: flex; gap: 10px; color: var(--muted); font-size: 13px; }
 .by a { margin-left: auto; font-size: 12px; white-space: nowrap; }
 .by .date { font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The card's video on its host: the wide layout only. */
+.watch { display: none; align-self: flex-start; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--accent); }
+.watch:hover { text-decoration: none; background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.scenes a.sn { display: block; }
 /* The full post details: only in the wide (side panel) layout. */
 .sect, .facts, .scenes, .info .all-tags { display: none; }
 .sect { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
@@ -193,6 +199,7 @@ a.badge { color: var(--fg); }
     padding: 16px 18px; gap: 9px; border-left: 1px solid var(--line); }
   .info .ttl { order: -2; display: block; font-size: 19px; }
   .info .by { order: -1; }
+  .info .watch { order: -1; display: inline-block; }
   .heat { height: 44px; border-radius: 6px; flex: none; }
   .info .top-tags { display: none; }
   .sect { display: block; }
@@ -224,6 +231,7 @@ a.badge { color: var(--fg); }
   <button type="button" id="refresh" title="Refresh: load the deck again (new images, runtimes, heat strips; skipped cards come back)" aria-label="Refresh">↻</button>
   <button type="button" id="shuffle" title="Shuffle: deal the deck in a new order" aria-label="Shuffle">⇄</button>
   <button type="button" id="gear" title="Shuffle settings: how far each stack's order may wander" aria-label="Shuffle settings" aria-expanded="false" aria-controls="settings">⚙</button>
+  <a class="downloads" href="downloads" title="What you swiped right: waiting for the next download run, downloaded lately, or turned down">Downloads</a>
   <div class="settings" id="settings" hidden>
     <label>Multi shuffle ± <input type="number" id="jitter-multi" data-stack="multi" min="0" max="30" step="0.5" inputmode="decimal"></label>
     <label>VR shuffle ± <input type="number" id="jitter-vr" data-stack="vr" min="0" max="30" step="0.5" inputmode="decimal"></label>
@@ -709,10 +717,33 @@ function cardNode(c, isTop) {
         c.author ? el('span', {}, (scene ? '' : 'by ') + c.author) : null,
         c.url ? el('a', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, (scene ? sourceName(c) + ' ' : '#' + c.id + ' ') + '↗') : null,
         monthYear(posted) ? el('span', { class: 'date', title: (scene ? 'Released ' : 'Posted ') + day(posted) }, monthYear(posted)) : null),
+      watchLink(c),
       topTags.length ? el('div', { class: 'tags top-tags' }, topTags) : null,
       scene ? sceneDetails(c, best) : details(c, best)));
   if (isTop) drag(node);
   return node;
+}
+
+// A post's video hosts as the Watch link names them (the scout's `video.host`).
+const HOST_NAMES = { mega: 'MEGA', slr: 'SLR', vrbangers: 'VRBangers', pmvhaven: 'PMVHaven', pornhub: 'Pornhub' };
+
+/**
+ * "▶ Watch on <host> ↗": a post's first video on its host (rule34video, pixeldrain, MEGA, SLR,
+ * …), a scene's video file (PMVHaven) or page; null without one. Shown in the wide layout.
+ */
+function watchLink(c) {
+  let url;
+  let where;
+  if (isScene(c)) {
+    url = c.videoUrl || c.url;
+    where = sourceName(c);
+  } else {
+    const s = (c.scenes || []).find((x) => x.url);
+    url = s && s.url;
+    where = s && (HOST_NAMES[s.host] || s.host || 'its host');
+  }
+  if (!url) return null;
+  return el('a', { class: 'watch', href: url, target: '_blank', rel: 'noopener noreferrer', title: url }, `▶ Watch on ${where} ↗`);
 }
 
 /** Every tag with its tag score (best ones outlined); a null score (a scene the scout didn't score) shows the tag alone. */
@@ -745,7 +776,8 @@ function details(c, best) {
     const total = scenes.length + (c.moreScenes || 0);
     out.push(el('div', { class: 'sect' }, total > 1 ? `Scenes (${total})` : 'Scene'), el('ol', { class: 'scenes' },
       scenes.map((s) => el('li', {},
-        el('div', { class: 'sn' }, s.name || '(unnamed)'),
+        s.url ? el('a', { class: 'sn', href: s.url, target: '_blank', rel: 'noopener noreferrer', title: 'Watch on ' + (HOST_NAMES[s.host] || s.host || 'its host') }, (s.name || '(unnamed)') + ' ↗')
+          : el('div', { class: 'sn' }, s.name || '(unnamed)'),
         el('div', { class: 'sm' }, [
           s.host,
           s.size != null ? fmtBytes(s.size) : null,

@@ -289,6 +289,9 @@ pub struct SceneInfo {
     /// The video's file name, else the scene's base name.
     pub name: Option<String>,
     pub host: Option<String>,
+    /// The video on its host (rule34video, pixeldrain, MEGA, SLR, …; https only): the card's
+    /// Watch link.
+    pub url: Option<String>,
     /// Bytes, when the host lists them.
     pub size: Option<u64>,
     pub runtime_ms: Option<u64>,
@@ -597,10 +600,29 @@ fn scene_info(scene: &Value) -> SceneInfo {
     SceneInfo {
         name: str_of(video, "name").or_else(|| str_of(scene, "base")),
         host: str_of(video, "host"),
+        url: str_of(video, "url").and_then(|u| watch_url(&u)),
         size: video.get("size").and_then(Value::as_u64),
         runtime_ms: runtime_ms(scene),
         axes: strings_of(scene, "axes").unwrap_or_default(),
     }
+}
+
+/// A video link to open in a browser (https only): pixeldrain's file API (`/api/file/<id>…`,
+/// which downloads) becomes its viewer page (`/u/<id>`); other hosts' pages as they are.
+pub fn watch_url(url: &str) -> Option<String> {
+    if !url.starts_with("https://") {
+        return None;
+    }
+    if let Some(rest) = url.strip_prefix("https://pixeldrain.com/api/file/") {
+        let id: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if !id.is_empty() {
+            return Some(format!("https://pixeldrain.com/u/{id}"));
+        }
+    }
+    Some(url.to_string())
 }
 
 fn runtime_ms(scene: &Value) -> Option<u64> {
@@ -761,8 +783,9 @@ mod tests {
              "tags": ["pov", "vr", "anal", "solo", "", "pov"],
              "tagScores": {"pov": 2, "vr": 1, "anal": -3, "toys": 0.5},
              "scenes": [{"axes": ["twist", "roll"], "durationMs": 754321, "heat": [0, 120.4, -5, "x", 480],
-                         "video": {"duration": 9, "name": "Ten.mp4", "host": "pixeldrain", "size": 1_500_000_000u64}},
-                        {"base": "Ten B", "axes": ["roll", "surge"]}]},
+                         "video": {"duration": 9, "name": "Ten.mp4", "host": "pixeldrain", "size": 1_500_000_000u64,
+                                   "url": "https://pixeldrain.com/api/file/ten?download"}},
+                        {"base": "Ten B", "axes": ["roll", "surge"], "video": {"url": "http://plain/ten-b"}}]},
             {"id": 11, "title": "Eleven", "score": 5.0, "axisType": "single",
              "scenes": [{"axes": [], "video": {"duration": 91.4}}]},
             {"id": 12, "title": "In library", "score": 99.0},
@@ -1053,9 +1076,10 @@ mod tests {
                 "likes": 42, "hosts": ["pixeldrain", "MEGA"], "gb": 1.5,
                 "created": "2026-01-02T00:00:00Z", "bumped": "2026-03-04T00:00:00Z",
                 "scenes": [
-                    {"name": "Ten.mp4", "host": "pixeldrain", "size": 1_500_000_000u64, "runtimeMs": 754321,
-                     "axes": ["twist", "roll"]},
-                    {"name": "Ten B", "host": null, "size": null, "runtimeMs": null, "axes": ["roll", "surge"]}
+                    {"name": "Ten.mp4", "host": "pixeldrain", "url": "https://pixeldrain.com/u/ten",
+                     "size": 1_500_000_000u64, "runtimeMs": 754321, "axes": ["twist", "roll"]},
+                    // Only https links.
+                    {"name": "Ten B", "host": null, "url": null, "size": null, "runtimeMs": null, "axes": ["roll", "surge"]}
                 ],
                 "moreScenes": 0
             })
@@ -1083,6 +1107,7 @@ mod tests {
             [SceneInfo {
                 name: None,
                 host: None,
+                url: None,
                 size: None,
                 runtime_ms: Some(91400),
                 axes: vec![],

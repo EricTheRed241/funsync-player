@@ -60,6 +60,17 @@ as full: Multi, VR and Flat take no swipes (the page turns them off, the swipe r
 answer 507) until space is freed; skip, undo and the Free space tab still work. The
 bar rereads /api/drive every minute.
 
+On a wide window a card also has a Watch link: a post's first video on its host
+(rule34video, pixeldrain's viewer page, MEGA, SLR, …), a scene's video file (PMVHaven) or
+page; each scene in the list links to its video too.
+
+The Downloads page, /downloads (the Downloads link in the top bar; /api/downloads as
+JSON), lists every right swipe: Waiting (not in the library yet; the next download run
+takes it), Downloaded (in the last 30 days, newest first) and Won't download (turned down
+when fetched, deleted later, or gone from its list), each with its picture, links and
+when it was swiped / downloaded; above them the download job (eroscripts-scout) as the
+job runner last saw it, with its log's last line while it runs.
+
 A card's pictures are the post's or scene's images, then the preview frames the scouts
 took at 25, 50 and 75 % of a video (<userData>/scout-frames/eroscripts/<topic id>/,
 listed in the post's record of eroscripts-scout-frames.json, and
