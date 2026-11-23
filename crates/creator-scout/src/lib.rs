@@ -23,6 +23,7 @@ pub mod library;
 pub mod people;
 pub mod post_images;
 pub mod profiles;
+pub mod runtimes;
 pub mod seed;
 pub mod state;
 pub mod store;
@@ -183,6 +184,9 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         })?,
         Mode::PostImages(n) => step("post-images", &env, &mut st, err, |st| {
             run_post_images(&env, n, &mut file, st, out)
+        })?,
+        Mode::Runtimes(n) => step("runtimes", &env, &mut st, err, |st| {
+            run_runtimes(&env, n, &mut file, st, out)
         })?,
         Mode::Profiles(n) => step("profiles", &env, &mut st, err, |st| {
             run_profiles(&env, &opts, n, &mut file, st, out)
@@ -471,7 +475,37 @@ fn run_post_images(
     .map_err(io)?;
     Ok(r.code)
 }
-/// `--status`'s post images line.
+
+fn run_runtimes(
+    env: &Env,
+    n: usize,
+    file: &mut store::CreatorsFile,
+    st: &mut state::State,
+    out: &mut dyn Write,
+) -> Result<i32, String> {
+    let swipes = state::read_swipes(&env.user_data)?;
+    let cookie = slr_scout::forum::session_cookie(&env.config);
+    let r = runtimes::Runtimes {
+        http: env.http.as_ref(),
+        user_data: &env.user_data,
+        cookie: cookie.as_deref(),
+        fake: env.fake,
+    };
+    let run = runtimes::run(&r, file, st, &swipes, n, out)?;
+    writeln!(
+        out,
+        "Runtimes: {} filled, {} without a readable script (tried again after {} days), {} failed, {} waiting.",
+        run.filled,
+        run.missed,
+        runtimes::MISS_DAYS,
+        run.failed,
+        run.left + run.forum_skipped
+    )
+    .map_err(io)?;
+    Ok(run.code)
+}
+
+/// `--status`'s post images and runtimes lines.
 fn post_images_status(user_data: &Path) -> Result<String, String> {
     let file = store::read(user_data)?.unwrap_or_else(store::CreatorsFile::empty);
     let st = state::read(user_data)?;
@@ -482,12 +516,15 @@ fn post_images_status(user_data: &Path) -> Result<String, String> {
     let due = post_images::due(&file, &st, &swipes, now);
     let of = |kind: &str| due.iter().filter(|w| w.kind == kind).count();
     Ok(format!(
-        "Post images: {} post(s) waiting for their picture ({} FapTap, {} EroScripts), {} without one (tried again after {} days).",
+        "Post images: {} post(s) waiting for their picture ({} FapTap, {} EroScripts), {} without one (tried again after {} days).\nRuntimes: {} EroScripts post(s) waiting for their runtime, {} without a readable script (tried again after {} days).",
         due.len(),
         of("faptap"),
         of("eroscripts"),
-        post_images::missed(&st, now),
-        post_images::MISS_DAYS
+        post_images::missed(&st.post_image_misses, now),
+        post_images::MISS_DAYS,
+        runtimes::due(&file, &st, &swipes, now).len(),
+        post_images::missed(&st.runtime_misses, now),
+        runtimes::MISS_DAYS
     ))
 }
 

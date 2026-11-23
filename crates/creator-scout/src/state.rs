@@ -2,8 +2,8 @@
 //! each creator's pictures were fetched, creators the judge named without a
 //! verifiable account, people and creators looked up without enough found,
 //! posts waiting for their details, fetch tries, Instagram follows, posts
-//! without a picture to fill) and `creator-swipes.json` (written by the
-//! Creators site, read here).
+//! without a picture to fill, EroScripts posts without a script to time)
+//! and `creator-swipes.json` (written by the Creators site, read here).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -95,6 +95,10 @@ pub struct State {
     /// for it or couldn't download it (tried again after 7 days).
     #[serde(default)]
     pub post_image_misses: BTreeMap<String, String>,
+    /// Post key (`eroscripts:41415`) → when `--runtimes` last found no
+    /// readable stroke script for it (tried again after 7 days).
+    #[serde(default)]
+    pub runtime_misses: BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

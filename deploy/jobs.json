@@ -45,6 +45,7 @@
       "steps": [
         ["npm", "run", "-s", "eroscripts:scout", "--", "--frames", "300"],
         ["npm", "run", "-s", "creators:scout", "--", "--post-images", "300"],
+        ["npm", "run", "-s", "creators:scout", "--", "--runtimes", "300"],
         ["npm", "run", "-s", "library:thumbs"]
       ]
     },

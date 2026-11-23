@@ -7,6 +7,7 @@ pub const DEFAULT_PICTURES: usize = 40;
 pub const DEFAULT_PROFILES: usize = 30;
 pub const DEFAULT_FOLLOWS: usize = 10;
 pub const DEFAULT_POST_IMAGES: usize = 300;
+pub const DEFAULT_RUNTIMES: usize = 300;
 
 pub const USAGE: &str = "\
 creator-scout: find independent creators (OnlyFans / Fansly / camgirls /
@@ -22,6 +23,7 @@ Usage:
   npm run creators:scout -- --profiles [N]         [options]
   npm run creators:scout -- --pictures [N]         [--user-data <dir>]
   npm run creators:scout -- --post-images [N]      [--user-data <dir>]
+  npm run creators:scout -- --runtimes [N]         [--user-data <dir>]
   npm run creators:scout -- --follow [N]           [--user-data <dir>]
   npm run creators:scout -- --login [--credentials <file>] [--user-data <dir>]
   npm run creators:scout -- --status               [--user-data <dir>]
@@ -79,6 +81,16 @@ Modes:
                         in the library and not swiped, of creators not swiped no.
                         A post without a picture, or whose picture won't
                         download, is tried again after 7 days.
+  --runtimes [N]        Fill in the runtime of up to N EroScripts posts (default
+                        300) filed without one, so their cards show the length:
+                        the topic's main script (the stroke script named like
+                        the post title, else the first one) is downloaded and
+                        timed by its last action; the script's length wins.
+                        Needs the EroScripts session (without it those posts
+                        wait: exit 3). Only downloadable posts not in the
+                        library and not swiped, of creators not swiped no. A
+                        post without a readable stroke script is tried again
+                        after 7 days.
   --follow [N]          Follow on Instagram (the --login account) up to N creators
                         (default 10) with a confirmed Instagram account who are a
                         favourite or swiped yes: a Chrome (headless, the --login
@@ -95,7 +107,7 @@ Modes:
                         (10 minutes at most).
   --status              Creators, posts, the Instagram session and its age, the
                         cursors, the profiles step, the follows, the posts waiting
-                        for their picture and the fetch queue.
+                        for their picture or runtime and the fetch queue.
   --fetch               Fetch the posts swiped \"want\" on the Creators site that
                         are downloadable and not in the library: EroScripts posts
                         through npm run eroscripts:scout (--add, then --fetch
@@ -124,7 +136,8 @@ Options:
   --npm <cmd>           The npm command for --fetch (default npm)
 
 Files in <userData>: creators.json (read by the Creators site), creator-pictures/,
-creator-scout-state.json, instagram-session.json; creator-swipes.json is read
+creator-scout-state.json, instagram-session.json, creator-scout-work/ (the
+judge's files, scripts being timed); creator-swipes.json is read
 (the site writes it). config.json is only read (the EroScripts session cookie,
 the library sources, tag scores, favourite artists). Lock: creator-scout.lock.
 
@@ -139,6 +152,7 @@ pub enum Mode {
     Discover,
     Pictures(usize),
     PostImages(usize),
+    Runtimes(usize),
     Profiles(usize),
     Follow(usize),
     Login,
@@ -187,6 +201,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 | "--npm"
                 | "--pictures"
                 | "--post-images"
+                | "--runtimes"
                 | "--profiles"
                 | "--follow"
                 | "--credentials"
@@ -208,7 +223,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
         let mut set_mode = |m: Mode| -> Result<(), String> {
             if o.mode.is_some() {
                 return Err(
-                    "give one of --import-seed, --discover, --profiles, --pictures, --post-images, --follow, --login, --status, --fetch, --daily"
+                    "give one of --import-seed, --discover, --profiles, --pictures, --post-images, --runtimes, --follow, --login, --status, --fetch, --daily"
                         .into(),
                 );
             }
@@ -219,7 +234,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
             "-h" | "--help" => o.help = true,
             "--import-seed" => set_mode(Mode::ImportSeed(PathBuf::from(value()?)))?,
             "--discover" => set_mode(Mode::Discover)?,
-            "--pictures" | "--post-images" | "--profiles" | "--follow" => {
+            "--pictures" | "--post-images" | "--runtimes" | "--profiles" | "--follow" => {
                 // The count is optional: a following number is it.
                 let n = match inline.as_deref() {
                     Some(v) => Some(v.to_string()),
@@ -239,6 +254,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 set_mode(match flag {
                     "--pictures" => Mode::Pictures(n.unwrap_or(DEFAULT_PICTURES)),
                     "--post-images" => Mode::PostImages(n.unwrap_or(DEFAULT_POST_IMAGES)),
+                    "--runtimes" => Mode::Runtimes(n.unwrap_or(DEFAULT_RUNTIMES)),
                     "--profiles" => Mode::Profiles(n.unwrap_or(DEFAULT_PROFILES)),
                     _ => Mode::Follow(n.unwrap_or(DEFAULT_FOLLOWS)),
                 })?
@@ -282,7 +298,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
     }
     let Some(mode) = &o.mode else {
         return Err(
-            "nothing to do: give --import-seed, --discover, --profiles, --pictures, --post-images, --follow, --login, --status, --fetch or --daily (see --help)"
+            "nothing to do: give --import-seed, --discover, --profiles, --pictures, --post-images, --runtimes, --follow, --login, --status, --fetch or --daily (see --help)"
                 .into(),
         );
     };
@@ -344,6 +360,13 @@ mod tests {
             p(&["--post-images", "5"]).unwrap().mode,
             Some(Mode::PostImages(5))
         );
+        assert_eq!(
+            p(&["--runtimes"]).unwrap().mode,
+            Some(Mode::Runtimes(DEFAULT_RUNTIMES))
+        );
+        assert_eq!(p(&["--runtimes=5"]).unwrap().mode, Some(Mode::Runtimes(5)));
+        assert!(p(&["--runtimes", "0"]).is_err());
+        assert!(p(&["--runtimes", "--post-images"]).is_err());
         assert!(p(&["--post-images", "--npm", "x"]).is_err());
         assert!(p(&["--profiles=0"]).is_err());
         assert!(p(&["--profiles", "--pictures"]).is_err());
