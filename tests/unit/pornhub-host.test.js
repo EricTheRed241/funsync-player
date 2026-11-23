@@ -89,8 +89,9 @@ describe('pornhubFile and the length check', () => {
     });
     expect(pornhubFile(URL, { title: '', durationSec: null, height: 720 }).name).toBe('pornhub 6745abc123 720p.mp4');
   });
-  it('fits like the other stream hosts; unknown lengths pass', () => {
+  it('fits like the other stream hosts at download time (script ≤ 60 s past the video); unknown lengths pass', () => {
     expect(pornhubFits(600, 590_000)).toBe(true);
+    expect(pornhubFits(600, 660_000)).toBe(true);
     expect(pornhubFits(600, 30_000)).toBe(false);
     expect(pornhubFits(600, 700_000)).toBe(false);
     expect(pornhubFits(null, 30_000)).toBe(true);

@@ -62,6 +62,16 @@ a:hover { text-decoration: underline; }
 .b-pmvhaven { --bc: #9b59d0; } .b-faptap { --bc: #f08c00; } .b-vr { --bc: #a46ad6; }
 .links { display: flex; gap: 12px; font-size: 13px; }
 .empty { color: var(--muted); text-align: center; padding: 30px 10px; }
+.item.week { box-shadow: inset 4px 0 0 var(--like); }
+.rank { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg); }
+.pin { color: var(--accent); font-weight: 600; }
+.ctl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.ctl button { background: var(--row); border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px;
+  font: inherit; font-size: 12px; color: var(--fg); cursor: pointer; }
+.ctl button:hover { border-color: var(--accent); }
+.ctl button:disabled { opacity: .4; cursor: default; }
+.cut { list-style: none; text-align: center; font-size: 12px; color: var(--muted); padding: 2px 0;
+  border-top: 2px dashed var(--like); }
 @media (max-width: 520px) {
   .thumb, .noimg { width: 96px; height: 54px; }
 }
@@ -127,45 +137,93 @@ function ago(at) {
 }
 const when = (at) => (typeof at === 'number' ? new Date(at * 1000) : new Date(at)).toLocaleString();
 
+/** "next Mon 04:00" / "next 14:00" from unix seconds. */
+function nextRun(t) {
+  const d = new Date(t * 1000);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? `next ${time}` : `next ${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+}
+
+/** The job line: on the SLR tab the weekly SLR run, elsewhere the hourly download run. */
 function renderJob() {
-  const j = data && data.job;
+  const slrTab = tab === 'slr';
+  const j = data && (slrTab ? data.slrJob : data.job);
   const box = $('job');
   if (!j) { box.hidden = true; return; }
   box.hidden = false;
   box.title = '';
   box.classList.toggle('running', j.running);
+  const name = slrTab ? 'SLR download run (weekly)' : 'Download run (hourly)';
   const parts = [];
   if (j.running) {
-    parts.push('Download run ', el('b', {}, 'running'), j.started ? ` since ${new Date(j.started * 1000).toLocaleTimeString()} (${ago(j.started)})` : '');
+    parts.push(`${name} `, el('b', {}, 'running'), j.started ? ` since ${new Date(j.started * 1000).toLocaleTimeString()} (${ago(j.started)})` : '');
   } else if (j.started) {
-    parts.push('Last download run ', el('b', {}, j.result || '?'), ` ${ago(j.ended || j.started)}`,
+    parts.push(`${name}: last `, el('b', {}, j.result || '?'), ` ${ago(j.ended || j.started)}`,
       j.exit != null ? ` (exit ${j.exit})` : '');
     box.title = `Started ${when(j.started)}` + (j.ended ? `, ended ${when(j.ended)}` : '');
   } else {
-    parts.push('No download run yet (job ', el('code', {}, j.name), ').');
+    parts.push(`${name}: no run yet (job `, el('code', {}, j.name), ')');
   }
+  if (j.next && !j.running) parts.push(` · ${nextRun(j.next)}`);
   box.replaceChildren(el('div', {}, parts), ...(j.lastLine ? [el('div', { class: 'line' }, j.lastLine)] : []));
 }
 
+const keyOf = (i) => `${i.source}:${i.id}`;
+
+/** The SLR keys put first, in order. */
+const pinnedKeys = () => data.slr.filter((i) => i.pinned).sort((a, b) => a.pinned - b.pinned).map(keyOf);
+
+async function setFirst(first) {
+  try {
+    const res = await fetch('api/slr-priority', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ first }) });
+    if (!res.ok) throw new Error((await res.text()).trim() || res.status);
+  } catch (e) {
+    alert(`Could not save the SLR order: ${e.message}`);
+  }
+  load();
+}
+
+/** An SLR row's place in the weekly queue and the buttons that move it. */
+function queueControls(i) {
+  const first = pinnedKeys();
+  const k = keyOf(i);
+  const at = first.indexOf(k);
+  const move = (to) => { const f = first.filter((x) => x !== k); f.splice(to, 0, k); setFirst(f); };
+  const btn = (label, title, fn, disabled) => el('button', { type: 'button', title, disabled, onclick: fn }, label);
+  return el('div', { class: 'ctl' },
+    at < 0
+      ? [btn('⤒ First', 'Download this one before everything else', () => move(0)),
+        btn('⇧ Next', 'Download this one right after the ones already put first', () => move(first.length))]
+      : [btn('↑', 'Earlier', () => move(at - 1), at === 0),
+        btn('↓', 'Later', () => move(at + 1), at === first.length - 1),
+        btn('✕ Score order', 'Back to its place by score', () => setFirst(first.filter((x) => x !== k)))]);
+}
+
 function itemNode(i) {
+  const queued = tab === 'slr' && i.rank != null;
   const site = SITE_NAMES[i.site] || SITE_NAMES[i.source] || i.source;
   const img = i.image
     ? el('img', { class: 'thumb', src: i.image, alt: '', loading: 'lazy', decoding: 'async' })
     : el('div', { class: 'noimg' });
   if (i.image) img.addEventListener('error', () => img.replaceWith(el('div', { class: 'noimg' })));
   const title = i.title || `#${i.id}`;
-  return el('li', { class: 'item' },
+  return el('li', { class: `item${queued && i.thisWeek ? ' week' : ''}` },
     i.url ? el('a', { href: i.url, target: '_blank', rel: 'noopener noreferrer' }, img) : img,
     el('div', { class: 'body' },
       el('div', { class: 'ttl', title }, i.url ? el('a', { href: i.url, target: '_blank', rel: 'noopener noreferrer' }, title) : title),
       el('div', { class: 'meta' },
+        queued ? el('span', { class: 'rank', title: 'Place in the weekly SLR run' }, `#${i.rank}`) : null,
+        queued && i.pinned ? el('span', { class: 'pin', title: 'Put first by you' }, `★ ${i.pinned}`) : null,
         el('span', { class: `badge b-${i.site in SITE_NAMES ? i.site : i.source}` }, site),
         i.vr ? el('span', { class: 'badge b-vr' }, 'VR') : null,
         i.author ? el('span', {}, i.author) : null,
         i.gb != null ? el('span', {}, `${i.gb} GB`) : null,
+        queued && i.score != null ? el('span', { title: 'Score' }, `◆ ${Math.round(i.score * 10) / 10}`) : null,
         i.downloadedAt ? el('span', { title: when(i.downloadedAt) }, `downloaded ${ago(i.downloadedAt)}`) : null,
         i.swipedAt ? el('span', { title: when(i.swipedAt) }, `swiped ${ago(i.swipedAt)}`) : null),
       i.note ? el('span', { class: 'note' }, i.note) : null,
+      queued ? queueControls(i) : null,
       i.videoUrl ? el('div', { class: 'links' },
         el('a', { href: i.videoUrl, target: '_blank', rel: 'noopener noreferrer' }, `▶ Watch on ${hostName(i.videoUrl)} ↗`)) : null));
 }
@@ -186,7 +244,8 @@ function renderQuota() {
   const quota = data.quota || {};
   const parts = data.quota
     ? ['SLR left: videos ', left(quota.videos), ' (7 days) · hand-crafted scripts ', left(quota.scripts),
-      ' · AI scripts ', left(quota.aiScripts), ' (this month)', quota.checkedAt ? ` · checked ${ago(quota.checkedAt)}` : '']
+      ' · AI scripts ', left(quota.aiScripts), ' (this month)', quota.checkedAt ? ` · checked ${ago(quota.checkedAt)}` : '',
+      '. Highest score first unless put first (⤒ / ⇧); the green ones fit this week\'s videos.']
     : ['SLR quota not read yet (npm run slr:scout).'];
   if (data.quotaError) parts.push(' ', el('span', { class: 'err' }, `(${data.quotaError})`));
   q.replaceChildren(...parts);
@@ -210,7 +269,15 @@ function render() {
   }
   $('counter').textContent = `${data.waiting.length} waiting · ${data.slr.length} on SLR · ${data.recent.length} downloaded`;
   const items = data[tab];
-  $('list').replaceChildren(...(items.length ? items.map(itemNode) : [el('li', { class: 'empty' }, EMPTY[tab])]));
+  const rows = items.map(itemNode);
+  if (tab === 'slr') {
+    const week = items.filter((i) => i.thisWeek).length;
+    const last = items.reduce((n, i, at) => (i.thisWeek ? at : n), -1);
+    if (last >= 0 && last < items.length - 1) {
+      rows.splice(last + 1, 0, el('li', { class: 'cut' }, `The next SLR run takes the ${week} green one${week === 1 ? '' : 's'} above; the rest wait for next week`));
+    }
+  }
+  $('list').replaceChildren(...(items.length ? rows : [el('li', { class: 'empty' }, EMPTY[tab])]));
 }
 
 async function load() {
@@ -225,7 +292,7 @@ async function load() {
   }
   render();
   // Follow a run while it downloads; otherwise now and then.
-  timer = setTimeout(load, data && data.job.running ? 20000 : 120000);
+  timer = setTimeout(load, data && (data.job.running || data.slrJob.running) ? 20000 : 120000);
 }
 
 $('tabs').addEventListener('click', (e) => {

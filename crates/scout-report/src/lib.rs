@@ -39,6 +39,7 @@ pub mod library;
 pub mod report;
 pub mod scenes;
 pub mod server;
+pub mod slr_queue;
 pub mod swipes;
 
 use std::ffi::OsString;

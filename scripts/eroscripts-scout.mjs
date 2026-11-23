@@ -15,7 +15,8 @@
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
 //   SexLikeReal scenes a post links (or, for a post naming SLR without a video, SLR's scene search finds by
-//   title and script length) come from the user's SLR account (scripts/slr-host.mjs; npm run slr:scout -- --login)
+//   title and script length) come from the user's SLR account (scripts/slr-host.mjs; npm run slr:scout -- --login),
+//   only with --slr: the weekly npm run slr:scout -- --fetch hands them over post by post (account quota)
 //
 // Rules and ranking: scripts/eroscripts-scout-lib.mjs (no sex rule, the
 // ranking decides; monster, feet and 2D hentai posts
@@ -122,16 +123,20 @@ Download:
                          vrbangers.com scenes come from the paid account through headless Google Chrome (logged in
                          once per pass; ≤ 8K, the planned file); with --dry-run the signed link is resolved and
                          probed for 1 byte instead
-                         SexLikeReal scenes come from the SLR account (<userData>/slr-session.json, saved by
-                         npm run slr:scout -- --login): one of its video downloads each (35 per rolling 7 days;
-                         none left: SLR scenes wait, exit 2), the encode within the caps, never the trailer;
+                         SexLikeReal scenes (only with --slr) come from the SLR account (<userData>/slr-session.json,
+                         saved by npm run slr:scout -- --login): one of its video downloads each (35 per rolling 7
+                         days; none left: SLR scenes wait, exit 2), the encode within the caps, never the trailer;
                          not logged in: SLR scenes are skipped (exit 3 when nothing else was done). With
                          --dry-run: the quota, the download type, its size and the target folder, no download
+  --slr                  take SexLikeReal scenes too. Without it --fetch (also --auto, --ids, --dry-run, --daily's
+                         fetch) and --manual-list leave them out and print how many: each costs one of the account's
+                         weekly downloads, so the weekly npm run slr:scout -- --fetch hands them over in the user's
+                         order, one post at a time (eroscripts:scout --fetch --ids <id> --slr)
   --vrb-credentials <f>  VRBangers account file (default: ${VRB_CREDENTIALS}; lines "Username: …", "password: …")
 By hand (pixeldrain's hotlink protection needs a CAPTCHA in a browser):
   --manual-list          write ~/Downloads/download-for-fs.txt: the waiting posts' pixeldrain files with
                          their pages and instructions (with --ids: only those posts); no login needed.
-                         SexLikeReal videos are listed as "${slrHost.SLR_ACCOUNT_DOWNLOAD}" (--fetch takes them)
+                         With --slr, SexLikeReal videos are listed as "${slrHost.SLR_ACCOUNT_DOWNLOAD}" (--fetch --slr takes them)
   --manual-dir <dir>     where files downloaded by hand are saved (default ~/Downloads/for-fs)
 Rename:
   --retitle              rename fetched scenes to "Artist - Title (metadata)" from their posts,
@@ -207,6 +212,7 @@ function parseArgs(argv) {
       case '--user-data': opts.userData = path.resolve(value(i, a)); i++; break;
       case '--incoming': opts.incoming = path.resolve(value(i, a)); i++; break;
       case '--vrbangers': opts.vrbangers = true; break;
+      case '--slr': opts.slr = true; break;
       case '--vrb-credentials': opts.vrbCredentials = path.resolve(value(i, a)); i++; break;
       case '-h': case '--help': opts.help = true; break;
       default: throw new Error(`Unknown option: ${a}`);
@@ -220,6 +226,7 @@ function parseArgs(argv) {
   if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   if (opts.auto && !opts.fetch) throw new Error('--auto goes with --fetch');
+  if (opts.slr && !(opts.fetch || opts.daily || opts.manualList)) throw new Error('--slr goes with --fetch, --daily or --manual-list');
   if (opts.rejudge && !opts.rejudge.length) throw new Error('--rejudge needs at least one verdict');
   if (opts.frames !== undefined && (opts.fetch || opts.daily || opts.add || opts.titles)) throw new Error('--frames runs on its own');
   return opts;
@@ -705,8 +712,9 @@ function videoSeconds(file) {
  * used instead of the network and removed from Downloads once it's in place.
  * A rule34video page (or a pmvhaven video, through its API) is read again for a fresh link, and the video must fit
  * the main script (`scriptMs`, else the page's length) before and after
- * the download (streams.durationMatches; ffprobe afterwards); a pmvhaven file must also have the size its API
- * gives now. A vrbangers.com
+ * the download (streams.downloadFits; ffprobe afterwards) and be whole (streams.wholeDownload: the Content-Length,
+ * else within 1 % of the size pmvhaven's API gives now or the size probed at the scan). Other hosts' files and
+ * copies saved by hand must have the exact size listed. A vrbangers.com
  * scene's signed link is read right now (logged-in Chrome), and the host
  * checks size and length itself (vrbangers-host.mjs download); so does a
  * SexLikeReal scene's (slr-host.mjs download: quota, download type, a fresh link).
@@ -719,6 +727,7 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
   const byHand = lib.findLocalCopy(file, local);
   const streamed = { [streams.RULE34VIDEO_HOST]: rule34video, [streams.PMVHAVEN_HOST]: pmvhaven }[file.host];
   let wantSize = file.size;
+  let contentLength = 0;
   activePart = tmp;
   try {
     if (byHand) {
@@ -746,10 +755,11 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
     } else if (streamed) {
       const now = await streamed.fresh(file);
       if (file.host === streams.PMVHAVEN_HOST) wantSize = now.size;
-      if (scriptMs && now.durationSec && !streams.durationMatches(now.durationSec, scriptMs)) {
+      if (scriptMs && now.durationSec && !streams.downloadFits(now.durationSec, scriptMs)) {
         throw new Error(`${file.host}: video ${clock(now.durationSec * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
       }
       const resp = await streamed.stream(now.direct);
+      contentLength = resp.headers.get('content-length');
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else if (file.host === vrbHost.VRBANGERS_HOST) {
       await vrbangers.download(file, tmp, { scriptMs, videoSeconds });
@@ -762,13 +772,14 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
     }
     const size = fs.statSync(tmp).size;
     const selfChecked = file.host === vrbHost.VRBANGERS_HOST || file.host === slrHost.SLR_HOST;
-    if (wantSize && size !== wantSize && (byHand || !selfChecked)) throw new Error(`size ${size} ≠ ${wantSize}`);
     if (streamed && !byHand) {
+      const broken = streams.wholeDownload(size, { contentLength, listed: wantSize });
+      if (broken) throw new Error(`${file.host}: ${broken}`);
       const want = scriptMs || (file.duration ? file.duration * 1000 : null);
       const got = videoSeconds(tmp);
       if (!got) throw new Error(`${file.host}: the download isn't a readable video (ffprobe)`);
-      if (want && !streams.durationMatches(got, want)) throw new Error(`${file.host}: downloaded video ${clock(got * 1000)}, script ${clock(want)}; not this scene's video`);
-    }
+      if (want && !streams.downloadFits(got, want)) throw new Error(`${file.host}: downloaded video ${clock(got * 1000)}, script ${clock(want)}; not this scene's video`);
+    } else if (wantSize && size !== wantSize && (byHand || !selfChecked)) throw new Error(`size ${size} ≠ ${wantSize}`);
     fs.renameSync(tmp, dest);
   } catch (err) {
     fs.rmSync(tmp, { force: true });
@@ -1004,7 +1015,8 @@ function readSwipesFile(userData) {
 /**
  * The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a
  * vrbangers.com video only; `--auto`: only posts swiped right, lib.autoFetchPick), checked again against the
- * library as it is now (lib.notYetHeld).
+ * library as it is now (lib.notYetHeld). Without `--slr` its SexLikeReal scenes are left out (lib.leaveOutSlr):
+ * they cost the account's weekly quota, and the weekly SLR run takes them post by post.
  */
 function savedQueue(opts, { userData, config, incoming }) {
   const file = listPath(userData);
@@ -1023,10 +1035,13 @@ function savedQueue(opts, { userData, config, incoming }) {
     .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, wanted)));
   const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
   const ownTopics = new Set();
-  fetchedScenes(incoming, userData, ownTopics);
+  const done = fetchedScenes(incoming, userData, ownTopics);
   const held = lib.notYetHeld(picked, { knownTopics, ownTopics, turnedDown, libraryVideos: library.videos });
   if (held.posts || held.scenes) console.log(`Skipped what the library holds now: ${held.posts} posts, ${held.scenes} more scenes`);
-  return held.queue;
+  if (opts.slr) return held.queue;
+  const left = lib.leaveOutSlr(held.queue, (id, video) => done.has(lib.fetchedKey(id, video)));
+  if (left.scenes) console.log(`Left for the weekly SLR run (--slr): ${left.scenes} SexLikeReal video(s) in ${left.posts} post(s)`);
+  return left.queue;
 }
 
 /** Write ~/Downloads/download-for-fs.txt: the waiting posts' files to download by hand. */

@@ -1,16 +1,42 @@
 {
-  "_comment": "FunSync's jobs, run on this Mac by job-runner (crates/job-runner), whose scheduler the desktop app starts. Orca automations decide when: each one runs `npm run jobs -- start <job>`. timeout: the run is stopped after this. steps run one after the other from the repo root; the job's exit code is the first that isn't 0 or 2, else 2 when a step left work, else 0.",
+  "_comment": "FunSync's jobs, run on this Mac by job-runner (crates/job-runner), whose scheduler the desktop app starts. schedule: cron's five fields (minute hour day-of-month month day-of-week, local time); the scheduler starts the job then itself, and once more after a run that was still going when the time came. Jobs without one are started by Orca automations: each runs `npm run jobs -- start <job>`. timeout: the run is stopped after this. steps run one after the other from the repo root; the job's exit code is the first that isn't 0 or 2, else 2 when a step left work, else 0.",
   "jobs": [
     {
-      "name": "eroscripts-scout",
-      "timeout": "12h",
+      "name": "downloads",
+      "schedule": "0 * * * *",
+      "timeout": "6h",
       "steps": [
-        ["npm", "run", "-s", "slr:scout", "--", "--fetch"],
+        ["npm", "run", "-s", "eroscripts:scout", "--", "--fetch", "--auto"],
         ["npm", "run", "-s", "vrb:scout", "--", "--fetch"],
         ["npm", "run", "-s", "pmvhaven:scout", "--", "--fetch"],
-        ["npm", "run", "-s", "vrb:scout"],
-        ["npm", "run", "-s", "pmvhaven:scout"],
-        ["npm", "run", "-s", "eroscripts:scout", "--", "--daily", "--passes", "2", "--wait", "1h"]
+        ["npm", "run", "-s", "creators:scout", "--", "--fetch"]
+      ]
+    },
+    {
+      "name": "eroscripts-scout",
+      "schedule": "15 * * * *",
+      "timeout": "1h",
+      "steps": [["npm", "run", "-s", "eroscripts:scout"]]
+    },
+    {
+      "name": "vrb-scout",
+      "schedule": "30 * * * *",
+      "timeout": "30m",
+      "steps": [["npm", "run", "-s", "vrb:scout"]]
+    },
+    {
+      "name": "pmvhaven-scout",
+      "schedule": "40 * * * *",
+      "timeout": "30m",
+      "steps": [["npm", "run", "-s", "pmvhaven:scout"]]
+    },
+    {
+      "name": "slr-downloads",
+      "schedule": "0 4 * * 1",
+      "timeout": "12h",
+      "steps": [
+        ["npm", "run", "-s", "slr:scout"],
+        ["npm", "run", "-s", "slr:scout", "--", "--fetch"]
       ]
     },
     {

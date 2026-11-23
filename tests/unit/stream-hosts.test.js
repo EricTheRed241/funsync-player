@@ -9,7 +9,7 @@
 // No network: fetch, clock and sleep are fakes.
 import { describe, it, expect } from 'vitest';
 import {
-  rule34videoLinks, parseRule34videoPage, rule34videoFiles, streamTitle, labelHeight, isoDurationSec, durationMatches,
+  rule34videoLinks, parseRule34videoPage, rule34videoFiles, streamTitle, labelHeight, isoDurationSec, durationMatches, downloadFits, wholeDownload,
   pacedFetch, createRule34video, rule34videoPosterUrl, RULE34VIDEO_INTERVAL_MS, RATE_LIMIT_BACKOFF_MS,
 } from '../../scripts/stream-hosts.mjs';
 import { planWithStreams, planScenes, sceneSidecar } from '../../scripts/eroscripts-scout-lib.mjs';
@@ -170,6 +170,38 @@ describe('durationMatches', () => {
     expect(durationMatches(200, 159_999)).toBe(false);
     expect(durationMatches(0, 1000)).toBe(false);
     expect(durationMatches(200, 0)).toBe(false);
+  });
+});
+
+describe('downloadFits', () => {
+  it('takes a script that ends ≤ 60 s after the downloaded video and covers ≥ 80 % of it', () => {
+    expect(downloadFits(2544, 2_546_000)).toBe(true);
+    expect(downloadFits(200, 260_000)).toBe(true);
+    expect(downloadFits(200, 260_001)).toBe(false);
+    expect(downloadFits(200, 160_000)).toBe(true);
+    expect(downloadFits(200, 159_999)).toBe(false);
+    expect(downloadFits(60, 2_100_000)).toBe(false);
+    expect(downloadFits(0, 1000)).toBe(false);
+    expect(downloadFits(200, 0)).toBe(false);
+  });
+});
+
+describe('wholeDownload', () => {
+  it('wants exactly the Content-Length the server sent, whatever the listed size', () => {
+    expect(wholeDownload(7405269922, { contentLength: '7405269922', listed: 7405269875 })).toBeNull();
+    expect(wholeDownload(7405269921, { contentLength: 7405269922, listed: 7405269921 })).toBe('size 7405269921 ≠ Content-Length 7405269922');
+  });
+
+  it('without a Content-Length, takes a size within 1 % of the listed one', () => {
+    expect(wholeDownload(990, { listed: 1000 })).toBeNull();
+    expect(wholeDownload(1010, { contentLength: null, listed: 1000 })).toBeNull();
+    expect(wholeDownload(989, { listed: 1000 })).toBe('size 989, listed 1000: more than 1 % off');
+    expect(wholeDownload(1011, { listed: 1000 })).toBe('size 1011, listed 1000: more than 1 % off');
+  });
+
+  it('is whole when neither size is known', () => {
+    expect(wholeDownload(5)).toBeNull();
+    expect(wholeDownload(5, { contentLength: '', listed: null })).toBeNull();
   });
 });
 

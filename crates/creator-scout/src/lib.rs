@@ -223,13 +223,6 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
                     run_follow(&env, cli::DEFAULT_FOLLOWS, &mut file, st, out)
                 })?,
             ));
-            writeln!(out, "== fetch").map_err(io)?;
-            codes.push((
-                "fetch",
-                step("fetch", &env, &mut st, err, |st| {
-                    run_fetch(&env, &opts, &mut file, st, out)
-                })?,
-            ));
             let code = codes.iter().fold(0, |a, (_, c)| combine(a, *c));
             writeln!(
                 out,

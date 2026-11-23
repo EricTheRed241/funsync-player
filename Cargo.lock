@@ -305,6 +305,7 @@ dependencies = [
 name = "slr-scout"
 version = "0.1.0"
 dependencies = [
+ "scout-report",
  "serde",
  "serde_json",
  "unicode-normalization",

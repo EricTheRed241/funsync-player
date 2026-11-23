@@ -1,10 +1,11 @@
 //! `npm run jobs -- <command>`: FunSync's jobs on this Mac (`deploy/jobs.json`),
-//! run by a scheduler the desktop app starts. Orca automations decide when,
-//! with `start`.
+//! run by a scheduler the desktop app starts: at their `schedule`, else when
+//! asked with `start` (Orca automations).
 
 pub mod exec;
 pub mod jobs;
 pub mod localtime;
+pub mod schedule;
 pub mod serve;
 pub mod state;
 
@@ -14,10 +15,11 @@ use std::path::{Path, PathBuf};
 
 pub const USAGE: &str = "\
 Usage: npm run jobs -- <command> [options]
-FunSync's jobs on this Mac (deploy/jobs.json). Orca automations start them; the
-desktop app runs the scheduler that does, so jobs get the app's access to
-Documents and the library drive.
-  status               every job: running or its last run
+FunSync's jobs on this Mac (deploy/jobs.json), run by the scheduler the desktop
+app starts, so jobs get the app's access to Documents and the library drive. A
+job with a `schedule` (cron: minute hour day-of-month month day-of-week, local
+time) is started by the scheduler then; the others by `start` (Orca automations).
+  status               every job: its schedule and next run, running or its last run
   start <job>          have the app's scheduler run a job now (it starts within 20 s,
                        outside this terminal; exit 2 when it's already running,
                        1 when the scheduler isn't running)
@@ -36,14 +38,14 @@ struct Options {
     target: Option<String>,
     user_data: Option<PathBuf>,
     jobs_file: Option<PathBuf>,
-    requested: bool,
+    trigger: exec::Trigger,
 }
 
 fn parse(args: &[OsString]) -> Result<Option<Options>, String> {
     let mut positional: Vec<String> = Vec::new();
     let mut user_data = None;
     let mut jobs_file = None;
-    let mut requested = false;
+    let mut trigger = exec::Trigger::Terminal;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let a = a.to_string_lossy();
@@ -57,7 +59,8 @@ fn parse(args: &[OsString]) -> Result<Option<Options>, String> {
             "--user-data" => user_data = Some(PathBuf::from(value("--user-data")?)),
             "--jobs" => jobs_file = Some(PathBuf::from(value("--jobs")?)),
             // Set by the scheduler on the runs it starts.
-            "--requested" => requested = true,
+            "--requested" => trigger = exec::Trigger::Requested,
+            "--scheduled" => trigger = exec::Trigger::Scheduled,
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             s => positional.push(s.to_string()),
         }
@@ -75,7 +78,7 @@ fn parse(args: &[OsString]) -> Result<Option<Options>, String> {
         target,
         user_data,
         jobs_file,
-        requested,
+        trigger,
     }))
 }
 
@@ -130,14 +133,7 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             status(&user_data, &jobs, out);
             Ok(0)
         }
-        "run" => find(&opts.target).map(|job| {
-            let trigger = if opts.requested {
-                exec::Trigger::Requested
-            } else {
-                exec::Trigger::Terminal
-            };
-            exec::run(&user_data, job, trigger, out)
-        }),
+        "run" => find(&opts.target).map(|job| exec::run(&user_data, job, opts.trigger, out)),
         "start" => find(&opts.target).and_then(|job| {
             if exec::holder_at(&state::dir(&user_data).join("serve.lock")).is_none() {
                 return Err("The scheduler isn't running (the desktop app starts it); `run` runs a job here instead.".into());
@@ -200,7 +196,12 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
         Ok(_) => {}
     }
     let _ = writeln!(out);
-    let _ = writeln!(out, "{:<18} {:<34} last run", "job", "now");
+    let now = exec::now();
+    let _ = writeln!(
+        out,
+        "{:<18} {:<28} {:<34} last run",
+        "job", "schedule", "now"
+    );
     for job in jobs {
         let st = state::read(user_data, &job.name);
         let holder = exec::holder(user_data, &job.name);
@@ -214,6 +215,13 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
                 format!("running since {since} ({})", h.pid)
             }
             None => "idle".into(),
+        };
+        let schedule = match &job.schedule {
+            Some(s) => match s.next_after(now) {
+                Some(next) => format!("{}, next {}", s.text(), localtime::fmt_upcoming(next, now)),
+                None => format!("{}, never", s.text()),
+            },
+            None => "on request".into(),
         };
         let last = match &st.last {
             Some(r) => {
@@ -236,7 +244,11 @@ fn status(user_data: &Path, jobs: &[jobs::Job], out: &mut dyn Write) {
             }
             None => "never".into(),
         };
-        let _ = writeln!(out, "{:<18} {:<34} {last}", job.name, now_col);
+        let _ = writeln!(
+            out,
+            "{:<18} {:<28} {:<34} {last}",
+            job.name, schedule, now_col
+        );
     }
 }
 

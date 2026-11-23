@@ -544,9 +544,9 @@ fn fetch_dry_run_prints_the_plan_and_downloads_nothing() {
     );
     assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
     let out = stdout(&o);
-    assert!(out.contains(
-        "6 scene(s) swiped right: 4 to fetch, 1 already fetched, 1 no longer in slr-scout.json."
-    ));
+    assert!(
+        out.contains("SLR queue: 4 to fetch (4 scene(s), 0 post(s)), 0 put first, then by score.")
+    );
     let other = tmp.0.join("lib/Other");
     assert!(out.contains(&format!(
         "video: maxResolution 4096p 6.52 GB h265 → {}",
@@ -647,7 +647,100 @@ fn fetch_downloads_until_the_video_quota_runs_out() {
         &["--user-data", ud.to_str().unwrap(), "--fetch"],
         Some(&fixtures),
     );
-    assert!(stdout(&o).contains("6 scene(s) swiped right: 2 to fetch, 3 already fetched"));
+    assert!(stdout(&o).contains("SLR queue: 2 to fetch (2 scene(s), 0 post(s))"));
+}
+
+#[test]
+fn fetch_takes_the_slr_queue_in_its_order_and_hands_posts_over() {
+    let tmp = TempDir::new();
+    let (ud, fixtures) = fetch_setup(&tmp, 35, 3);
+    // A waiting EroScripts post whose video is on SLR, swiped right, the best score of all.
+    fs::write(
+        ud.join("eroscripts-scout.json"),
+        json!({"candidates": [{"id": 700, "title": "Post On SLR", "score": 50.0,
+            "scenes": [{"video": {"host": "slr", "url": "https://www.sexlikereal.com/scenes/x-700"}}]}]})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        ud.join("eroscripts-scout-swipes.json"),
+        json!({"version": 1, "swipes": {"700": {"dir": "right", "at": "2026-11-20T00:00:00Z"}}})
+            .to_string(),
+    )
+    .unwrap();
+    let first = |keys: Value| {
+        fs::write(
+            ud.join("slr-priority.json"),
+            json!({"version": 1, "first": keys}).to_string(),
+        )
+        .unwrap()
+    };
+    first(json!(["slr:12"]));
+    let npm = tmp.0.join("fake-npm");
+    let log = tmp.0.join("npm.log");
+    fs::write(
+        &npm,
+        format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", log.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755)).unwrap();
+    let args = |dry: bool| {
+        let mut a = vec![
+            "--user-data".to_string(),
+            ud.display().to_string(),
+            "--fetch".into(),
+            "--npm".into(),
+            npm.display().to_string(),
+        ];
+        if dry {
+            a.push("--dry-run".into());
+        }
+        a
+    };
+
+    // Put first, then by score: 12, the post (50), 11 (20), 13, 14.
+    let a = args(true);
+    let o = run(
+        &a.iter().map(String::as_str).collect::<Vec<_>>(),
+        Some(&fixtures),
+    );
+    let out = stdout(&o);
+    assert!(
+        out.contains("SLR queue: 5 to fetch (4 scene(s), 1 post(s)), 1 put first"),
+        "{out}"
+    );
+    let at = |s: &str| out.find(s).unwrap_or_else(|| panic!("{s} missing:\n{out}"));
+    assert!(at("#12 B Title") < at("EroScripts #700 Post On SLR"));
+    assert!(at("EroScripts #700 Post On SLR") < at("#11 A Title"));
+    assert!(out.contains(&format!(
+        "would run: {} run -s eroscripts:scout -- --user-data '{}' --fetch --ids 700 --slr",
+        npm.display(),
+        ud.display()
+    )));
+    assert!(!out.contains("--add"));
+    assert!(!log.exists());
+
+    // The post put first: eroscripts:scout fetches it with --slr, then the scenes follow.
+    first(json!(["eroscripts:700"]));
+    let a = args(false);
+    let o = run(
+        &a.iter().map(String::as_str).collect::<Vec<_>>(),
+        Some(&fixtures),
+    );
+    let out = stdout(&o);
+    assert!(
+        out.contains("EroScripts #700 Post On SLR\n  ✓ fetched"),
+        "{out}"
+    );
+    assert_eq!(
+        fs::read_to_string(&log).unwrap().trim(),
+        format!(
+            "run -s eroscripts:scout -- --user-data {} --fetch --ids 700 --slr",
+            ud.display()
+        )
+    );
+    assert!(out.contains("Fetched 3, 0 failed, 0 skipped."), "{out}");
 }
 
 #[test]

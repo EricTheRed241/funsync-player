@@ -29,7 +29,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { canonicalArtist } from '../renderer/js/artist-playlists.js';
 import { FLAT_MAX_HEIGHT, VR_MAX_FPS, VR_MAX_HEIGHT } from '../renderer/js/content-preferences.js';
-import { capBytes, durationMatches, pacedFetch, safeName, STEM_BYTES } from './stream-hosts.mjs';
+import { capBytes, downloadFits, durationMatches, pacedFetch, safeName, STEM_BYTES, wholeDownload } from './stream-hosts.mjs';
 
 export const SLR_HOST = 'slr';
 export const SLR_API = 'https://api.sexlikereal.com';
@@ -317,10 +317,11 @@ function writeSession(file, session) {
  * - `plan(file)`: the download options read now and the one to take
  *   (chooseSlrDownload); an error when none fits. Uses up nothing.
  * - `download(file, tmp, {scriptMs, videoSeconds})`: ready, plan, a fresh
- *   link (this uses up one download), stream into `tmp`, then the size (the
- *   option's byte count) and the length (ffprobe through `videoSeconds`,
- *   durationMatches with the main script, else the scene's length) must
- *   agree. Returns the option taken.
+ *   link (this uses up one download), stream into `tmp`, then the size
+ *   (wholeDownload: the Content-Length, else within 1 % of the option's byte
+ *   count) and the length (ffprobe through `videoSeconds`, downloadFits with
+ *   the main script, else the scene's length) must agree. Returns the option
+ *   taken.
  * - `scene(ref)`: a scene's public details (`/v3/scenes/<id>` data, no
  *   login; its free trailer encodings give frames: scripts/scout-frames.mjs),
  *   null when there is no such scene.
@@ -443,7 +444,7 @@ export function createSlr({
       return pick;
     },
     async download(file, tmp, { scriptMs = null, videoSeconds } = {}) {
-      if (scriptMs && file.duration && !durationMatches(file.duration, scriptMs)) {
+      if (scriptMs && file.duration && !downloadFits(file.duration, scriptMs)) {
         throw new Error(`sexlikereal: video ${clock(file.duration * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
       }
       const quota = await host.ready();
@@ -458,12 +459,12 @@ export function createSlr({
         throw new Error(`sexlikereal: HTTP ${resp.status} for the ${pick.type} file of scene ${file.slrSceneId}`);
       }
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
-      const want = Number(pick.size) || Number(resp.headers.get('content-length')) || 0;
       const size = fs.statSync(tmp).size;
-      if (want && size !== want) throw new Error(`sexlikereal: size ${size} ≠ ${want} for scene ${file.slrSceneId}`);
+      const broken = wholeDownload(size, { contentLength: resp.headers.get('content-length'), listed: pick.size });
+      if (broken) throw new Error(`sexlikereal: ${broken} for scene ${file.slrSceneId}`);
       const got = videoSeconds(tmp);
       if (!got) throw new Error(`sexlikereal: scene ${file.slrSceneId} isn't a readable video (ffprobe)`);
-      const fits = scriptMs ? durationMatches(got, scriptMs) : !file.duration || durationMatches(got, file.duration * 1000) || durationMatches(file.duration, got * 1000);
+      const fits = scriptMs ? downloadFits(got, scriptMs) : !file.duration || downloadFits(got, file.duration * 1000) || downloadFits(file.duration, got * 1000);
       if (!fits) throw new Error(`sexlikereal: downloaded video ${clock(got * 1000)}, ${scriptMs ? `script ${clock(scriptMs)}` : `scene ${clock(file.duration * 1000)}`}; not this scene's video`);
       return pick;
     },

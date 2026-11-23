@@ -1370,6 +1370,32 @@ export function notYetHeld(candidates, { knownTopics = new Set(), ownTopics = ne
 }
 
 /**
+ * A download queue without its SexLikeReal scenes: each SLR download uses up
+ * one of the account's weekly quota, so only the weekly SLR run (`--slr`,
+ * one post at a time in the user's order) takes them. Posts left without a
+ * scene are dropped. `scenes` and `posts` count the SLR scenes left out that
+ * aren't `isDone` (already fetched or turned down) and the posts holding them.
+ *
+ * @param {object[]} queue
+ * @param {(id: number, videoName: string) => boolean} [isDone]
+ * @returns {{queue: object[], scenes: number, posts: number}}
+ */
+export function leaveOutSlr(queue, isDone = () => false) {
+  const out = [];
+  let scenes = 0;
+  let posts = 0;
+  for (const c of queue) {
+    const slr = c.scenes.filter((sc) => sc.video?.host === SLR_HOST);
+    const waiting = slr.filter((sc) => !isDone(c.id, sc.video.name)).length;
+    scenes += waiting;
+    if (waiting) posts++;
+    if (!slr.length) out.push(c);
+    else if (slr.length < c.scenes.length) out.push({ ...c, scenes: c.scenes.filter((sc) => sc.video?.host !== SLR_HOST) });
+  }
+  return { queue: out, scenes, posts };
+}
+
+/**
  * Make sure the scout's download folder (`{name: 'EroScripts'|'FapTap', path}`)
  * is a library source in a parsed config.json (mutated). True when added.
  */

@@ -124,6 +124,7 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
             slr: Pacer::new(slr_gap),
             forum: Pacer::new(forum_gap),
             fake: slr_gap.is_zero(),
+            npm: opts.npm.as_deref().unwrap_or("npm"),
         };
         return f.run(out);
     }

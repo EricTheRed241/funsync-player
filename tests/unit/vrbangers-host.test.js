@@ -265,7 +265,7 @@ describe('createVrbangers', () => {
   };
 
   /** A fake Chrome session and CDN; `events` records the order of link reads and downloads. */
-  function fakeSite({ links = () => [link('one_last_bang', 4, { bytes: 11 }), link('one_last_bang', 2)], login = async () => {}, body = 'video bytes', status = 200 } = {}) {
+  function fakeSite({ links = () => [link('one_last_bang', 4, { bytes: 11 }), link('one_last_bang', 2)], login = async () => {}, body = 'video bytes', status = 200, contentLength } = {}) {
     const events = [];
     const browsers = [];
     const open = async (o) => {
@@ -282,7 +282,8 @@ describe('createVrbangers', () => {
     const fetch = async (url, init = {}) => {
       events.push(init.headers?.Range ? `probe ${url.split('?')[0].split('/').pop()}` : `get ${url.split('?')[0].split('/').pop()}`);
       if (init.headers?.Range) return new Response('x', { status: 206, headers: { 'content-range': 'bytes 0-0/3514643215' } });
-      return new Response(body, { status, headers: { 'content-length': String(Buffer.byteLength(body)) } });
+      const sent = contentLength === undefined ? Buffer.byteLength(body) : contentLength;
+      return new Response(body, { status, headers: sent === null ? {} : { 'content-length': String(sent) } });
     };
     const clock = fakeClock();
     const host = createVrbangers({ open, fetch, now: clock.now, sleep: clock.sleep, userData: '/ud', credentialsFile: '/creds.txt' });
@@ -376,8 +377,8 @@ describe('createVrbangers', () => {
   });
 
   it('checks the size and the length of the download', async () => {
-    const short = fakeSite({ body: 'video' });
-    await expect(short.host.download(planned, tmpFile(), { videoSeconds: () => 2123 })).rejects.toThrow(/size 5 ≠ 11/);
+    const short = fakeSite({ contentLength: 11, body: 'video' });
+    await expect(short.host.download(planned, tmpFile(), { videoSeconds: () => 2123 })).rejects.toThrow(/size 5 ≠ Content-Length 11/);
     const teaser = fakeSite();
     await expect(teaser.host.download(planned, tmpFile(), { scriptMs: 2_100_000, videoSeconds: () => 60 })).rejects.toThrow(/not this scene's video/);
     const unreadable = fakeSite();
@@ -386,6 +387,24 @@ describe('createVrbangers', () => {
     await expect(failed.host.download(planned, tmpFile(), { videoSeconds: () => 2123 })).rejects.toThrow(/HTTP 403/);
     const wrongScene = fakeSite();
     await expect(wrongScene.host.download(planned, tmpFile(), { videoSeconds: () => 600 })).rejects.toThrow(/page 35:23; not this scene's video/);
+  });
+
+  it('takes the Content-Length over the listed size, else the listed size within 1 %', async () => {
+    const sent = fakeSite({ body: 'video' });
+    await expect(sent.host.download(planned, tmpFile(), { videoSeconds: () => 2123 })).resolves.toMatchObject({ file: planned.name });
+    const listed = () => [link('one_last_bang', 4, { bytes: 1000 })];
+    const near = fakeSite({ links: listed, body: 'x'.repeat(990), contentLength: null });
+    await expect(near.host.download(planned, tmpFile(), { videoSeconds: () => 2123 })).resolves.toMatchObject({ file: planned.name });
+    const off = fakeSite({ links: listed, body: 'x'.repeat(989), contentLength: null });
+    await expect(off.host.download(planned, tmpFile(), { videoSeconds: () => 2123 })).rejects.toThrow(/size 989, listed 1000: more than 1 % off/);
+  });
+
+  it('takes a script that runs up to a minute past the downloaded video', async () => {
+    // From a nightly log: video 42:24, script 42:26.
+    const { host } = fakeSite();
+    await expect(host.download({ ...planned, duration: 2544 }, tmpFile(), { scriptMs: 2_546_000, videoSeconds: () => 2544 })).resolves.toMatchObject({ file: planned.name });
+    await expect(fakeSite().host.download(planned, tmpFile(), { scriptMs: 2_123_000, videoSeconds: () => 2063 })).resolves.toBeTruthy();
+    await expect(fakeSite().host.download(planned, tmpFile(), { scriptMs: 2_123_000, videoSeconds: () => 2062 })).rejects.toThrow(/not this scene's video/);
   });
 
   it('refuses a planned scene the script does not fit before reading any link', async () => {
