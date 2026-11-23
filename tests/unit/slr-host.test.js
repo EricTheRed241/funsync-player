@@ -352,6 +352,26 @@ describe('the SLR host (createSlr)', () => {
     await expect(slr.download(slrFile(detail()), tmp, { scriptMs: 2_300_000, videoSeconds: () => 600 })).rejects.toThrow(/not this scene's video/);
     await expect(slr.download(slrFile(detail()), tmp, { scriptMs: 1_000_000, videoSeconds: () => 2328 })).rejects.toThrow(/script 16:40/);
   });
+
+  it('takes a download whole by its Content-Length when the listed size is a few bytes off', async () => {
+    // From a nightly log: size 7405269922 ≠ 7405269875 (the option's size) for a complete download.
+    const ud = userDataWith({ refreshJwt: 'r' });
+    const bytes = Buffer.from('video-bytes');
+    const options = [{ type: 'maxResolution', height: 3840, width: 7680, size: bytes.length + 47, codec: 'h265' }];
+    let sent = bytes.length;
+    const { fetch } = fakeSlr(account(5, {
+      '/content/v1/videos/49489/download-options': { data: { options } },
+      '/content/v1/videos/49489/download?type=maxResolution': { data: { url: 'https://cdn.example/49489.mp4?sig=1' } },
+      'cdn.example': () => new Response(bytes, { status: 200, headers: sent ? { 'content-length': String(sent) } : {} }),
+    }));
+    const slr = createSlr({ fetch, userData: ud, now: () => 0, sleep: async () => {} });
+    const tmp = path.join(ud, 'v.part');
+    await expect(slr.download(slrFile(detail()), tmp, { scriptMs: 2_300_000, videoSeconds: () => 2328 })).resolves.toMatchObject({ type: 'maxResolution' });
+    sent = bytes.length + 47;
+    await expect(slr.download(slrFile(detail()), tmp, { scriptMs: 2_300_000, videoSeconds: () => 2328 })).rejects.toThrow(/size 11 ≠ Content-Length 58 for scene 49489/);
+    sent = 0;
+    await expect(slr.download(slrFile(detail()), tmp, { scriptMs: 2_300_000, videoSeconds: () => 2328 })).rejects.toThrow(/size 11, listed 58: more than 1 % off/);
+  });
 });
 
 describe('--manual-list and SLR videos', () => {

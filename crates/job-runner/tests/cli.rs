@@ -201,3 +201,42 @@ fn start_has_the_scheduler_run_the_job() {
         "the request is used up"
     );
 }
+
+#[test]
+fn serve_runs_a_job_whose_time_came() {
+    let tmp = TempDir::new();
+    let marker = tmp.0.join("ran");
+    let step = format!("touch '{}'", marker.display());
+    let scheduled = job("j", "1h", &[&step]).replacen('{', r#"{"schedule":"* * * * *","#, 1);
+    let jobs = format!("{scheduled},{}", job("other", "1h", &["true"]));
+    let (ud, jobs) = setup(&tmp.0, true, &jobs);
+    // A run long ago, so the current minute is due at once.
+    fs::create_dir_all(ud.join("job-runner")).unwrap();
+    let old = r#"{"last":{"trigger":"terminal","started":0,"ended":1,"exit":0,"result":"done","log":""}}"#;
+    fs::write(ud.join("job-runner/j.json"), old).unwrap();
+
+    let status = String::from_utf8_lossy(&cli(&ud, &jobs, &["status"]).stdout).into_owned();
+    assert!(status.contains("* * * * *, next "), "{status}");
+    assert!(status.contains("on request"), "{status}");
+
+    let mut serve = Command::new(env!("CARGO_BIN_EXE_job-runner"))
+        .args(["serve", "--user-data"])
+        .arg(&ud)
+        .arg("--jobs")
+        .arg(&jobs)
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let until = Instant::now() + Duration::from_secs(15);
+    while !marker.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = serve.kill();
+    let _ = serve.wait();
+    assert!(marker.exists(), "the scheduler ran the due job");
+    assert_eq!(state(&ud, "j")["last"]["trigger"], "scheduled");
+    assert!(
+        !ud.join("job-runner/other.json").exists(),
+        "a job without a schedule waits for `start`"
+    );
+}

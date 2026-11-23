@@ -13,9 +13,10 @@ import {
   emptyScoutState, normalizeScoutState, seenTopic, markTopic, listFeed, mergeCandidates, RULES_VERSION, needsJudging, pendingTopics, screenPick,
   staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, topicsMissingInfo, addPostInfo, readSwipes, scoredCandidate,
   contentRuleBreak, isHentaiOnly, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
-  manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName,
+  manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName, leaveOutSlr,
   scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS, IMAGES_VERSION,
 } from '../../scripts/eroscripts-scout-lib.mjs';
+import { SLR_HOST } from '../../scripts/slr-host.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
 import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
 
@@ -607,6 +608,31 @@ describe('notYetHeld', () => {
       { libraryVideos, ownTopics: new Set([1]) });
     expect(r.queue.map((c) => c.scenes.length)).toEqual([2, 1]);
     expect([r.posts, r.scenes]).toEqual([0, 0]);
+  });
+});
+
+describe('leaveOutSlr', () => {
+  const scene = (name, host) => ({ base: name, video: { name, host }, axes: [], scripts: [] });
+  const post = (id, ...scenes) => ({ id, title: `Post ${id}`, scenes });
+
+  it('leaves out SexLikeReal scenes for the weekly SLR run, and posts left without a scene', () => {
+    const queue = [
+      post(1, scene('a.mp4', 'forum')),
+      post(2, scene('b.mp4', SLR_HOST), scene('c.mp4', 'mega')),
+      post(3, scene('d.mp4', SLR_HOST), scene('e.mp4', SLR_HOST)),
+    ];
+    const r = leaveOutSlr(queue);
+    expect(r.queue.map((c) => [c.id, c.scenes.map((sc) => sc.video.name)])).toEqual([[1, ['a.mp4']], [2, ['c.mp4']]]);
+    expect(r.queue[0]).toBe(queue[0]);
+    expect(queue[1].scenes).toHaveLength(2);
+    expect([r.scenes, r.posts]).toEqual([3, 2]);
+  });
+
+  it('counts only SLR scenes not fetched yet', () => {
+    const queue = [post(2, scene('b.mp4', SLR_HOST), scene('c.mp4', 'mega')), post(3, scene('d.mp4', SLR_HOST))];
+    const r = leaveOutSlr(queue, (id, video) => id === 3 && video === 'd.mp4');
+    expect(r.queue.map((c) => c.id)).toEqual([2]);
+    expect([r.scenes, r.posts]).toEqual([1, 1]);
   });
 });
 

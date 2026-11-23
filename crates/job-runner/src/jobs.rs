@@ -1,6 +1,8 @@
 //! The job definitions (`deploy/jobs.json`, built in; `--jobs <file>`
-//! replaces them). When a job runs is up to its Orca automation.
+//! replaces them). A job with a `schedule` is started by the scheduler
+//! (`serve`) itself; the others by `start` (their Orca automation).
 
+use crate::schedule::Schedule;
 use serde::Deserialize;
 
 pub const BUILT_IN: &str = include_str!("../../../deploy/jobs.json");
@@ -11,6 +13,8 @@ pub struct Job {
     /// Seconds: a run still going after this is stopped.
     pub timeout: i64,
     pub steps: Vec<Vec<String>>,
+    /// When `serve` starts it; None: only on `start` requests.
+    pub schedule: Option<Schedule>,
 }
 
 #[derive(Deserialize)]
@@ -19,6 +23,7 @@ struct RawJob {
     name: String,
     timeout: String,
     steps: Vec<Vec<String>>,
+    schedule: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -43,6 +48,12 @@ pub fn parse(text: &str) -> Result<Vec<Job>, String> {
         }
         jobs.push(Job {
             timeout: duration(&raw.timeout).map_err(err)?,
+            schedule: raw
+                .schedule
+                .as_deref()
+                .map(Schedule::parse)
+                .transpose()
+                .map_err(err)?,
             steps: raw.steps,
             name,
         });
@@ -73,9 +84,16 @@ mod tests {
     #[test]
     fn the_built_in_jobs_parse() {
         let jobs = parse(BUILT_IN).unwrap();
-        let scout = jobs.iter().find(|j| j.name == "eroscripts-scout").unwrap();
-        assert_eq!((scout.timeout, scout.steps.len()), (12 * 3600, 6));
-        assert!(jobs.iter().any(|j| j.name == "thumbnails"));
+        let downloads = jobs.iter().find(|j| j.name == "downloads").unwrap();
+        assert_eq!((downloads.timeout, downloads.steps.len()), (6 * 3600, 4));
+        assert_eq!(
+            downloads.schedule.as_ref().map(Schedule::text),
+            Some("0 * * * *")
+        );
+        let slr = jobs.iter().find(|j| j.name == "slr-downloads").unwrap();
+        assert_eq!(slr.schedule.as_ref().map(Schedule::text), Some("0 4 * * 1"));
+        let thumbnails = jobs.iter().find(|j| j.name == "thumbnails").unwrap();
+        assert!(thumbnails.schedule.is_none());
     }
 
     #[test]
@@ -105,5 +123,18 @@ mod tests {
         assert!(parse(&file(&[job("a", "[[]]")])).is_err());
         assert!(parse(&file(&[job("a b", r#"[["true"]]"#)])).is_err());
         assert!(parse(&file(&[job("a", r#"[["true"]]"#)])).is_ok());
+    }
+
+    #[test]
+    fn a_schedule_is_optional_and_checked() {
+        let file = |extra: &str| {
+            format!(r#"{{"jobs":[{{"name":"a","timeout":"1h","steps":[["true"]]{extra}}}]}}"#)
+        };
+        assert!(parse(&file("")).unwrap()[0].schedule.is_none());
+        let jobs = parse(&file(r#","schedule":"15 * * * *""#)).unwrap();
+        assert_eq!(jobs[0].schedule.as_ref().unwrap().text(), "15 * * * *");
+        let e = parse(&file(r#","schedule":"61 * * * *""#)).unwrap_err();
+        assert!(e.contains("job a") && e.contains("minute"), "{e}");
+        assert!(parse(&file(r#","when":"daily""#)).is_err());
     }
 }

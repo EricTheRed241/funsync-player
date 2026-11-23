@@ -4,14 +4,15 @@
 //! - `<job>.lock`: held while the job runs (its pid).
 //! - `requests/<job>`: `job-runner start <job>` asks the scheduler to run the
 //!   job now; the scheduler removes it when it handles it.
-//! - `logs/<job>/<YYYYMMDD-HHMMSS>.log`: one per run, the last 20 kept.
+//! - `logs/<job>/<YYYYMMDD-HHMMSS>.log`: one per run, the last 72 kept (three
+//!   days of an hourly job).
 //! - `serve.lock`: the scheduler (one per data folder).
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const KEEP_LOGS: usize = 20;
+pub const KEEP_LOGS: usize = 72;
 
 pub fn dir(user_data: &Path) -> PathBuf {
     user_data.join("job-runner")
@@ -50,7 +51,8 @@ pub struct JobState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Run {
-    /// `requested` (through the scheduler) or `terminal` (`run` in a terminal).
+    /// `requested` (a `start` request), `scheduled` (the job's schedule),
+    /// both through the scheduler, or `terminal` (`run` in a terminal).
     pub trigger: String,
     pub started: i64,
     /// None while it runs.

@@ -99,12 +99,13 @@ Modes:
   --fetch               Fetch the posts swiped \"want\" on the Creators site that
                         are downloadable and not in the library: EroScripts posts
                         through npm run eroscripts:scout (--add, then --fetch
-                        --ids), FapTap videos through npm run faptap:scout. A post
-                        that doesn't reach the library is tried again next run,
-                        5 times at most.
+                        --ids), FapTap videos through npm run faptap:scout. Runs
+                        hourly in the downloads job. SLR-hosted posts are left to
+                        the weekly slr:scout --fetch. A post that doesn't reach
+                        the library is tried again after 12 hours, 5 times at most.
   --dry-run             With --fetch: print what would be fetched, change nothing
-  --daily               --discover, --profiles 30, --pictures 40, --follow 10 and
-                        --fetch; a failing step doesn't stop the next
+  --daily               --discover, --profiles 30, --pictures 40 and --follow 10;
+                        a failing step doesn't stop the next
   -h, --help            This text
 
 Options:
@@ -295,9 +296,8 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
     if o.judge_cmd.is_some() && o.max_cost.is_some() {
         return Err("--max-cost applies to the default judge only".into());
     }
-    let fetching = matches!(mode, Mode::Fetch | Mode::Daily);
-    if !fetching && (o.repo.is_some() || o.npm.is_some()) {
-        return Err("--repo and --npm go with --fetch and --daily".into());
+    if *mode != Mode::Fetch && (o.repo.is_some() || o.npm.is_some()) {
+        return Err("--repo and --npm go with --fetch".into());
     }
     Ok(o)
 }
@@ -368,6 +368,7 @@ mod tests {
         assert!(p(&["--status=1"]).is_err());
         assert!(p(&["--bogus"]).is_err());
         assert!(p(&["--import-seed"]).is_err());
-        assert!(p(&["--daily", "--max-cost", "3", "--npm", "n"]).is_ok());
+        assert!(p(&["--daily", "--max-cost", "3"]).is_ok());
+        assert!(p(&["--daily", "--npm", "n"]).is_err());
     }
 }

@@ -201,6 +201,41 @@ export function durationMatches(videoSec, scriptMs) {
   return scriptMs <= videoMs + DURATION_SLACK_MS && scriptMs >= DURATION_MIN_SHARE * videoMs;
 }
 
+/**
+ * At download time a script may end this much after the video: scripts often
+ * run a few seconds past the file a host serves (an intro or outro cut, a
+ * last action held), and the scene was already matched to the post
+ * (durationMatches) before anything downloaded.
+ */
+export const DOWNLOAD_SLACK_MS = 60_000;
+
+/**
+ * durationMatches for a download: the script ends no later than the video
+ * (+60 s) and covers at least 80 % of it, so a trailer or teaser still fails.
+ */
+export function downloadFits(videoSec, scriptMs) {
+  const videoMs = Number(videoSec) * 1000;
+  if (!(videoMs > 0) || !(scriptMs > 0)) return false;
+  return scriptMs <= videoMs + DOWNLOAD_SLACK_MS && scriptMs >= DURATION_MIN_SHARE * videoMs;
+}
+
+/** A download may be this share off the size a host lists for it (when the server sends no Content-Length). */
+export const LISTED_SIZE_SLACK = 0.01;
+
+/**
+ * null when a download of `size` bytes is whole, else why not. Whole: exactly
+ * the `contentLength` the server sent; without one, within 1 % of the size
+ * the host `listed` (hosts list sizes a few bytes off the file they serve:
+ * SexLikeReal 40–60 bytes). Neither known: whole.
+ */
+export function wholeDownload(size, { contentLength = 0, listed = 0 } = {}) {
+  const sent = Number(contentLength) || 0;
+  if (sent > 0) return size === sent ? null : `size ${size} ≠ Content-Length ${sent}`;
+  const want = Number(listed) || 0;
+  if (want > 0 && Math.abs(size - want) > LISTED_SIZE_SLACK * want) return `size ${size}, listed ${want}: more than 1 % off`;
+  return null;
+}
+
 // ── Requests ────────────────────────────────────────────────────────────
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

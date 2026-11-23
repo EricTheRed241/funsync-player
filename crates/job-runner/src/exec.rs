@@ -21,6 +21,8 @@ const KILL_GRACE: Duration = Duration::from_secs(30);
 pub enum Trigger {
     /// Started by the scheduler on a `start` request (an Orca automation).
     Requested,
+    /// Started by the scheduler at the job's `schedule`.
+    Scheduled,
     /// `run` in a terminal.
     Terminal,
 }
@@ -109,6 +111,7 @@ pub fn run(user_data: &Path, job: &Job, trigger: Trigger, out: &mut dyn Write) -
     };
     let trigger_name = match trigger {
         Trigger::Requested => "requested",
+        Trigger::Scheduled => "scheduled",
         Trigger::Terminal => "terminal",
     };
     st.last = Some(Run {
@@ -161,10 +164,10 @@ fn run_steps(
     say: &dyn Fn(&mut dyn Write, String),
     out: &mut dyn Write,
 ) -> (i32, &'static str) {
-    // Requested runs own their process group, so a timeout stops the whole
-    // step (npm, node, the binaries it starts). A run in a terminal stays in
-    // the terminal's group, so Ctrl-C reaches the step.
-    let own_group = trigger == Trigger::Requested || !io::stdout().is_terminal();
+    // Runs the scheduler starts own their process group, so a timeout stops
+    // the whole step (npm, node, the binaries it starts). A run in a terminal
+    // stays in the terminal's group, so Ctrl-C reaches the step.
+    let own_group = trigger != Trigger::Terminal || !io::stdout().is_terminal();
     let deadline = started + job.timeout;
     let mut codes = Vec::new();
     for step in &job.steps {

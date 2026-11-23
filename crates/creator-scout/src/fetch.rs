@@ -1,11 +1,14 @@
-//! `--fetch`: the posts swiped `want` on the Creators site go through the
-//! scouts that download them (`npm run eroscripts:scout` / `faptap:scout`:
-//! `--add <ids>`, then `--fetch --ids <ids>`), run from the repo. A post
-//! counts as fetched once the library has it; one that doesn't arrive is
-//! tried again next run, [`MAX_TRIES`] times in all.
+//! `--fetch` (hourly, in the `downloads` job): the posts swiped `want` on
+//! the Creators site go through the scouts that download them (`npm run
+//! eroscripts:scout` / `faptap:scout`: `--add <ids>`, then `--fetch --ids
+//! <ids>`), run from the repo. A post counts as fetched once the library
+//! has it; one that doesn't arrive is tried again once [`RETRY_HOURS`] have
+//! passed, [`MAX_TRIES`] times in all. SLR-hosted posts are left to the
+//! weekly `slr:scout --fetch`.
 
+use crate::instagram::parse_iso;
 use crate::library::LibraryIds;
-use crate::state::{MAX_TRIES, State, Swipes};
+use crate::state::{MAX_TRIES, RETRY_HOURS, State, Swipes};
 use crate::store::{CreatorsFile, Post};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,22 +28,27 @@ pub struct Wanted {
     pub title: String,
 }
 
-/// Posts swiped `want` that can be fetched: downloadable, not in the
-/// library, not fetched before, tried fewer than [`MAX_TRIES`] times. In
-/// swipe-key order.
-pub fn wanted(file: &CreatorsFile, swipes: &Swipes, state: &State) -> Vec<Wanted> {
+/// Posts swiped `want` that can be fetched: downloadable, not SLR-hosted,
+/// not in the library, not fetched before, tried fewer than [`MAX_TRIES`]
+/// times and not within [`RETRY_HOURS`] of `now` (seconds since the epoch;
+/// an unreadable last try counts as due). In swipe-key order.
+pub fn wanted(file: &CreatorsFile, swipes: &Swipes, state: &State, now: i64) -> Vec<Wanted> {
     let posts: Vec<&Post> = file.creators.values().flat_map(|c| &c.posts).collect();
     swipes
         .posts
         .iter()
         .filter(|(_, choice)| *choice == "want")
         .filter_map(|(key, _)| posts.iter().find(|p| p.key() == *key))
-        .filter(|p| p.downloadable && !p.in_library)
+        .filter(|p| p.downloadable && !p.in_library && !p.hosts.iter().any(|h| h == "slr"))
         .filter(|p| {
-            state
-                .fetch
-                .get(&p.key())
-                .is_none_or(|r| r.done_at.is_none() && r.tries < MAX_TRIES)
+            state.fetch.get(&p.key()).is_none_or(|r| {
+                r.done_at.is_none()
+                    && r.tries < MAX_TRIES
+                    && r.last_try
+                        .as_deref()
+                        .and_then(parse_iso)
+                        .is_none_or(|t| now - t >= RETRY_HOURS * 3600)
+            })
         })
         .map(|p| Wanted {
             key: p.key(),
@@ -105,7 +113,10 @@ pub fn fetch(
     rescan: &dyn Fn() -> LibraryIds,
     out: &mut dyn Write,
 ) -> Result<FetchRun, String> {
-    let list = wanted(file, swipes, state);
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let list = wanted(file, swipes, state, now_unix);
     let mut run = FetchRun {
         code: 0,
         fetched: 0,
@@ -239,6 +250,12 @@ mod tests {
                     post("faptap", "5", true, false),
                     post("eroscripts", "6", true, false),
                     post("eroscripts", "7", true, false),
+                    post("eroscripts", "8", true, false),
+                    post("eroscripts", "9", true, false),
+                    Post {
+                        hosts: vec!["slr".into()],
+                        ..post("eroscripts", "10", true, false)
+                    },
                 ],
                 ..Creator::default()
             },
@@ -252,6 +269,9 @@ mod tests {
             ("faptap:5", "hide"),
             ("eroscripts:6", "want"),
             ("eroscripts:7", "want"),
+            ("eroscripts:8", "want"),
+            ("eroscripts:9", "want"),
+            ("eroscripts:10", "want"),
             ("eroscripts:99", "want"),
         ] {
             swipes.posts.insert(k.into(), c.into());
@@ -272,11 +292,25 @@ mod tests {
                 ..FetchRecord::default()
             },
         );
-        let keys: Vec<String> = wanted(&file, &swipes, &state)
+        let now = parse_iso("2026-11-23T12:00:00Z").unwrap();
+        for (k, at) in [
+            ("eroscripts:8", "2026-11-23T11:00:00.000Z"),
+            ("eroscripts:9", "2026-11-22T23:00:00.000Z"),
+        ] {
+            state.fetch.insert(
+                k.into(),
+                FetchRecord {
+                    tries: 1,
+                    last_try: Some(at.into()),
+                    ..FetchRecord::default()
+                },
+            );
+        }
+        let keys: Vec<String> = wanted(&file, &swipes, &state, now)
             .into_iter()
             .map(|w| w.key)
             .collect();
-        assert_eq!(keys, ["eroscripts:1", "faptap:4"]);
+        assert_eq!(keys, ["eroscripts:1", "eroscripts:9", "faptap:4"]);
         assert_eq!(
             commands("npm", "faptap", &["4".into(), "8".into()]).unwrap(),
             [

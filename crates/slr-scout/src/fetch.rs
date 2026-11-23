@@ -1,6 +1,9 @@
-//! `--fetch`: download the scenes swiped right on the swipe page's SLR tab
-//! (`<userData>/slr-scout-swipes.json`) that aren't in the library yet, with
-//! the user's SLR account:
+//! `--fetch`: download the SLR queue (scout-report's `slr_queue`, the order the Downloads
+//! page's SLR tab shows): the right swipes that download from SexLikeReal, highest score
+//! first except the ones put first on that tab. Each costs one of the account's weekly
+//! video downloads, so the scheduled job (`slr-downloads`) runs this once a week.
+//!
+//! A scene of slr-scout.json (swiped right in `slr-scout-swipes.json`):
 //!
 //! - the video: SLR's download options, `maxResolution` when it's within
 //!   the caps (`videoCaps`), else `optimalResolution`, never the trailer;
@@ -14,10 +17,16 @@
 //! Scenes go to `<Other>/<first performer>/<Performers> - <Title>
 //! (<Studio>)<vrSuffix>/` with an `slr.json` sidecar, then get generated
 //! twist / roll / pitch (`scripts/upgrade-multi-axis.mjs`; hand-made axes
-//! win). The video quota is checked before every video and the library cap
-//! (`libraryMaxVideos`) before every scene. `fetchedAt` is set in
-//! slr-scout.json; at the end the app is asked to rescan. `--dry-run`
-//! prints the plan and sends no download request.
+//! win); `fetchedAt` is set in slr-scout.json.
+//!
+//! An EroScripts post whose video is on SLR (swiped right, or a creator's post swiped want)
+//! goes to `npm run eroscripts:scout -- --fetch --ids <id> --slr` (`--add <id>` first when it
+//! isn't on the waiting list), which downloads it with the same account; the quota is read
+//! again afterwards.
+//!
+//! The video quota is checked before every download and the library cap (`libraryMaxVideos`)
+//! before every item; at the end the app is asked to rescan. `--dry-run` prints the plan and
+//! sends no download request.
 
 use crate::forum::{self, Attachment};
 use crate::http::{Http, NetError, Pacer};
@@ -26,6 +35,7 @@ use crate::prefs::{Prefs, VideoCaps};
 use crate::quota::{self, QuotaError};
 use crate::slr::{self, API};
 use crate::store::{self, Handmade, Quota, Scene, ScoutFile, ScriptSource};
+use scout_report::downloads::Item;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
@@ -41,20 +51,24 @@ pub const SIDECAR: &str = "slr.json";
 /// `.generated.twist.funscript` (STEM_BYTES in eroscripts-scout-lib.mjs).
 pub const STEM_BYTES: usize = 180;
 
-/// The scene ids swiped right (`{version, swipes: {"<id>": {dir, at}}}`).
-pub fn right_swipes(user_data: &Path) -> Result<Vec<u64>, String> {
-    swipe_ids(user_data, |s| s["dir"] == "right")
+/// The repo the npm scripts run in: the working directory under `npm run`, else this
+/// crate's checkout.
+fn repo_root() -> PathBuf {
+    if Path::new("scripts/upgrade-multi-axis.mjs").is_file() {
+        PathBuf::from(".")
+    } else {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
 }
 
-/// The scenes to download: swiped right, not fetched yet, highest score first (ties by
-/// newest id), so the best ones get the weekly videos and monthly scripts before the rest.
-pub fn fetch_queue(scenes: &[crate::store::Scene], right: &[u64]) -> Vec<u64> {
-    let mut queue: Vec<&crate::store::Scene> = scenes
-        .iter()
-        .filter(|s| right.contains(&s.id) && s.fetched_at.is_none())
-        .collect();
-    queue.sort_by(|a, b| b.score.total_cmp(&a.score).then(b.id.cmp(&a.id)));
-    queue.into_iter().map(|s| s.id).collect()
+/// The EroScripts topic of an SLR queue item that is a post (`eroscripts:<id>`, or a
+/// creator's `creators:eroscripts:<id>`).
+fn post_topic(item: &Item) -> Option<u64> {
+    match item.source {
+        "eroscripts" => item.id.parse().ok(),
+        "creators" => item.id.strip_prefix("eroscripts:")?.parse().ok(),
+        _ => None,
+    }
 }
 
 /// The scene ids swiped either way (the deck shows neither again).
@@ -363,6 +377,8 @@ pub struct Fetch<'a> {
     pub forum: Pacer,
     /// Canned network (tests): no upgrade run, no rescan.
     pub fake: bool,
+    /// Runs `eroscripts:scout` for the queue's posts (`npm`).
+    pub npm: &'a str,
 }
 
 struct Ctx {
@@ -397,24 +413,14 @@ impl Fetch<'_> {
                 file_path.display()
             )
         })?;
-        let right = right_swipes(self.user_data)?;
-        let missing: Vec<u64> = right
-            .iter()
-            .copied()
-            .filter(|id| !file.scenes.iter().any(|s| s.id == *id))
-            .collect();
-        let queue = fetch_queue(&file.scenes, &right);
-        let done = right.len() - missing.len() - queue.len();
+        let queue = scout_report::downloads::load(self.user_data).slr;
+        let scenes = queue.iter().filter(|i| i.source == "slr").count();
+        let first = queue.iter().filter(|i| i.pinned.is_some()).count();
         writeln!(
             out,
-            "{} scene(s) swiped right: {} to fetch, {done} already fetched{}.",
-            right.len(),
+            "SLR queue: {} to fetch ({scenes} scene(s), {} post(s)), {first} put first, then by score.",
             queue.len(),
-            if missing.is_empty() {
-                String::new()
-            } else {
-                format!(", {} no longer in slr-scout.json", missing.len())
-            }
+            queue.len() - scenes
         )
         .map_err(io)?;
         if queue.is_empty() {
@@ -477,13 +483,7 @@ impl Fetch<'_> {
         let cap = self.prefs.library_max_videos;
         let mut held = library::video_count(&user.sources);
         let (mut fetched, mut failed, mut skipped, mut code) = (0, 0, 0, 0);
-        for id in queue {
-            let scene = file
-                .scenes
-                .iter()
-                .find(|s| s.id == id)
-                .cloned()
-                .ok_or("scene vanished")?;
+        for item in queue {
             if held >= cap {
                 writeln!(
                     out,
@@ -493,6 +493,63 @@ impl Fetch<'_> {
                 code = 2;
                 break;
             }
+            if let Some(topic) = post_topic(&item) {
+                let title = item.title.as_deref().unwrap_or("");
+                writeln!(out, "EroScripts #{topic} {title}").map_err(io)?;
+                if ctx.quota.videos.remaining <= 0 {
+                    writeln!(out, "  stopped: the weekly video download quota is used up")
+                        .map_err(io)?;
+                    code = 2;
+                    break;
+                }
+                let c = self.hand_over(topic, out)?;
+                if self.dry_run {
+                    ctx.quota.videos.remaining -= 1;
+                    held += 1;
+                    continue;
+                }
+                // eroscripts:scout spent the quota out of process: read what's left.
+                match quota::overview(self.http, &ctx.token, &timefmt::now_iso()) {
+                    Ok(q) => ctx.quota = q,
+                    Err(_) if c == 0 => ctx.quota.videos.remaining -= 1,
+                    Err(_) => {}
+                }
+                file.quota = Some(ctx.quota.clone());
+                store::write(self.user_data, &file)?;
+                held = library::video_count(&user.sources);
+                match c {
+                    0 => {
+                        fetched += 1;
+                        writeln!(out, "  ✓ fetched").map_err(io)?;
+                    }
+                    2 => {
+                        writeln!(out, "  left for later (exit 2)").map_err(io)?;
+                        skipped += 1;
+                        code = 2;
+                    }
+                    3 => {
+                        writeln!(out, "  stopped: not logged in (exit 3)").map_err(io)?;
+                        code = 3;
+                        break;
+                    }
+                    c => {
+                        writeln!(out, "  ✗ eroscripts:scout exit {c}").map_err(io)?;
+                        failed += 1;
+                    }
+                }
+                continue;
+            }
+            let Ok(id) = item.id.parse::<u64>() else {
+                continue;
+            };
+            let Some(scene) = file
+                .scenes
+                .iter()
+                .find(|s| s.id == id && s.fetched_at.is_none())
+                .cloned()
+            else {
+                continue;
+            };
             writeln!(out, "#{id} {}", scene.title).map_err(io)?;
             let planned = match self.plan(&scene, &mut ctx) {
                 Ok(p) => p,
@@ -572,6 +629,47 @@ impl Fetch<'_> {
             self.rescan(&config, out)?;
         }
         Ok(if failed > 0 { 1 } else { code })
+    }
+
+    /// Hand an SLR-hosted EroScripts post to `eroscripts:scout` (`--add` first when it isn't on
+    /// the waiting list); its exit code. A dry run prints the commands.
+    fn hand_over(&self, topic: u64, out: &mut dyn Write) -> Result<i32, String> {
+        let mut problems = Vec::new();
+        let waiting = scout_report::report::read_json(
+            self.user_data,
+            scout_report::report::WAITING_FILE,
+            &mut problems,
+        );
+        let user_data = self.user_data.display();
+        let base = format!(
+            "{} run -s eroscripts:scout -- --user-data '{user_data}'",
+            self.npm
+        );
+        let mut cmds = Vec::new();
+        if !scout_report::deck::is_waiting(&waiting, topic) {
+            cmds.push(format!("{base} --add {topic}"));
+        }
+        cmds.push(format!("{base} --fetch --ids {topic} --slr"));
+        let repo = repo_root();
+        for cmd in &cmds {
+            if self.dry_run {
+                writeln!(out, "  would run: {cmd}").map_err(io)?;
+                continue;
+            }
+            out.flush().map_err(io)?;
+            let status = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(cmd)
+                .current_dir(&repo)
+                .stdin(std::process::Stdio::null())
+                .status()
+                .map_err(|e| format!("can't run {cmd}: {e}"))?;
+            let c = status.code().unwrap_or(1);
+            if c != 0 {
+                return Ok(c);
+            }
+        }
+        Ok(0)
     }
 
     /// Re-read the scene, pick its script and video download; no download
@@ -786,14 +884,7 @@ impl Fetch<'_> {
         if self.fake {
             return Ok(());
         }
-        // The repo root is the working directory under `npm run` and in the jobs image
-        // (/app, where the build checkout's path doesn't exist); else this crate's checkout.
-        let local = Path::new("scripts/upgrade-multi-axis.mjs");
-        let script = if local.is_file() {
-            local.to_path_buf()
-        } else {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/upgrade-multi-axis.mjs")
-        };
+        let script = repo_root().join("scripts/upgrade-multi-axis.mjs");
         let status = Command::new("node")
             .arg(&script)
             .arg(dir)
@@ -1080,42 +1171,33 @@ mod tests {
     }
 
     #[test]
-    fn fetches_highest_score_first() {
-        let s = |id: u64, score: f64, fetched: bool| {
-            let mut s = crate::slr::scene(&json!({"id": id, "label": format!("s-{id}")})).unwrap();
-            s.score = score;
-            if fetched {
-                s.fetched_at = Some("2026-11-14T00:00:00Z".into());
-            }
-            s
+    fn queue_posts_name_their_topic() {
+        let item = |source, id: &str| Item {
+            source,
+            id: id.into(),
+            ..Item::default()
         };
-        // Listed out of score order; 4 isn't swiped, 5 is fetched already.
-        let scenes = [
-            s(1, 3.0, false),
-            s(2, 9.5, false),
-            s(3, 9.5, false),
-            s(4, 20.0, false),
-            s(5, 30.0, true),
-            s(6, -1.0, false),
-        ];
-        assert_eq!(fetch_queue(&scenes, &[1, 2, 3, 5, 6]), [3, 2, 1, 6]);
+        assert_eq!(post_topic(&item("eroscripts", "349897")), Some(349897));
+        assert_eq!(post_topic(&item("creators", "eroscripts:123")), Some(123));
+        assert_eq!(post_topic(&item("creators", "faptap:123")), None);
+        assert_eq!(post_topic(&item("slr", "51579")), None);
     }
 
     #[test]
-    fn reads_right_swipes() {
+    fn reads_swipes_either_way() {
         let dir = std::env::temp_dir().join(format!("slr-scout-swipes-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        assert!(right_swipes(&dir).unwrap().is_empty());
+        assert!(swiped(&dir).unwrap().is_empty());
         fs::write(
             dir.join(SWIPES_FILE),
             r#"{"version": 1, "swipes": {"66249": {"dir": "right", "at": "x"},
                 "65840": {"dir": "right"}, "7": {"dir": "left"}, "bad": {"dir": "right"}}}"#,
         )
         .unwrap();
-        assert_eq!(right_swipes(&dir).unwrap(), [65840, 66249]);
+        assert_eq!(swiped(&dir).unwrap(), [7, 65840, 66249]);
         fs::write(dir.join(SWIPES_FILE), "nope").unwrap();
-        assert!(right_swipes(&dir).is_err());
+        assert!(swiped(&dir).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

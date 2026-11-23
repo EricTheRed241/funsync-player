@@ -4,8 +4,9 @@
 //! - **Waiting**: swiped right and not in the library yet; the next download run takes it
 //!   (an EroScripts post still on the waiting list, a scene not fetched, a creator's post).
 //! - **SLR**: the same for whatever downloads from SexLikeReal (SLR scenes, posts and creator
-//!   posts whose video is on SLR): those wait on the account's quota, which comes along
-//!   (`slr-scout.json`'s `quota` / `quotaError`), so they're kept apart from Waiting.
+//!   posts whose video is on SLR): those wait for the weekly SLR run and the account's quota
+//!   (`slr-scout.json`'s `quota` / `quotaError`), in the order that run takes them
+//!   (crate::slr_queue), so they're kept apart from Waiting.
 //! - **Downloaded**: swiped right and in the library, within the last RECENT_DAYS, newest
 //!   first (at most MAX_RECENT). A post's time is its newest library video's modification
 //!   time (crate::library::topic_downloaded), a scene's its scout's `fetchedAt`.
@@ -13,8 +14,9 @@
 //!   (`eroscripts-scout-rejected.json`'s reasons), or it left the waiting list or the scout's
 //!   file.
 //!
-//! Plus the download job (`eroscripts-scout` in deploy/jobs.json: every scout's `--fetch`)
-//! as the job runner last saw it: running now (and its log's last line) or its last run.
+//! Plus the download jobs (deploy/jobs.json) as the job runner last saw them, and when each
+//! runs next: `downloads` (hourly: every scout's `--fetch` but SLR) and `slr-downloads`
+//! (weekly), running now (and its log's last line) or its last run.
 
 use crate::creators::Creators;
 use crate::frames;
@@ -31,8 +33,10 @@ use std::time::{Duration, SystemTime};
 /// "Downloaded" lists what came in this many days back.
 pub const RECENT_DAYS: u64 = 30;
 pub const MAX_RECENT: usize = 100;
-/// The job that downloads the right swipes (deploy/jobs.json).
-pub const DOWNLOAD_JOB: &str = "eroscripts-scout";
+/// The job that downloads the right swipes but SLR's, and the one that downloads SLR's
+/// (deploy/jobs.json).
+pub const DOWNLOAD_JOB: &str = "downloads";
+pub const SLR_JOB: &str = "slr-downloads";
 pub const REJECTED_FILE: &str = "eroscripts-scout-rejected.json";
 /// Longest log line passed on.
 const MAX_LOG_LINE: usize = 300;
@@ -41,7 +45,7 @@ const MAX_LOG_LINE: usize = 300;
 #[serde(rename_all = "camelCase")]
 pub struct Downloads {
     pub waiting: Vec<Item>,
-    /// Waiting items that download from SexLikeReal (`Item::slr`).
+    /// Waiting items that download from SexLikeReal (`Item::slr`), in the weekly run's order.
     pub slr: Vec<Item>,
     pub recent: Vec<Item>,
     pub wont: Vec<Item>,
@@ -50,6 +54,7 @@ pub struct Downloads {
     pub quota: Value,
     pub quota_error: Option<String>,
     pub job: Job,
+    pub slr_job: Job,
     /// Files that exist but couldn't be read, library sources that can't be.
     pub problems: Vec<String>,
 }
@@ -80,9 +85,24 @@ pub struct Item {
     pub downloaded_at: Option<String>,
     /// Why it waits or won't come.
     pub note: Option<String>,
+    /// Its score (the scout's), for the SLR queue.
+    pub score: Option<f64>,
+    /// An SLR scene's script source (`eroscripts`, `slr-handcrafted`, `slr-ai`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
+    /// An SLR scene that also has SLR's AI script (the hand-crafted one's fallback).
+    #[serde(skip)]
+    pub ai_script: bool,
+    /// SLR tab: place in the weekly run's queue (1-based), place among the ones put first,
+    /// and whether the next run takes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<usize>,
+    pub this_week: bool,
 }
 
-/// The download job as the job runner last saw it.
+/// A download job as the job runner last saw it.
 #[derive(Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -95,6 +115,9 @@ pub struct Job {
     pub exit: Option<i32>,
     /// The run's log's last line while it runs.
     pub last_line: Option<String>,
+    /// Its schedule (cron, local time) and next scheduled start (unix seconds).
+    pub schedule: Option<String>,
+    pub next: Option<i64>,
 }
 
 /// Read every file and sort the right swipes.
@@ -203,6 +226,7 @@ pub fn load(user_data: &Path) -> Downloads {
                 .any(|t| t.eq_ignore_ascii_case("vr")),
             slr: crate::creators::on_slr(post),
             swiped_at: w.at.clone(),
+            score: post.get("score").and_then(Value::as_f64),
             ..Item::default()
         };
         let downloaded = topic
@@ -222,7 +246,11 @@ pub fn load(user_data: &Path) -> Downloads {
     }
 
     d.waiting.sort_by(|a, b| b.swiped_at.cmp(&a.swiped_at));
-    d.slr.sort_by(|a, b| b.swiped_at.cmp(&a.swiped_at));
+    let first = crate::slr_queue::read(user_data).unwrap_or_else(|e| {
+        problems.push(e);
+        crate::slr_queue::Priority::default()
+    });
+    crate::slr_queue::arrange(&mut d.slr, &first.first, &d.quota);
     d.wont.sort_by(|a, b| b.swiped_at.cmp(&a.swiped_at));
     d.recent.retain(|i| {
         i.downloaded_at
@@ -232,7 +260,8 @@ pub fn load(user_data: &Path) -> Downloads {
     d.recent
         .sort_by(|a, b| b.downloaded_at.cmp(&a.downloaded_at));
     d.recent.truncate(MAX_RECENT);
-    d.job = job(user_data);
+    d.job = job(user_data, DOWNLOAD_JOB);
+    d.slr_job = job(user_data, SLR_JOB);
     d.problems = problems;
     d
 }
@@ -353,6 +382,7 @@ fn post_item(
             .iter()
             .any(|s| s.pointer("/video/host").and_then(Value::as_str) == Some("slr")),
         gb: report::total_gb(scenes),
+        score: cand.and_then(|c| c.get("score")).and_then(Value::as_f64),
         ..Item::default()
     }
 }
@@ -376,25 +406,40 @@ fn scene_item(src: Source, id: String, s: &Value) -> Item {
             .get("fileSize")
             .and_then(Value::as_f64)
             .map(|b| (b / 1e7).round() / 100.0),
+        score: s.get("score").and_then(Value::as_f64),
+        script: (src == Source::Slr)
+            .then(|| str_of(s, "scriptSource"))
+            .flatten(),
+        ai_script: flag(s, "aiScript"),
         ..Item::default()
     }
 }
 
-/// The download job's state (job_runner::state) and whether it runs now (its lock's pid).
-fn job(user_data: &Path) -> Job {
-    let last = job_runner::state::read(user_data, DOWNLOAD_JOB).last;
-    let running = job_runner::exec::holder(user_data, DOWNLOAD_JOB).is_some();
+/// A job's state (job_runner::state), whether it runs now (its lock's pid) and its next
+/// scheduled start (deploy/jobs.json's `schedule`).
+fn job(user_data: &Path, name: &'static str) -> Job {
+    let last = job_runner::state::read(user_data, name).last;
+    let running = job_runner::exec::holder(user_data, name).is_some();
     let last_line = running
         .then(|| last.as_ref().and_then(|r| last_log_line(Path::new(&r.log))))
         .flatten();
+    let schedule = job_runner::jobs::parse(job_runner::jobs::BUILT_IN)
+        .ok()
+        .and_then(|jobs| jobs.into_iter().find(|j| j.name == name))
+        .and_then(|j| j.schedule);
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
     Job {
-        name: DOWNLOAD_JOB,
+        name,
         running,
         started: last.as_ref().map(|r| r.started),
         ended: last.as_ref().and_then(|r| r.ended),
         result: last.as_ref().map(|r| r.result.clone()),
         exit: last.as_ref().and_then(|r| r.exit),
         last_line,
+        next: schedule.as_ref().and_then(|s| s.next_after(now)),
+        schedule: schedule.map(|s| s.text().to_string()),
     }
 }
 

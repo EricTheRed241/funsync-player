@@ -18,6 +18,8 @@ pub const SWIPES_NAME: &str = "creator-swipes.json";
 pub const VERSION: u64 = 1;
 /// Fetch attempts per post before it is given up.
 pub const MAX_TRIES: u32 = 5;
+/// Hours between fetch tries of a post: 5 tries span about two days.
+pub const RETRY_HOURS: i64 = 12;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

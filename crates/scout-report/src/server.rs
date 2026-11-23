@@ -16,8 +16,10 @@
 //! library videos), `POST /api/free-space/delete` (rates the left-marked ones for deletion
 //! through the app's backend), `POST /api/duplicates/swipe {id, dir: left|right|up}`,
 //! `…/undo {id}` (marks on pairs) and `POST /api/duplicates/delete` (the app deletes each
-//! marked copy as a duplicate). The swipes files are the only writes, crate::swipes and
-//! crate::creators. Post and
+//! marked copy as a duplicate), `POST /api/slr-priority {first: [key…]}` (the SLR tab's queue:
+//! the keys put ahead of the score order, crate::slr_queue). The swipes files and
+//! slr-priority.json are the only writes, crate::swipes, crate::creators and crate::slr_queue.
+//! Post and
 //! scene swipes are refused (507) while the library drive is full; undos and the Free space
 //! and Duplicates tabs' marks never are. In front of them all, crate::gate: the access PIN,
 //! and `/login` and `/logout`.
@@ -27,6 +29,7 @@ use crate::scenes::{self, Source};
 use crate::swipes::{self, Dir, Store};
 use crate::{
     creator_pictures, creators, deck, downloads, drive, duplicates, frames, free_space, report,
+    slr_queue,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -152,6 +155,7 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
         ("GET" | "HEAD", "/api/drive") => json_ok(&drive::status(user_data)),
         ("GET" | "HEAD", "/downloads") => html(DOWNLOADS_PAGE),
         ("GET" | "HEAD", "/api/downloads") => json_ok(&downloads::load(user_data)),
+        ("POST", "/api/slr-priority") => slr_priority(body, user_data),
         ("GET" | "HEAD", "/api/deck") => match deal(query) {
             Ok(d) if d.stack == deck::Stack::Free => {
                 json_ok(&free_space::load(user_data, d.limit, &d.exclude))
@@ -341,6 +345,24 @@ fn free_request(body: &[u8]) -> Result<(Value, String), Response> {
 
 fn free_id(body: &[u8]) -> Result<String, Response> {
     free_request(body).map(|(_, id)| id)
+}
+
+/// `POST /api/slr-priority {first: [key…]}`: the SLR keys to put first, in order.
+fn slr_priority(body: &[u8], user_data: &Path) -> Response {
+    let first: Option<Vec<String>> = serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("first").cloned())
+        .and_then(|f| serde_json::from_value(f).ok());
+    let Some(first) = first else {
+        return text(400, "body must be {\"first\": [\"<source>:<id>\", …]}\n");
+    };
+    if let Err(e) = slr_queue::check(&first) {
+        return text(400, &format!("{e}\n"));
+    }
+    match slr_queue::write(user_data, first) {
+        Ok(p) => json_ok(&p),
+        Err(e) => text(500, &format!("{e}\n")),
+    }
 }
 
 /// `POST /api/free-space/swipe {id, dir}`: mark a library video (left = delete, right = keep).

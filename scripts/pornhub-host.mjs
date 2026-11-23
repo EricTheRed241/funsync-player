@@ -14,7 +14,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { durationMatches, streamTitle } from './stream-hosts.mjs';
+import { downloadFits, streamTitle } from './stream-hosts.mjs';
 
 export const PORNHUB_HOST = 'pornhub';
 export const YT_DLP = 'yt-dlp';
@@ -120,9 +120,9 @@ export function pornhubFile(url, info) {
   };
 }
 
-/** True when the main script (`scriptMs`) fits the video (`durationSec`); unknown lengths pass. */
+/** True when the main script (`scriptMs`) fits the video (`durationSec`) for a download (downloadFits); unknown lengths pass. */
 export function pornhubFits(durationSec, scriptMs) {
-  return !(scriptMs > 0 && durationSec > 0) || durationMatches(durationSec, scriptMs);
+  return !(scriptMs > 0 && durationSec > 0) || downloadFits(durationSec, scriptMs);
 }
 
 /** Runs yt-dlp: `{code, stdout, stderr}`; YtDlpMissingError when it isn't installed. */
@@ -179,7 +179,7 @@ export function createPornhub({ run = runYtDlp } = {}) {
       if (videoSeconds) {
         const got = videoSeconds(tmp);
         if (!got) throw new Error('pornhub: the download isn\'t a readable video (ffprobe)');
-        if (want && !durationMatches(got, want)) throw new Error(`pornhub: downloaded video ${Math.round(got)} s, script ${Math.round(want / 1000)} s; not this scene's video`);
+        if (want && !downloadFits(got, want)) throw new Error(`pornhub: downloaded video ${Math.round(got)} s, script ${Math.round(want / 1000)} s; not this scene's video`);
       }
     },
   };

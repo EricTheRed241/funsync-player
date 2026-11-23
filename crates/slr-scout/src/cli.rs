@@ -10,7 +10,7 @@ by the scout:report swipe page), and download the scenes swiped right
 
 Usage:
   npm run slr:scout [-- --actor <name>]... [--no-forum] [--frames <n>]
-  npm run slr:scout -- --fetch [--dry-run]
+  npm run slr:scout -- --fetch [--dry-run] [--npm <cmd>]
   npm run slr:scout -- --quota
   npm run slr:scout -- --login [--credentials <file>]
 
@@ -22,10 +22,12 @@ Options:
                         previous run are kept)
   --frames <n>          Take preview frames for at most n scenes this scan (default 100;
                         0: none)
-  --fetch               Download the scenes swiped right (<userData>/slr-scout-swipes.json)
-                        that aren't fetched yet: video and script, into the library
+  --fetch               Download the SLR queue: the right swipes that download from
+                        SexLikeReal (the Downloads page's SLR tab), in its order
   --dry-run             With --fetch: print the plan (download choice, script, target
                         path); no download request is sent
+  --npm <cmd>           With --fetch: the npm that runs eroscripts:scout for the queue's
+                        posts (default npm; run from the repo root)
   --quota               Only refresh the download quota in the existing file
   --login               Sign in to SLR in a visible Chrome window (Google Chrome,
                         profile <userData>/slr-chrome), save the session to
@@ -58,14 +60,20 @@ got none records framesFailed and is tried again after 7 days.
 The quota (hand-crafted scripts, AI scripts, videos) needs a session; when it can't
 be read, the previous quota is kept and quotaError says why.
 
---fetch takes each right-swiped scene (highest score first): SLR's download within the
-video caps (maxResolution, else optimalResolution; never the trailer) into
-<library parent>/_staging, then <Other>/<first performer>/<Performers> - <Title>
-(<Studio>)<VR suffix>/ with the script and an slr.json sidecar; generated twist / roll /
-pitch (scripts/upgrade-multi-axis.mjs); fetchedAt in slr-scout.json; at the end the app
-is asked to rescan. A scene without a script to take is skipped. It stops at the
-weekly video quota and at the library cap (libraryMaxVideos). The quota it reads at
-the start, and what's left after each download, go into slr-scout.json's quota.
+--fetch takes the SLR queue (scout-report's crate::slr_queue, the order the Downloads
+page's SLR tab shows): the right swipes that download from SexLikeReal, scenes of this
+file and EroScripts posts (swiped or a creator's) whose video is on SLR, highest score
+first except the ones put first on that tab (<userData>/slr-priority.json). A scene:
+SLR's download within the video caps (maxResolution, else optimalResolution; never the
+trailer) into <library parent>/_staging, then <Other>/<first performer>/<Performers> -
+<Title> (<Studio>)<VR suffix>/ with the script and an slr.json sidecar; generated twist /
+roll / pitch (scripts/upgrade-multi-axis.mjs); fetchedAt in slr-scout.json. A scene
+without a script to take (a used-up monthly script quota) is skipped. A post goes to
+npm run eroscripts:scout -- --fetch --ids <id> --slr (after --add <id> when it isn't on
+the waiting list), and the quota is read again after it. It stops at the weekly video
+quota and at the library cap (libraryMaxVideos); at the end the app is asked to
+rescan. The quota it reads at the start, and what's left after each download, go into
+slr-scout.json's quota. The scheduled job slr-downloads runs it weekly.
 
 Exit codes: 0 ok, 1 error, 2 rate limited (HTTP 429), or --fetch stopped by a quota or
 the library cap with work left, 3 not logged in (no or expired SLR session; a scout run
@@ -85,6 +93,8 @@ pub struct Options {
     pub credentials: Option<PathBuf>,
     /// `--frames N`: scenes given preview frames this scan (None: frames::DEFAULT_PER_SCAN).
     pub frames: Option<usize>,
+    /// `--npm <cmd>`: runs eroscripts:scout for the queue's posts (None: `npm`).
+    pub npm: Option<String>,
 }
 
 pub fn parse(args: &[OsString]) -> Result<Options, String> {
@@ -100,7 +110,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
         };
         let takes_value = matches!(
             flag,
-            "--user-data" | "--actor" | "--credentials" | "--frames"
+            "--user-data" | "--actor" | "--credentials" | "--frames" | "--npm"
         );
         if inline.is_some() && !takes_value {
             return Err(format!("{flag} takes no value"));
@@ -126,6 +136,7 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
                 o.actors.push(name);
             }
             "--credentials" => o.credentials = Some(PathBuf::from(value()?)),
+            "--npm" => o.npm = Some(value()?),
             "--frames" => {
                 let v = value()?;
                 o.frames = Some(
@@ -159,6 +170,9 @@ pub fn parse(args: &[OsString]) -> Result<Options, String> {
     }
     if o.credentials.is_some() && !o.login {
         return Err("--credentials goes with --login".into());
+    }
+    if o.npm.is_some() && !o.fetch {
+        return Err("--npm goes with --fetch".into());
     }
     Ok(o)
 }

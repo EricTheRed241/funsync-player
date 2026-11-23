@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { chooseLink, sceneUrl } from './vrbangers-lib.mjs';
-import { durationMatches, pacedFetch } from './stream-hosts.mjs';
+import { downloadFits, pacedFetch, wholeDownload } from './stream-hosts.mjs';
 
 export const VRBANGERS_HOST = 'vrbangers';
 /** Least time between two vrbangers.com page reads. */
@@ -175,9 +175,10 @@ const lazyBrowser = () => import('./vrbangers-browser.mjs');
  *   else the best one within the caps → `{link, userAgent}`.
  * - `probe(file)`: fresh, then a 1-byte Range request → `{link, status, total}`.
  * - `download(file, tmp, {scriptMs, videoSeconds})`: fresh, stream into
- *   `tmp`, then the size (the site's byte count) and the length (ffprobe
- *   through `videoSeconds`, durationMatches with the main script, else the
- *   page's length) must agree. Returns the link taken.
+ *   `tmp`, then the size (wholeDownload: the Content-Length, else within 1 %
+ *   of the site's byte count) and the length (ffprobe through `videoSeconds`,
+ *   downloadFits with the main script, else the page's length) must agree.
+ *   Returns the link taken.
  * - `run(fn)`: `fn()`, then `close()`, also when it throws.
  * - `close()`: quit Chrome if it was started.
  */
@@ -242,7 +243,7 @@ export function createVrbangers({
       return { link, status: resp.status, total };
     },
     async download(file, tmp, { scriptMs = null, videoSeconds } = {}) {
-      if (scriptMs && file.duration && !durationMatches(file.duration, scriptMs)) {
+      if (scriptMs && file.duration && !downloadFits(file.duration, scriptMs)) {
         throw new Error(`vrbangers: video ${clock(file.duration * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
       }
       const { link, userAgent } = await host.fresh(file);
@@ -252,13 +253,14 @@ export function createVrbangers({
         throw new Error(`vrbangers: HTTP ${resp.status} for ${link.file}`);
       }
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
-      const want = link.bytes || (link.file === file.name ? file.size : 0) || Number(resp.headers.get('content-length')) || 0;
       const size = fs.statSync(tmp).size;
-      if (want && size !== want) throw new Error(`vrbangers: size ${size} ≠ ${want} for ${link.file}`);
+      const listed = link.bytes || (link.file === file.name ? file.size : 0);
+      const broken = wholeDownload(size, { contentLength: resp.headers.get('content-length'), listed });
+      if (broken) throw new Error(`vrbangers: ${broken} for ${link.file}`);
       const got = videoSeconds(tmp);
       if (!got) throw new Error(`vrbangers: ${link.file} isn't a readable video (ffprobe)`);
       // The main script must fit the download; without one the page's length and the file's must fit each other either way.
-      const fits = scriptMs ? durationMatches(got, scriptMs) : !file.duration || durationMatches(got, file.duration * 1000) || durationMatches(file.duration, got * 1000);
+      const fits = scriptMs ? downloadFits(got, scriptMs) : !file.duration || downloadFits(got, file.duration * 1000) || downloadFits(file.duration, got * 1000);
       if (!fits) throw new Error(`vrbangers: downloaded video ${clock(got * 1000)}, ${scriptMs ? `script ${clock(scriptMs)}` : `page ${clock(file.duration * 1000)}`}; not this scene's video`);
       return link;
     },
