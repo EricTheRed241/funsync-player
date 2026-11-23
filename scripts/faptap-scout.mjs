@@ -64,8 +64,8 @@ Pick:
 Download (needs ffmpeg and ffprobe on PATH):
   --fetch                download the saved list's videos swiped right in npm run scout:report
                          (<userData>/${lib.SWIPES_FILE}), best first, whatever their score, into the FapTap
-                         library folder (a left swipe only hides a video from the deck); skips scripts under
-                         ${scout.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
+                         library folder (a left swipe only hides a video from the deck), any length; skips
+                         scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting videos now off focus or breaking the content rules
   --ids a,b,c            only these FapTap video ids, swiped or not (instead of the swipes)
   --passes N             repeat the queue until no failures, at most N times (default 1)
@@ -197,9 +197,9 @@ function writeState(userData, state) {
   fs.renameSync(tmp, target);
 }
 
-/** Scenes not to fetch again: those with a sidecar and video, and every rejected one. */
+/** Scenes not to fetch again: those with a sidecar and video, and every rejected one but the once-too-short. */
 function doneScenes(incoming, userData) {
-  const done = new Set(rejectedVideos.readRejected(userData).entries.map((e) => e.key));
+  const done = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short').map((e) => e.key));
   walk(incoming, 0, (full, e) => {
     if (e.name !== lib.SIDECAR) return;
     try {
@@ -408,7 +408,7 @@ function sceneDir(parent, stem, id) {
 /** One pass over the queue; downloads at most `room` videos (the library cap). */
 async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
   const done = doneScenes(incoming, userData);
-  let ok = 0; let failed = 0; let short = 0; let capped = false;
+  let ok = 0; let failed = 0; let capped = false;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     if (done.has(lib.fetchedKey(c.id))) continue;
@@ -425,15 +425,6 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       stem = path.basename(dir);
       const video = path.join(dir, `${stem}.mp4`);
       const script = lib.csvToFunscript(await faptap(`/assets/${plan.script}`, { text: true }));
-      const lengthMs = scout.scriptDurationMs(script);
-      if (lengthMs < prefs.MIN_VIDEO_MS) {
-        rejectedVideos.recordRejection(userData, {
-          source: 'faptap', faptapId: c.id, title: c.title, url: c.url, reason: 'short', lengthMs, at: new Date().toISOString(),
-        });
-        console.log(`${now()} – ${creator}/${stem}: script ${Math.round(lengthMs / 1000)} s, under ${scout.MIN_VIDEO_LABEL}; skipped`);
-        short++;
-        continue;
-      }
       // The script goes in once the video is there, so a failed download
       // leaves no half scene behind.
       await downloadStream(plan.source.url, video, staging, c.duration);
@@ -454,7 +445,7 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       failed++;
     }
   }
-  return { ok, failed, short, capped };
+  return { ok, failed, capped };
 }
 
 /**
@@ -512,7 +503,7 @@ async function fetchAll(opts, { userData, config, incoming }) {
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
     const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming), room: prefs.LIBRARY_MAX_VIDEOS - held });
-    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.short} under ${scout.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (r.capped) break;
     if (!r.failed) return 0;

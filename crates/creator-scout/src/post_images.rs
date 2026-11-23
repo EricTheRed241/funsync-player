@@ -11,13 +11,14 @@ use crate::store::{self, CreatorsFile, Post};
 use crate::{eroscripts, faptap, instagram};
 use serde_json::Value;
 use slr_scout::http::{self, Http, NetError, Request};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
 /// A post without a picture isn't tried again for this long.
 pub const MISS_DAYS: i64 = 7;
 
-/// A post waiting for its picture.
+/// A post waiting for its picture (or, for `--runtimes`, its length).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Waiting {
     pub slug: String,
@@ -25,27 +26,34 @@ pub struct Waiting {
     pub id: String,
 }
 
-fn missed_recently(state: &State, key: &str, now: i64) -> bool {
-    state
-        .post_image_misses
+/// Whether `key`'s miss (post key → when) is under [`MISS_DAYS`] old.
+pub fn missed_recently(misses: &BTreeMap<String, String>, key: &str, now: i64) -> bool {
+    misses
         .get(key)
         .and_then(|t| instagram::parse_iso(t))
         .is_some_and(|t| now - t < MISS_DAYS * 86_400)
 }
 
-fn wants_image(p: &Post, swipes: &Swipes) -> bool {
-    p.image.is_none()
-        && (p.kind == "faptap" || p.kind == "eroscripts")
-        && p.downloadable
-        && !p.in_library
-        && !swipes.posts.contains_key(&p.key())
+/// A post still to be had: downloadable, not in the library, not swiped.
+pub fn open_post(p: &Post, swipes: &Swipes) -> bool {
+    p.downloadable && !p.in_library && !swipes.posts.contains_key(&p.key())
 }
 
-/// The posts whose picture is due: no image, downloadable, not in the
-/// library, not swiped, of a creator not swiped no, not missed in the last
-/// [`MISS_DAYS`] days. Creators with a source first (swiped, favourite,
-/// pornstar list), then by slug; her posts in their order.
-pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes, now: i64) -> Vec<Waiting> {
+fn wants_image(p: &Post, swipes: &Swipes) -> bool {
+    p.image.is_none() && (p.kind == "faptap" || p.kind == "eroscripts") && open_post(p, swipes)
+}
+
+/// The posts `wants` takes, of creators not swiped no, not missed in the
+/// last [`MISS_DAYS`] days (`misses`). Creators with a source first
+/// (swiped, favourite, pornstar list), then by slug; her posts in their
+/// order.
+pub fn waiting(
+    file: &CreatorsFile,
+    swipes: &Swipes,
+    misses: &BTreeMap<String, String>,
+    now: i64,
+    wants: impl Fn(&Post) -> bool,
+) -> Vec<Waiting> {
     let mut creators: Vec<_> = file
         .creators
         .iter()
@@ -57,7 +65,7 @@ pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes, now: i64) -> Vec
         .flat_map(|(slug, c)| {
             c.posts
                 .iter()
-                .filter(|p| wants_image(p, swipes) && !missed_recently(state, &p.key(), now))
+                .filter(|p| wants(p) && !missed_recently(misses, &p.key(), now))
                 .map(move |p| Waiting {
                     slug: slug.clone(),
                     kind: p.kind.clone(),
@@ -67,12 +75,19 @@ pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes, now: i64) -> Vec
         .collect()
 }
 
-/// Posts missed in the last [`MISS_DAYS`] days.
-pub fn missed(state: &State, now: i64) -> usize {
-    state
-        .post_image_misses
+/// The posts whose picture is due: no image, an open post ([`open_post`]),
+/// as [`waiting`] picks them.
+pub fn due(file: &CreatorsFile, state: &State, swipes: &Swipes, now: i64) -> Vec<Waiting> {
+    waiting(file, swipes, &state.post_image_misses, now, |p| {
+        wants_image(p, swipes)
+    })
+}
+
+/// Misses (post key → when) in the last [`MISS_DAYS`] days.
+pub fn missed(misses: &BTreeMap<String, String>, now: i64) -> usize {
+    misses
         .keys()
-        .filter(|k| missed_recently(state, k, now))
+        .filter(|k| missed_recently(misses, k, now))
         .count()
 }
 
@@ -98,7 +113,7 @@ enum Outcome {
 }
 
 /// A JSON document; `None` when it is gone (404 / 410).
-fn json_unless_gone(http: &dyn Http, req: &Request) -> Result<Option<Value>, NetError> {
+pub(crate) fn json_unless_gone(http: &dyn Http, req: &Request) -> Result<Option<Value>, NetError> {
     let res = http
         .send(req)
         .map_err(|e| NetError::Failed(format!("{}: {e}", req.url)))?;
@@ -187,7 +202,7 @@ pub struct PostImages<'a> {
     pub fake: bool,
 }
 
-fn now_secs() -> i64 {
+pub(crate) fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
@@ -372,6 +387,6 @@ mod tests {
             keys,
             ["c/faptap:8", "a/faptap:2", "b/faptap:1", "b/eroscripts:5"]
         );
-        assert_eq!(missed(&state, now), 1);
+        assert_eq!(missed(&state.post_image_misses, now), 1);
     }
 }

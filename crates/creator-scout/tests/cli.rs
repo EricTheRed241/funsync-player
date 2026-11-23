@@ -878,3 +878,127 @@ fn post_images_without_a_forum_session_skip_eroscripts_posts_exit_3() {
     assert!(t.state()["postImageMisses"].as_object().unwrap().is_empty());
     assert!(t.creators()["creators"]["a1"]["posts"][0]["image"].is_null());
 }
+
+fn es_post(id: &str, title: &str) -> Value {
+    json!({"kind": "eroscripts", "id": id, "title": title, "url": format!("{FORUM}/t/{id}"),
+           "free": true, "downloadable": true, "hosts": ["pixeldrain"]})
+}
+
+#[test]
+fn runtimes_time_the_main_script_and_remember_posts_without_one() {
+    let t = TempDir::new();
+    let mut timed = es_post("202", "Already timed");
+    timed["durationS"] = json!(99);
+    fs::write(
+        t.ud().join("creators.json"),
+        json!({"version": 1, "creators": {"a1": {"name": "A One", "posts": [
+            es_post("200", "A One - Riding Session"), es_post("201", "A One - No files"), timed, ft_post("101")]}}})
+        .to_string(),
+    )
+    .unwrap();
+    let link = |file: &str, name: &str| {
+        format!("<a class=\"attachment\" href=\"/uploads/short-url/{file}\">{name}</a>")
+    };
+    let mut fixtures = serde_json::Map::new();
+    fixtures.insert(
+        format!("GET {FORUM}/t/200.json"),
+        json!({"body": {"id": 200, "post_stream": {"posts": [{"cooked": format!("<p>{}{}{}</p>",
+            link("intro.funscript", "Intro.funscript"),
+            link("riding.funscript", "Riding Session.funscript"),
+            link("riding-roll.funscript", "Riding Session.roll.funscript"))}]}}}),
+    );
+    fixtures.insert(
+        format!("GET {FORUM}/t/201.json"),
+        json!({"body": {"id": 201, "post_stream": {"posts": [{"cooked": "<p>Video on pixeldrain</p>"}]}}}),
+    );
+    // The forum redirects an upload to its CDN.
+    fixtures.insert(
+        format!("GET {FORUM}/uploads/short-url/riding.funscript"),
+        json!({"status": 302, "headers": [["Location", "https://cdn.es/riding.funscript"]]}),
+    );
+    fixtures.insert(
+        "GET https://cdn.es/riding.funscript".into(),
+        json!({"body": {"version": "1.0", "actions": [
+            {"at": 0, "pos": 0}, {"at": 754_600, "pos": 80}, {"at": 300_000, "pos": 20}]}}),
+    );
+    fixtures.insert(
+        format!("GET {FORUM}/uploads/short-url/intro.funscript"),
+        json!({"body": {"actions": [{"at": 10_000, "pos": 0}]}}),
+    );
+    let fixtures = t.write("fixtures.json", &Value::Object(fixtures).to_string());
+
+    // One post per run: the rest is work left.
+    let o = run(&t, &["--runtimes", "1"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(2), "{out}");
+    assert!(
+        out.contains("A One: eroscripts 200: 12:35 (Riding Session.funscript)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("1 filled") && out.contains("1 waiting"),
+        "{out}"
+    );
+    let posts = |f: &Value| f["creators"]["a1"]["posts"].as_array().unwrap().clone();
+    assert_eq!(posts(&t.creators())[0]["durationS"], 755);
+    assert_eq!(t.state()["lastRuns"]["runtimes"]["code"], 2);
+    let work = t.ud().join("creator-scout-work");
+    assert_eq!(fs::read_dir(&work).unwrap().count(), 0, "temp script left");
+
+    let o = run(&t, &["--runtimes"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}");
+    assert!(
+        out.contains("eroscripts 201: no stroke script attached; tried again in 7 days"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("eroscripts 202") && !out.contains("faptap"),
+        "{out}"
+    );
+    let p = posts(&t.creators());
+    assert_eq!(p[0]["durationS"], 755);
+    assert!(p[1]["durationS"].is_null());
+    assert_eq!(p[2]["durationS"], 99);
+    assert!(p[3]["durationS"].is_null());
+    let missed_at = t.state()["runtimeMisses"]["eroscripts:201"].clone();
+    assert!(missed_at.is_string(), "{}", t.state());
+
+    // The miss isn't tried again for 7 days.
+    let o = run(&t, &["--runtimes"], Some(&fixtures));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}");
+    assert!(!out.contains("201"), "{out}");
+    assert!(out.contains("0 filled"), "{out}");
+    assert_eq!(t.state()["runtimeMisses"]["eroscripts:201"], missed_at);
+    let o = run(&t, &["--status"], None);
+    assert!(
+        text(&o).contains(
+            "Runtimes: 0 EroScripts post(s) waiting for their runtime, 1 without a readable script"
+        ),
+        "{}",
+        text(&o)
+    );
+}
+
+#[test]
+fn runtimes_without_a_forum_session_wait_and_exit_3() {
+    let t = TempDir::new();
+    fs::write(t.ud().join("config.json"), "{}").unwrap();
+    fs::write(
+        t.ud().join("creators.json"),
+        json!({"version": 1, "creators": {"a1": {"name": "A One", "posts": [es_post("200", "Script")]}}})
+            .to_string(),
+    )
+    .unwrap();
+    let none = t.write("fixtures.json", "{}");
+    let o = run(&t, &["--runtimes"], Some(&none));
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(3), "{out}");
+    assert!(
+        out.contains("no session cookie") && out.contains("1 waiting"),
+        "{out}"
+    );
+    assert!(t.state()["runtimeMisses"].as_object().unwrap().is_empty());
+    assert!(t.creators()["creators"]["a1"]["posts"][0]["durationS"].is_null());
+}

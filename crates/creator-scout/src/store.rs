@@ -205,8 +205,8 @@ impl Creator {
         self.posts.iter().find(|p| p.kind == kind && p.id == id)
     }
 
-    /// Add `post`, or refresh the one with its key (keeping its image when
-    /// the new one has none). Returns whether it was new.
+    /// Add `post`, or refresh the one with its key (keeping its image and
+    /// runtime when the new one has none). Returns whether it was new.
     pub fn upsert_post(&mut self, mut post: Post) -> bool {
         match self
             .posts
@@ -219,6 +219,9 @@ impl Creator {
                 }
                 if post.created_at.is_none() {
                     post.created_at = old.created_at.clone();
+                }
+                if post.duration_s.is_none() {
+                    post.duration_s = old.duration_s;
                 }
                 *old = post;
                 false

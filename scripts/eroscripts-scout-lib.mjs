@@ -26,8 +26,8 @@
 //     daily run) takes only posts swiped right in `npm run scout:report`'s
 //     deck, whatever their score or axes; there's no score threshold any
 //     more. A left swipe only hides a post from the deck (readSwipes).
-//   • Videos shorter than MIN_VIDEO_MS (by the main script) aren't
-//     downloaded; shorter scenes fetched under older rules stay.
+//   • A swiped scene downloads whatever its length (user, 2026-11-23: "once
+//     we swipe, we assume downloaded"); MIN_VIDEO_MS no longer stops one.
 //   • Single-axis and multi-axis scenes alike (user, 2026-11-07: hand-made
 //     axes are a preference, not a requirement); multi-axis posts rank
 //     higher (RANKING.multiAxis) and download first.

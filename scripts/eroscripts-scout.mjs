@@ -105,7 +105,7 @@ Pick:
                          live-not-POV rule doesn't); single-axis scenes get generated axes
 Download:
   --fetch                download the saved list (multi-axis first) into the EroScripts library folder;
-                         skips videos under ${lib.MIN_VIDEO_LABEL}, scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
+                         any length (a swiped scene is wanted); skips scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids (also with --frames)
   --auto                 only the posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}),
@@ -795,9 +795,13 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
   return 'ok';
 }
 
-/** Scenes not to fetch: those with a sidecar and video, and every rejected one; `topics` (optional Set) gets the posts with a sidecar. */
+/**
+ * Scenes not to fetch: those with a sidecar and video, and every rejected one but those once turned down as too
+ * short (since 2026-11-23 a swiped scene downloads whatever its length); `topics` (optional Set) gets the posts
+ * with a sidecar.
+ */
 function fetchedScenes(incoming, userData, topics = null) {
-  const done = new Set(rejectedVideos.readRejected(userData).entries.map((e) => e.key));
+  const done = new Set(rejectedVideos.readRejected(userData).entries.filter((e) => e.reason !== 'short').map((e) => e.key));
   walk(incoming, 0, (full, e) => {
     if (e.name !== 'eroscripts.json') return;
     try {
@@ -827,7 +831,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
   const saved = readLocal();
   const byHand = (c) => c.scenes.some((sc) => [sc.video, ...sc.scripts].some((f) => lib.findLocalCopy(f, saved)));
   const order = [...queue].sort((a, b) => byHand(b) - byHand(a));
-  let ok = 0; let failed = 0; let generated = 0; let short = 0; let capped = false;
+  let ok = 0; let failed = 0; let generated = 0; let capped = false;
   let slrStop = null; let slrSkipped = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of order) {
@@ -840,7 +844,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       if (sc.packed) {
         try {
           const r = await fetchPacked(c, sc, { api, userData, incoming, staging, local, now });
-          ok += r.ok; short += r.short; generated += r.generated;
+          ok += r.ok; generated += r.generated;
         } catch (err) {
           console.log(`${now()} ✗ ${lib.creatorFolder(c.title, c.author)}/${sc.video.name}: ${err.message}`);
           failed++;
@@ -860,17 +864,6 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
         for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging, local);
         let lengthMs = null;
         try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
-        if (lengthMs !== null && lengthMs < prefs.MIN_VIDEO_MS) {
-          for (const f of sc.scripts) fs.rmSync(path.join(dir, lib.scriptFileName(stem, f.axis)), { force: true });
-          removeIfEmpty(dir);
-          removeIfEmpty(path.dirname(dir));
-          rejectedVideos.recordRejection(userData, {
-            topicId: c.id, video: sc.video.name, title: c.title, url: c.url, reason: 'short', lengthMs, at: new Date().toISOString(),
-          });
-          console.log(`${now()} – ${creator}/${stem}: ${Math.round(lengthMs / 1000)} s, under ${lib.MIN_VIDEO_LABEL}; skipped`);
-          short++;
-          continue;
-        }
         const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs, vr: c.vr === true });
         writeAtomic(path.join(dir, 'eroscripts.json'), JSON.stringify(
           lib.sceneSidecar(c, sc.video, path.basename(video), new Date().toISOString()), null, 1));
@@ -897,7 +890,7 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
       }
     }
   }
-  return { ok, failed, generated, short, capped, slrStop, slrSkipped };
+  return { ok, failed, generated, capped, slrStop, slrSkipped };
 }
 
 /**
@@ -946,7 +939,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
   const out = path.join(staging, `${sc.base}.unpacked`);
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
-  const r = { ok: 0, short: 0, generated: 0 };
+  const r = { ok: 0, generated: 0 };
   try {
     unpack(archive, out);
     const scenes = lib.unpackedScenes(filesUnder(out), { vr: c.vr });
@@ -966,14 +959,6 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       const dir = path.join(incoming, creator, stem);
       const video = path.join(dir, stem + path.extname(s.video.name).toLowerCase());
       if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in the library; left as is`); continue; }
-      const main = s.scripts.find((f) => f.axis === '');
-      let lengthMs = null;
-      try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(main.path, 'utf8'))); } catch { /* unreadable script: file it anyway */ }
-      if (lengthMs !== null && lengthMs < prefs.MIN_VIDEO_MS) {
-        console.log(`${now()} – ${creator}/${stem}: ${Math.round(lengthMs / 1000)} s, under ${lib.MIN_VIDEO_LABEL}; skipped`);
-        r.short++;
-        continue;
-      }
       fs.mkdirSync(dir, { recursive: true });
       for (const f of s.scripts) fs.renameSync(f.path, path.join(dir, lib.scriptFileName(stem, f.axis)));
       fs.renameSync(s.video.path, video);
@@ -990,7 +975,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       r.ok++;
     }
     // Nothing filed: no sidecar names this archive, so record it, or every pass and run fetches it again.
-    if (!r.ok) reject(r.short ? 'short' : 'duplicate');
+    if (!r.ok) reject('duplicate');
     fs.rmSync(archive, { force: true });
     return r;
   } finally {
@@ -1080,10 +1065,10 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
     // Chrome (vrbangers.com) starts with the pass's first VRBangers scene and is closed when the pass ends, failed or not.
     const r = await vrbangers.run(() => fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir }));
     const slrWaiting = r.slrSkipped ? `; ${r.slrSkipped} SexLikeReal scene${r.slrSkipped > 1 ? 's' : ''} waiting (${r.slrStop === 'quota' ? 'no video download left on the account' : 'not logged in to SexLikeReal'})` : '';
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.short} under ${lib.MIN_VIDEO_LABEL}, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${slrWaiting}`);
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${slrWaiting}`);
     if (r.ok) dedupeAfterFetch(userData);
     last = r;
-    did ||= r.ok + r.failed + r.short > 0;
+    did ||= r.ok + r.failed > 0;
     if (r.capped || !r.failed) break;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min for host quotas`);
