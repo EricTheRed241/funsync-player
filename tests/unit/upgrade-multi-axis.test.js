@@ -45,7 +45,7 @@ describe('planUpgrade', () => {
     expect(result.error).toBeNull();
     expect(result.writes.map((w) => w.suffix)).toEqual(['twist', 'roll', 'pitch']);
     expect(result.writes.map((w) => w.tcode)).toEqual(['R0', 'R1', 'R2']);
-    expect(result.writes.map((w) => w.mode)).toEqual(['guided', 'random', 'pattern']);
+    expect(result.writes.map((w) => w.mode)).toEqual(['guided', 'guided', 'pattern']);
   });
 
   it('does not invent surge/sway/valve unless those axes are enabled', () => {
@@ -76,12 +76,23 @@ describe('planUpgrade', () => {
     ]);
   });
 
-  it('random track is deterministic for a fixed injected noise function', () => {
-    const a = plan({ noise: createNoise1D(99) }).writes.find((w) => w.suffix === 'roll');
-    const b = plan({ noise: createNoise1D(99) }).writes.find((w) => w.suffix === 'roll');
+  it('pitch is deterministic for a fixed injected noise function', () => {
+    const a = plan({ noise: createNoise1D(99) }).writes.find((w) => w.suffix === 'pitch');
+    const b = plan({ noise: createNoise1D(99) }).writes.find((w) => w.suffix === 'pitch');
     expect(a.actions).toEqual(b.actions);
-    const other = plan({ noise: createNoise1D(3) }).writes.find((w) => w.suffix === 'roll');
+    const other = plan({ noise: createNoise1D(3) }).writes.find((w) => w.suffix === 'pitch');
     expect(other.actions).not.toEqual(a.actions);
+  });
+
+  it('only plans the axes asked for', () => {
+    expect(plan({ only: ['roll'] }).writes.map((w) => w.suffix)).toEqual(['roll']);
+  });
+
+  it('twist and roll of one scene draw different randomness', () => {
+    const { writes } = plan({ seed: 42 });
+    const pos = (s) => writes.find((w) => w.suffix === s).actions.map((a) => a.pos);
+    expect(pos('roll')).not.toEqual(pos('twist'));
+    expect(writes.find((w) => w.suffix === 'roll').generator).toMatch(/^roll-guided/);
   });
 
   it('clamps every generated position to 0-100', () => {
@@ -93,10 +104,9 @@ describe('planUpgrade', () => {
     }
   });
 
-  it('roll and pitch keep the stroke timestamps', () => {
-    for (const w of plan().writes.filter((x) => x.suffix !== 'twist')) {
-      expect(w.actions.map((a) => a.at)).toEqual(STROKE.map((a) => a.at));
-    }
+  it('pitch keeps the stroke timestamps', () => {
+    const w = plan().writes.find((x) => x.suffix === 'pitch');
+    expect(w.actions.map((a) => a.at)).toEqual(STROKE.map((a) => a.at));
   });
 
   it('roll and pitch are not copies of the stroke', () => {

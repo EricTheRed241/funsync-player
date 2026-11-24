@@ -2,17 +2,19 @@
  * @vitest-environment node
  * Pure generator — no DOM.
  */
-// The generated twist: guided by a stroke model, styled by fitted knobs,
-// randomness seeded per scene.
+// The generated twist and roll: guided by a stroke model, styled by fitted
+// knobs, randomness seeded per scene.
 
 import { describe, it, expect } from 'vitest';
 import {
-  TWIST_MODEL,
-  generateTwist,
+  AXIS_MODELS,
+  generateGuided,
   guidedTrack,
   strokeSeries,
   strokeTemplates,
-} from '../../renderer/js/twist-generator.js';
+} from '../../renderer/js/guided-axis.js';
+
+const TWIST_MODEL = AXIS_MODELS.twist;
 
 const HZ = TWIST_MODEL.hz;
 
@@ -55,11 +57,12 @@ describe('stroke templates', () => {
   });
 });
 
-describe('generateTwist', () => {
+describe.each(['twist', 'roll'])('generateGuided %s', (axis) => {
   const script = stroke(180);
+  const gen = (opts) => generateGuided(script, { axis, ...opts });
 
   it('writes a playable script over the stroke span: 0–100, in order, a point every 2 s or sooner (to the sample)', () => {
-    const { actions } = generateTwist(script, { vr: false, seed: 7 });
+    const { actions } = gen({ vr: false, seed: 7 });
     expect(actions.length).toBeGreaterThan(50);
     expect(actions[0].at).toBe(0);
     expect(actions[actions.length - 1].at).toBeLessThanOrEqual(180_000);
@@ -74,26 +77,24 @@ describe('generateTwist', () => {
     }
   });
 
-  it('the same seed gives the same twist, another seed another one', () => {
-    const a = generateTwist(script, { seed: 11 }).actions;
-    expect(generateTwist(script, { seed: 11 }).actions).toEqual(a);
-    expect(generateTwist(script, { seed: 12 }).actions).not.toEqual(a);
+  it('the same seed gives the same track, another seed another one', () => {
+    const a = gen({ seed: 11 }).actions;
+    expect(gen({ seed: 11 }).actions).toEqual(a);
+    expect(gen({ seed: 12 }).actions).not.toEqual(a);
   });
 
-  it('VR twist stays gentler than flat twist', () => {
-    const spread = (vr) => [1, 2, 3].map((seed) => std(generateTwist(script, { vr, seed }).actions.map((a) => a.pos)));
-    const vr = spread(true);
-    const flat = spread(false);
-    expect(Math.max(...vr)).toBeLessThan(Math.min(...flat));
+  it('VR stays gentler than flat', () => {
+    const spread = (vr) => [1, 2, 3].map((seed) => std(gen({ vr, seed }).actions.map((a) => a.pos)));
+    expect(Math.max(...spread(true))).toBeLessThan(Math.min(...spread(false)));
   });
 
   it('records which generator made it', () => {
-    expect(generateTwist(script, { vr: true }).generator).toBe(TWIST_MODEL.groups.vr.generator);
-    expect(generateTwist(script, { vr: false }).generator).toBe(TWIST_MODEL.groups.flat.generator);
+    expect(gen({ vr: true }).generator).toBe(AXIS_MODELS[axis].groups.vr.generator);
+    expect(gen({ vr: false }).generator).toBe(AXIS_MODELS[axis].groups.flat.generator);
   });
 
   it('returns nothing for a stroke without a span', () => {
-    expect(generateTwist([{ at: 0, pos: 10 }]).actions).toEqual([]);
+    expect(generateGuided([{ at: 0, pos: 10 }], { axis }).actions).toEqual([]);
   });
 });
 

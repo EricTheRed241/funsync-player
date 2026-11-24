@@ -10,19 +10,20 @@
 // exists is skipped. A script with any hand-made axes (see handmade-axes.js)
 // gets nothing at all: hand-made axis scripts always win.
 //
-// Twist comes from twist-generator.js (guided by the stroke, shaped like the
-// liked scenes' twist, seeded randomness); roll and pitch from motion-source.js.
+// Twist and roll come from guided-axis.js (guided by the stroke, shaped like
+// the liked scenes' hand-made axis, seeded randomness); pitch from
+// motion-source.js.
 
 import { generateAxisActions, shapeGeneratedValue, axisPhase, createNoise1D } from './motion-source.js';
 import { getBaseName, detectCompanionFiles } from './multi-axis.js';
 import { buildCompanionFiles } from './embedded-multi-axis.js';
-import { generateTwist } from './twist-generator.js';
+import { generateGuided } from './guided-axis.js';
 
 /**
  * Default extra axes for OSR / MiraBot Lite.
  *
- * Twist (`guided`): twist-generator.js, with VR and flat settings of its own.
- * Roll and pitch: none is a full copy of L0. Each keyframe is scaled to one
+ * Twist and roll (`guided`): guided-axis.js, with VR and flat settings per axis.
+ * Pitch: not a full copy of L0. Each keyframe is scaled to one
  * of 0 / 25 / 50 / 75 / 100% around centre, with odds that fall through the
  * video. On top of that, smooth noise changes the result by 10–60% of that
  * scaled motion, so the build stays visible and the path is not a schedule.
@@ -34,7 +35,7 @@ const HOLD_MS = 4_000;
 
 export const DEFAULT_UPGRADE_AXES = Object.freeze([
   { suffix: 'twist', tcode: 'R0', mode: 'guided' },
-  { suffix: 'roll',  tcode: 'R1', mode: 'random', ramp: 'down' },
+  { suffix: 'roll',  tcode: 'R1', mode: 'guided' },
   { suffix: 'pitch', tcode: 'R2', mode: 'pattern', pattern: 'sine', speed: 0.5, ramp: 'down' },
 ]);
 
@@ -192,8 +193,9 @@ function applyDepth(actions, segments, noise, phase) {
  *        suffixes (`handmadeAxisSuffixes`); any → no writes, error 'handmade-axes'
  * @param {Iterable<string>|Set<string>} [opts.enabledTcodes]
  * @param {(t:number)=>number} [opts.noise] — inject a seeded field; do not use Math.random
- * @param {boolean} [opts.vr] — the video is VR (twist has VR and flat settings)
- * @param {number} [opts.seed] — seeds the twist's randomness (one per scene)
+ * @param {boolean} [opts.vr] — the video is VR (twist and roll have VR and flat settings)
+ * @param {number} [opts.seed] — seeds the guided axes' randomness (one per scene)
+ * @param {Iterable<string>} [opts.only] — plan only these axis suffixes (all when omitted)
  * @returns {{
  *   writes: Array<{suffix:string, tcode:string, mode:string, path:string, actions:Array<{at:number, pos:number}>, segments:Array|null, generator?:string}>,
  *   skipped: Array<{suffix:string, tcode:string, path:string, reason:string}>,
@@ -209,6 +211,7 @@ export function planUpgrade({
   noise,
   vr = false,
   seed = 1337,
+  only,
 } = {}) {
   const stroke = Array.isArray(strokeActions) ? strokeActions : [];
   const existing = existingSuffixes instanceof Set
@@ -232,19 +235,22 @@ export function planUpgrade({
   const field = noise || createNoise1D();
   const writes = [];
   const skipped = [];
+  const onlySet = only ? new Set(only) : null;
   for (const axis of resolveUpgradeAxes(enabledTcodes)) {
+    if (onlySet && !onlySet.has(axis.suffix)) continue;
     const path = companionPathForScript(primaryPath, axis.suffix);
     if (existing.has(axis.suffix)) {
       skipped.push({ suffix: axis.suffix, tcode: axis.tcode, path, reason: 'exists' });
       continue;
     }
     if (axis.mode === 'guided') {
-      const twist = generateTwist(stroke, { vr, seed });
-      if (twist.actions.length < 2) {
+      // Roll draws from its own stream, so twist and roll of one scene don't share their randomness.
+      const guided = generateGuided(stroke, { axis: axis.suffix, vr, seed: axis.suffix === 'twist' ? seed : (seed ^ 0x9e3779b9) >>> 0 });
+      if (guided.actions.length < 2) {
         skipped.push({ suffix: axis.suffix, tcode: axis.tcode, path, reason: 'too-short' });
         continue;
       }
-      writes.push({ suffix: axis.suffix, tcode: axis.tcode, mode: axis.mode, path, actions: twist.actions, segments: null, generator: twist.generator });
+      writes.push({ suffix: axis.suffix, tcode: axis.tcode, mode: axis.mode, path, actions: guided.actions, segments: null, generator: guided.generator });
       continue;
     }
     const phase = axisPhase(axis.tcode);

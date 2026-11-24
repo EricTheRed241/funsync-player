@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 // One-shot: stroke funscript (+ optional video) → twist / roll / pitch companions.
 //
-// Twist is guided by the stroke and shaped like the twist of the scenes you
-// like, with seeded randomness (renderer/js/twist-generator.js; VR and flat
-// have their own settings). VR is decided as in `dedupe:scenes`: the
-// backend's stereo check when it has looked at the file, else the filename or
-// a VR-shaped frame (ffprobe). Each scene gets its own seed (from its name and
-// --seed), so a re-run writes the same twist.
-// Roll and pitch are scaled to 0 / 25 / 50 / 75 / 100% around centre, with
-// odds that fall later. Smooth noise then changes that scaled motion by
-// 10–60%, so the build stays visible. A 0% rest sits at centre and cannot last
-// more than 10 seconds.
+// Twist and roll are guided by the stroke and shaped like the hand-made axis
+// of the scenes you like, with seeded randomness (renderer/js/guided-axis.js;
+// VR and flat have their own settings). VR is decided as in `dedupe:scenes`:
+// the backend's stereo check when it has looked at the file, else the
+// filename or a VR-shaped frame (ffprobe). Each scene gets its own seed (from
+// its name and --seed), so a re-run writes the same axes.
+// Pitch is scaled to 0 / 25 / 50 / 75 / 100% around centre, with odds that
+// fall later. Smooth noise then changes that scaled motion by 10–60%, so the
+// build stays visible. A 0% rest sits at centre and cannot last more than 10
+// seconds.
 //
 // The stroke file is never overwritten. An existing companion for an axis is
-// skipped. A folder where any stroke script has hand-made axes (a companion
+// skipped, unless --replace: then an existing `.generated.` companion is
+// written again, the previous file kept as `<file>.<its generator>`
+// (`v0-random` when it doesn't name one). --only=roll,… limits the axes.
+// A folder where any stroke script has hand-made axes (a companion
 // that isn't `.generated.`, or axes embedded in the stroke script) is
 // skipped entirely, sibling videos included: hand-made axis scripts always
 // win (`npm run prune:generated` copies them to siblings whose timing
@@ -25,6 +28,7 @@
 //   node scripts/upgrade-multi-axis.mjs ./library-folder
 //   node scripts/upgrade-multi-axis.mjs --dry-run ./clip.funscript
 //   node scripts/upgrade-multi-axis.mjs --surge --sway ./clip.mp4
+//   node scripts/upgrade-multi-axis.mjs --only=roll --replace ./library-folder
 //
 // Prints the files it will write, then writes them. --dry-run stops after the list.
 
@@ -48,6 +52,7 @@ const {
   planUpgrade,
   serialiseUpgradeWrites,
   companionPathForScript,
+  resolveUpgradeAxes,
 } = await import('../renderer/js/upgrade-multi-axis.js');
 const { pairUpgradeJobs } = await import('./upgrade-pairing.mjs');
 const { VIDEO_EXTS, groupScenes, folderStrokeScripts, readStrokeScript, sceneHandmadeAxes } = await import('./handmade-scenes.mjs');
@@ -67,6 +72,9 @@ const flags = new Set(args.filter((a) => a.startsWith('--')));
 const paths = args.filter((a) => !a.startsWith('--'));
 const seedArg = args.find((a) => a.startsWith('--seed='));
 const seed = seedArg ? Number(seedArg.slice('--seed='.length)) : 1337;
+const onlyArg = args.find((a) => a.startsWith('--only='));
+const only = onlyArg ? onlyArg.slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean) : null;
+const replace = flags.has('--replace');
 
 const enabled = new Set();
 if (flags.has('--surge')) enabled.add('L1');
@@ -187,6 +195,24 @@ async function existingSuffixes(anchor) {
   return suffixes;
 }
 
+async function fileExists(p) {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The generator a companion file names in its metadata; `v0-random` for files from before it was recorded. */
+async function generatorTag(file) {
+  try {
+    const tag = JSON.parse((await fs.readFile(file, 'utf8')).replace(/^\uFEFF/, ''))?.metadata?.generator;
+    if (typeof tag === 'string' && /^[\w.-]+$/.test(tag)) return tag;
+  } catch { /* unreadable: treat as the old generator */ }
+  return 'v0-random';
+}
+
 /** Hand-made axes that keep a job from generating anything.
  *  `own`: its scene's (every stroke script of the same video in the script's
  *  folder, variants included, plus companions of the output anchor).
@@ -222,17 +248,25 @@ async function jobHandmadeAxes(anchor, script, parsed) {
 
 async function main() {
   if (paths.length === 0 || flags.has('--help') || flags.has('-h')) {
-    console.log(`Usage: node scripts/upgrade-multi-axis.mjs [--dry-run] [--seed=N] [--surge] [--sway] [--valve] <video|funscript|dir>...
+    console.log(`Usage: node scripts/upgrade-multi-axis.mjs [--dry-run] [--seed=N] [--only=twist,roll,…] [--replace] [--surge] [--sway] [--valve] <video|funscript|dir>...
 
-Twist is guided by the stroke and styled like the twist of your liked scenes (VR and flat
-settings of its own), with randomness seeded per scene. Roll and pitch are quieter late.
-A 0% rest sits at centre and cannot last more than 10 seconds.
-Does not overwrite the stroke file. Skips an axis whose companion already exists.
+Twist and roll are guided by the stroke and styled like the hand-made axis of your liked
+scenes (VR and flat settings of their own), with randomness seeded per scene. Pitch is
+quieter late; a 0% rest sits at centre and cannot last more than 10 seconds.
+Does not overwrite the stroke file. Skips an axis whose companion already exists, unless
+--replace: an existing .generated. companion is written again, the old file kept as
+<file>.<its generator>. --only limits the axes written.
 Skips a folder where any script has hand-made axes (companion files or axes embedded in the script).`);
     process.exit(paths.length === 0 ? 1 : 0);
   }
   if (!Number.isFinite(seed)) {
     console.error(`bad --seed: ${seedArg}`);
+    process.exit(1);
+  }
+  const known = new Set(resolveUpgradeAxes(enabled).map((a) => a.suffix));
+  const unknown = (only || []).filter((s) => !known.has(s));
+  if (only && (only.length === 0 || unknown.length > 0)) {
+    console.error(`bad --only: ${unknown.join(', ') || '(empty)'} (axes: ${[...known].join(', ')})`);
     process.exit(1);
   }
 
@@ -270,6 +304,18 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
     }
     const anchor = outputAnchor(job.video, job.script);
     const existing = await existingSuffixes(anchor);
+    // --replace: an axis whose only companion is our own generated file is planned again.
+    const replaced = new Set();
+    if (replace) {
+      for (const suffix of existing) {
+        if (only && !only.includes(suffix)) continue;
+        // A hand-made companion of this axis means hand-made axes: the job is skipped below.
+        if (await fileExists(companionPathForScript(anchor, suffix))) {
+          existing.delete(suffix);
+          replaced.add(suffix);
+        }
+      }
+    }
     const handmade = await jobHandmadeAxes(anchor, job.script, parsed);
     const vr = await sceneVr(job.video || job.script, caches);
     const plan = planUpgrade({
@@ -281,6 +327,7 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
       noise,
       vr,
       seed: sceneSeed(anchor),
+      only,
     });
     if (plan.error === 'handmade-axes') {
       if (handmade.own.length > 0) {
@@ -296,7 +343,7 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
       console.log(`skip ${job.script}: ${plan.error}`);
       continue;
     }
-    planned.push({ ...job, anchor, plan });
+    planned.push({ ...job, anchor, plan, replaced });
   }
 
   const writes = planned.flatMap((p) => p.plan.writes);
@@ -310,16 +357,17 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
     process.exit(1);
   }
 
-  console.log('Twist is guided by the stroke and styled like your liked scenes. Roll and pitch fall; noise is 10–60% of their motion.');
+  console.log('Twist and roll are guided by the stroke and styled like your liked scenes. Pitch falls; noise is 10–60% of its motion.');
   console.log('Stroke files are not modified.\n');
+  const replacing = new Set(planned.flatMap((p) => p.plan.writes.filter((w) => p.replaced.has(w.suffix)).map((w) => w.path)));
   for (const w of writes) {
-    console.log(`write  ${w.path}  (${MODE_LABEL[w.mode] || w.mode}${w.generator ? `: ${w.generator}` : ''})`);
+    console.log(`${replacing.has(w.path) ? 'replace' : 'write'}  ${w.path}  (${MODE_LABEL[w.mode] || w.mode}${w.generator ? `: ${w.generator}` : ''})`);
   }
   for (const s of skipped) {
     console.log(`skip   ${s.path}  (${s.reason === 'exists' ? 'already exists' : 'stroke too short'})`);
   }
   if (dryRun) {
-    console.log(`\n${writes.length} to write, ${skipped.length} skipped (dry run)`);
+    console.log(`\n${writes.length} to write (${replacing.size} replacing), ${skipped.length} skipped (dry run)`);
     return;
   }
   if (writes.length === 0) {
@@ -343,22 +391,33 @@ Skips a folder where any script has hand-made axes (companion files or axes embe
           ...(write?.generator ? { generator: write.generator } : {}),
           seed: write?.generator ? sceneSeed(p.anchor) : seed,
         },
+        replaces: p.replaced.has(file.suffix),
       });
     }
   }
 
   let wrote = 0;
-  for (const [target, content] of byPath) {
-    try {
-      await fs.access(target);
-      console.log(`skip   ${target}  (appeared before write)`);
-      continue;
-    } catch { /* absent */ }
+  let backedUp = 0;
+  for (const [target, { replaces, ...content }] of byPath) {
+    if (await fileExists(target)) {
+      if (!replaces) {
+        console.log(`skip   ${target}  (appeared before write)`);
+        continue;
+      }
+      // Keep the previous generated file, named after what made it (the first backup of a tag stays).
+      const backup = `${target}.${await generatorTag(target)}`;
+      if (!(await fileExists(backup))) {
+        await fs.rename(target, backup);
+        backedUp++;
+      }
+    }
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, JSON.stringify(content, null, 2) + '\n', 'utf8');
+    const tmp = `${target}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(content, null, 2) + '\n', 'utf8');
+    await fs.rename(tmp, target);
     wrote++;
   }
-  console.log(`\nwrote ${wrote}`);
+  console.log(`\nwrote ${wrote}${replace ? ` (${backedUp} previous files kept as <file>.<generator>)` : ''}`);
 }
 
 main().catch((err) => {
