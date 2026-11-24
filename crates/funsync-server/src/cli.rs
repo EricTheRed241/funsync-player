@@ -1,0 +1,120 @@
+//! Command line: `serve` (default) and `import`.
+
+use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
+
+pub const DEFAULT_PORT: u16 = 5300;
+
+pub const USAGE: &str = "\
+funsync-server: FunSync in Rust (library server + web UI)
+
+Usage:
+  funsync-server [serve] [--port N] [--data-dir <dir>]
+  funsync-server import [--from <old userData>] [--force] [--data-dir <dir>]
+
+serve    Serve http://127.0.0.1:<port>/ (default 5300, loopback only) and
+         scan the library at start.
+import   Copy library sources, playlists, categories and ratings from the old
+         app's config.json (read-only) into <data-dir>/library.json.
+         Refuses to replace an earlier import without --force.
+
+--data-dir  default $FUNSYNC_RUST_DATA, else
+            ~/Library/Application Support/funsync-rust
+--from      default $FUNSYNC_USER_DATA, else
+            ~/Library/Application Support/funsync-player
+
+Exit codes: 0 done, 1 error, 2 bad usage.";
+
+#[derive(Debug, PartialEq)]
+pub enum Command {
+    Help,
+    Serve {
+        addr: SocketAddr,
+        data_dir: PathBuf,
+    },
+    Import {
+        from: PathBuf,
+        data_dir: PathBuf,
+        force: bool,
+    },
+}
+
+pub fn parse(args: &[String]) -> Result<Command, String> {
+    let mut it = args.iter().peekable();
+    let sub = match it.peek().map(|s| s.as_str()) {
+        Some("serve") | Some("import") => it.next().cloned(),
+        _ => None,
+    };
+    let mut port = DEFAULT_PORT;
+    let mut data_dir = None;
+    let mut from = None;
+    let mut force = false;
+    while let Some(a) = it.next() {
+        let mut val = |name: &str| it.next().cloned().ok_or(format!("{name} needs a value"));
+        match a.as_str() {
+            "-h" | "--help" => return Ok(Command::Help),
+            "--port" => port = val("--port")?.parse().map_err(|_| "--port: not a port")?,
+            "--data-dir" => data_dir = Some(PathBuf::from(val("--data-dir")?)),
+            "--from" if sub.as_deref() == Some("import") => {
+                from = Some(PathBuf::from(val("--from")?))
+            }
+            "--force" if sub.as_deref() == Some("import") => force = true,
+            other => return Err(format!("unknown argument: {other}")),
+        }
+    }
+    let data_dir = data_dir
+        .or_else(crate::data::default_data_dir)
+        .ok_or("no data folder: set --data-dir or HOME")?;
+    if sub.as_deref() == Some("import") {
+        let from = from
+            .or_else(crate::data::default_old_user_data)
+            .ok_or("no old data folder: set --from")?;
+        return Ok(Command::Import {
+            from,
+            data_dir,
+            force,
+        });
+    }
+    Ok(Command::Serve {
+        addr: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+        data_dir,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn parses() {
+        assert_eq!(
+            parse(&s(&["--port", "5301", "--data-dir", "/d"])).unwrap(),
+            Command::Serve {
+                addr: "127.0.0.1:5301".parse().unwrap(),
+                data_dir: "/d".into()
+            }
+        );
+        assert_eq!(
+            parse(&s(&[
+                "import",
+                "--from",
+                "/o",
+                "--force",
+                "--data-dir",
+                "/d"
+            ]))
+            .unwrap(),
+            Command::Import {
+                from: "/o".into(),
+                data_dir: "/d".into(),
+                force: true
+            }
+        );
+        assert!(parse(&s(&["--force"])).is_err());
+        assert_eq!(parse(&s(&["--help"])).unwrap(), Command::Help);
+    }
+}
