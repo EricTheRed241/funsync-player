@@ -460,7 +460,12 @@ mod tests {
                 },
             );
         }
-        let dir = std::env::temp_dir().join(format!("creator-scout-follow-{}", std::process::id()));
+        // One dir per call: the tests run in parallel threads of one process, and a
+        // shared dir was wiped by the next test's remove_dir_all mid-run.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("creator-scout-follow-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         (file, dir)
