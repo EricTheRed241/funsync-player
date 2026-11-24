@@ -1889,15 +1889,17 @@ class App {
       const vrPlayer = { video: vrVideo, get currentTime() { return vrVideo.currentTime; }, get paused() { return vrVideo.paused; }, get duration() { return vrVideo.duration; } };
       this._vrPlayerRef = vrPlayer; // keep reference for cleanup
 
-      // Bind sync engines to VR proxy (stop was already called in _stopVRSync)
+      // Bind sync engines to VR proxy (stop was already called in _stopVRSync).
+      // Bound even with no device connected yet: one that connects later
+      // starts against this player (_tryStart*Sync keeps the binding).
+      if (this.buttplugSync) this.buttplugSync.player = vrPlayer;
+      if (this.tcodeSync) this.tcodeSync.player = vrPlayer;
       if (this.buttplugSync && this.buttplugManager?.connected) {
-        this.buttplugSync.player = vrPlayer;
         this.buttplugSync.reloadActions();
         this.buttplugSync.start();
       }
 
       if (this.tcodeSync && this.tcodeManager?.connected) {
-        this.tcodeSync.player = vrPlayer;
         this.tcodeSync.reloadActions();
         this.tcodeSync.start();
       }
@@ -2451,17 +2453,20 @@ class App {
       this._remoteProxy.reset();
       const proxyPlayer = this._remoteProxy.asVideoPlayerWrapper();
 
-      // Stop any current sync, rebind to the proxy, restart.
+      // Stop any current sync, rebind to the proxy, restart. The binding
+      // holds even with no device connected yet: a device that connects
+      // later (a remote-serial port opened by the phone's page after the
+      // video started) must follow the phone, not the paused desktop video.
       if (this.buttplugSync?._active) this.buttplugSync.stop();
       if (this.tcodeSync?._active) this.tcodeSync.stop();
+      if (this.buttplugSync) this.buttplugSync.player = proxyPlayer;
+      if (this.tcodeSync) this.tcodeSync.player = proxyPlayer;
 
       if (this.buttplugSync && this.buttplugManager?.connected) {
-        this.buttplugSync.player = proxyPlayer;
         this.buttplugSync.reloadActions();
         this.buttplugSync.start();
       }
       if (this.tcodeSync && this.tcodeManager?.connected) {
-        this.tcodeSync.player = proxyPlayer;
         this.tcodeSync.reloadActions();
         this.tcodeSync.start();
       }
@@ -5137,15 +5142,18 @@ class App {
     this._playerWinProxy.updateState({ at: startMs, paused: true, duration: vid.duration || 0 });
     const proxyPlayer = this._playerWinProxy.asVideoPlayerWrapper();
 
-    // Stop engines, repoint to the proxy, restart (idle until proxy plays).
+    // Stop engines, repoint to the proxy (also when no device is connected
+    // yet, so a late one follows the pop-out), restart (idle until proxy plays).
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
+    if (this.buttplugSync) this.buttplugSync.player = proxyPlayer;
+    if (this.tcodeSync) this.tcodeSync.player = proxyPlayer;
 
     if (this.buttplugSync && this.buttplugManager?.connected) {
-      this.buttplugSync.player = proxyPlayer; this.buttplugSync.reloadActions(); this.buttplugSync.start();
+      this.buttplugSync.reloadActions(); this.buttplugSync.start();
     }
     if (this.tcodeSync && this.tcodeManager?.connected) {
-      this.tcodeSync.player = proxyPlayer; this.tcodeSync.reloadActions(); this.tcodeSync.start();
+      this.tcodeSync.reloadActions(); this.tcodeSync.start();
     }
 
     // Repoint Up Next onto the proxy so its countdown + auto-advance track
