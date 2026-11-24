@@ -405,7 +405,7 @@ A local desktop video player with device synchronization for funscript playback.
 
 ## Install
 
-The app runs from a source checkout:
+The app runs from a source checkout. There are no installers: a release (since 0.11.0) is a git tag on this fork with its notes on the GitHub Releases page, so `git checkout v0.11.0` gives that version and `main` the latest.
 
 ```bash
 npm install
