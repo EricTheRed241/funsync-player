@@ -1,0 +1,31 @@
+[package]
+name = "funsync-server"
+version = "0.1.0"
+description = "FunSync in Rust: one server that owns the library and serves the web UI (port 5300)"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "funsync_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "funsync-server"
+path = "src/main.rs"
+
+# The one crate allowed an HTTP framework (AGENTS.md, "Rust app"): WebSockets,
+# range streaming and many connections. tower-http's ServeFile does the
+# Range / If-Modified-Since handling for video streams.
+[dependencies]
+axum = "0.8"
+md5 = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "process", "sync", "time", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
