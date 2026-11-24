@@ -17,8 +17,11 @@
 //! `_180x180_3dh` projection suffix is what the headset reads), with a
 //! `vrb.json` sidecar, then get generated twist / roll / pitch
 //! (`scripts/upgrade-multi-axis.mjs`; hand-made axes win). `fetchedAt` is set
-//! in vrb-scout.json; at the end the app is asked to rescan. `--dry-run`
-//! signs in and reads the links but downloads nothing.
+//! in vrb-scout.json; at the end the app is asked to rescan. A video only
+//! downloads when the library drive keeps `swipeDeck.minFreeGb` free after it
+//! (`slr_scout::disk`): a scene that doesn't fit is left for later (exit 2)
+//! and the next one tried. `--dry-run` signs in and reads the links (and
+//! prints the disk check) but downloads nothing.
 //!
 //! A refused login on a site the account is a member of (`Site::member`)
 //! stops the run (exit 3); on another site (VRConk) its scenes are skipped as
@@ -31,6 +34,7 @@ use crate::nuxt::{self, Link};
 use crate::sites::{self, Site};
 use crate::store::{self, Scene};
 use serde_json::{Value, json};
+use slr_scout::disk;
 use slr_scout::fetch::{artist_folder, stem};
 use slr_scout::http::{Http, Request};
 use slr_scout::library;
@@ -132,7 +136,8 @@ pub struct Fetch<'a> {
     pub dry_run: bool,
     /// Scenes to download this run at most.
     pub limit: Option<usize>,
-    /// Canned network (tests): no upgrade run, no rescan.
+    /// Canned network (tests): no upgrade run, no rescan, the free space from
+    /// `slr_scout::disk::FAKE_FREE_ENV`.
     pub fake: bool,
 }
 
@@ -255,7 +260,6 @@ impl Fetch<'_> {
                     break;
                 }
             };
-            taken += 1;
             writeln!(
                 out,
                 "  video: {} {} {} {} → {}",
@@ -271,6 +275,21 @@ impl Fetch<'_> {
             )
             .map_err(io)?;
             writeln!(out, "  script: {}", planned.script).map_err(io)?;
+            // Room on the drive for the video (none needed when it's there already).
+            let there = planned.link.bytes.is_some()
+                && fs::metadata(planned.dir.join(format!("{}.mp4", planned.stem)))
+                    .map(|m| m.len())
+                    .ok()
+                    == planned.link.bytes;
+            if !there
+                && !disk::gate(&other, planned.link.bytes, self.fake, self.dry_run, out)
+                    .map_err(io)?
+            {
+                skipped += 1;
+                code = code.max(2);
+                continue;
+            }
+            taken += 1;
             held += 1;
             if self.dry_run {
                 continue;

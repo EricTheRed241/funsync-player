@@ -20,7 +20,7 @@
 // loads the home page for one and loads it again when a script is refused.
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
-// last pass.
+// last pass / downloads left for lack of disk space.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -47,6 +47,7 @@ const { createPacer, parseInterval } = await import('./eroscripts-sync-lib.mjs')
 const { defaultUserDataDir } = await import('./host-env.mjs');
 const live = await import('./scout-live.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
+const disk = await import('./disk-space.mjs');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -71,6 +72,9 @@ Download (needs ffmpeg and ffprobe on PATH):
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
+                         Disk space: a video starts only when the library drive keeps ${prefs.MIN_FREE_GB} GB free after it
+                         (content-preferences.json swipeDeck.minFreeGb; size from FapTap when it gives one); else
+                         it's left for later and the next one is tried (exit 2)
 Rename:
   --retitle              rename fetched FapTap scenes to "Artist - Title (metadata)" (artist: favourite, the
                          title's own artist, a library creator, the performer, else the uploader), filling in
@@ -405,10 +409,13 @@ function sceneDir(parent, stem, id) {
   }
 }
 
-/** One pass over the queue; downloads at most `room` videos (the library cap). */
+/**
+ * One pass over the queue; downloads at most `room` videos (the library cap). A video that would leave the
+ * library drive under MIN_FREE_GB free (scripts/disk-space.mjs) is skipped and left for later (`noRoom`).
+ */
 async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
   const done = doneScenes(incoming, userData);
-  let ok = 0; let failed = 0; let capped = false;
+  let ok = 0; let failed = 0; let capped = false; let noRoom = 0;
   const now = () => new Date().toISOString().slice(11, 19);
   for (const c of queue) {
     if (done.has(lib.fetchedKey(c.id))) continue;
@@ -424,6 +431,8 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       const dir = sceneDir(path.join(incoming, creator), name.stem, c.id);
       stem = path.basename(dir);
       const video = path.join(dir, `${stem}.mp4`);
+      const short = disk.roomFor({ dir: incoming, bytes: Number(plan.source.size) || 0, minFree: prefs.MIN_FREE_GB * 1e9 });
+      if (short) { console.log(`${now()} – ${creator}/${stem}: ${short}; left for later`); noRoom++; continue; }
       const script = lib.csvToFunscript(await faptap(`/assets/${plan.script}`, { text: true }));
       // The script goes in once the video is there, so a failed download
       // leaves no half scene behind.
@@ -445,7 +454,7 @@ async function fetchPass(queue, { userData, incoming, staging, naming, room }) {
       failed++;
     }
   }
-  return { ok, failed, capped };
+  return { ok, failed, capped, noRoom };
 }
 
 /**
@@ -503,10 +512,11 @@ async function fetchAll(opts, { userData, config, incoming }) {
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
     const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming), room: prefs.LIBRARY_MAX_VIDEOS - held });
-    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}`);
+    const noRoom = r.noRoom ? `; ${r.noRoom} left for later: not enough disk space (${prefs.MIN_FREE_GB} GB kept free)` : '';
+    console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${noRoom}`);
     if (r.ok) dedupeAfterFetch(userData);
     if (r.capped) break;
-    if (!r.failed) return 0;
+    if (!r.failed) return r.noRoom ? 2 : 0;
     if (pass < opts.passes) {
       console.log(`Waiting ${opts.wait / 60} min before the next pass`);
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));

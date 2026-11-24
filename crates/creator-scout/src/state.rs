@@ -47,6 +47,10 @@ pub struct FetchRecord {
     /// Set once the post is in the library.
     #[serde(default)]
     pub done_at: Option<String>,
+    /// An EroScripts post: set once `eroscripts:scout --add` put it on the waiting list, from
+    /// where the hourly `eroscripts:scout --fetch --auto` downloads it (no more tries here).
+    #[serde(default)]
+    pub handed_at: Option<String>,
 }
 
 /// A follow of a creator's Instagram account (`--follow`).

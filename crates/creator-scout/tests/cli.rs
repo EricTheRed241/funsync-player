@@ -316,8 +316,8 @@ fn discovers_creators_their_posts_and_pictures_then_fetches() {
     );
     assert!(t.state()["pictures"]["sweetiefox"].is_string());
 
-    // Fetch: the EroScripts post arrives (the fake npm writes its sidecar),
-    // the FapTap one doesn't.
+    // Fetch: the EroScripts post is handed over (the fake npm's --add puts it on the waiting
+    // list), the FapTap one doesn't arrive.
     fs::write(
         t.ud().join("creator-swipes.json"),
         json!({"version": 1, "creators": {"sweetiefox": {"choice": "yes"}}, "posts": {
@@ -332,9 +332,8 @@ fn discovers_creators_their_posts_and_pictures_then_fetches() {
     let npm = t.write(
         "npm.sh",
         &format!(
-            "echo \"$(pwd -P) $*\" >> '{log}'\nif [ \"$3\" = eroscripts:scout ] && [ \"$5\" = --fetch ]; then\n  mkdir -p '{lib}/EroScripts/Sweetie Fox/Morning'\n  echo '{{\"topicId\": '$7'}}' > '{lib}/EroScripts/Sweetie Fox/Morning/eroscripts.json'\nfi\n",
+            "echo \"$(pwd -P) $*\" >> '{log}'\nif [ \"$3\" = eroscripts:scout ] && [ \"$5\" = --add ]; then\n  echo '{{\"candidates\": [{{\"id\": '$6'}}]}}' > \"$FUNSYNC_USER_DATA/eroscripts-scout.json\"\nfi\n",
             log = npm_log.display(),
-            lib = t.lib().display()
         ),
     );
     let npm_cmd = format!("sh {}", npm.display());
@@ -361,22 +360,45 @@ fn discovers_creators_their_posts_and_pictures_then_fetches() {
     assert_eq!(o.status.code(), Some(2), "{out}");
     let log = fs::read_to_string(&npm_log).unwrap();
     let lines: Vec<&str> = log.lines().collect();
-    assert_eq!(lines.len(), 4, "{log}");
+    assert_eq!(lines.len(), 3, "{log}");
     let real_repo = fs::canonicalize(&t.0).unwrap().display().to_string();
     assert!(
         lines[0].starts_with(&real_repo)
             && lines[0].ends_with("run -s eroscripts:scout -- --add 400000")
     );
-    assert!(lines[1].ends_with("run -s eroscripts:scout -- --fetch --ids 400000"));
-    assert!(lines[3].ends_with("run -s faptap:scout -- --fetch --ids 9002"));
+    assert!(lines[1].ends_with("run -s faptap:scout -- --add 9002"));
+    assert!(lines[2].ends_with("run -s faptap:scout -- --fetch --ids 9002"));
+    assert!(
+        out.contains("Fetch: 0 fetched, 1 handed to eroscripts:scout, 1 not yet."),
+        "{out}"
+    );
     let st = t.state();
-    assert!(st["fetch"]["eroscripts:400000"]["doneAt"].is_string());
+    let handed = &st["fetch"]["eroscripts:400000"];
+    assert!(handed["handedAt"].is_string(), "{st}");
+    assert_eq!(handed["tries"], 0);
+    assert!(handed["doneAt"].is_null());
     assert_eq!(st["fetch"]["faptap:9002"]["tries"], 1);
     assert!(st["fetch"]["faptap:9002"]["doneAt"].is_null());
     assert!(
         st["fetch"].get("eroscripts:345187").is_none(),
         "already in the library"
     );
+
+    // eroscripts:scout --fetch --auto downloads it; the next --fetch marks it done and runs
+    // nothing (the FapTap retry isn't due for 12 hours).
+    let scene = t.lib().join("EroScripts/Sweetie Fox/Morning");
+    fs::create_dir_all(&scene).unwrap();
+    fs::write(scene.join("eroscripts.json"), r#"{"topicId": 400000}"#).unwrap();
+    let o = run(
+        &t,
+        &["--fetch", "--npm", &npm_cmd, "--repo", &repo],
+        Some(&fixtures),
+    );
+    let out = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}");
+    assert!(out.contains("Nothing to fetch."), "{out}");
+    assert_eq!(fs::read_to_string(&npm_log).unwrap().lines().count(), 3);
+    assert!(t.state()["fetch"]["eroscripts:400000"]["doneAt"].is_string());
     let f = t.creators();
     assert_eq!(f["creators"]["sweetiefox"]["posts"][0]["inLibrary"], true);
 }

@@ -41,10 +41,13 @@ the library: the mp4 into <library parent>/_staging as a .part, then
 <Other>/<artist>/<Artist> - <Title> (PMVHaven)<VR suffix>/ with the script (and its
 axis companions) and a pmvhaven.json sidecar; generated twist / roll / pitch
 (scripts/upgrade-multi-axis.mjs); fetchedAt in pmvhaven-scout.json; at the end the
-app is asked to rescan. It stops at the library cap (libraryMaxVideos).
+app is asked to rescan. It stops at the library cap (libraryMaxVideos). A video only
+downloads when the library drive keeps swipeDeck.minFreeGb (content-preferences.json)
+free after it; one that doesn't fit is left for later and the next tried (--dry-run
+prints the check).
 
 Exit codes: 0 ok, 1 error, 2 rate limited (HTTP 429) or work left (details still
-to read, the library cap, --limit reached).
+to read, the library cap, --limit reached, a video left for lack of disk space).
 ";
 
 #[derive(Debug, Default, PartialEq, Eq)]

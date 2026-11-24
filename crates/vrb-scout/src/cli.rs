@@ -48,11 +48,15 @@ VR caps (videoCaps: 8K, 60 fps), stereo before mono, curl into <library parent>/
 then <Other>/<first performer>/<Performers> - <Title> (<Site>)_<projection>/ with a
 vrb.json sidecar; generated twist / roll / pitch (scripts/upgrade-multi-axis.mjs);
 fetchedAt in vrb-scout.json; at the end the app is asked to rescan. It stops at the
-library cap (libraryMaxVideos). VRConk scenes need a VRConk membership: when the
-account can't sign in there or gets no download links, they are skipped.
+library cap (libraryMaxVideos). A video only downloads when the library drive keeps
+swipeDeck.minFreeGb (content-preferences.json) free after it; one that doesn't fit is
+left for later and the next tried (--dry-run prints the check). VRConk scenes need a
+VRConk membership: when the account can't sign in there or gets no download links,
+they are skipped.
 
 Exit codes: 0 ok, 1 error, 2 rate limited (HTTP 429), or --fetch stopped by the library
-cap or --limit with work left, 3 not logged in (VRBangers refused the account).
+cap or --limit or left a video for lack of disk space, 3 not logged in (VRBangers
+refused the account).
 ";
 
 #[derive(Debug, Default, PartialEq, Eq)]

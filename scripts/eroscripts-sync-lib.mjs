@@ -244,7 +244,8 @@ export async function scriptEntries(name, bytes) {
 // ── Pacing & forum access ───────────────────────────────────────────────
 
 /**
- * At least `intervalMs` between successive `wait()` resolutions.
+ * At least `intervalMs` between successive `wait()` resolutions, also when callers wait at
+ * the same time (parallel downloads): each call queues behind the previous one.
  * `now`/`sleep` injectable for fake timers.
  */
 export function createPacer({
@@ -254,12 +255,17 @@ export function createPacer({
 } = {}) {
   let last = -Infinity;
   let count = 0;
+  let queue = Promise.resolve();
   return {
-    async wait() {
-      const delay = last + intervalMs - now();
-      if (delay > 0) await sleep(delay);
-      last = now();
-      count++;
+    wait() {
+      const turn = queue.then(async () => {
+        const delay = last + intervalMs - now();
+        if (delay > 0) await sleep(delay);
+        last = now();
+        count++;
+      });
+      queue = turn;
+      return turn;
     },
     get count() { return count; },
   };

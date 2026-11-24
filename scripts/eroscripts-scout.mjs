@@ -3,14 +3,15 @@
 // download them into the library's EroScripts folder.
 //
 //   npm run eroscripts:scout                 scan new posts (+ a little backfill) → <userData>/eroscripts-scout.json
-//   npm run eroscripts:scout -- --fetch      download the saved list
+//   npm run eroscripts:scout -- --fetch      download the saved list (--parallel N: N scenes at once; each keeps
+//                                            the library drive's minimum free space, scripts/disk-space.mjs)
 //   npm run eroscripts:scout -- --retitle    rename fetched scenes to `Artist - Title (metadata)`
 //   npm run eroscripts:scout -- --manual-list  write ~/Downloads/download-for-fs.txt: files to download by hand
 //   npm run eroscripts:scout -- --status     backfill progress and the waiting list, offline
 //   npm run eroscripts:scout -- --titles     title, author, dates, images for posts judged before verdicts kept them, and
 //                                            the waiting posts' script previews (length, heat strip)
 //   npm run eroscripts:scout -- --daily      scan, then download the waiting
-//                                            posts swiped right in npm run scout:report
+//                                            posts swiped right in npm run scout:report (or wanted on the Creators site)
 //   npm run eroscripts:scout -- --frames     frames of unswiped waiting posts' videos for the swipe deck (scripts/scout-frames.mjs)
 //   npm run vrbangers:scout                  the same, VRBangers posts only (--vrbangers): vrbangers.com
 //                                            scenes come from the paid account (scripts/vrbangers-host.mjs)
@@ -28,12 +29,13 @@
 // config.json is written (to add the source) only while the app is closed.
 //
 // Exit codes: 0 done, 1 error, 2 rate limited / downloads left after the
-// last pass / SLR download quota used up / app running (--retitle) / another
+// last pass / downloads left for lack of disk space / SLR download quota used up / app running (--retitle) / another
 // scout run doing the same kind of work (one lock per kind: scan, downloads,
 // frames; lib.SCOUT_LOCKS), 3 not logged in / session expired (EroScripts,
 // VRBangers, or SexLikeReal when its scenes were all that was left to do).
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,6 +66,7 @@ const { redactUrl } = await import('./vrbangers-lib.mjs');
 const slrHost = await import('./slr-host.mjs');
 const frames = await import('./scout-frames.mjs');
 const prefs = await import('../renderer/js/content-preferences.js');
+const disk = await import('./disk-space.mjs');
 const require = createRequire(import.meta.url);
 const rejectedVideos = require('../electron/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -108,8 +111,16 @@ Download:
                          any length (a swiped scene is wanted); skips scenes rejected in the app (${prefs.DELETE_AT_OR_BELOW} stars or lower)
                          and waiting posts that break the content rules
   --ids 1,2,3            only these post ids (also with --frames)
-  --auto                 only the posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}),
-                         whatever their score or axes
+  --auto                 only the posts swiped right in npm run scout:report (<userData>/${lib.SWIPES_FILE}) or wanted
+                         on the Creators site (<userData>/${lib.CREATOR_SWIPES_FILE}: "eroscripts:<id>" posts
+                         marked want; missing or unreadable: none), whatever their score or axes
+  --parallel N           download up to N scenes at once (default 1; 1–${lib.MAX_PARALLEL}). Each host has its own limit so
+                         none takes every slot: ${Object.entries(lib.HOST_SLOTS).filter(([h]) => h !== 'local').map(([h, n]) => `${h} ${n}`).join(', ')};
+                         one scene folder is never written by two at once. Each scene prints a start and an end line.
+                         Disk space (every download, also without --parallel): a video or archive starts only when
+                         the library drive keeps ${prefs.MIN_FREE_GB} GB free after it (content-preferences.json swipeDeck.minFreeGb),
+                         counting the downloads still running; else it's left for later and the next one is tried
+                         (exit 2). Scripts aren't checked
   --passes N             repeat the queue until no failures, at most N times (default 1)
   --wait 1h              pause between passes (default 1h; also 90m, 3d)
   --dry-run              list what would be downloaded (or, with --retitle, renamed)
@@ -154,7 +165,7 @@ Frames (for the swipe deck's cards; free reads only):
                          each run first takes in records left on the scan state and frames folders without one).
                          A failed post is tried again after 7 days. Exit 2 when posts are left
 Daily (run once a day):
-  --daily                scan, then --fetch --auto (takes --passes, --wait), each step under its own lock
+  --daily                scan, then --fetch --auto (takes --passes, --wait, --parallel), each step under its own lock
                          (below); a step another run is doing is skipped (exit 2) and the next goes on; writes
                          <userData>/eroscripts-scout-daily.json. Frames are a separate run (--frames)
 Run locks (in <userData>, holding the pid; a run whose lock another live run holds exits 2 and names it;
@@ -204,6 +215,7 @@ function parseArgs(argv) {
       case '--full': opts.full = true; break;
       case '--top': opts.top = Number(value(i, a)); i++; break;
       case '--passes': opts.passes = Number(value(i, a)); i++; break;
+      case '--parallel': opts.parallel = Number(value(i, a)); i++; break;
       case '--wait': opts.wait = parseInterval(value(i, a)); i++; break;
       case '--ids': opts.ids = new Set(value(i, a).split(',').map(Number)); i++; break;
       case '--add': opts.add = [...new Set(value(i, a).split(',').map((s) => Number(s.trim())).filter((n) => n > 0))]; i++; break;
@@ -226,6 +238,10 @@ function parseArgs(argv) {
   if (opts.since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since) && Number.isFinite(Date.parse(opts.since)))) throw new Error('--since must be a date like 2025-01-01');
   if (!opts.wait) throw new Error('--wait must be an interval like 1h, 90m or 3d');
   if (opts.auto && !opts.fetch) throw new Error('--auto goes with --fetch');
+  if (opts.parallel !== undefined) {
+    if (!(Number.isInteger(opts.parallel) && opts.parallel >= 1 && opts.parallel <= lib.MAX_PARALLEL)) throw new Error(`--parallel must be 1 to ${lib.MAX_PARALLEL}`);
+    if (!(opts.fetch || opts.daily)) throw new Error('--parallel goes with --fetch or --daily');
+  }
   if (opts.slr && !(opts.fetch || opts.daily || opts.manualList)) throw new Error('--slr goes with --fetch, --daily or --manual-list');
   if (opts.rejudge && !opts.rejudge.length) throw new Error('--rejudge needs at least one verdict');
   if (opts.frames !== undefined && (opts.fetch || opts.daily || opts.add || opts.titles)) throw new Error('--frames runs on its own');
@@ -671,13 +687,51 @@ async function addPicked(opts, { api, userData, config, incoming }) {
 
 // ── Fetch ───────────────────────────────────────────────────────────────
 
-/** The `.part` being written; removed if the run is stopped (Ctrl-C, kill). */
-let activePart = null;
+/** The `.part` files being written; removed if the run is stopped (Ctrl-C, kill). */
+const activeParts = new Set();
 for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.on(sig, () => {
-    if (activePart) fs.rmSync(activePart, { force: true });
+    for (const part of activeParts) fs.rmSync(part, { force: true });
     process.exit(code);
   });
+}
+
+/**
+ * `cmd args` without blocking the downloads running beside it: spawnSync's result (`{status, stdout,
+ * stderr, error}`); after `timeout` ms the child is killed (`error.code` ETIMEDOUT).
+ */
+function spawnAsync(cmd, args, { cwd, timeout } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let error = null;
+    const timer = timeout ? setTimeout(() => { error = Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }); child.kill('SIGKILL'); }, timeout) : null;
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (err) => { error ||= err; });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      resolve({ status: error ? null : status, stdout, stderr, error });
+    });
+  });
+}
+
+/** Generated twist / roll / pitch for a single-axis scene folder (scripts/upgrade-multi-axis.mjs): null when made, else why not. */
+async function generateAxes(dir) {
+  const up = await spawnAsync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO });
+  return up.status === 0 ? null : (up.stderr || up.stdout || up.error?.message || '').trim().split('\n').pop();
+}
+
+/**
+ * `fn()` once the host's earlier calls through here have settled. Its pacer (createPacer) spaces calls made
+ * one after another only, so parallel downloads take their fresh links and streams from it in turn.
+ */
+const hostTurns = new Map();
+function inTurn(host, fn) {
+  const run = (hostTurns.get(host) || Promise.resolve()).then(fn);
+  hostTurns.set(host, run.catch(() => {}));
+  return run;
 }
 
 /**
@@ -706,7 +760,8 @@ function videoSeconds(file) {
 }
 
 /**
- * Download `file` to `dest` through `<staging>/<name>.part`. Every attempt
+ * Download `file` to `dest` through `<staging>/<name>.<dest hash>.part` (the hash keeps parallel downloads of
+ * same-named files in different scene folders apart). Every attempt
  * starts from scratch, so a failed one deletes its `.part` rather than leave
  * it behind. A copy the user saved by hand (`local`, see localDownloads) is
  * used instead of the network and removed from Downloads once it's in place.
@@ -723,12 +778,12 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
   if (fs.existsSync(dest)) return 'have';
   fs.mkdirSync(staging, { recursive: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  const tmp = path.join(staging, `${path.basename(dest)}.part`);
+  const tmp = path.join(staging, `${path.basename(dest)}.${createHash('sha1').update(dest).digest('hex').slice(0, 8)}.part`);
   const byHand = lib.findLocalCopy(file, local);
   const streamed = { [streams.RULE34VIDEO_HOST]: rule34video, [streams.PMVHAVEN_HOST]: pmvhaven }[file.host];
   let wantSize = file.size;
   let contentLength = 0;
-  activePart = tmp;
+  activeParts.add(tmp);
   try {
     if (byHand) {
       fs.copyFileSync(byHand.path, tmp);
@@ -753,12 +808,12 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
       if (!resp.ok) throw new Error(`pixeldrain: HTTP ${resp.status}${resp.status === 403 ? ' (download it by hand: --manual-list)' : ''}`);
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else if (streamed) {
-      const now = await streamed.fresh(file);
+      const now = await inTurn(file.host, () => streamed.fresh(file));
       if (file.host === streams.PMVHAVEN_HOST) wantSize = now.size;
       if (scriptMs && now.durationSec && !streams.downloadFits(now.durationSec, scriptMs)) {
         throw new Error(`${file.host}: video ${clock(now.durationSec * 1000)}, script ${clock(scriptMs)}; not this scene's video`);
       }
-      const resp = await streamed.stream(now.direct);
+      const resp = await inTurn(file.host, () => streamed.stream(now.direct));
       contentLength = resp.headers.get('content-length');
       await pipeline(Readable.fromWeb(resp.body), fs.createWriteStream(tmp));
     } else if (file.host === vrbHost.VRBANGERS_HOST) {
@@ -785,7 +840,7 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
     fs.rmSync(tmp, { force: true });
     throw err;
   } finally {
-    activePart = null;
+    activeParts.delete(tmp);
   }
   if (byHand) {
     fs.rmSync(byHand.path, { force: true });
@@ -818,11 +873,18 @@ function fetchedScenes(incoming, userData, topics = null) {
 }
 
 /**
- * One pass over the queue; downloads at most `room` videos (the library cap). SexLikeReal scenes need the
- * account: once it isn't logged in (`slrStop: 'login'`) or has no video download left (`'quota'`), the
- * pass's later SLR scenes are skipped (`slrSkipped`) and the rest goes on.
+ * One pass over the queue; downloads at most `room` videos (the library cap), up to `parallel` scenes at
+ * once. A unit is one scene of a post (a packed one: its archive); lib.nextFetchUnit picks the next one in
+ * queue order whose host has a slot left (lib.HOST_SLOTS) and whose scene folder no running unit holds, so a
+ * second post bringing the same folder waits and then finds it in the library. Units running count against
+ * `room`. SexLikeReal scenes need the account: once it isn't logged in (`slrStop: 'login'`) or has no video
+ * download left (`'quota'`), the pass's later SLR scenes are skipped (`slrSkipped`) and the rest goes on.
+ * A video or archive that would leave the library drive under MIN_FREE_GB free, counting the downloads in
+ * flight (scripts/disk-space.mjs), is skipped and left for later (`noRoom`); the next one may fit. Not
+ * logged in to vrbangers.com ends the pass: no unit starts any more, the running ones finish, then the
+ * LoginError is thrown. With `parallel` > 1 each unit prints a start line as well as its end line.
  */
-async function fetchPass(queue, { api, userData, incoming, staging, room, manualDir }) {
+async function fetchPass(queue, { api, userData, incoming, staging, room, manualDir, parallel = 1 }) {
   const done = fetchedScenes(incoming, userData);
   // Files saved by hand: posts with one go first, and the folders are read
   // again before every scene, so a file saved during a long pass is taken
@@ -831,66 +893,100 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
   const saved = readLocal();
   const byHand = (c) => c.scenes.some((sc) => [sc.video, ...sc.scripts].some((f) => lib.findLocalCopy(f, saved)));
   const order = [...queue].sort((a, b) => byHand(b) - byHand(a));
-  let ok = 0; let failed = 0; let generated = 0; let capped = false;
-  let slrStop = null; let slrSkipped = 0;
+  const r = { ok: 0, failed: 0, generated: 0, capped: false, slrStop: null, slrSkipped: 0, noRoom: 0 };
   const now = () => new Date().toISOString().slice(11, 19);
-  for (const c of order) {
-    if (capped) break;
-    for (const sc of c.scenes) {
-      const local = readLocal();
-      if (done.has(lib.fetchedKey(c.id, sc.video.name))) continue;
-      if (ok >= room) { capped = true; break; }
-      if (slrStop && sc.video.host === slrHost.SLR_HOST) { slrSkipped++; continue; }
-      if (sc.packed) {
-        try {
-          const r = await fetchPacked(c, sc, { api, userData, incoming, staging, local, now });
-          ok += r.ok; generated += r.generated;
-        } catch (err) {
-          console.log(`${now()} ✗ ${lib.creatorFolder(c.title, c.author)}/${sc.video.name}: ${err.message}`);
-          failed++;
-        }
-        continue;
+  const minFree = prefs.MIN_FREE_GB * 1e9;
+  const pending = order.flatMap((c) => c.scenes.map((sc) => {
+    if (sc.packed) return { c, sc, name: `${lib.creatorFolder(c.title, c.author)}/${sc.video.name}`, dir: path.join(staging, `${sc.base}.unpacked`) };
+    const { creator, stem } = lib.sceneNameOf(c, sc);
+    const dir = path.join(incoming, creator, stem);
+    return { c, sc, stem, name: `${creator}/${stem}`, dir, video: path.join(dir, stem + path.extname(sc.video.name).toLowerCase()) };
+  }));
+  const running = new Set();
+  // A folder another running unit is writing: fetchPacked leaves it alone like one already in the library.
+  const busy = (u) => (dir) => [...running].some((o) => o !== u && o.dir === dir);
+  let loginError = null;
+
+  const runScene = async (u, local) => {
+    const { c, sc, dir, stem, video } = u;
+    try {
+      // The account first (session, a download left), so a scene it can't fetch leaves no scripts behind.
+      if (sc.video.host === slrHost.SLR_HOST && !lib.findLocalCopy(sc.video, local)) await slr.ready();
+      for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging, local);
+      let lengthMs = null;
+      try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
+      const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs, vr: c.vr === true });
+      writeAtomic(path.join(dir, 'eroscripts.json'), JSON.stringify(
+        lib.sceneSidecar(c, sc.video, path.basename(video), new Date().toISOString()), null, 1));
+      let note = '';
+      if (!sc.axes.length) {
+        const why = await generateAxes(dir);
+        if (why === null) { r.generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${why})`;
       }
-      const { creator, stem } = lib.sceneNameOf(c, sc);
-      const dir = path.join(incoming, creator, stem);
-      const video = path.join(dir, stem + path.extname(sc.video.name).toLowerCase());
-      // Another post already brought this scene (same folder and video file): leave the
-      // folder alone. Its scripts, sidecar and length were judged when it came, so this
-      // post's files and the current length rule don't apply to it.
-      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in the library from another post; left as is`); continue; }
-      try {
-        // The account first (session, a download left), so a scene it can't fetch leaves no scripts behind.
-        if (sc.video.host === slrHost.SLR_HOST && !lib.findLocalCopy(sc.video, local)) await slr.ready();
-        for (const f of sc.scripts) await download(api, f, path.join(dir, lib.scriptFileName(stem, f.axis)), staging, local);
-        let lengthMs = null;
-        try { lengthMs = lib.scriptDurationMs(JSON.parse(fs.readFileSync(path.join(dir, lib.scriptFileName(stem, '')), 'utf8'))); } catch { /* unreadable script: download anyway */ }
-        const got = await download(api, sc.video, video, staging, local, { scriptMs: lengthMs, vr: c.vr === true });
-        writeAtomic(path.join(dir, 'eroscripts.json'), JSON.stringify(
-          lib.sceneSidecar(c, sc.video, path.basename(video), new Date().toISOString()), null, 1));
-        let note = '';
-        if (!sc.axes.length) {
-          const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
-          if (up.status === 0) { generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
-        }
-        const kind = c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
-        console.log(`${now()} ✓ ${creator}/${stem}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}`);
-        ok++;
-      } catch (err) {
-        // Not logged in to vrbangers.com: every later VRBangers scene would fail the same way.
-        if (err instanceof LoginError) throw err;
-        // Not logged in to SexLikeReal, or no download left: the pass's other SLR scenes wait, the rest goes on.
-        if (err instanceof slrHost.SlrLoginError || err instanceof slrHost.SlrQuotaError) {
-          slrStop = err instanceof slrHost.SlrQuotaError ? 'quota' : 'login';
-          slrSkipped++;
-          console.log(`${now()} – ${creator}/${stem}: ${err.message}; SexLikeReal scenes skipped from here`);
-          continue;
-        }
-        console.log(`${now()} ✗ ${creator}/${stem}: ${err.message}`);
-        failed++;
+      const kind = c.favourite && c.live ? ` [favourite: ${c.favourite}]` : '';
+      console.log(`${now()} ✓ ${u.name}${kind}${note}${got === 'local' ? ' (from Downloads)' : ''}`);
+      r.ok++;
+    } catch (err) {
+      // Not logged in to vrbangers.com: every later VRBangers scene would fail the same way.
+      if (err instanceof LoginError) throw err;
+      // Not logged in to SexLikeReal, or no download left: the pass's other SLR scenes wait, the rest goes on.
+      if (err instanceof slrHost.SlrLoginError || err instanceof slrHost.SlrQuotaError) {
+        r.slrStop = err instanceof slrHost.SlrQuotaError ? 'quota' : 'login';
+        r.slrSkipped++;
+        console.log(`${now()} – ${u.name}: ${err.message}; SexLikeReal scenes skipped from here`);
+        return;
+      }
+      console.log(`${now()} ✗ ${u.name}: ${err.message}`);
+      r.failed++;
+    }
+  };
+  const runPacked = async (u, local) => {
+    try {
+      const p = await fetchPacked(u.c, u.sc, { api, userData, incoming, staging, local, now, busy: busy(u) });
+      r.ok += p.ok; r.generated += p.generated;
+    } catch (err) {
+      console.log(`${now()} ✗ ${u.name}: ${err.message}`);
+      r.failed++;
+    }
+  };
+  const oneFinished = () => Promise.race([...running].map((u) => u.promise));
+
+  while (!loginError) {
+    const local = readLocal();
+    for (let i = 0; i < pending.length;) {
+      const u = pending[i];
+      if (done.has(lib.fetchedKey(u.c.id, u.sc.video.name))) pending.splice(i, 1);
+      else if (r.slrStop && u.sc.video.host === slrHost.SLR_HOST) { r.slrSkipped++; pending.splice(i, 1); } else {
+        u.host = lib.findLocalCopy(u.sc.video, local) ? 'local' : u.sc.video.host;
+        i++;
       }
     }
+    if (!pending.length) break;
+    if (r.ok + running.size >= room) {
+      if (!running.size) { r.capped = true; break; }
+      await oneFinished();
+      continue;
+    }
+    const i = lib.nextFetchUnit(pending, { running: [...running], parallel });
+    if (i < 0) { await oneFinished(); continue; }
+    const [u] = pending.splice(i, 1);
+    // Another post already brought this scene (same folder and video file): leave the
+    // folder alone. Its scripts, sidecar and length were judged when it came, so this
+    // post's files and the current length rule don't apply to it.
+    if (!u.sc.packed && fs.existsSync(u.video)) { console.log(`${now()} = ${u.name}: already in the library from another post; left as is`); continue; }
+    const inFlight = [...running].reduce((n, o) => n + (o.sc.video.size || 0), 0);
+    const short = disk.roomFor({ dir: incoming, bytes: u.sc.video.size, inFlight, minFree });
+    if (short) { console.log(`${now()} – ${u.name}: ${short}; left for later`); r.noRoom++; continue; }
+    const size = u.sc.video.size ? `, ${(u.sc.video.size / 1e9).toFixed(1)} GB` : '';
+    if (parallel > 1) console.log(`${now()} → ${u.name}: ${u.host === 'local' ? 'saved by hand' : u.host}${size}`);
+    running.add(u);
+    u.promise = (u.sc.packed ? runPacked(u, local) : runScene(u, local))
+      .catch((err) => { loginError ||= err; })
+      .finally(() => running.delete(u));
   }
-  return { ok, failed, generated, capped, slrStop, slrSkipped };
+  await Promise.all([...running].map((u) => u.promise));
+  if (loginError) throw loginError;
+  return r;
 }
 
 /**
@@ -898,11 +994,11 @@ async function fetchPass(queue, { api, userData, incoming, staging, room, manual
  * when neither can. No stdin and a time limit: bsdtar asks for the password
  * of an encrypted ZIP on the terminal and would wait for it forever.
  */
-function unpack(archive, out) {
+async function unpack(archive, out) {
   const tries = [['unar', ['-q', '-f', '-D', '-o', out, archive]], ['bsdtar', ['-xf', archive, '-C', out]]];
   const errors = [];
   for (const [cmd, args] of tries) {
-    const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30 * 60 * 1000 });
+    const r = await spawnAsync(cmd, args, { timeout: 30 * 60 * 1000 });
     if (r.status === 0) return;
     const why = r.error?.code === 'ENOENT' ? 'not installed' : r.error?.code === 'ETIMEDOUT' ? 'timed out' : (r.stderr || r.stdout || '').trim().split('\n').pop();
     if (/password/i.test(why)) throw new Error(`${path.basename(archive)} is password-protected (the password is usually in the post); unpack it by hand`);
@@ -931,9 +1027,10 @@ function filesUnder(dir) {
  * fetched), the length rule. An archive that files no scene (none inside,
  * all under the minimum length, or all in the library already) is recorded as
  * rejected so it isn't fetched again. The archive and its unpacked files are
- * removed once filed; a failed unpack keeps the archive in staging for the next pass.
+ * removed once filed; a failed unpack keeps the archive in staging for the next pass. A scene folder
+ * another running download is writing (`busy(dir)`) is left alone like one already in the library.
  */
-async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now }) {
+async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now, busy = () => false }) {
   const archive = path.join(staging, sc.video.name);
   const got = await download(api, sc.video, archive, staging, local);
   const out = path.join(staging, `${sc.base}.unpacked`);
@@ -941,7 +1038,7 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
   fs.mkdirSync(out, { recursive: true });
   const r = { ok: 0, generated: 0 };
   try {
-    unpack(archive, out);
+    await unpack(archive, out);
     const scenes = lib.unpackedScenes(filesUnder(out), { vr: c.vr });
     const creator = lib.creatorFolder(c.title, c.author);
     const reject = (reason, extra = {}) => rejectedVideos.recordRejection(userData, {
@@ -958,7 +1055,8 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       const stem = lib.sceneTitle({ title: c.title, author: c.author, video: s.video.name, shared });
       const dir = path.join(incoming, creator, stem);
       const video = path.join(dir, stem + path.extname(s.video.name).toLowerCase());
-      if (fs.existsSync(video)) { console.log(`${now()} = ${creator}/${stem}: already in the library; left as is`); continue; }
+      const held = fs.existsSync(video) ? 'already in the library' : busy(dir) ? 'being downloaded for another post' : null;
+      if (held) { console.log(`${now()} = ${creator}/${stem}: ${held}; left as is`); continue; }
       fs.mkdirSync(dir, { recursive: true });
       for (const f of s.scripts) fs.renameSync(f.path, path.join(dir, lib.scriptFileName(stem, f.axis)));
       fs.renameSync(s.video.path, video);
@@ -968,8 +1066,8 @@ async function fetchPacked(c, sc, { api, userData, incoming, staging, local, now
       }, null, 1));
       let note = '';
       if (!s.axes.length) {
-        const up = spawnSync(process.execPath, [path.join(REPO, 'scripts/upgrade-multi-axis.mjs'), dir], { cwd: REPO, encoding: 'utf8' });
-        if (up.status === 0) { r.generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${(up.stderr || up.stdout).trim().split('\n').pop()})`;
+        const why = await generateAxes(dir);
+        if (why === null) { r.generated++; note = ' + generated axes'; } else note = ` (axis generation failed: ${why})`;
       }
       console.log(`${now()} ✓ ${creator}/${stem}${note} (unpacked from ${sc.video.name}${got === 'local' ? ', saved by hand' : ''})`);
       r.ok++;
@@ -998,8 +1096,20 @@ function readSwipesFile(userData) {
 }
 
 /**
+ * `--auto`'s posts: those swiped right in the swipe deck (readSwipesFile) and the EroScripts posts wanted on
+ * the Creators site (<userData>/creator-swipes.json, lib.creatorWants; missing or unreadable: none).
+ */
+function wantedPosts(userData) {
+  const { wanted } = readSwipesFile(userData);
+  let creators = new Set();
+  try { creators = lib.creatorWants(JSON.parse(fs.readFileSync(path.join(userData, lib.CREATOR_SWIPES_FILE), 'utf8'))); } catch { /* none */ }
+  return new Set([...wanted, ...creators]);
+}
+
+/**
  * The saved list as a download queue (content-rule breaks dropped, `--ids` applied; `--vrbangers`: posts with a
- * vrbangers.com video only; `--auto`: only posts swiped right, lib.autoFetchPick), checked again against the
+ * vrbangers.com video only; `--auto`: only posts swiped right or wanted on the Creators site, wantedPosts and
+ * lib.autoFetchPick), checked again against the
  * library as it is now (lib.notYetHeld). Without `--slr` its SexLikeReal scenes are left out (lib.leaveOutSlr):
  * they cost the account's weekly quota, and the weekly SLR run takes them post by post.
  */
@@ -1015,7 +1125,7 @@ function savedQueue(opts, { userData, config, incoming }) {
   }
   const dropped = Object.values(breaks).reduce((n, k) => n + k, 0);
   if (dropped) console.log(`Dropped ${dropped} waiting posts that break the content rules ${JSON.stringify(breaks)}`);
-  const { wanted } = opts.auto ? readSwipesFile(userData) : { wanted: new Set() };
+  const wanted = opts.auto ? wantedPosts(userData) : new Set();
   const picked = lib.downloadQueue(candidates, scoring, favourites)
     .filter((c) => (!opts.ids || opts.ids.has(c.id)) && (!opts.vrbangers || lib.isVrbangersCandidate(c)) && (!opts.auto || lib.autoFetchPick(c, wanted)));
   const { library, knownTopics, turnedDown } = scoutContext(config, userData, incoming);
@@ -1063,9 +1173,10 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
     }
     console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
     // Chrome (vrbangers.com) starts with the pass's first VRBangers scene and is closed when the pass ends, failed or not.
-    const r = await vrbangers.run(() => fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir }));
+    const r = await vrbangers.run(() => fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir, parallel: opts.parallel ?? 1 }));
     const slrWaiting = r.slrSkipped ? `; ${r.slrSkipped} SexLikeReal scene${r.slrSkipped > 1 ? 's' : ''} waiting (${r.slrStop === 'quota' ? 'no video download left on the account' : 'not logged in to SexLikeReal'})` : '';
-    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${slrWaiting}`);
+    const noRoom = r.noRoom ? `; ${r.noRoom} left for later: not enough disk space (${prefs.MIN_FREE_GB} GB kept free)` : '';
+    console.log(`Pass ${pass}: ${r.ok} downloaded (${r.generated} with generated axes), ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${slrWaiting}${noRoom}`);
     if (r.ok) dedupeAfterFetch(userData);
     last = r;
     did ||= r.ok + r.failed > 0;
@@ -1075,7 +1186,7 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
       await new Promise((resolve) => setTimeout(resolve, opts.wait * 1000));
     }
   }
-  if (last.capped || last.failed) return 2;
+  if (last.capped || last.failed || last.noRoom) return 2;
   // SexLikeReal scenes left: not logged in is 3 when they were all there was to do; no download left is work left.
   if (last.slrStop === 'login') return did ? 2 : 3;
   return last.slrStop ? 2 : 0;
@@ -1298,7 +1409,7 @@ function status({ userData, config, incoming }) {
   const candidates = lib.downloadQueue(saved, scoring, favourites).filter((c) => c.scenes.some((sc) => !done.has(lib.fetchedKey(c.id, sc.video.name))));
   let daily = null;
   try { daily = JSON.parse(fs.readFileSync(path.join(userData, DAILY_FILE), 'utf8')); } catch { /* no daily run yet */ }
-  const { wanted } = readSwipesFile(userData);
+  const wanted = wantedPosts(userData);
   for (const line of lib.scoutStatus(state, { candidates, scoring, wanted, daily })) console.log(line);
   return 0;
 }

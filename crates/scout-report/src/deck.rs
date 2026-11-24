@@ -506,10 +506,13 @@ pub fn build(f: &Files, stack: Stack) -> Deck {
         if f.videos.get(&id).is_some_and(|&n| n > 0) || post_stack(cand) != stack {
             continue;
         }
-        match f.post_swipes.dir(&id.to_string()) {
-            Some(Dir::Right) => wanted += 1,
-            Some(Dir::Left) => {}
-            None => cards.push(DeckCard::Post(card(
+        // A creator post swiped on its creator card is on the waiting list once creators:scout
+        // hands it over (`--add`): it counts as swiped here too.
+        let creator_choice = f.creators.post_choice(&format!("eroscripts:{id}"));
+        match (f.post_swipes.dir(&id.to_string()), creator_choice) {
+            (Some(Dir::Right), _) | (None, Some("want")) => wanted += 1,
+            (Some(Dir::Left), _) | (None, Some(_)) => {}
+            (None, None) => cards.push(DeckCard::Post(card(
                 id,
                 cand,
                 f.state.pointer(&format!("/topics/{id}")),
@@ -1566,5 +1569,21 @@ mod tests {
             (&v["source"], &v["creator"]),
             (&json!("creators"), &json!("Ann"))
         );
+    }
+
+    #[test]
+    fn a_creator_post_handed_to_the_waiting_list_counts_as_swiped() {
+        let before = build(&with_creators(), Stack::Flat);
+        let mut f = with_creators();
+        f.creators = Creators::new(
+            json!({"creators": {"ann": {"name": "Ann", "sources": ["favourite"],
+                "posts": [{"kind": "eroscripts", "id": 11, "downloadable": true}]}}}),
+            json!({"version": 1, "posts": {"eroscripts:11": {"choice": "want", "at": "t", "creator": "ann"}}}),
+            4.0,
+        );
+        let d = build(&f, Stack::Flat);
+        assert!(before.cards.iter().any(|c| c.key() == "eroscripts:11"));
+        assert!(!d.cards.iter().any(|c| c.key() == "eroscripts:11"));
+        assert_eq!(d.wanted, build(&files(), Stack::Flat).wanted + 1);
     }
 }

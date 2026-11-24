@@ -2,15 +2,28 @@
   "_comment": "FunSync's jobs, run on this Mac by job-runner (crates/job-runner), whose scheduler the desktop app starts. schedule: cron's five fields (minute hour day-of-month month day-of-week, local time); the scheduler starts the job then itself, and once more after a run that was still going when the time came. Jobs without one are started by Orca automations: each runs `npm run jobs -- start <job>`. timeout: the run is stopped after this. steps run one after the other from the repo root; the job's exit code is the first that isn't 0 or 2, else 2 when a step left work, else 0.",
   "jobs": [
     {
-      "name": "downloads",
+      "name": "downloads-eroscripts",
       "schedule": "0 * * * *",
       "timeout": "6h",
-      "steps": [
-        ["npm", "run", "-s", "eroscripts:scout", "--", "--fetch", "--auto"],
-        ["npm", "run", "-s", "vrb:scout", "--", "--fetch"],
-        ["npm", "run", "-s", "pmvhaven:scout", "--", "--fetch"],
-        ["npm", "run", "-s", "creators:scout", "--", "--fetch"]
-      ]
+      "steps": [["npm", "run", "-s", "eroscripts:scout", "--", "--fetch", "--auto", "--parallel", "8"]]
+    },
+    {
+      "name": "downloads-vrb",
+      "schedule": "2 * * * *",
+      "timeout": "6h",
+      "steps": [["npm", "run", "-s", "vrb:scout", "--", "--fetch"]]
+    },
+    {
+      "name": "downloads-pmvhaven",
+      "schedule": "4 * * * *",
+      "timeout": "3h",
+      "steps": [["npm", "run", "-s", "pmvhaven:scout", "--", "--fetch"]]
+    },
+    {
+      "name": "downloads-creators",
+      "schedule": "6 * * * *",
+      "timeout": "1h",
+      "steps": [["npm", "run", "-s", "creators:scout", "--", "--fetch"]]
     },
     {
       "name": "eroscripts-scout",
