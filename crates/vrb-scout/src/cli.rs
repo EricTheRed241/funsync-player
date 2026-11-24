@@ -43,7 +43,7 @@ fetchedAt is kept from the previous file.
 
 --fetch takes each right-swiped scene (highest score first): the public toy script,
 then the video with the member's signed link from the scene page (headless Google
-Chrome signed in to the site, profile <userData>/vrbangers-chrome): the best within the
+Chrome signed in to the site, profile <userData>/vrb-scout-chrome): the best within the
 VR caps (videoCaps: 8K, 60 fps), stereo before mono, curl into <library parent>/_staging,
 then <Other>/<first performer>/<Performers> - <Title> (<Site>)_<projection>/ with a
 vrb.json sidecar; generated twist / roll / pitch (scripts/upgrade-multi-axis.mjs);

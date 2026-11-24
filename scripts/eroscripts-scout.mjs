@@ -734,6 +734,11 @@ function inTurn(host, fn) {
   return run;
 }
 
+/** Forum files (scripts, forum-hosted videos): ≥ 700 ms apart like every forum request, parallel downloads too. */
+const forumFiles = createPacer();
+/** Pauses before trying a forum file again after a 503 / 429 (the forum shedding a burst). */
+const FORUM_RETRY_MS = [10_000, 30_000];
+
 /**
  * Files saved by hand: the files directly in each of `dirs` (AppleDouble
  * sidecars left out), as `[{name, path, size}]`.
@@ -788,7 +793,13 @@ async function download(api, file, dest, staging, local = [], { scriptMs = null,
     if (byHand) {
       fs.copyFileSync(byHand.path, tmp);
     } else if (file.host === 'forum') {
-      const r = await api.downloadFile(file.url, tmp, { overwrite: true });
+      let r;
+      for (const pause of [0, ...FORUM_RETRY_MS]) {
+        if (pause) await new Promise((resolve) => setTimeout(resolve, pause));
+        await forumFiles.wait();
+        r = await api.downloadFile(file.url, tmp, { overwrite: true });
+        if (r.success || !/\b(503|429)\b/.test(String(r.error))) break;
+      }
       if (!r.success) throw new Error(`forum: ${r.error}`);
     } else if (file.host === 'mega') {
       const { File } = await import('megajs');
