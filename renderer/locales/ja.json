@@ -1676,7 +1676,27 @@
       "remoteConnected": "{ip} のブラウザー経由で接続済み",
       "remoteWaitingBackend": "バックエンドを待っています…",
       "remoteWaitingBrowser": "別のコンピューターのブラウザーを待っています…",
-      "remoteWaitingPort": "{ip} のブラウザーが接続されました。デバイスのポートを待っています…"
+      "remoteWaitingPort": "{ip} のブラウザーが接続されました。デバイスのポートを待っています…",
+      "profile": "デバイス",
+      "profileHint": "TCode デバイスは一度に 1 台。各デバイスは接続、軸、オフセット、自動接続を個別に保持します。切り替えると現在のデバイスを切断し、もう一方を接続します。",
+      "profileCustom": "カスタム（その他の TCode デバイス）"
+    },
+    "funsr": {
+      "title": "FUNSR MINI の設定",
+      "hint": "変更時と接続のたびにデバイスへ送信します。ストロークはデバイスの限界内に収めてください。端のストッパーに当たるとモーターが停止し、損傷します。",
+      "stroke": "ストローク長 (DAG)",
+      "strokeValue": "{value} · 約 {cm} cm",
+      "speed": "速度 (DKP)",
+      "speedHint": "高いほど速くなりますが音も大きくなります。デバイス既定値 1.2。",
+      "start": "開始位置 (DSP)",
+      "startUnset": "デバイスの設定のまま",
+      "startBottom": "下 (DSP1)",
+      "startMiddle": "中央 (DSP2)",
+      "startTop": "上 (DSP3)",
+      "reset": "デバイス既定値に戻す",
+      "deviceDefault": "未送信",
+      "savedForConnect": "保存しました。デバイス接続時に送信します。",
+      "sent": "送信: {commands}"
     },
     "sync": {
       "experimental": "実験的",

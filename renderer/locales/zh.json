@@ -1676,7 +1676,27 @@
       "remoteConnected": "已通过 {ip} 上的浏览器连接",
       "remoteWaitingBackend": "正在等待后端…",
       "remoteWaitingBrowser": "正在等待另一台电脑上的浏览器…",
-      "remoteWaitingPort": "{ip} 上的浏览器已连接；正在等待设备端口…"
+      "remoteWaitingPort": "{ip} 上的浏览器已连接；正在等待设备端口…",
+      "profile": "设备",
+      "profileHint": "一次只用一个 TCode 设备。每个设备各自保存连接、轴、偏移和自动连接；切换时会断开当前设备并连接另一个。",
+      "profileCustom": "自定义（其他 TCode 设备）"
+    },
+    "funsr": {
+      "title": "FUNSR MINI 设置",
+      "hint": "修改时以及每次连接时发送到设备。请让行程保持在设备限位以内：撞到末端限位会使电机堵转并损坏。",
+      "stroke": "行程长度 (DAG)",
+      "strokeValue": "{value} · 约 {cm} cm",
+      "speed": "速度 (DKP)",
+      "speedHint": "越高越快，但噪音更大。设备默认值 1.2。",
+      "start": "起始位置 (DSP)",
+      "startUnset": "保持设备上的设置",
+      "startBottom": "底部 (DSP1)",
+      "startMiddle": "中间 (DSP2)",
+      "startTop": "顶部 (DSP3)",
+      "reset": "恢复设备默认值",
+      "deviceDefault": "未发送",
+      "savedForConnect": "已保存；设备连接时发送。",
+      "sent": "已发送：{commands}"
     },
     "sync": {
       "experimental": "实验性",

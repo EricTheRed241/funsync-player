@@ -1676,7 +1676,27 @@
       "remoteConnected": "Verbunden über Browser an {ip}",
       "remoteWaitingBackend": "Warte auf das Backend…",
       "remoteWaitingBrowser": "Warte auf den Browser am anderen Computer…",
-      "remoteWaitingPort": "Browser an {ip} verbunden; warte auf den Geräteport…"
+      "remoteWaitingPort": "Browser an {ip} verbunden; warte auf den Geräteport…",
+      "profile": "Gerät",
+      "profileHint": "Immer nur ein TCode-Gerät. Jedes behält eigene Verbindung, Achsen, Versatz und Auto-Verbindung; beim Wechsel wird das aktuelle getrennt und das andere verbunden.",
+      "profileCustom": "Benutzerdefiniert (anderes TCode-Gerät)"
+    },
+    "funsr": {
+      "title": "FUNSR-MINI-Einstellungen",
+      "hint": "Wird bei Änderung und bei jeder Verbindung an das Gerät gesendet. Halte den Hub innerhalb der Gerätegrenzen: Fährt es in die Endanschläge, blockiert der Motor und nimmt Schaden.",
+      "stroke": "Hublänge (DAG)",
+      "strokeValue": "{value} · ≈{cm} cm",
+      "speed": "Geschwindigkeit (DKP)",
+      "speedHint": "Höher ist schneller, aber lauter. Gerätestandard 1,2.",
+      "start": "Startposition (DSP)",
+      "startUnset": "Wie am Gerät eingestellt lassen",
+      "startBottom": "Unten (DSP1)",
+      "startMiddle": "Mitte (DSP2)",
+      "startTop": "Oben (DSP3)",
+      "reset": "Auf Gerätestandard zurücksetzen",
+      "deviceDefault": "nicht gesendet",
+      "savedForConnect": "Gespeichert; wird beim Verbinden gesendet.",
+      "sent": "Gesendet: {commands}"
     },
     "sync": {
       "experimental": "EXPERIMENTELL",

@@ -1676,7 +1676,27 @@
       "remoteConnected": "{ip} 의 브라우저를 통해 연결됨",
       "remoteWaitingBackend": "백엔드를 기다리는 중…",
       "remoteWaitingBrowser": "다른 컴퓨터의 브라우저를 기다리는 중…",
-      "remoteWaitingPort": "{ip} 의 브라우저 연결됨; 기기 포트를 기다리는 중…"
+      "remoteWaitingPort": "{ip} 의 브라우저 연결됨; 기기 포트를 기다리는 중…",
+      "profile": "기기",
+      "profileHint": "TCode 기기는 한 번에 하나만. 각 기기는 연결, 축, 오프셋, 자동 연결을 따로 저장하며, 전환하면 현재 기기를 끊고 다른 기기를 연결합니다.",
+      "profileCustom": "사용자 지정 (다른 TCode 기기)"
+    },
+    "funsr": {
+      "title": "FUNSR MINI 설정",
+      "hint": "변경할 때와 연결할 때마다 기기로 전송됩니다. 스트로크를 기기 한계 안에 두세요. 끝 멈춤쇠에 닿으면 모터가 멈추고 손상됩니다.",
+      "stroke": "스트로크 길이 (DAG)",
+      "strokeValue": "{value} · 약 {cm} cm",
+      "speed": "속도 (DKP)",
+      "speedHint": "높을수록 빠르지만 소음이 커집니다. 기기 기본값 1.2.",
+      "start": "시작 위치 (DSP)",
+      "startUnset": "기기 설정 그대로",
+      "startBottom": "아래 (DSP1)",
+      "startMiddle": "가운데 (DSP2)",
+      "startTop": "위 (DSP3)",
+      "reset": "기기 기본값으로 재설정",
+      "deviceDefault": "전송 안 함",
+      "savedForConnect": "저장됨; 기기가 연결되면 전송합니다.",
+      "sent": "전송됨: {commands}"
     },
     "sync": {
       "experimental": "실험적",

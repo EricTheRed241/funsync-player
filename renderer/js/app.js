@@ -23,6 +23,10 @@ import { ButtplugManager } from './buttplug-manager.js';
 import { ButtplugSync } from './buttplug-sync.js';
 import { TCodeManager } from './tcode-manager.js';
 import { TCodeSync } from './tcode-sync.js';
+import { activeProfileId, getProfile } from './tcode-profiles.js';
+// How often a saved USB serial TCode device's port is looked for while it
+// isn't plugged in.
+const SERIAL_PORT_WAIT_MS = 5000;
 import { VRBridge } from './vr-bridge.js';
 import { RemoteBridge } from './remote-bridge.js';
 import { LibraryEditApplier } from './library-edits.js';
@@ -832,6 +836,8 @@ class App {
         // user swaps videos. Returns true if a device was available to
         // re-arm so the panel can show success/failure feedback.
         onButtplugResync: () => this._resyncButtplug(),
+        // A TCode device profile switch: connect the new device.
+        onTCodeProfileSwitched: () => this._autoConnectTCode(),
       });
 
       // Load saved smoothing settings into buttplug sync
@@ -998,8 +1004,10 @@ class App {
         const panelTCodeDisconnect = this.tcodeManager.onDisconnect;
         this.tcodeManager.onDisconnect = () => {
           if (panelTCodeDisconnect) panelTCodeDisconnect();
-          console.log('[TCode] Disconnected — stopping sync engine');
           if (this.tcodeSync) this.tcodeSync.stop();
+          // A USB device pulled out: reconnect when it's plugged back in.
+          clearTimeout(this._serialWaitTimer);
+          this._serialWaitTimer = setTimeout(() => this._waitForSerialPort(), SERIAL_PORT_WAIT_MS);
           this._updateDeviceIndicators();
           this._refreshOrgasmPlan();
         };
@@ -3612,18 +3620,25 @@ class App {
     }
   }
 
-  /** Device list label for the connected TCode transport. */
+  /** Device list label for the connected TCode transport, led by the device profile. */
   _tcodeDeviceLabel() {
-    if (this.tcodeManager._transportKind === 'remote-serial') return 'TCode (remote serial)';
-    return `TCode (${this.tcodeManager.portPath || 'serial'})`;
+    const link = this.tcodeManager._transportKind === 'remote-serial'
+      ? 'TCode (remote serial)'
+      : this.tcodeManager._transportKind === 'websocket'
+        ? `TCode (${this.tcodeManager._transportOpts?.url || 'WebSocket'})`
+        : `TCode (${this.tcodeManager.portPath || 'serial'})`;
+    const profile = getProfile(activeProfileId(this.settings.get('tcode') || {}));
+    return profile?.name ? `${profile.name} · ${link}` : link;
   }
 
   /**
-   * Start-up connect for a saved WebSocket or remote-serial TCode device.
-   * Main keeps trying while it doesn't answer (switched off, or the other
-   * computer's browser not attached yet, is normal), and the manager's
-   * onConnect starts sync once it does. Off after the user pressed
-   * Disconnect (`tcode.autoConnect` false) until they connect again.
+   * Start-up connect for the active TCode device profile's saved device, also
+   * run after a profile switch. WebSocket and remote serial: main keeps
+   * trying while it doesn't answer (switched off, or the other computer's
+   * browser not attached yet, is normal), and the manager's onConnect starts
+   * sync once it does. Local USB serial: waits for its port to show up.
+   * Off after the user pressed Disconnect (`tcode.autoConnect` false) until
+   * they connect again.
    */
   async _autoConnectTCode() {
     if (this.settings.get('tcode.autoConnect') === false) return;
@@ -3641,6 +3656,9 @@ class App {
       kind = 'remote-serial';
       opts = { baudRate: Number(this.settings.get('tcode.remoteBaudRate')) || 115200 };
       what = `remote serial @ ${opts.baudRate}`;
+    } else if (transport === 'serial') {
+      this._waitForSerialPort();
+      return;
     } else {
       return;
     }
@@ -3649,6 +3667,34 @@ class App {
     if (!success && !this.tcodeManager.waiting) {
       console.warn(`[TCode] Auto-connect to ${what} failed`);
     }
+  }
+
+  /**
+   * Local USB serial device (FUNSR MINI): connect once its saved port is
+   * listed, looking again every SERIAL_PORT_WAIT_MS while it isn't
+   * (unplugged, switched off). Only for a device connected from the panel
+   * before (`tcode.autoConnect` true); stops when the user disconnects,
+   * picks another transport or profile, or it connects.
+   */
+  async _waitForSerialPort() {
+    clearTimeout(this._serialWaitTimer);
+    this._serialWaitTimer = null;
+    const path = this.settings.get('tcode.port');
+    const wanted = () => path
+      && this.settings.get('tcode.autoConnect') === true
+      && this.settings.get('tcode.transport') === 'serial'
+      && this.settings.get('tcode.port') === path
+      && !this.tcodeManager.connected && !this.tcodeManager.waiting;
+    if (!wanted()) return;
+    const ports = await this.tcodeManager.listPorts();
+    if (!wanted()) return;
+    if (ports.some((p) => p.path === path)) {
+      const baudRate = Number(this.settings.get('tcode.baudRate')) || 115200;
+      console.log(`[TCode] Auto-connecting to ${path} @ ${baudRate}...`);
+      if (await this.tcodeManager.connect('serial', { path, baudRate })) return;
+      console.warn(`[TCode] Auto-connect to ${path} failed`);
+    }
+    this._serialWaitTimer = setTimeout(() => this._waitForSerialPort(), SERIAL_PORT_WAIT_MS);
   }
 
   /**
