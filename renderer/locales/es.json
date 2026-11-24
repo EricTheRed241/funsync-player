@@ -1676,7 +1676,27 @@
       "remoteConnected": "Conectado mediante el navegador en {ip}",
       "remoteWaitingBackend": "Esperando al backend…",
       "remoteWaitingBrowser": "Esperando al navegador del otro ordenador…",
-      "remoteWaitingPort": "Navegador en {ip} conectado; esperando el puerto del dispositivo…"
+      "remoteWaitingPort": "Navegador en {ip} conectado; esperando el puerto del dispositivo…",
+      "profile": "Dispositivo",
+      "profileHint": "Un dispositivo TCode a la vez. Cada uno guarda su conexión, ejes, desfase y conexión automática; al cambiar se desconecta el actual y se conecta el otro.",
+      "profileCustom": "Personalizado (otro dispositivo TCode)"
+    },
+    "funsr": {
+      "title": "Ajustes de FUNSR MINI",
+      "hint": "Se envía al dispositivo al cambiarlo y en cada conexión. Mantén el recorrido dentro de los límites: chocar con los topes bloquea el motor y lo daña.",
+      "stroke": "Longitud de recorrido (DAG)",
+      "strokeValue": "{value} · ≈{cm} cm",
+      "speed": "Velocidad (DKP)",
+      "speedHint": "Más alto es más rápido pero más ruidoso. Valor del dispositivo: 1,2.",
+      "start": "Posición inicial (DSP)",
+      "startUnset": "Dejar como está en el dispositivo",
+      "startBottom": "Abajo (DSP1)",
+      "startMiddle": "Centro (DSP2)",
+      "startTop": "Arriba (DSP3)",
+      "reset": "Restablecer valores del dispositivo",
+      "deviceDefault": "no enviado",
+      "savedForConnect": "Guardado; se envía al conectar el dispositivo.",
+      "sent": "Enviado: {commands}"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",

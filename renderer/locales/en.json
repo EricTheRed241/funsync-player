@@ -1753,7 +1753,27 @@
       "remoteConnected": "Connected via browser at {ip}",
       "remoteWaitingBackend": "Waiting for the backend…",
       "remoteWaitingBrowser": "Waiting for the browser on the other computer…",
-      "remoteWaitingPort": "Browser at {ip} attached; waiting for the device port…"
+      "remoteWaitingPort": "Browser at {ip} attached; waiting for the device port…",
+      "profile": "Device",
+      "profileHint": "One TCode device at a time. Each keeps its own connection, axes, offset and auto-connect; switching disconnects the current one and connects the other.",
+      "profileCustom": "Custom (other TCode device)"
+    },
+    "funsr": {
+      "title": "FUNSR MINI settings",
+      "hint": "Sent to the device when changed and again at every connect. Keep the stroke inside the device's limits: running into the end stops stalls the motor and damages it.",
+      "stroke": "Stroke length (DAG)",
+      "strokeValue": "{value} · ≈{cm} cm",
+      "speed": "Speed (DKP)",
+      "speedHint": "Higher is faster but louder. Device default 1.2.",
+      "start": "Start position (DSP)",
+      "startUnset": "Leave as set on the device",
+      "startBottom": "Bottom (DSP1)",
+      "startMiddle": "Middle (DSP2)",
+      "startTop": "Top (DSP3)",
+      "reset": "Reset to device defaults",
+      "deviceDefault": "not sent",
+      "savedForConnect": "Saved; sent when the device connects.",
+      "sent": "Sent: {commands}"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",

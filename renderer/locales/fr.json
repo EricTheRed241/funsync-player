@@ -1676,7 +1676,27 @@
       "remoteConnected": "Connecté via le navigateur sur {ip}",
       "remoteWaitingBackend": "En attente du backend…",
       "remoteWaitingBrowser": "En attente du navigateur sur l'autre ordinateur…",
-      "remoteWaitingPort": "Navigateur sur {ip} connecté ; en attente du port de l'appareil…"
+      "remoteWaitingPort": "Navigateur sur {ip} connecté ; en attente du port de l'appareil…",
+      "profile": "Appareil",
+      "profileHint": "Un seul appareil TCode à la fois. Chacun garde sa connexion, ses axes, son décalage et sa connexion automatique ; changer déconnecte l'actuel et connecte l'autre.",
+      "profileCustom": "Personnalisé (autre appareil TCode)"
+    },
+    "funsr": {
+      "title": "Réglages FUNSR MINI",
+      "hint": "Envoyé à l'appareil à chaque modification et à chaque connexion. Gardez la course dans les limites : buter contre les butées bloque le moteur et l'endommage.",
+      "stroke": "Longueur de course (DAG)",
+      "strokeValue": "{value} · ≈{cm} cm",
+      "speed": "Vitesse (DKP)",
+      "speedHint": "Plus haut = plus rapide mais plus bruyant. Valeur de l'appareil : 1,2.",
+      "start": "Position de départ (DSP)",
+      "startUnset": "Laisser le réglage de l'appareil",
+      "startBottom": "En bas (DSP1)",
+      "startMiddle": "Au milieu (DSP2)",
+      "startTop": "En haut (DSP3)",
+      "reset": "Rétablir les valeurs de l'appareil",
+      "deviceDefault": "non envoyé",
+      "savedForConnect": "Enregistré ; envoyé à la connexion de l'appareil.",
+      "sent": "Envoyé : {commands}"
     },
     "sync": {
       "experimental": "EXPÉRIMENTAL",

@@ -10,6 +10,18 @@ import {
 } from '../js/auto-offset.js';
 import { eventBus } from '../js/event-bus.js';
 import { showToast } from '../js/toast.js';
+import {
+  TCODE_PROFILES,
+  activeProfileId,
+  switchProfile,
+  FUNSR_LIMITS,
+  funsrCommands,
+  funsrStrokeCm,
+} from '../js/tcode-profiles.js';
+
+// Wait after a connect before sending FUNSR MINI settings: opening a USB
+// serial port can reset the board, which drops anything sent while it boots.
+const FUNSR_SEND_DELAY_MS = 2500;
 
 // TCode v0.3 axes exposed in the Axis Ranges UI. Naming + type match the
 // multi-axis spec module (renderer/js/multi-axis.js) and the official TCode
@@ -38,7 +50,7 @@ const TCODE_UI_AXES = [
 ];
 
 export class ConnectionPanel {
-  constructor({ buttplugManager, buttplugSync, tcodeManager, tcodeSync, vrBridge, settings, onButtplugResync }) {
+  constructor({ buttplugManager, buttplugSync, tcodeManager, tcodeSync, vrBridge, settings, onButtplugResync, onTCodeProfileSwitched }) {
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
     this.tcodeManager = tcodeManager || null;
@@ -49,6 +61,9 @@ export class ConnectionPanel {
     // Buttplug sync engine at the current video position. Returns true
     // if a device was available to re-arm. Optional.
     this.onButtplugResync = onButtplugResync || null;
+    // Called with the new profile id after a TCode device profile switch,
+    // so the app can connect the new device. Optional.
+    this.onTCodeProfileSwitched = onTCodeProfileSwitched || null;
     this._panel = null;
     this._visible = false;
     this._activeTab = 'buttplug';
@@ -160,6 +175,10 @@ export class ConnectionPanel {
       </div>
 
       <div class="connection-panel__form">
+        <label class="connection-panel__label" for="tcode-profile-select" data-i18n="connection.tcode.profile">${_esc(t('connection.tcode.profile'))}</label>
+        <select id="tcode-profile-select" class="connection-panel__input" aria-describedby="tcode-profile-hint"></select>
+        <div id="tcode-profile-hint" class="connection-panel__hint" style="margin:4px 0 8px;font-size:11px;color:var(--text-secondary)" data-i18n="connection.tcode.profileHint">${_esc(t('connection.tcode.profileHint'))}</div>
+
         <label class="connection-panel__label" data-i18n="connection.tcode.transport">${_esc(t('connection.tcode.transport'))}</label>
         <select id="tcode-transport-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.transportAria" aria-label="${_esc(t('connection.tcode.transportAria'))}">
           <option value="serial" selected data-i18n="connection.tcode.transportSerial">${_esc(t('connection.tcode.transportSerial'))}</option>
@@ -242,6 +261,37 @@ export class ConnectionPanel {
       <div id="tcode-axis-settings" class="connection-panel__section" hidden>
         <label class="connection-panel__section-label" data-i18n="connection.tcode.axisRanges">${_esc(t('connection.tcode.axisRanges'))}</label>
         <div id="tcode-axis-list"></div>
+      </div>
+
+      <div id="tcode-funsr-settings" class="connection-panel__section" hidden>
+        <label class="connection-panel__section-label" data-i18n="connection.funsr.title">${_esc(t('connection.funsr.title'))}</label>
+        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;color:var(--text-secondary)" data-i18n="connection.funsr.hint">${_esc(t('connection.funsr.hint'))}</div>
+
+        <label class="connection-panel__label" for="funsr-dag" data-i18n="connection.funsr.stroke">${_esc(t('connection.funsr.stroke'))}</label>
+        <div class="connection-panel__device-safety">
+          <input type="range" id="funsr-dag" class="connection-panel__safety-slider" min="1" max="3" step="0.05" aria-describedby="funsr-dag-val">
+          <span id="funsr-dag-val" class="connection-panel__safety-value"></span>
+        </div>
+
+        <label class="connection-panel__label" for="funsr-dkp" data-i18n="connection.funsr.speed">${_esc(t('connection.funsr.speed'))}</label>
+        <div class="connection-panel__device-safety">
+          <input type="range" id="funsr-dkp" class="connection-panel__safety-slider" min="0.5" max="5" step="0.1" aria-describedby="funsr-dkp-val funsr-dkp-hint">
+          <span id="funsr-dkp-val" class="connection-panel__safety-value"></span>
+        </div>
+        <div id="funsr-dkp-hint" class="connection-panel__hint" style="font-size:11px;color:var(--text-secondary)" data-i18n="connection.funsr.speedHint">${_esc(t('connection.funsr.speedHint'))}</div>
+
+        <label class="connection-panel__label" style="margin-top:8px" for="funsr-dsp" data-i18n="connection.funsr.start">${_esc(t('connection.funsr.start'))}</label>
+        <select id="funsr-dsp" class="connection-panel__input">
+          <option value="" data-i18n="connection.funsr.startUnset">${_esc(t('connection.funsr.startUnset'))}</option>
+          <option value="1" data-i18n="connection.funsr.startBottom">${_esc(t('connection.funsr.startBottom'))}</option>
+          <option value="2" data-i18n="connection.funsr.startMiddle">${_esc(t('connection.funsr.startMiddle'))}</option>
+          <option value="3" data-i18n="connection.funsr.startTop">${_esc(t('connection.funsr.startTop'))}</option>
+        </select>
+
+        <div class="connection-panel__input-row" style="margin-top:10px">
+          <button id="funsr-reset-btn" class="connection-panel__btn connection-panel__btn--secondary" style="flex:1" data-i18n="connection.funsr.reset">${_esc(t('connection.funsr.reset'))}</button>
+        </div>
+        <div id="funsr-status" class="connection-panel__hint" aria-live="polite"></div>
       </div>
 
       </div><!-- end tab-tcode -->
@@ -406,75 +456,213 @@ export class ConnectionPanel {
       if (transportSelect) {
         transportSelect.addEventListener('change', () => this._onTCodeTransportChange());
       }
-
-      // Restore saved settings — both legacy (serial) and new transport-aware.
-      const savedTransport = this.settings.get('tcode.transport') || 'serial';
-      const savedPort = this.settings.get('tcode.port') || '';
-      const savedBaud = this.settings.get('tcode.baudRate') || 115200;
-      const savedUdpHost = this.settings.get('tcode.udpHost') || '';
-      const savedUdpPort = this.settings.get('tcode.udpPort') || '';
-      const savedWsUrl = this.settings.get('tcode.wsUrl') || '';
-      const savedRemoteBaud = this.settings.get('tcode.remoteBaudRate') || 115200;
-      const savedPrecision = Number(this.settings.get('tcode.precision')) || 3;
-
-      if (transportSelect) transportSelect.value = savedTransport;
-      this._panel.querySelector('#tcode-baud-select').value = String(savedBaud);
-      const udpHost = this._panel.querySelector('#tcode-udp-host');
-      const udpPort = this._panel.querySelector('#tcode-udp-port');
-      const wsUrl = this._panel.querySelector('#tcode-ws-url');
       const precisionSelect = this._panel.querySelector('#tcode-precision-select');
-      if (udpHost) udpHost.value = savedUdpHost;
-      if (udpPort && savedUdpPort) udpPort.value = String(savedUdpPort);
-      if (wsUrl) wsUrl.value = savedWsUrl;
-      const remoteBaud = this._panel.querySelector('#tcode-remote-baud-select');
-      if (remoteBaud) remoteBaud.value = String(savedRemoteBaud);
-      if (precisionSelect) {
-        precisionSelect.value = String(savedPrecision);
-        // Apply immediately so the manager emits the right precision even
-        // before the user clicks Connect.
-        this.tcodeManager.setPrecision?.(savedPrecision);
-        precisionSelect.addEventListener('change', () => {
-          const digits = parseInt(precisionSelect.value, 10);
-          this.tcodeManager.setPrecision?.(digits);
-          this.settings.set('tcode.precision', digits);
-        });
-      }
+      precisionSelect?.addEventListener('change', () => {
+        const digits = parseInt(precisionSelect.value, 10);
+        this.tcodeManager.setPrecision?.(digits);
+        this.settings.set('tcode.precision', digits);
+      });
       // Output rate (advanced) — smoother wired motion at higher Hz. Applies
       // live to the sync engine (restarts its scheduler) and persists.
       const rateSelect = this._panel.querySelector('#tcode-update-rate-select');
-      if (rateSelect) {
-        // Fallback matches the store default (60 since the keyframe-output
-        // rework) — a mismatched fallback here showed 25 in the dropdown
-        // while the engine actually ran at 60.
-        const savedRate = Number(this.settings.get('tcode.updateRateHz')) || 60;
-        rateSelect.value = String(savedRate);
-        this.tcodeSync?.setUpdateRate?.(savedRate);
-        rateSelect.addEventListener('change', () => {
-          const hz = parseInt(rateSelect.value, 10) || 25;
-          this.tcodeSync?.setUpdateRate?.(hz);
-          this.settings.set('tcode.updateRateHz', hz);
-        });
-      }
-      this._onTCodeTransportChange();
+      rateSelect?.addEventListener('change', () => {
+        const hz = parseInt(rateSelect.value, 10) || 25;
+        this.tcodeSync?.setUpdateRate?.(hz);
+        this.settings.set('tcode.updateRateHz', hz);
+      });
 
-      this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
+      this._wireTCodeProfiles();
+      this._wireFunsrSettings();
+      this._restoreTCodeForm();
+
+      this.tcodeManager.onConnect = () => {
+        this._updateTCodeStatus('connected');
+        this._sendFunsrSettingsSoon();
+      };
       this.tcodeManager.onDisconnect = () => this._updateTCodeStatus(this._tcodeLinkState());
       // Every link change (also the start-up auto-connect, which doesn't go
       // through this panel): a WebSocket device that isn't answering shows
       // as connecting until it does.
       this.tcodeManager.onStatus = () => this._updateTCodeStatus(this._tcodeLinkState());
-
-      // Push saved axis ranges/enabled state into tcodeSync so they apply
-      // as soon as the device connects — no need to open the panel first.
-      this._applyTCodeAxisSettings();
-
-      // Initial port scan (only meaningful for serial transport, but cheap)
-      this._refreshTCodePorts(savedPort);
     }
 
     // VR Bridge UI + offset slider live in components/vr-modal.js now —
     // this panel stays focused on physical devices (Buttplug / TCode).
     // The bridge itself still runs; only the UI moved.
+  }
+
+  /**
+   * Load the active profile's `tcode.*` settings into the TCode form, the
+   * manager (precision) and the sync engine (rate, offset, axes). Runs at
+   * start and after every profile switch.
+   */
+  _restoreTCodeForm() {
+    const get = (k) => this.settings.get(`tcode.${k}`);
+    const q = (sel) => this._panel.querySelector(sel);
+    const savedPrecision = Number(get('precision')) || 3;
+    // Fallback matches the store default (60 since the keyframe-output
+    // rework) — a mismatched fallback here showed 25 in the dropdown
+    // while the engine actually ran at 60.
+    const savedRate = Number(get('updateRateHz')) || 60;
+
+    q('#tcode-transport-select').value = get('transport') || 'serial';
+    q('#tcode-baud-select').value = String(get('baudRate') || 115200);
+    q('#tcode-udp-host').value = get('udpHost') || '';
+    q('#tcode-udp-port').value = get('udpPort') ? String(get('udpPort')) : '';
+    q('#tcode-ws-url').value = get('wsUrl') || '';
+    q('#tcode-remote-baud-select').value = String(get('remoteBaudRate') || 115200);
+    q('#tcode-precision-select').value = String(savedPrecision);
+    q('#tcode-update-rate-select').value = String(savedRate);
+    q('#tcode-profile-select').value = activeProfileId(this.settings.get('tcode') || {});
+
+    // Apply immediately so the manager emits the right precision even
+    // before the user clicks Connect.
+    this.tcodeManager.setPrecision?.(savedPrecision);
+    this.tcodeSync?.setUpdateRate?.(savedRate);
+    this.tcodeSync?.setOffsetMs?.(Number(get('defaultOffset')) || 0);
+    this._onTCodeTransportChange();
+    // Push saved axis ranges/enabled state into tcodeSync so they apply
+    // as soon as the device connects — no need to open the panel first.
+    this._applyTCodeAxisSettings();
+    if (this.tcodeManager.connected) this._renderTCodeAxes();
+    this._restoreFunsrSettings();
+    // Port scan (only meaningful for serial transport, but cheap)
+    this._refreshTCodePorts(get('port') || '');
+  }
+
+  // --- TCode device profiles ---
+
+  _wireTCodeProfiles() {
+    const select = this._panel.querySelector('#tcode-profile-select');
+    for (const p of TCODE_PROFILES) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      if (p.nameKey) {
+        opt.dataset.i18n = p.nameKey;
+        opt.textContent = t(p.nameKey);
+      } else {
+        opt.textContent = p.name;
+      }
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => this.switchTCodeProfile(select.value));
+  }
+
+  /**
+   * Make `id` the active TCode device: disconnect the current one, save its
+   * settings under its profile, load the new profile's (its defaults the
+   * first time) and connect it when it auto-connects. One device at a time.
+   */
+  async switchTCodeProfile(id) {
+    const change = switchProfile(this.settings.get('tcode') || {}, id);
+    if (!change) return false;
+    if (this.tcodeManager.connected || this.tcodeManager.waiting) {
+      await this.tcodeManager.disconnect();
+      this._updateTCodeStatus('disconnected');
+    }
+    for (const [field, value] of Object.entries(change.fields)) {
+      this.settings.set(`tcode.${field}`, value);
+    }
+    this.settings.set('tcode.profiles', change.profiles);
+    this._restoreTCodeForm();
+    console.log(`[TCode] Device profile → ${id}`);
+    this.onTCodeProfileSwitched?.(id);
+    return true;
+  }
+
+  // --- FUNSR MINI settings (stroke, speed, start position) ---
+
+  _wireFunsrSettings() {
+    const dag = this._panel.querySelector('#funsr-dag');
+    const dkp = this._panel.querySelector('#funsr-dkp');
+    const dsp = this._panel.querySelector('#funsr-dsp');
+    dag.min = String(FUNSR_LIMITS.dag.min);
+    dag.max = String(FUNSR_LIMITS.dag.max);
+    dag.step = String(FUNSR_LIMITS.dag.step);
+    dkp.min = String(FUNSR_LIMITS.dkp.min);
+    dkp.max = String(FUNSR_LIMITS.dkp.max);
+    dkp.step = String(FUNSR_LIMITS.dkp.step);
+    // Readouts follow the slider while dragging; the device only gets the
+    // value on release (`change`), not a command per pixel.
+    dag.addEventListener('input', () => this._paintFunsrReadouts());
+    dkp.addEventListener('input', () => this._paintFunsrReadouts());
+    dag.addEventListener('change', () => this._setFunsrSetting('dag', Number(dag.value)));
+    dkp.addEventListener('change', () => this._setFunsrSetting('dkp', Number(dkp.value)));
+    dsp.addEventListener('change', () => this._setFunsrSetting('dsp', dsp.value ? Number(dsp.value) : null));
+    this._panel.querySelector('#funsr-reset-btn').addEventListener('click', () => {
+      const funsr = {
+        dag: FUNSR_LIMITS.dag.default,
+        dkp: FUNSR_LIMITS.dkp.default,
+        dsp: FUNSR_LIMITS.dsp.default,
+      };
+      this.settings.set('tcode.funsr', funsr);
+      this._restoreFunsrSettings();
+      this._sendFunsrSettings(funsr);
+    });
+  }
+
+  /** Show the FUNSR MINI section for that profile and load its saved values. */
+  _restoreFunsrSettings() {
+    const section = this._panel.querySelector('#tcode-funsr-settings');
+    const isFunsr = activeProfileId(this.settings.get('tcode') || {}) === 'funsr-mini';
+    section.hidden = !isFunsr;
+    if (!isFunsr) return;
+    const funsr = this.settings.get('tcode.funsr') || {};
+    this._panel.querySelector('#funsr-dag').value = String(funsr.dag ?? FUNSR_LIMITS.dag.default);
+    this._panel.querySelector('#funsr-dkp').value = String(funsr.dkp ?? FUNSR_LIMITS.dkp.default);
+    this._panel.querySelector('#funsr-dsp').value = funsr.dsp ? String(funsr.dsp) : '';
+    this._paintFunsrReadouts();
+  }
+
+  _paintFunsrReadouts() {
+    const funsr = this.settings.get('tcode.funsr') || {};
+    const dag = Number(this._panel.querySelector('#funsr-dag').value);
+    const dkp = Number(this._panel.querySelector('#funsr-dkp').value);
+    const unset = ` · ${t('connection.funsr.deviceDefault')}`;
+    this._panel.querySelector('#funsr-dag-val').textContent =
+      t('connection.funsr.strokeValue', { value: dag.toFixed(2), cm: funsrStrokeCm(dag).toFixed(1) })
+      + (funsr.dag == null ? unset : '');
+    this._panel.querySelector('#funsr-dkp-val').textContent =
+      dkp.toFixed(1) + (funsr.dkp == null ? unset : '');
+  }
+
+  _setFunsrSetting(key, value) {
+    const funsr = { ...(this.settings.get('tcode.funsr') || {}), [key]: value };
+    if (value == null) delete funsr[key];
+    this.settings.set('tcode.funsr', funsr);
+    this._paintFunsrReadouts();
+    this._sendFunsrSettings({ [key]: value });
+  }
+
+  /**
+   * Send FUNSR MINI settings commands while that profile is connected.
+   * @returns {number} commands sent
+   */
+  _sendFunsrSettings(funsr) {
+    const status = this._panel.querySelector('#funsr-status');
+    if (activeProfileId(this.settings.get('tcode') || {}) !== 'funsr-mini') return 0;
+    if (!this.tcodeManager?.connected) {
+      if (status) status.textContent = t('connection.funsr.savedForConnect');
+      return 0;
+    }
+    const lines = funsrCommands(funsr);
+    for (const line of lines) this.tcodeManager.send(line);
+    if (status && lines.length) {
+      status.textContent = t('connection.funsr.sent', { commands: lines.map((l) => l.trim()).join(' ') });
+    }
+    return lines.length;
+  }
+
+  /**
+   * Re-send the saved FUNSR MINI settings after a connect. The manual
+   * doesn't say the device keeps them over a power cycle, and opening a
+   * USB serial port can reset an ESP32 board, so wait for it to boot.
+   */
+  _sendFunsrSettingsSoon() {
+    clearTimeout(this._funsrConnectTimer);
+    this._funsrConnectTimer = setTimeout(() => {
+      this._sendFunsrSettings(this.settings.get('tcode.funsr'));
+    }, FUNSR_SEND_DELAY_MS);
   }
 
   _loadSavedSettings() {
@@ -1475,6 +1663,8 @@ export class ConnectionPanel {
       if (kind === 'serial') {
         this.settings.set('tcode.port', opts.path);
         this.settings.set('tcode.baudRate', opts.baudRate);
+        // Reconnected at start and when it's plugged back in (app.js).
+        this.settings.set('tcode.autoConnect', true);
       } else if (kind === 'udp') {
         this.settings.set('tcode.udpHost', opts.host);
         this.settings.set('tcode.udpPort', opts.port);
