@@ -32,10 +32,12 @@ pub fn content_type(file: &str) -> Option<&'static str> {
     }
 }
 
-/// The URL of creator `slug`'s picture `file`, if both names are valid.
+/// The URL of creator `slug`'s picture `file`, if both names are valid: relative
+/// (`pictures/<slug>/<file>`) so it resolves under the app's `/swipe/` and `/creators/`
+/// proxies too.
 pub fn url(slug: &str, file: &str) -> Option<String> {
     (valid_name(slug) && valid_name(file) && content_type(file).is_some())
-        .then(|| format!("/pictures/{slug}/{file}"))
+        .then(|| format!("pictures/{slug}/{file}"))
 }
 
 /// The file a request path names, `/pictures/<slug>/<file>`, with its content type;
@@ -102,7 +104,7 @@ mod tests {
     fn builds_urls_for_valid_names_only() {
         assert_eq!(
             url("sweetiefox", "ft-1.jpg").as_deref(),
-            Some("/pictures/sweetiefox/ft-1.jpg")
+            Some("pictures/sweetiefox/ft-1.jpg")
         );
         assert_eq!(url("sweetiefox", "../x.jpg"), None);
         assert_eq!(url("a b", "x.jpg"), None);
