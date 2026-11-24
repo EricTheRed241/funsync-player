@@ -432,7 +432,8 @@ impl Creators {
         self.owners.get(key)
     }
 
-    fn post_choice(&self, key: &str) -> Option<&str> {
+    /// A post's choice on its creator card (`want` / `hide`), by `<kind>:<id>`.
+    pub fn post_choice(&self, key: &str) -> Option<&str> {
         self.swipes
             .get("posts")
             .and_then(|p| p.get(key))

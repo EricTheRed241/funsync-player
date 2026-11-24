@@ -15,8 +15,8 @@
 //!   file.
 //!
 //! Plus the download jobs (deploy/jobs.json) as the job runner last saw them, and when each
-//! runs next: `downloads` (hourly: every scout's `--fetch` but SLR) and `slr-downloads`
-//! (weekly), running now (and its log's last line) or its last run.
+//! runs next: the hourly ones, one per source so none waits behind another (DOWNLOAD_JOBS),
+//! and the weekly `slr-downloads`; running now (and its log's last line) or its last run.
 
 use crate::creators::Creators;
 use crate::frames;
@@ -33,9 +33,14 @@ use std::time::{Duration, SystemTime};
 /// "Downloaded" lists what came in this many days back.
 pub const RECENT_DAYS: u64 = 30;
 pub const MAX_RECENT: usize = 100;
-/// The job that downloads the right swipes but SLR's, and the one that downloads SLR's
-/// (deploy/jobs.json).
-pub const DOWNLOAD_JOB: &str = "downloads";
+/// The hourly jobs that download the right swipes but SLR's, one per source, with the name the
+/// page shows; and the weekly one that downloads SLR's (deploy/jobs.json).
+pub const DOWNLOAD_JOBS: [(&str, &str); 4] = [
+    ("downloads-eroscripts", "EroScripts"),
+    ("downloads-vrb", "VRBangers"),
+    ("downloads-pmvhaven", "PMVHaven"),
+    ("downloads-creators", "Creators"),
+];
 pub const SLR_JOB: &str = "slr-downloads";
 pub const REJECTED_FILE: &str = "eroscripts-scout-rejected.json";
 /// Longest log line passed on.
@@ -53,7 +58,8 @@ pub struct Downloads {
     /// last read failed.
     pub quota: Value,
     pub quota_error: Option<String>,
-    pub job: Job,
+    /// DOWNLOAD_JOBS in that order.
+    pub jobs: Vec<Job>,
     pub slr_job: Job,
     /// Files that exist but couldn't be read, library sources that can't be.
     pub problems: Vec<String>,
@@ -107,6 +113,8 @@ pub struct Item {
 #[serde(rename_all = "camelCase")]
 pub struct Job {
     pub name: &'static str,
+    /// What it downloads, as the page names it (`EroScripts`, `SLR`, …).
+    pub label: &'static str,
     pub running: bool,
     /// The last (or current) run: unix seconds, and `done`, `work left`, `failed`, …
     pub started: Option<i64>,
@@ -260,8 +268,17 @@ pub fn load(user_data: &Path) -> Downloads {
     d.recent
         .sort_by(|a, b| b.downloaded_at.cmp(&a.downloaded_at));
     d.recent.truncate(MAX_RECENT);
-    d.job = job(user_data, DOWNLOAD_JOB);
-    d.slr_job = job(user_data, SLR_JOB);
+    d.jobs = DOWNLOAD_JOBS
+        .iter()
+        .map(|(name, label)| Job {
+            label,
+            ..job(user_data, name)
+        })
+        .collect();
+    d.slr_job = Job {
+        label: "SLR",
+        ..job(user_data, SLR_JOB)
+    };
     d.problems = problems;
     d
 }
@@ -432,6 +449,7 @@ fn job(user_data: &Path, name: &'static str) -> Job {
         .map_or(0, |d| d.as_secs() as i64);
     Job {
         name,
+        label: name,
         running,
         started: last.as_ref().map(|r| r.started),
         ended: last.as_ref().and_then(|r| r.ended),
@@ -637,7 +655,16 @@ mod tests {
             Some("not on the waiting list any more")
         );
         assert!(d.recent[1].downloaded_at.as_deref().unwrap().ends_with('Z'));
-        assert_eq!((d.job.running, d.job.result.as_deref()), (false, None));
+        let names: Vec<_> = d.jobs.iter().map(|j| (j.label, j.running)).collect();
+        assert_eq!(
+            names,
+            [
+                ("EroScripts", false),
+                ("VRBangers", false),
+                ("PMVHaven", false),
+                ("Creators", false)
+            ]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

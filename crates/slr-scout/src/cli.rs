@@ -68,16 +68,20 @@ SLR's download within the video caps (maxResolution, else optimalResolution; nev
 trailer) into <library parent>/_staging, then <Other>/<first performer>/<Performers> -
 <Title> (<Studio>)<VR suffix>/ with the script and an slr.json sidecar; generated twist /
 roll / pitch (scripts/upgrade-multi-axis.mjs); fetchedAt in slr-scout.json. A scene
-without a script to take (a used-up monthly script quota) is skipped. A post goes to
+without a script to take (a used-up monthly script quota) is skipped, and so is one whose
+video would leave the library drive less than swipeDeck.minFreeGb (content-preferences.json)
+free (left for later; the next may fit; --dry-run prints the check). A post goes to
 npm run eroscripts:scout -- --fetch --ids <id> --slr (after --add <id> when it isn't on
-the waiting list), and the quota is read again after it. It stops at the weekly video
+the waiting list); while another eroscripts:scout run holds its downloads lock
+(<userData>/eroscripts-scout-fetch.lock, exit 2) it is tried again every minute, for 3
+hours at most, and the quota is read again after it. It stops at the weekly video
 quota and at the library cap (libraryMaxVideos); at the end the app is asked to
 rescan. The quota it reads at the start, and what's left after each download, go into
 slr-scout.json's quota. The scheduled job slr-downloads runs it weekly.
 
 Exit codes: 0 ok, 1 error, 2 rate limited (HTTP 429), or --fetch stopped by a quota or
-the library cap with work left, 3 not logged in (no or expired SLR session; a scout run
-still writes the scenes).
+the library cap or left a scene for lack of disk space, 3 not logged in (no or expired
+SLR session; a scout run still writes the scenes).
 ";
 
 #[derive(Debug, Default, PartialEq, Eq)]

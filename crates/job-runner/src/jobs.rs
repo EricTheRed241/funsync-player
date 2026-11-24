@@ -84,12 +84,17 @@ mod tests {
     #[test]
     fn the_built_in_jobs_parse() {
         let jobs = parse(BUILT_IN).unwrap();
-        let downloads = jobs.iter().find(|j| j.name == "downloads").unwrap();
-        assert_eq!((downloads.timeout, downloads.steps.len()), (6 * 3600, 4));
-        assert_eq!(
-            downloads.schedule.as_ref().map(Schedule::text),
-            Some("0 * * * *")
-        );
+        let downloads: Vec<&Job> = jobs
+            .iter()
+            .filter(|j| j.name.starts_with("downloads-"))
+            .collect();
+        assert_eq!(downloads.len(), 4);
+        assert!(downloads.iter().all(|j| j.schedule.is_some()));
+        let ero = jobs
+            .iter()
+            .find(|j| j.name == "downloads-eroscripts")
+            .unwrap();
+        assert_eq!(ero.schedule.as_ref().map(Schedule::text), Some("0 * * * *"));
         let slr = jobs.iter().find(|j| j.name == "slr-downloads").unwrap();
         assert_eq!(slr.schedule.as_ref().map(Schedule::text), Some("0 4 * * 1"));
         let thumbnails = jobs.iter().find(|j| j.name == "thumbnails").unwrap();

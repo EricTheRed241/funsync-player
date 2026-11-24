@@ -109,12 +109,17 @@ Modes:
                         cursors, the profiles step, the follows, the posts waiting
                         for their picture or runtime and the fetch queue.
   --fetch               Fetch the posts swiped \"want\" on the Creators site that
-                        are downloadable and not in the library: EroScripts posts
-                        through npm run eroscripts:scout (--add, then --fetch
-                        --ids), FapTap videos through npm run faptap:scout. Runs
-                        hourly in the downloads job. SLR-hosted posts are left to
-                        the weekly slr:scout --fetch. A post that doesn't reach
-                        the library is tried again after 12 hours, 5 times at most.
+                        are downloadable and not in the library. EroScripts posts
+                        are handed over: npm run eroscripts:scout -- --add puts
+                        them on its waiting list (ids not on it yet), and the
+                        hourly eroscripts:scout --fetch --auto (downloads-eroscripts)
+                        downloads them; one on the list is never tried here again,
+                        one the scout doesn't list counts a try. FapTap videos go
+                        through npm run faptap:scout (--add, then --fetch --ids).
+                        Runs hourly in the downloads-creators job. SLR-hosted posts
+                        are left to the weekly slr:scout --fetch. A post that
+                        doesn't reach the library is tried again after 12 hours,
+                        5 times at most.
   --dry-run             With --fetch: print what would be fetched, change nothing
   --daily               --discover, --profiles 30, --pictures 40 and --follow 10;
                         a failing step doesn't stop the next
@@ -133,12 +138,14 @@ Options:
   --credentials <file>  The Instagram account for --login: \"username: …\" and
                         \"password: …\" lines (default $FUNSYNC_INSTAGRAM_CREDENTIALS,
                         else instagram_creds.txt at the repo root; never printed)
-  --npm <cmd>           The npm command for --fetch (default npm)
+  --npm <cmd>           The npm command for --fetch (default npm; run in --repo with
+                        FUNSYNC_USER_DATA set to this run's userData)
 
 Files in <userData>: creators.json (read by the Creators site), creator-pictures/,
 creator-scout-state.json, instagram-session.json, creator-scout-work/ (the
 judge's files, scripts being timed); creator-swipes.json is read
-(the site writes it). config.json is only read (the EroScripts session cookie,
+(the site writes it), and eroscripts-scout.json (eroscripts:scout's waiting list,
+--fetch). config.json is only read (the EroScripts session cookie,
 the library sources, tag scores, favourite artists). Lock: creator-scout.lock.
 
 Exit codes: 0 ok, 1 error, 2 rate limited or work left (more pages, creators

@@ -7,13 +7,17 @@
 //! (PMVHaven)<VR suffix>/` with a `pmvhaven.json` sidecar. Single-axis
 //! scenes then get generated twist / roll / pitch
 //! (`scripts/upgrade-multi-axis.mjs`; hand-made axes win). The library cap
-//! (`libraryMaxVideos`) is checked before every video, `fetchedAt` is set
-//! in pmvhaven-scout.json, and at the end the app is asked to rescan.
-//! `--dry-run` prints the plan only.
+//! (`libraryMaxVideos`) is checked before every video, and so is room on the
+//! library drive (`slr_scout::disk`: `swipeDeck.minFreeGb` must stay free
+//! after the download; a video that doesn't fit is left for later, exit 2,
+//! and the next one tried); `fetchedAt` is set in pmvhaven-scout.json, and
+//! at the end the app is asked to rescan. `--dry-run` prints the plan (and
+//! the disk check) only.
 
 use crate::library;
 use crate::store::{self, Scene};
 use serde_json::{Value, json};
+use slr_scout::disk;
 use slr_scout::fetch::{artist_folder, move_file, stem};
 use slr_scout::http::{Http, Pacer, Request};
 use slr_scout::library as slr_library;
@@ -118,7 +122,8 @@ pub struct Fetch<'a> {
     pub limit: Option<usize>,
     /// The bucket (scripts, videos).
     pub files: Pacer,
-    /// Canned network (tests): no upgrade run, no rescan.
+    /// Canned network (tests): no upgrade run, no rescan, the free space from
+    /// `slr_scout::disk::FAKE_FREE_ENV`.
     pub fake: bool,
 }
 
@@ -190,7 +195,7 @@ impl Fetch<'_> {
             .map_or_else(|| other.join("_staging"), |p| p.join("_staging"));
         let cap = self.library_max_videos;
         let mut held = slr_library::video_count(&user.sources);
-        let (mut fetched, mut failed, mut code) = (0, 0, 0);
+        let (mut fetched, mut failed, mut skipped, mut code) = (0, 0, 0, 0);
         for (planned, id) in queue.iter().enumerate() {
             let scene = file.scene(id).cloned().ok_or("scene vanished")?;
             if held >= cap {
@@ -240,6 +245,16 @@ impl Fetch<'_> {
                 }
             )
             .map_err(io)?;
+            // Room on the drive for the video (none needed when it's there already).
+            let there = scene.file_size.is_some()
+                && fs::metadata(p.dir.join(&p.video)).map(|m| m.len()).ok() == scene.file_size;
+            if !there
+                && !disk::gate(&other, scene.file_size, self.fake, self.dry_run, out).map_err(io)?
+            {
+                skipped += 1;
+                code = 2;
+                continue;
+            }
             held += 1;
             if self.dry_run {
                 continue;
@@ -268,7 +283,16 @@ impl Fetch<'_> {
         if self.dry_run {
             writeln!(out, "Dry run: nothing downloaded.").map_err(io)?;
         } else {
-            writeln!(out, "Fetched {fetched}, {failed} failed.").map_err(io)?;
+            writeln!(
+                out,
+                "Fetched {fetched}, {failed} failed{}.",
+                if skipped > 0 {
+                    format!(", {skipped} left for later (disk space)")
+                } else {
+                    String::new()
+                }
+            )
+            .map_err(io)?;
         }
         if fetched > 0 {
             self.rescan(&config, out)?;

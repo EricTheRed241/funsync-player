@@ -1072,10 +1072,11 @@ export function listedTopic(id, data) {
 
 /**
  * True when `--fetch --auto` takes a waiting post: only one the user swiped right on in
- * `npm run scout:report` (`wanted`, readSwipes), whatever its score or axes (user, 2026-11-13).
+ * `npm run scout:report` (readSwipes) or wanted on the Creators site (creatorWants), together `wanted`,
+ * whatever its score or axes (user, 2026-11-13).
  *
  * @param {object} c saved candidate
- * @param {Set<number>} [wanted] post ids swiped right
+ * @param {Set<number>} [wanted] post ids swiped right or wanted
  */
 export function autoFetchPick(c, wanted = new Set()) {
   return wanted.has(c.id);
@@ -1107,6 +1108,61 @@ export function readSwipes(json) {
     }
   }
   return { wanted, hidden };
+}
+
+/** The Creators site's swipe file in userData (crates/creator-report): its EroScripts post wants count for `--auto`. */
+export const CREATOR_SWIPES_FILE = 'creator-swipes.json';
+
+/**
+ * The EroScripts posts wanted on the Creators site, from CREATOR_SWIPES_FILE parsed
+ * (`{posts: {"eroscripts:<id>": {choice: "want" | "hide", at, creator}}}`): ids whose choice is `want`.
+ * Other sources' posts and anything else in the file are ignored.
+ *
+ * @param {object|null} json
+ * @returns {Set<number>}
+ */
+export function creatorWants(json) {
+  const out = new Set();
+  const posts = json?.posts;
+  if (!posts || typeof posts !== 'object') return out;
+  for (const [key, p] of Object.entries(posts)) {
+    const m = /^eroscripts:(\d+)$/.exec(key);
+    const id = m ? Number(m[1]) : 0;
+    if (Number.isSafeInteger(id) && id > 0 && p?.choice === 'want') out.add(id);
+  }
+  return out;
+}
+
+// ── Parallel downloads (`--fetch --parallel N`) ────────────────────────
+
+/**
+ * Most downloads at once per host, so no host takes every slot and no account is hammered:
+ * vrbangers.com (one headless Chrome session) and SexLikeReal (the account's quota) one at a time,
+ * MEGA (shared free bandwidth), pixeldrain, rule34video and Pornhub two, pmvhaven three, forum
+ * attachments four. `local` (a copy saved by hand) touches no host. A host not listed gets one.
+ */
+export const HOST_SLOTS = Object.freeze({
+  [VRBANGERS_HOST]: 1, [SLR_HOST]: 1, mega: 2, pixeldrain: 2, [RULE34VIDEO_HOST]: 2, [PORNHUB_HOST]: 2,
+  [PMVHAVEN_HOST]: 3, forum: 4, local: Infinity,
+});
+
+/** Most downloads `--parallel` takes. */
+export const MAX_PARALLEL = 16;
+
+/**
+ * The unit to start next: the index in `pending` (in queue order) of the first one whose host has a
+ * slot left (HOST_SLOTS) and whose target folder (`dir`) no running unit holds; -1 when none can start
+ * now (all `parallel` slots busy, or every waiting unit's host or folder taken).
+ *
+ * @param {{host: string, dir?: string}[]} pending
+ * @param {{running?: {host: string, dir?: string}[], parallel?: number, slots?: object}} [o]
+ */
+export function nextFetchUnit(pending, { running = [], parallel = 1, slots = HOST_SLOTS } = {}) {
+  if (running.length >= parallel) return -1;
+  const perHost = new Map();
+  for (const u of running) perHost.set(u.host, (perHost.get(u.host) || 0) + 1);
+  const dirs = new Set(running.map((u) => u.dir).filter(Boolean));
+  return pending.findIndex((u) => (perHost.get(u.host) || 0) < (slots[u.host] ?? 1) && !(u.dir && dirs.has(u.dir)));
 }
 
 /**
@@ -1185,7 +1241,7 @@ export function scoutStatus(state, { candidates = [], scoring = {}, wanted = new
   if (pending) lines.push(`Listed, not judged yet: ${pending} (the next run goes on with them)`);
   const multi = candidates.filter((c) => c.axisType === 'multi').length;
   const auto = candidates.filter((c) => autoFetchPick(c, wanted)).length;
-  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (swiped right)`);
+  lines.push(`Waiting to download: ${candidates.length} posts (${multi} multi-axis, ${candidates.length - multi} single-axis); --auto takes ${auto} (swiped right or wanted on the Creators site)`);
   return lines;
 }
 

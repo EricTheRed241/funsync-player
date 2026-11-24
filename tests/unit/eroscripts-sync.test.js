@@ -271,6 +271,17 @@ describe('polite pacing', () => {
     expect(done).toEqual([0, 700, 1400]);
   });
 
+  it('keeps the spacing when callers wait at the same time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const pacer = createPacer();
+    const done = [];
+    const all = Promise.all([0, 1, 2].map(async () => { await pacer.wait(); done.push(Date.now() - NOW); }));
+    await vi.advanceTimersByTimeAsync(1400);
+    await all;
+    expect(done).toEqual([0, 700, 1400]);
+  });
+
   it('runs every forum call through the pacer', async () => {
     const waits = vi.fn(async () => {});
     const api = fakeApi({ search: () => [topicResult(1, 'Scene')], topics: { 1: { attachments: [att('Scene.funscript', 's')], linked: [], external: [], paid: false } }, files: { [upload('s')]: script(1000) } });

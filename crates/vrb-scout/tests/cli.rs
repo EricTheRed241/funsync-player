@@ -401,6 +401,51 @@ fn fetches_right_swipes() {
 }
 
 #[test]
+fn a_video_without_disk_room_is_left_for_later() {
+    let t = TempDir::new();
+    let ud = t.user_data();
+    let ud_s = ud.to_str().unwrap();
+    let base = catalogue("Wet & Wild In Malibu");
+    let o = run(&["--user-data", ud_s], &t.fixtures(&base));
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    t.swipe(&["a1"]);
+    let script =
+        "https://mov.vrbangers.com/vrb_wet_and_wild/MISC/VRBANGERS_wet_and_wild_toy.funscript";
+    let f = t.fixtures(&with(
+        base,
+        json!({
+            "GET https://vrbangers.com/video/wet-and-wild/": scene_page(),
+            format!("GET {script}"): ok(json!({"actions": [{"at": 0, "pos": 0}, {"at": 500, "pos": 100}]})),
+            format!("GET {}", signed("8K")): ok(Value::String("VIDEO".into())),
+        }),
+    ));
+    // The 8K file is 5 bytes: 50 GB + 4 free is one byte short of keeping 50 GB free.
+    let fetch = |free: u64| {
+        Command::new(env!("CARGO_BIN_EXE_vrb-scout"))
+            .args(["--user-data", ud_s, "--fetch"])
+            .env_remove("FUNSYNC_USER_DATA")
+            .env("VRB_SCOUT_FAKE_HTTP", &f)
+            .env("FUNSYNC_FAKE_FREE_BYTES", free.to_string())
+            .output()
+            .unwrap()
+    };
+    let o = fetch(50_000_000_004);
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(2), "{out}{}", stderr(&o));
+    assert!(
+        out.contains("  skipped: not enough disk space (50 GB free, 50 GB needed to keep 50 GB free); left for later\n"),
+        "{out}"
+    );
+    assert!(out.contains("Fetched 0, 0 failed, 1 skipped."), "{out}");
+    assert!(!t.other().join("Angel Youngs").exists());
+
+    let o = fetch(50_000_000_005);
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}{}", stderr(&o));
+    assert!(out.contains("Fetched 1, 0 failed, 0 skipped."), "{out}");
+}
+
+#[test]
 fn a_refused_login_is_exit_3() {
     let t = TempDir::new();
     let ud = t.user_data();

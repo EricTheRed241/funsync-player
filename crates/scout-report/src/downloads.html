@@ -144,28 +144,32 @@ function nextRun(t) {
   return d.toDateString() === new Date().toDateString() ? `next ${time}` : `next ${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
 }
 
-/** The job line: on the SLR tab the weekly SLR run, elsewhere the hourly download run. */
-function renderJob() {
-  const slrTab = tab === 'slr';
-  const j = data && (slrTab ? data.slrJob : data.job);
-  const box = $('job');
-  if (!j) { box.hidden = true; return; }
-  box.hidden = false;
-  box.title = '';
-  box.classList.toggle('running', j.running);
-  const name = slrTab ? 'SLR download run (weekly)' : 'Download run (hourly)';
+/** One job's line: running since when (and its log's last line), else its last run and next start. */
+function jobLines(j, name) {
   const parts = [];
+  let title = '';
   if (j.running) {
-    parts.push(`${name} `, el('b', {}, 'running'), j.started ? ` since ${new Date(j.started * 1000).toLocaleTimeString()} (${ago(j.started)})` : '');
+    parts.push(`${name}: `, el('b', {}, 'running'), j.started ? ` since ${new Date(j.started * 1000).toLocaleTimeString()} (${ago(j.started)})` : '');
   } else if (j.started) {
     parts.push(`${name}: last `, el('b', {}, j.result || '?'), ` ${ago(j.ended || j.started)}`,
       j.exit != null ? ` (exit ${j.exit})` : '');
-    box.title = `Started ${when(j.started)}` + (j.ended ? `, ended ${when(j.ended)}` : '');
+    title = `Started ${when(j.started)}` + (j.ended ? `, ended ${when(j.ended)}` : '');
   } else {
     parts.push(`${name}: no run yet (job `, el('code', {}, j.name), ')');
   }
   if (j.next && !j.running) parts.push(` · ${nextRun(j.next)}`);
-  box.replaceChildren(el('div', {}, parts), ...(j.lastLine ? [el('div', { class: 'line' }, j.lastLine)] : []));
+  return [el('div', { title }, parts), ...(j.lastLine ? [el('div', { class: 'line' }, j.lastLine)] : [])];
+}
+
+/** The job lines: on the SLR tab the weekly SLR run, elsewhere the hourly runs, one per source. */
+function renderJob() {
+  const box = $('job');
+  if (!data) { box.hidden = true; return; }
+  const slrTab = tab === 'slr';
+  const jobs = slrTab ? [[data.slrJob, 'SLR download run (weekly)']] : data.jobs.map((j) => [j, `${j.label} downloads (hourly)`]);
+  box.hidden = false;
+  box.classList.toggle('running', jobs.some(([j]) => j.running));
+  box.replaceChildren(...jobs.flatMap(([j, name]) => jobLines(j, name)));
 }
 
 const keyOf = (i) => `${i.source}:${i.id}`;
@@ -292,7 +296,7 @@ async function load() {
   }
   render();
   // Follow a run while it downloads; otherwise now and then.
-  timer = setTimeout(load, data && (data.job.running || data.slrJob.running) ? 20000 : 120000);
+  timer = setTimeout(load, data && [...data.jobs, data.slrJob].some((j) => j.running) ? 20000 : 120000);
 }
 
 $('tabs').addEventListener('click', (e) => {

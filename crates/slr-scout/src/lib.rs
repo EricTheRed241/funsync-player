@@ -10,6 +10,7 @@
 
 pub mod cdp;
 pub mod cli;
+pub mod disk;
 pub mod fetch;
 pub mod forum;
 pub mod frames;
@@ -125,6 +126,15 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
             forum: Pacer::new(forum_gap),
             fake: slr_gap.is_zero(),
             npm: opts.npm.as_deref().unwrap_or("npm"),
+            // Canned network (tests): a short wait for eroscripts:scout's downloads lock.
+            lock_wait: if slr_gap.is_zero() {
+                fetch::LockWait {
+                    every: Duration::from_millis(20),
+                    max: Duration::from_secs(5),
+                }
+            } else {
+                fetch::LOCK_WAIT
+            },
         };
         return f.run(out);
     }

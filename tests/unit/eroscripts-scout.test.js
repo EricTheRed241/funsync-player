@@ -14,7 +14,7 @@ import {
   staleTopicIds, autoFetchPick, feedProgress, notYetHeld, postInfo, topicsMissingInfo, addPostInfo, readSwipes, scoredCandidate,
   contentRuleBreak, isHentaiOnly, judgeFirstPost, lessPreferred, candidateScore, isBlockedCreator, hasBlockedTag,
   manualDownloads, manualListText, findLocalCopy, archiveScenes, unpackedScenes, isArchiveName, megaKeyOk, sceneNameOf, vrbangersSceneName, leaveOutSlr,
-  scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS, IMAGES_VERSION,
+  scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS, IMAGES_VERSION, creatorWants, nextFetchUnit, HOST_SLOTS,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { SLR_HOST } from '../../scripts/slr-host.mjs';
 import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
@@ -1048,5 +1048,66 @@ describe('script previews for the swipe deck', () => {
       { id: 5, score: 9, scenes: [sc()] },
     ];
     expect(candidatesMissingPreview(list).map((c) => c.id)).toEqual([5, 2, 1]);
+  });
+});
+
+describe('creatorWants', () => {
+  it('takes the EroScripts posts wanted on the Creators site', () => {
+    const json = {
+      version: 1,
+      creators: { 'eroscripts:9': { choice: 'want' } },
+      posts: {
+        'eroscripts:41415': { choice: 'want', at: 't', creator: 'sweetiefox' },
+        'eroscripts:7': { choice: 'hide', at: 't', creator: 'ann' },
+        'faptap:12': { choice: 'want', at: 't', creator: 'ann' },
+        'eroscripts:abc': { choice: 'want' },
+        'eroscripts:0': { choice: 'want' },
+        'eroscripts:8': null,
+      },
+    };
+    expect([...creatorWants(json)]).toEqual([41415]);
+  });
+
+  it('is empty without a file or posts', () => {
+    expect(creatorWants(null).size).toBe(0);
+    expect(creatorWants({ creators: {} }).size).toBe(0);
+    expect(creatorWants({ posts: 'x' }).size).toBe(0);
+  });
+
+  it('adds to what --auto takes', () => {
+    const wanted = new Set([...readSwipes({ swipes: { 5: { dir: 'right' } } }).wanted, ...creatorWants({ posts: { 'eroscripts:6': { choice: 'want' } } })]);
+    expect([5, 6, 7].filter((id) => autoFetchPick({ id }, wanted))).toEqual([5, 6]);
+  });
+});
+
+describe('nextFetchUnit', () => {
+  let n = 0;
+  const u = (host, dir = `/lib/${host}/${n++}`) => ({ host, dir });
+
+  it('caps each host so none takes every slot', () => {
+    expect(HOST_SLOTS).toMatchObject({ vrbangers: 1, slr: 1, mega: 2, pixeldrain: 2, rule34video: 2, pornhub: 2, pmvhaven: 3, forum: 4 });
+    const running = [u('mega'), u('mega')];
+    expect(nextFetchUnit([u('mega'), u('forum')], { running, parallel: 8 })).toBe(1);
+    expect(nextFetchUnit([u('vrbangers'), u('slr'), u('pixeldrain')], { running: [u('vrbangers'), u('slr')], parallel: 8 })).toBe(2);
+    expect(nextFetchUnit([u('pmvhaven')], { running: [u('pmvhaven'), u('pmvhaven')], parallel: 8 })).toBe(0);
+    expect(nextFetchUnit([u('pmvhaven')], { running: [u('pmvhaven'), u('pmvhaven'), u('pmvhaven')], parallel: 8 })).toBe(-1);
+  });
+
+  it('takes the queue in order and stops at the parallel limit', () => {
+    const pending = [u('forum'), u('mega')];
+    expect(nextFetchUnit(pending, { running: [], parallel: 1 })).toBe(0);
+    expect(nextFetchUnit(pending, { running: [u('pixeldrain')], parallel: 1 })).toBe(-1);
+    expect(nextFetchUnit(pending, { running: [u('pixeldrain')], parallel: 2 })).toBe(0);
+  });
+
+  it('never starts a second unit on a folder a running one holds', () => {
+    const pending = [u('forum', '/lib/a/Scene'), u('forum', '/lib/b/Other')];
+    expect(nextFetchUnit(pending, { running: [u('mega', '/lib/a/Scene')], parallel: 4 })).toBe(1);
+    expect(nextFetchUnit(pending.slice(0, 1), { running: [u('mega', '/lib/a/Scene')], parallel: 4 })).toBe(-1);
+  });
+
+  it('gives copies saved by hand no host limit, and an unknown host one slot', () => {
+    expect(nextFetchUnit([u('local')], { running: [u('local'), u('local'), u('local'), u('local')], parallel: 8 })).toBe(0);
+    expect(nextFetchUnit([u('other')], { running: [u('other')], parallel: 8 })).toBe(-1);
   });
 });

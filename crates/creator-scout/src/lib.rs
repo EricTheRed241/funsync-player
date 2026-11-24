@@ -645,6 +645,7 @@ fn run_fetch(
         file,
         &swipes,
         st,
+        &env.user_data,
         opts.npm.as_deref().unwrap_or("npm"),
         &repo,
         opts.dry_run,
@@ -653,7 +654,12 @@ fn run_fetch(
     )?;
     if !opts.dry_run {
         store::write(&env.user_data, file)?;
-        writeln!(out, "Fetch: {} fetched, {} not yet.", r.fetched, r.failed).map_err(io)?;
+        writeln!(
+            out,
+            "Fetch: {} fetched, {} handed to eroscripts:scout, {} not yet.",
+            r.fetched, r.handed, r.failed
+        )
+        .map_err(io)?;
     }
     Ok(r.code)
 }
@@ -738,16 +744,25 @@ fn status(user_data: &Path, out: &mut dyn Write) -> std::io::Result<()> {
             let waiting = st
                 .fetch
                 .values()
-                .filter(|r| r.done_at.is_none() && r.tries < state::MAX_TRIES)
+                .filter(|r| {
+                    r.done_at.is_none() && r.handed_at.is_none() && r.tries < state::MAX_TRIES
+                })
+                .count();
+            let handed = st
+                .fetch
+                .values()
+                .filter(|r| r.done_at.is_none() && r.handed_at.is_some())
                 .count();
             let given_up = st
                 .fetch
                 .values()
-                .filter(|r| r.done_at.is_none() && r.tries >= state::MAX_TRIES)
+                .filter(|r| {
+                    r.done_at.is_none() && r.handed_at.is_none() && r.tries >= state::MAX_TRIES
+                })
                 .count();
             writeln!(
                 out,
-                "Fetch: {} done, {waiting} to retry, {given_up} given up; {} post(s) waiting for details.",
+                "Fetch: {} done, {handed} handed to eroscripts:scout, {waiting} to retry, {given_up} given up; {} post(s) waiting for details.",
                 st.fetch.values().filter(|r| r.done_at.is_some()).count(),
                 st.pending_details.len()
             )?;

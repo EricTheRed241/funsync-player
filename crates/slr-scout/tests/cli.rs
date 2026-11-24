@@ -55,6 +55,17 @@ fn run(args: &[&str], fixtures: Option<&Path>) -> Output {
     cmd.output().unwrap()
 }
 
+/// `run` with the library drive's free bytes faked (`FUNSYNC_FAKE_FREE_BYTES`).
+fn run_free(args: &[&str], fixtures: &Path, free: u64) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_slr-scout"))
+        .args(args)
+        .env_remove("FUNSYNC_USER_DATA")
+        .env("SLR_SCOUT_FAKE_HTTP", fixtures)
+        .env("FUNSYNC_FAKE_FREE_BYTES", free.to_string())
+        .output()
+        .unwrap()
+}
+
 fn stdout(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).into_owned()
 }
@@ -741,6 +752,113 @@ fn fetch_takes_the_slr_queue_in_its_order_and_hands_posts_over() {
         )
     );
     assert!(out.contains("Fetched 3, 0 failed, 0 skipped."), "{out}");
+}
+
+#[test]
+fn fetch_leaves_scenes_without_disk_room_for_later() {
+    let tmp = TempDir::new();
+    let (ud, fixtures) = fetch_setup(&tmp, 2, 3);
+    let ud = ud.to_str().unwrap();
+    // 55 GB free: a 7 GB video would leave less than swipeDeck.minFreeGb (50).
+    let short = "not enough disk space (55 GB free, 57 GB needed to keep 50 GB free)";
+    let o = run_free(
+        &["--user-data", ud, "--fetch", "--dry-run"],
+        &fixtures,
+        55_000_000_000,
+    );
+    let out = stdout(&o);
+    // The dry run plans #11 and #12 (the video quota of 2 stops it at #13), each with the check.
+    assert_eq!(o.status.code(), Some(2), "{out}\n{}", stderr(&o));
+    assert_eq!(
+        out.matches(&format!(
+            "  disk space: {short}; a real run leaves it for later\n"
+        ))
+        .count(),
+        2,
+        "{out}"
+    );
+
+    let o = run_free(&["--user-data", ud, "--fetch"], &fixtures, 55_000_000_000);
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(2), "{out}\n{}", stderr(&o));
+    // Each is skipped and the next tried: no quota spent, nothing downloaded.
+    assert_eq!(
+        out.matches(&format!("  skipped: {short}; left for later\n"))
+            .count(),
+        3,
+        "{out}"
+    );
+    assert!(out.contains("Fetched 0, 0 failed, 4 skipped."), "{out}");
+    assert!(!tmp.0.join("lib/_staging").exists());
+
+    // Exactly 50 GB left after the download is enough.
+    let o = run_free(&["--user-data", ud, "--fetch"], &fixtures, 57_000_000_000);
+    let out = stdout(&o);
+    assert!(!out.contains("disk space"), "{out}");
+    assert!(out.contains("Fetched 2, 0 failed, 0 skipped."), "{out}");
+}
+
+#[test]
+fn a_handed_over_post_waits_while_another_eroscripts_run_downloads() {
+    let tmp = TempDir::new();
+    let (ud, fixtures) = fetch_setup(&tmp, 35, 3);
+    // Only the waiting EroScripts post on SLR in the queue.
+    fs::write(
+        ud.join("slr-scout-swipes.json"),
+        json!({"version": 1, "swipes": {}}).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        ud.join("eroscripts-scout.json"),
+        json!({"candidates": [{"id": 700, "title": "Post On SLR", "score": 50.0,
+            "scenes": [{"video": {"host": "slr", "url": "https://www.sexlikereal.com/scenes/x-700"}}]}]})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        ud.join("eroscripts-scout-swipes.json"),
+        json!({"version": 1, "swipes": {"700": {"dir": "right", "at": "2026-11-20T00:00:00Z"}}})
+            .to_string(),
+    )
+    .unwrap();
+    // Another eroscripts:scout run (this test, a live pid) holds the downloads lock; the
+    // fake npm exits 2 while it does, and its second try finds the lock gone.
+    let lock = ud.join("eroscripts-scout-fetch.lock");
+    fs::write(&lock, std::process::id().to_string()).unwrap();
+    let npm = tmp.0.join("fake-npm");
+    let log = tmp.0.join("npm.log");
+    fs::write(
+        &npm,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{log}'\nif [ \"$(wc -l < '{log}')\" -ge 2 ]; then rm -f '{lock}'; exit 0; fi\nexit 2\n",
+            log = log.display(),
+            lock = lock.display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755)).unwrap();
+    let o = run(
+        &[
+            "--user-data",
+            ud.to_str().unwrap(),
+            "--fetch",
+            "--npm",
+            npm.to_str().unwrap(),
+        ],
+        Some(&fixtures),
+    );
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}\n{}", stderr(&o));
+    assert!(
+        out.contains(&format!(
+            "EroScripts #700 Post On SLR\n  another eroscripts:scout run (pid {}) holds eroscripts-scout-fetch.lock: trying again in 20 ms (waited 0 ms of 5 s)\n  ✓ fetched",
+            std::process::id()
+        )),
+        "{out}"
+    );
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
+    assert!(out.contains("Fetched 1, 0 failed, 0 skipped."), "{out}");
 }
 
 #[test]

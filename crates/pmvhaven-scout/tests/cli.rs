@@ -373,6 +373,68 @@ fn a_failed_download_leaves_nothing_behind() {
 }
 
 #[test]
+fn a_video_without_disk_room_is_left_for_later_and_a_smaller_one_fits() {
+    let t = TempDir::new();
+    let ud = t.user_data();
+    let ud_s = ud.to_str().unwrap();
+    let mut r = responses();
+    // Shrooms is 3 GB, Neurotica 7 bytes.
+    r[format!("GET {SITE}/api/videos/aaa")] = detail(json!({
+        "funScriptUrl": format!("{S3}/funscripts/aaa.funscript"), "fileSize": 3_000_000_000u64}));
+    let fixtures = t.fixtures(&r);
+    let o = run(&["--user-data", ud_s], Some(&fixtures));
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    fs::write(
+        ud.join("pmvhaven-scout-swipes.json"),
+        r#"{"version": 1, "swipes": {"aaa": {"dir": "right", "at": "x"}, "bbb": {"dir": "right", "at": "x"}}}"#,
+    )
+    .unwrap();
+    // 52 GB free: 3 GB would leave less than swipeDeck.minFreeGb (50).
+    let fetch = |dry: bool| {
+        let mut args = vec!["--user-data", ud_s, "--fetch"];
+        if dry {
+            args.push("--dry-run");
+        }
+        Command::new(env!("CARGO_BIN_EXE_pmvhaven-scout"))
+            .args(&args)
+            .env_remove("FUNSYNC_USER_DATA")
+            .env("PMVHAVEN_SCOUT_FAKE_HTTP", &fixtures)
+            .env("FUNSYNC_FAKE_FREE_BYTES", "52000000000")
+            .output()
+            .unwrap()
+    };
+    let short = "not enough disk space (52 GB free, 53 GB needed to keep 50 GB free)";
+    let o = fetch(true);
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(0), "{out}{}", stderr(&o));
+    assert!(
+        out.contains(&format!(
+            "  disk space: {short}; a real run leaves it for later\n"
+        )),
+        "{out}"
+    );
+    assert!(out.contains("  disk space: enough\n"), "{out}");
+
+    let o = fetch(false);
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(2), "{out}{}", stderr(&o));
+    assert!(
+        out.contains(&format!("  skipped: {short}; left for later\n")),
+        "{out}"
+    );
+    assert!(
+        out.contains("Fetched 1, 0 failed, 1 left for later (disk space)."),
+        "{out}"
+    );
+    assert!(!t.other().join("Vassago").exists());
+    assert!(
+        t.other()
+            .join("Scruffy6/Scruffy6 - Neurotica (PMVHaven)/Scruffy6 - Neurotica (PMVHaven).mp4")
+            .is_file()
+    );
+}
+
+#[test]
 fn a_rate_limited_list_writes_nothing() {
     let t = TempDir::new();
     let ud = t.user_data();

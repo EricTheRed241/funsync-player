@@ -28,8 +28,9 @@
 // thresholds are mirrored in backend/services/vr_sections.py, NEEDS_REVIEW_PLAYLIST
 // there and in backend/web-remote/review-on-end.js, DEFAULT_SORT in
 // backend/web-remote/sort-default.js (the phone can't import this file).
-// `swipeDeck.minFreeGb` (JSON only, read by crates/scout-report): the swipe deck's download
-// tabs stop swiping while the library drive has less free space than this.
+// `swipeDeck.minFreeGb` (MIN_FREE_GB here; read by crates/scout-report too): the swipe deck's download
+// tabs stop swiping while the library drive has less free space than this, and the JS scouts' downloads
+// (scripts/disk-space.mjs) keep this much free after each one.
 // `swipeDeck.yesCreatorBonus` (JSON only, read by crates/scout-report): score points the swipe
 // deck adds to cards of the creators you said yes to on the Creators site (swiped yes,
 // favourites, pornstar list).
@@ -114,6 +115,8 @@ export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{
 // scripts, so all of its scenes come in single-axis.
 /** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
 export const LIBRARY_MAX_VIDEOS = data.libraryMaxVideos;
+/** Gigabytes (10⁹ bytes) the library drive keeps free: a scout download that would leave less is skipped (scripts/disk-space.mjs). */
+export const MIN_FREE_GB = data.swipeDeck.minFreeGb;
 /** FapTap (single-axis only): a video needs at least FAPTAP_FOCUS_MIN of these themes, by tag or title (VR also by FapTap's flag); favourites need none. */
 export const FAPTAP_FOCUS = [
   { name: 'PMV / HMV', tags: [...PMV_TAGS], title: PMV_TITLE },

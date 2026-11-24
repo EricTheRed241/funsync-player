@@ -22,12 +22,18 @@
 //! An EroScripts post whose video is on SLR (swiped right, or a creator's post swiped want)
 //! goes to `npm run eroscripts:scout -- --fetch --ids <id> --slr` (`--add <id>` first when it
 //! isn't on the waiting list), which downloads it with the same account; the quota is read
-//! again afterwards.
+//! again afterwards. While another eroscripts:scout run is downloading (its exit 2 with
+//! `<userData>/eroscripts-scout-fetch.lock` held by a live pid), the post waits: a try every
+//! minute, three hours at most ([`LOCK_WAIT`]).
 //!
 //! The video quota is checked before every download and the library cap (`libraryMaxVideos`)
-//! before every item; at the end the app is asked to rescan. `--dry-run` prints the plan and
-//! sends no download request.
+//! before every item; a scene's video only downloads when the library drive keeps
+//! `swipeDeck.minFreeGb` free after it (`crate::disk`; a scene that doesn't fit is left for
+//! later and the run exits 2; posts are checked by eroscripts:scout). At the end the app is
+//! asked to rescan. `--dry-run` prints the plan (and the disk check) and sends no download
+//! request.
 
+use crate::disk;
 use crate::forum::{self, Attachment};
 use crate::http::{Http, NetError, Pacer};
 use crate::library;
@@ -41,6 +47,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+use video_tags::host::{self, LockHolder};
 use video_tags::timefmt;
 
 pub const SWIPES_FILE: &str = "slr-scout-swipes.json";
@@ -50,6 +58,96 @@ pub const SIDECAR: &str = "slr.json";
 /// Scene stems stay under the 255-byte name limit with
 /// `.generated.twist.funscript` (STEM_BYTES in eroscripts-scout-lib.mjs).
 pub const STEM_BYTES: usize = 180;
+/// eroscripts:scout's downloads lock (`SCOUT_LOCKS.fetch` in scripts/eroscripts-scout-lib.mjs).
+pub const ERO_FETCH_LOCK: &str = "eroscripts-scout-fetch.lock";
+
+/// How long a post handed to eroscripts:scout waits for another run's downloads.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LockWait {
+    /// Between tries.
+    pub every: Duration,
+    /// In all; then the post is left for later.
+    pub max: Duration,
+}
+
+/// A try a minute, three hours at most.
+pub const LOCK_WAIT: LockWait = LockWait {
+    every: Duration::from_secs(60),
+    max: Duration::from_secs(3 * 3600),
+};
+
+/// The live holder of eroscripts:scout's downloads lock in `user_data`, if any.
+fn ero_fetch_holder(user_data: &Path) -> Option<LockHolder> {
+    fs::read_to_string(user_data.join(ERO_FETCH_LOCK))
+        .ok()
+        .and_then(|s| LockHolder::parse(&s))
+        .filter(|h| h.holds(host::pid_alive))
+}
+
+/// `500 ms`, `60 s`, `5 min`, `3 h`.
+fn span(d: Duration) -> String {
+    let s = d.as_secs();
+    match s {
+        0 => format!("{} ms", d.as_millis()),
+        1..120 => format!("{s} s"),
+        _ if s.is_multiple_of(3600) => format!("{} h", s / 3600),
+        _ => format!("{} min", s / 60),
+    }
+}
+
+/// Run `attempt` (eroscripts:scout `--fetch`) again while it exits 2 and another run holds
+/// `<user_data>/eroscripts-scout-fetch.lock` (a live pid): every `wait.every`, a line each,
+/// for `wait.max` at most. Its last exit code. `out` is flushed before each attempt (the
+/// child writes to the same stdout).
+pub fn while_locked(
+    user_data: &Path,
+    wait: LockWait,
+    out: &mut dyn Write,
+    mut attempt: impl FnMut() -> Result<i32, String>,
+) -> Result<i32, String> {
+    let mut waited = Duration::ZERO;
+    loop {
+        out.flush().map_err(io)?;
+        let code = attempt()?;
+        if code != 2 {
+            return Ok(code);
+        }
+        let Some(holder) = ero_fetch_holder(user_data) else {
+            return Ok(code);
+        };
+        if waited >= wait.max || wait.every.is_zero() {
+            writeln!(
+                out,
+                "  another eroscripts:scout run ({holder}) still holds {ERO_FETCH_LOCK} after {}",
+                span(waited)
+            )
+            .map_err(io)?;
+            return Ok(code);
+        }
+        writeln!(
+            out,
+            "  another eroscripts:scout run ({holder}) holds {ERO_FETCH_LOCK}: trying again in {} (waited {} of {})",
+            span(wait.every),
+            span(waited),
+            span(wait.max)
+        )
+        .map_err(io)?;
+        std::thread::sleep(wait.every);
+        waited += wait.every;
+    }
+}
+
+/// Run a command line with sh in `repo` (stdin closed); its exit code.
+fn sh(cmd: &str, repo: &Path) -> Result<i32, String> {
+    let status = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(repo)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .map_err(|e| format!("can't run {cmd}: {e}"))?;
+    Ok(status.code().unwrap_or(1))
+}
 
 /// The repo the npm scripts run in: the working directory under `npm run`, else this
 /// crate's checkout.
@@ -375,10 +473,14 @@ pub struct Fetch<'a> {
     pub dry_run: bool,
     pub slr: Pacer,
     pub forum: Pacer,
-    /// Canned network (tests): no upgrade run, no rescan.
+    /// Canned network (tests): no upgrade run, no rescan, the free space from
+    /// `disk::FAKE_FREE_ENV`.
     pub fake: bool,
     /// Runs `eroscripts:scout` for the queue's posts (`npm`).
     pub npm: &'a str,
+    /// A handed-over post's wait for another eroscripts:scout run's downloads
+    /// ([`LOCK_WAIT`]).
+    pub lock_wait: LockWait,
 }
 
 struct Ctx {
@@ -582,6 +684,26 @@ impl Fetch<'_> {
             )
             .map_err(io)?;
             writeln!(out, "  script: {}", planned.script.describe()).map_err(io)?;
+            // Room on the drive for the video (none needed when it's there already).
+            let there = planned.option.size.is_some()
+                && fs::metadata(planned.dir.join(&planned.name))
+                    .map(|m| m.len())
+                    .ok()
+                    == planned.option.size;
+            if !there
+                && !disk::gate(
+                    &ctx.other,
+                    planned.option.size,
+                    self.fake,
+                    self.dry_run,
+                    out,
+                )
+                .map_err(io)?
+            {
+                skipped += 1;
+                code = 2;
+                continue;
+            }
             spend(&mut ctx.quota, &planned.script);
             ctx.quota.videos.remaining -= 1;
             held += 1;
@@ -632,7 +754,8 @@ impl Fetch<'_> {
     }
 
     /// Hand an SLR-hosted EroScripts post to `eroscripts:scout` (`--add` first when it isn't on
-    /// the waiting list); its exit code. A dry run prints the commands.
+    /// the waiting list); its exit code. While another run holds the downloads lock the fetch
+    /// is tried again ([`while_locked`]). A dry run prints the commands.
     fn hand_over(&self, topic: u64, out: &mut dyn Write) -> Result<i32, String> {
         let mut problems = Vec::new();
         let waiting = scout_report::report::read_json(
@@ -645,31 +768,25 @@ impl Fetch<'_> {
             "{} run -s eroscripts:scout -- --user-data '{user_data}'",
             self.npm
         );
-        let mut cmds = Vec::new();
         if !scout_report::deck::is_waiting(&waiting, topic) {
-            cmds.push(format!("{base} --add {topic}"));
-        }
-        cmds.push(format!("{base} --fetch --ids {topic} --slr"));
-        let repo = repo_root();
-        for cmd in &cmds {
+            let add = format!("{base} --add {topic}");
             if self.dry_run {
-                writeln!(out, "  would run: {cmd}").map_err(io)?;
-                continue;
-            }
-            out.flush().map_err(io)?;
-            let status = Command::new("/bin/sh")
-                .arg("-c")
-                .arg(cmd)
-                .current_dir(&repo)
-                .stdin(std::process::Stdio::null())
-                .status()
-                .map_err(|e| format!("can't run {cmd}: {e}"))?;
-            let c = status.code().unwrap_or(1);
-            if c != 0 {
-                return Ok(c);
+                writeln!(out, "  would run: {add}").map_err(io)?;
+            } else {
+                out.flush().map_err(io)?;
+                let c = sh(&add, &repo_root())?;
+                if c != 0 {
+                    return Ok(c);
+                }
             }
         }
-        Ok(0)
+        let fetch = format!("{base} --fetch --ids {topic} --slr");
+        if self.dry_run {
+            writeln!(out, "  would run: {fetch}").map_err(io)?;
+            return Ok(0);
+        }
+        let repo = repo_root();
+        while_locked(self.user_data, self.lock_wait, out, || sh(&fetch, &repo))
     }
 
     /// Re-read the scene, pick its script and video download; no download
@@ -1040,6 +1157,86 @@ mod tests {
 
     fn strings(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_handed_over_post_waits_while_another_run_downloads() {
+        let dir = std::env::temp_dir().join(format!("slr-scout-lock-wait-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join(ERO_FETCH_LOCK);
+        let me = std::process::id().to_string();
+        let wait = LockWait {
+            every: Duration::from_millis(5),
+            max: Duration::from_millis(50),
+        };
+
+        // A live pid holds the lock for two tries; the third gets through.
+        fs::write(&lock, &me).unwrap();
+        let mut tries = 0;
+        let mut out = Vec::new();
+        let code = while_locked(&dir, wait, &mut out, || {
+            tries += 1;
+            if tries < 3 {
+                return Ok(2);
+            }
+            fs::remove_file(&lock).unwrap();
+            Ok(0)
+        })
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!((code, tries), (0, 3), "{text}");
+        assert_eq!(
+            text.matches(&format!(
+                "another eroscripts:scout run (pid {me}) holds eroscripts-scout-fetch.lock: trying again in 5 ms"
+            ))
+            .count(),
+            2,
+            "{text}"
+        );
+
+        // Held all along: left for later once the wait is over.
+        fs::write(&lock, &me).unwrap();
+        let mut tries = 0;
+        let mut out = Vec::new();
+        let code = while_locked(&dir, wait, &mut out, || {
+            tries += 1;
+            Ok(2)
+        })
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!((code, tries), (2, 11), "{text}");
+        assert!(
+            text.ends_with("still holds eroscripts-scout-fetch.lock after 50 ms\n"),
+            "{text}"
+        );
+
+        // A dead pid's lock, or none: exit 2 stands at once; other codes too.
+        for (holder, exit) in [(Some("4294967295"), 2), (None, 2), (Some(me.as_str()), 1)] {
+            match holder {
+                Some(pid) => fs::write(&lock, pid).unwrap(),
+                None => {
+                    let _ = fs::remove_file(&lock);
+                }
+            }
+            let mut tries = 0;
+            let mut out = Vec::new();
+            let code = while_locked(&dir, wait, &mut out, || {
+                tries += 1;
+                Ok(exit)
+            })
+            .unwrap();
+            assert_eq!((code, tries, out.len()), (exit, 1, 0), "{holder:?}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn spans_read_naturally() {
+        assert_eq!(span(Duration::from_millis(20)), "20 ms");
+        assert_eq!(span(Duration::from_secs(60)), "60 s");
+        assert_eq!(span(Duration::from_secs(300)), "5 min");
+        assert_eq!(span(LOCK_WAIT.max), "3 h");
     }
 
     #[test]
