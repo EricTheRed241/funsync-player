@@ -1,32 +1,37 @@
-// twist-generator — the generated twist for `upgrade:axes` (user, 2026-11-21/22).
+// guided-axis — the generated twist and roll for `upgrade:axes` (user,
+// 2026-11-21/24).
 //
-// Three parts, chosen in the twist experiments (33 VR / 111 flat scenes with
-// hand-made twist, scored 0.5 · style match with the liked scenes + 0.5 ·
-// timing against the hand-made twist, 5-fold):
-//   preference  the twist is built from stretches of stroke-derived shapes
-//               (copy, quarter phase, every other stroke, rest; flat also a
-//               flick at stroke tops and more rest while the stroke is busy),
+// Three parts, chosen in the axes lab's experiments (scored 0.5 · style match
+// with the liked scenes' hand-made axis + 0.5 · timing against the hand-made
+// axis, 5-fold):
+//   preference  the axis is built from stretches of stroke-derived shapes
+//               (copy, quarter phase, every other stroke, rest; flat twist also
+//               a flick at stroke tops and more rest while the stroke is busy),
 //               their mix, length, size and slow lean fitted so the result
-//               looks like the twist of the scenes you like (favourite, 4★+,
-//               top-quarter score)
+//               looks like the hand-made axis of the scenes you like
+//               (favourite, 4★+, top-quarter score; VR roll: every scene with
+//               hand-made roll, which scored higher than the 15 liked ones)
 //   guided      a stroke model (gradient-boosted trees over the stroke, its
-//               shapes and speed) predicts where the twist goes; each stretch
+//               shapes and speed) predicts where the axis goes; each stretch
 //               takes the direction that agrees with it (probability `trust`)
 //               and the slow lean follows its slow part (share `follow`)
 //   random      everything else is drawn from a PRNG seeded per scene, so a
-//               scene always gets the same twist and two scenes never share one
-// VR and flat have their own settings (`twist-model.json`, exported by the
-// axes lab's export_twist_model.py). Scores: VR 71.5, flat 67.0, against 38.3
-// and 45.7 for the earlier random twist.
+//               scene always gets the same axis and two scenes never share one
+// Each axis has VR and flat settings (`<axis>-model.json`, exported by the
+// axes lab's export_twist_model.py). Scores:
+//   twist (33 VR / 111 flat scenes)  VR 71.5, flat 67.0; earlier random 38.3 / 45.7
+//   roll  (39 VR / 112 flat scenes)  VR 70.3, flat 67.4; earlier random 59.8 / 63.2
 //
 // Pure: no I/O. Signal maths follows NumPy / SciPy (interp, uniform_filter1d,
 // hilbert, unwrap, gradient) so the exported model sees the features it was
 // trained on.
 
 import TWIST_MODEL from './twist-model.json' with { type: 'json' };
+import ROLL_MODEL from './roll-model.json' with { type: 'json' };
 import { mulberry32 } from './motion-source.js';
 
-export { TWIST_MODEL };
+/** Axis suffix → exported model. */
+export const AXIS_MODELS = Object.freeze({ twist: TWIST_MODEL, roll: ROLL_MODEL });
 
 const HZ = TWIST_MODEL.hz;
 
@@ -201,7 +206,7 @@ export function strokeSeries(actions) {
   return { t, L };
 }
 
-/** The stroke's shapes a scripter builds twist from. */
+/** The stroke's shapes a scripter builds twist and roll from. */
 export function strokeTemplates(L) {
   const n = L.length;
   const local = uniformFilter(L, 4 * HZ, 'nearest');
@@ -229,8 +234,8 @@ export function strokeTemplates(L) {
   return { copy, quarter: a.im, alternate, alternate_q: alternateQ, slow, envelope };
 }
 
-/** Model inputs per sample, each standardised over the scene (order = TWIST_MODEL.features). */
-export function twistFeatures(L, T) {
+/** Model inputs per sample, each standardised over the scene (order = <axis>-model.json `features`). */
+export function axisFeatures(L, T) {
   const n = L.length;
   const c = Float64Array.from(L, (v) => v - 50);
   const cols = [];
@@ -292,7 +297,7 @@ const unit = (x) => {
 };
 
 /**
- * Guided twist track at HZ (0–100) for stroke samples L.
+ * Guided axis track at HZ (0–100) for stroke samples L.
  * @param {Float64Array} L
  * @param {object} T  strokeTemplates(L)
  * @param {Float64Array} pred  the stroke model's prediction
@@ -382,16 +387,16 @@ export function trackToActions(t, y) {
 }
 
 /**
- * The generated twist for a stroke script.
+ * The generated axis (twist or roll) for a stroke script.
  * @param {Array<{at:number, pos:number}>} strokeActions
- * @param {{vr?: boolean, seed?: number, model?: object}} [opts]
+ * @param {{axis?: string, vr?: boolean, seed?: number, model?: object}} [opts]
  * @returns {{actions: Array<{at:number, pos:number}>, generator: string}}
  */
-export function generateTwist(strokeActions, { vr = false, seed = 1337, model = TWIST_MODEL } = {}) {
+export function generateGuided(strokeActions, { axis = 'twist', vr = false, seed = 1337, model = AXIS_MODELS[axis] } = {}) {
   const g = model.groups[vr ? 'vr' : 'flat'];
   const { t, L } = strokeSeries(strokeActions);
   if (L.length < 2) return { actions: [], generator: g.generator };
   const T = strokeTemplates(L);
-  const pred = predictTrees(g.model, twistFeatures(L, T));
+  const pred = predictTrees(g.model, axisFeatures(L, T));
   return { actions: trackToActions(t, guidedTrack(L, T, pred, g, seed)), generator: g.generator };
 }
