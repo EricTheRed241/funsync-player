@@ -13,7 +13,9 @@ which they leave open):
     resolve under the prefix) and the nav bar's script right after `<head>`.
 
 `GET /site-nav.js` is the nav bar every page loads (the web remote too): links to the
-web remote and each site, the current one marked.
+web remote and each site, each followed by its `pages` (`<prefix><path>`, e.g. the swipe
+deck's Downloads page at `/swipe/downloads`), the current one marked. A page's bare
+`<path>` on this port (`/downloads`) redirects to it.
 """
 
 import json
@@ -103,9 +105,16 @@ async def relay(site: dict, rest: str, request: Request) -> Response:
     return Response(content=content, status_code=answer.status_code, headers=out)
 
 
+def nav_links(sites: list[dict]) -> list[dict]:
+    links = [{"name": "Remote", "href": "/remote/"}]
+    for s in sites:
+        links.append({"name": s["name"], "href": s["prefix"] + "/"})
+        links += [{"name": p["name"], "href": s["prefix"] + p["path"]} for p in s.get("pages", [])]
+    return links
+
+
 def nav_script(sites: list[dict]) -> str:
-    links = [{"name": "Remote", "href": "/remote/"}] + [
-        {"name": s["name"], "href": s["prefix"] + "/"} for s in sites]
+    links = nav_links(sites)
     with open(NAV_SCRIPT, encoding="utf-8") as f:
         return f"window.FUNSYNC_NAV = {json.dumps(links)};\n" + f.read()
 
@@ -121,6 +130,16 @@ def _add_site(site: dict) -> None:
     @router.api_route(prefix + "/{rest:path}", methods=["GET", "HEAD", "POST"], include_in_schema=False)
     async def proxied(rest: str, request: Request):
         return await relay(site, rest, request)
+
+    for page in site.get("pages", []):
+        _add_page_alias(page["path"], prefix + page["path"])
+
+
+def _add_page_alias(path: str, target: str) -> None:
+    @router.api_route(path, methods=["GET", "HEAD"], include_in_schema=False)
+    async def page_alias(request: Request):
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"{target}{query}", status_code=307)
 
 
 SITES = load_sites() if os.path.isfile(SITES_FILE) else []

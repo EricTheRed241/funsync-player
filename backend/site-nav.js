@@ -22,12 +22,15 @@ html.has-site-nav { --safe-top: 0px; }`;
   const brand = document.createElement('b');
   brand.textContent = 'FunSync';
   nav.append(brand);
+  // The longest link the page is under: /swipe/downloads marks Downloads, not Swipe.
   const here = location.pathname;
-  for (const { name, href } of links) {
+  const under = (href) => here === href || here.startsWith(href) || here === href.replace(/\/$/, '');
+  const current = links.filter((l) => under(l.href)).sort((a, b) => b.href.length - a.href.length)[0];
+  for (const link of links) {
     const a = document.createElement('a');
-    a.href = href;
-    a.textContent = name;
-    if (here === href || here.startsWith(href) || here === href.replace(/\/$/, '')) a.setAttribute('aria-current', 'page');
+    a.href = link.href;
+    a.textContent = link.name;
+    if (link === current) a.setAttribute('aria-current', 'page');
     nav.append(a);
   }
   document.body.prepend(nav);

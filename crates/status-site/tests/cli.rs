@@ -78,6 +78,7 @@ fn serves_the_page_and_every_sites_status() {
             "Backend",
             "Web remote",
             "Swipe deck",
+            "Downloads",
             "Creators",
             "Collection"
         ]

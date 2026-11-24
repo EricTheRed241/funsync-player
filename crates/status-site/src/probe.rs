@@ -2,7 +2,8 @@
 //! (loopback passes the access PIN), up when it answers 2xx in time; and a TCP connect to
 //! the Mac's network address, which tells whether other devices can reach the port. Every
 //! site is on the desktop app's one port: the backend serves the web remote and proxies the
-//! swipe deck (`/swipe/`) and the Creators site (`/creators/`), which it starts itself.
+//! swipe deck (`/swipe/`, its Downloads page `/swipe/downloads`) and the Creators site
+//! (`/creators/`), which it starts itself.
 
 use serde::Serialize;
 use std::io::{Read, Write};
@@ -49,6 +50,13 @@ pub const SITES: &[Site] = &[
         port: 5123,
         probe: "/swipe/api/deck?limit=1",
         open: "/swipe/",
+        start: APP,
+    },
+    Site {
+        name: "Downloads",
+        port: 5123,
+        probe: "/swipe/api/downloads",
+        open: "/swipe/downloads",
         start: APP,
     },
     Site {

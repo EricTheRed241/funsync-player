@@ -100,3 +100,15 @@ def test_nav_script_lists_the_remote_then_every_site(client):
     assert first.startswith('window.FUNSYNC_NAV = [{"name": "Remote", "href": "/remote/"}')
     for s in sites.SITES:
         assert f'"href": "{s["prefix"]}/"' in first
+
+
+def test_a_sites_page_follows_it_in_the_nav():
+    hrefs = [link["href"] for link in sites.nav_links(sites.SITES)]
+    assert hrefs.index("/swipe/downloads") == hrefs.index("/swipe/") + 1
+
+
+def test_a_pages_bare_path_redirects_under_its_site(client, upstream):
+    r = client.get("/downloads?tab=slr")
+    assert r.status_code == 307
+    assert r.headers["location"] == "/swipe/downloads?tab=slr"
+    assert upstream == []
