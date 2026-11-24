@@ -2,7 +2,7 @@
 //! scripts/vrbangers-browser.mjs): the sites sign download links per member
 //! inside the scene page, so `--fetch` signs in and reads each scene page's
 //! `#__NUXT_DATA__` right before its download. Chrome runs headless
-//! (`--headful` shows it) with its own profile, `<userData>/vrbangers-chrome`,
+//! (`--headful` shows it) with its own profile, `<userData>/vrb-scout-chrome`,
 //! so the session survives runs, and is driven over the DevTools protocol
 //! (`slr_scout::cdp`). The account comes from `vb_hack.txt` (`Username: …` /
 //! `password: …`); the password, cookies and link tokens are never printed.
@@ -22,9 +22,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Chrome's profile, in userData (the JS helper's, so a session it made
-/// carries over).
-pub const PROFILE_DIR: &str = "vrbangers-chrome";
+/// Chrome's profile, in userData. Not the EroScripts scout's (`vrbangers-chrome`): both
+/// download from VRBangers in their own hourly jobs, and one Chrome profile can't be open
+/// twice (since 2026-11-23); this one signs in on its first use.
+pub const PROFILE_DIR: &str = "vrb-scout-chrome";
 pub const CREDENTIALS_ENV: &str = "FUNSYNC_VRB_CREDENTIALS";
 /// Where a kept session lands after `/login/`.
 const DASHBOARD_PATH: &str = "/main-dashboard/";

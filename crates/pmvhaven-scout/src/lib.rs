@@ -63,13 +63,20 @@ fn run_inner(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Res
         return Err(format!("{} is not a folder", user_data.display()));
     }
     let lock_path = user_data.join(LOCK_NAME);
-    let _lock = host::take_lock(&lock_path).map_err(|e| match e {
-        LockError::Held(holder) => format!(
-            "another pmvhaven-scout run ({holder}) holds {}",
-            lock_path.display()
-        ),
-        LockError::Io(m) => m,
-    })?;
+    // Another run is at it: work left for a later run (exit 2), as every scout's lock.
+    let _lock = match host::take_lock(&lock_path) {
+        Ok(lock) => lock,
+        Err(LockError::Held(holder)) => {
+            writeln!(
+                err,
+                "pmvhaven-scout: another pmvhaven-scout run ({holder}) holds {}",
+                lock_path.display()
+            )
+            .map_err(io)?;
+            return Ok(2);
+        }
+        Err(LockError::Io(m)) => return Err(m),
+    };
     let (client, gap): (Box<dyn Http>, Duration) =
         match std::env::var_os(FAKE_ENV).filter(|v| !v.is_empty()) {
             Some(path) => (
