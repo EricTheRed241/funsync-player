@@ -163,7 +163,7 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
     // Instagram's picture first.
     assert_eq!(
         fox["pictures"][0]["src"],
-        "/pictures/sweetiefox/ig-3456789.jpg"
+        "pictures/sweetiefox/ig-3456789.jpg"
     );
     assert_eq!(fox["instagram"]["lastPostAt"], Value::Null);
     assert_eq!(fox["twitch"]["followers"], 9225);
@@ -226,7 +226,7 @@ fn serves_the_tabs_decks_pictures_and_records_swipes() {
     assert_eq!(got, [("annie", "no"), ("sweetiefox", "yes")]);
     assert_eq!(
         swiped["cards"][1]["pictures"][0]["src"],
-        "/pictures/sweetiefox/ig-3456789.jpg"
+        "pictures/sweetiefox/ig-3456789.jpg"
     );
 
     // The file creator-scout reads, in the contract's shape.

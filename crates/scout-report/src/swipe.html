@@ -295,8 +295,8 @@ const isLibrary = (c) => sourceOf(c) === 'library';
 // A Duplicates pair (source "dupes"): /api/duplicates/swipe, duplicate-swipes.json.
 const isPair = (c) => sourceOf(c) === 'dupes';
 const isScene = (c) => sourceOf(c) !== 'eroscripts' && !isLibrary(c) && !isPair(c);
-const swipePath = (c) => (isLibrary(c) ? '/api/free-space/swipe' : isPair(c) ? '/api/duplicates/swipe'
-  : isScene(c) ? `/api/scenes/${encodeURIComponent(c.source)}/swipe` : '/api/swipe');
+const swipePath = (c) => (isLibrary(c) ? 'api/free-space/swipe' : isPair(c) ? 'api/duplicates/swipe'
+  : isScene(c) ? `api/scenes/${encodeURIComponent(c.source)}/swipe` : 'api/swipe');
 // Whether a swipe counts in the tab's second counter: a library video swiped left is marked for
 // deletion, a pair swiped either side marks its other video, anything else swiped right is wanted.
 const marks = (c, dir) => (isLibrary(c) ? dir === 'left' : isPair(c) ? dir === 'left' || dir === 'right' : dir === 'right');
@@ -885,7 +885,7 @@ function deleteMarked(e) {
   const dupes = stack === 'dupes';
   const what = dupes ? `${wanted} duplicate cop${wanted === 1 ? 'y' : 'ies'}` : `${wanted} video${wanted === 1 ? '' : 's'}`;
   if (!wanted || !confirm(`Delete ${what} (${fmtBytes(markedBytes)}) from disk, with their scripts?${dupes ? ' The copies you kept stay.' : ''} This can't be undone.`)) return;
-  serial(() => post(dupes ? '/api/duplicates/delete' : '/api/free-space/delete', {})).then((r) => {
+  serial(() => post(dupes ? 'api/duplicates/delete' : 'api/free-space/delete', {})).then((r) => {
     // Their marks are gone with them: undo can't bring a deleted video back.
     for (let i = undoStack.length - 1; i >= 0; i--) {
       const u = undoStack[i];
@@ -984,7 +984,7 @@ function renderDrive() {
 
 async function loadDrive() {
   try {
-    const res = await fetch('/api/drive', { cache: 'no-store' });
+    const res = await fetch('api/drive', { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     drive = await res.json();
   } catch (e) {
@@ -1020,7 +1020,7 @@ function render(enterFrom) {
       : loading ? ['Loading…']
       : stack === 'free' ? ['Nothing left to offer on Free space.',
         el('span', {}, wanted ? 'Delete the marked videos above, or undo a swipe.' : 'Everything else is protected (hover the drive line to see why).'),
-        el('a', { href: '/' }, 'Back to the report')]
+        el('a', { href: './' }, 'Back to the report')]
       : stack === 'dupes' ? ['No likely duplicates left.',
         el('span', {}, (wanted ? 'Delete the marked copies above, or undo a swipe. ' : '')
           + (lastDeck ? `Pairs under ${Math.round(lastDeck.floorConfidence)}% confidence aren't shown.` : '')),
@@ -1327,7 +1327,7 @@ function more() {
   const held = [...queue, ...skipped].map(keyOf).join(',');
   serial(async () => {
     const jitter = jitters[stack] == null ? '' : `&jitter=${jitters[stack]}`;
-    const res = await fetch(`/api/deck?stack=${stack}&limit=${BATCH}&seed=${seed}${jitter}&exclude=${held}`, { cache: 'no-store' });
+    const res = await fetch(`api/deck?stack=${stack}&limit=${BATCH}&seed=${seed}${jitter}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {

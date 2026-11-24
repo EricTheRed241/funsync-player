@@ -19,10 +19,10 @@ Options:
 
 The page is http://127.0.0.1:<port>/; with --lan it also answers on the Mac's network
 address, which the banner prints. It lists the backend (5123 /health), the web remote
-(5123 /remote/), the swipe deck (5131, npm run scout:report), the Creators deck and the
-Collection (5132, npm run creators:site), each up or down with its HTTP status and
-response time, and whether its port answers on the network address too (a site started
-without --lan answers on this Mac only). Every load of /api/status probes them again
+(5123 /remote/), the swipe deck (5123 /swipe/), the Creators deck and the Collection
+(5123 /creators/), all served on the desktop app's port, each up or down with its HTTP
+status and response time, and whether the port answers on the network address too (an
+app without network access answers on this Mac only). Every load of /api/status probes them again
 from this Mac; the page reloads it every 15 s. With an access PIN set (npm run
 access:pin) other devices first get the /login page, as on the other sites. It writes
 nothing. Stop it with Ctrl-C.

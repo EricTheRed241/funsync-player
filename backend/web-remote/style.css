@@ -174,9 +174,10 @@ body::-webkit-scrollbar {
      container width regardless of any child's min-content size. */
   grid-template-rows: auto 1fr auto;
   grid-template-columns: minmax(0, 1fr);
-  height: 100vh;
-  height: 100dvh;
-  height: calc(var(--app-vh, 1vh) * 100);
+  /* The nav bar to the other FunSync pages (backend/site-nav.js) sits above #app. */
+  height: calc(100vh - var(--site-nav-h, 0px));
+  height: calc(100dvh - var(--site-nav-h, 0px));
+  height: calc(var(--app-vh, 1vh) * 100 - var(--site-nav-h, 0px));
 }
 
 /* ============================================================
