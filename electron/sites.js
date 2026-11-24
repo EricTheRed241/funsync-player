@@ -1,9 +1,8 @@
 // Runs the local sites of deploy/sites.json (the swipe deck, Creators, Status) next to the
-// app, each on 127.0.0.1:<port> only: the backend serves them on its own port under their
-// prefix (backend/routes/sites.py), behind the access PIN. Built from the checkout at start
-// and rebuilt and restarted a few seconds after one exits, so killing a site's process
-// reloads it after a merge (electron/rust-process.js). Off in a packaged app and with
-// FUNSYNC_SITES=0.
+// app, each on its own port for the home network (`--lan`, every interface; the sites'
+// access PIN gates other devices). Built from the checkout at start and rebuilt and
+// restarted a few seconds after one exits, so killing a site's process reloads it after a
+// merge (electron/rust-process.js). Off in a packaged app and with FUNSYNC_SITES=0.
 const fs = require('fs');
 const path = require('path');
 const log = require('./logger');
@@ -34,7 +33,7 @@ function startSites({ appPath, userData, isPackaged }) {
   running = sites.map((s) => supervise({
     tag: `site ${s.package}`,
     pkg: s.package,
-    args: ['--port', String(s.port), '--user-data', userData],
+    args: ['--lan', '--port', String(s.port), '--user-data', userData],
     appPath,
     env,
     restartDelayMs: RESTART_DELAY_MS,

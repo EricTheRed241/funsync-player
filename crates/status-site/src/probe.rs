@@ -1,8 +1,6 @@
 //! The sites and how one is probed: an HTTP GET from this Mac to `127.0.0.1:<port><probe>`
 //! (loopback passes the access PIN), up when it answers 2xx in time; and a TCP connect to
-//! the Mac's network address, which tells whether other devices can reach the port. Every
-//! site is on the desktop app's one port: the backend serves the web remote and proxies the
-//! swipe deck (`/swipe/`) and the Creators site (`/creators/`), which it starts itself.
+//! the Mac's network address, which tells whether other devices can reach the port.
 
 use serde::Serialize;
 use std::io::{Read, Write};
@@ -27,7 +25,7 @@ pub struct Site {
     pub start: &'static str,
 }
 
-const APP: &str = "the desktop app (it runs the sites; restart it)";
+const APP: &str = "the desktop app (npm start)";
 
 pub const SITES: &[Site] = &[
     Site {
@@ -46,24 +44,24 @@ pub const SITES: &[Site] = &[
     },
     Site {
         name: "Swipe deck",
-        port: 5123,
-        probe: "/swipe/api/deck?limit=1",
-        open: "/swipe/",
-        start: APP,
+        port: 5131,
+        probe: "/api/deck?limit=1",
+        open: "/swipe",
+        start: "npm run scout:report -- --lan",
     },
     Site {
         name: "Creators",
-        port: 5123,
-        probe: "/creators/api/creators/deck?limit=1",
-        open: "/creators/",
-        start: APP,
+        port: 5132,
+        probe: "/api/creators/deck?limit=1",
+        open: "/creators",
+        start: "npm run creators:site -- --lan",
     },
     Site {
         name: "Collection",
-        port: 5123,
-        probe: "/creators/api/creators/collection",
-        open: "/creators/collection",
-        start: APP,
+        port: 5132,
+        probe: "/api/creators/collection",
+        open: "/collection",
+        start: "npm run creators:site -- --lan",
     },
 ];
 

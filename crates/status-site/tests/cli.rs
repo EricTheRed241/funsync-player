@@ -74,13 +74,7 @@ fn serves_the_page_and_every_sites_status() {
         .collect();
     assert_eq!(
         names,
-        [
-            "Backend",
-            "Web remote",
-            "Swipe deck",
-            "Creators",
-            "Collection"
-        ]
+        ["Backend", "Web remote", "Swipe deck", "Creators", "Collection"]
     );
     for s in v["sites"].as_array().unwrap() {
         let up = s["up"].as_bool().unwrap();
