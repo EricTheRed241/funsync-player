@@ -934,7 +934,7 @@ pub struct Side {
     pub path: String,
     /// The library source folder's name (`EroScripts`, `FapTap`, `Other` …).
     pub library: Option<String>,
-    /// Frames of the video to tap through after the thumbnail (relative `dupes-frames/<id>/<n>.jpg`,
+    /// Frames of the video to tap through after the thumbnail (`/dupes-frames/<id>/<n>.jpg`,
     /// taken on first request, crate::duplicates::frame_image).
     pub frames: Vec<String>,
     pub size: u64,
@@ -1015,7 +1015,7 @@ fn side(x: &Facts, lib: &Library, disk: &dyn Disk) -> Side {
         id: x.id.clone(),
         frames: FRAME_SHARES
             .iter()
-            .map(|n| format!("dupes-frames/{}/{n}.jpg", x.id))
+            .map(|n| format!("/dupes-frames/{}/{n}.jpg", x.id))
             .collect(),
         title: v
             .get("name")

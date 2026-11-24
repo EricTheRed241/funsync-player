@@ -353,7 +353,7 @@ app.whenReady().then(async () => {
   // Scheduled jobs (deploy/jobs.json) run under the app, with its access to
   // Documents and the library drive.
   startJobRunner({ appPath: app.getAppPath(), userData: userDataDir, isPackaged: app.isPackaged });
-  // The local sites (deploy/sites.json) on loopback; the backend serves them on its port.
+  // The local sites (deploy/sites.json), each on its own port for the home network.
   startSites({ appPath: app.getAppPath(), userData: userDataDir, isPackaged: app.isPackaged });
 
   const _tWindow = Date.now();

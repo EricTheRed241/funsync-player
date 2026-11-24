@@ -4,7 +4,7 @@
 //! EROSCRIPTS_FILE) and `<userData>/scout-frames/slr/<scene id>/` (by slr:scout, in the
 //! scene's `frames.files` in slr-scout.json). Served at `/frames/<source>/<id>/<25|50|75>.jpg`,
 //! that exact shape only; a card lists the files of its record that are on disk after its own
-//! images, as relative URLs (`frames/…`) so they resolve under the app's `/swipe/` proxy too.
+//! images.
 
 use crate::deck::MAX_IMAGES;
 use serde_json::Value;
@@ -86,7 +86,7 @@ pub fn urls(user_data: &Path, source: Source, id: u64, rec: &Value) -> Vec<Strin
         .flatten()
         .filter_map(Value::as_str)
     {
-        let url = format!("frames/{}/{id}/{name}", source.as_str());
+        let url = format!("/frames/{}/{id}/{name}", source.as_str());
         if NAMES.contains(&name) && !out.contains(&url) && dir.join(name).is_file() {
             out.push(url);
         }
@@ -161,7 +161,7 @@ mod tests {
         // 50 isn't on disk; unknown names never count.
         assert_eq!(
             urls(&ud, Source::Eroscripts, 7, &rec),
-            ["frames/eroscripts/7/75.jpg", "frames/eroscripts/7/25.jpg"]
+            ["/frames/eroscripts/7/75.jpg", "/frames/eroscripts/7/25.jpg"]
         );
         assert!(urls(&ud, Source::Slr, 7, &rec).is_empty());
         assert!(urls(&ud, Source::Eroscripts, 8, &rec).is_empty());
