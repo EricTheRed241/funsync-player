@@ -22,7 +22,8 @@ static FILE: LazyLock<Mutex<Option<PathBuf>>> = LazyLock::new(|| {
             std::env::var_os("HOME")
                 .map(|h| PathBuf::from(h).join("Library/Logs/funsync-rust/server.log"))
         });
-    Mutex::new(path)
+    // Unit tests run the router in-process: they never write the user's log.
+    Mutex::new(path.filter(|_| !cfg!(test)))
 });
 
 /// Write one line (timestamped) to stderr and the log file.
