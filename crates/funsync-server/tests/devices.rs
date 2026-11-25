@@ -607,3 +607,98 @@ async fn buttplug_devices_get_their_own_outputs() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
+
+/// A browser tab attaching to the serial relay, as `serial-relay.js` does.
+async fn sink(
+    port: u16,
+    origin: Option<&str>,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    tokio_tungstenite::tungstenite::Error,
+> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut req = format!("ws://127.0.0.1:{port}/api/remote/tcode-relay?role=sink")
+        .into_client_request()
+        .unwrap();
+    if let Some(o) = origin {
+        req.headers_mut().insert("Origin", o.parse().unwrap());
+    }
+    tokio_tungstenite::connect_async(req).await.map(|x| x.0)
+}
+
+#[tokio::test]
+async fn browser_serial_relay_carries_tcode_to_the_tab() {
+    let lib = tempfile::tempdir().unwrap();
+    std::fs::write(lib.path().join("Scene.mp4"), b"0").unwrap();
+    std::fs::write(
+        lib.path().join("Scene.funscript"),
+        br#"{"actions":[{"at":0,"pos":0},{"at":60000,"pos":100}]}"#,
+    )
+    .unwrap();
+    let (_srv, port, _data) = serve(serde_json::json!({"settings": {
+        "library": {"sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]},
+        "tcode": {"transport": "remote-serial", "remoteBaudRate": 250000,
+                  "axes": {"L0": {"min": 0, "max": 100}}},
+    }}));
+    // Pages from elsewhere may not attach.
+    assert!(sink(port, None).await.is_err());
+    assert!(sink(port, Some("http://evil.example")).await.is_err());
+
+    let origin = format!("http://127.0.0.1:{port}");
+    let mut tab = sink(port, Some(&origin)).await.unwrap();
+    let Some(Ok(Message::Text(cfg))) = tab.next().await else {
+        panic!("no config")
+    };
+    assert_eq!(cfg.as_str(), r#"{"baudRate":250000,"type":"config"}"#);
+    let port_msg = r#"{"type":"port","open":true,"info":{"usbVendorId":6790},"baudRate":250000}"#;
+    tab.send(Message::text(port_msg)).await.unwrap();
+    status_until(port, |s| {
+        s["tcodeRelay"]["sink"]["portOpen"] == true
+            && s["devices"]["tcode"]["link"]["state"] == "connected"
+    })
+    .await;
+
+    let id = loop {
+        if let Some(id) = get(port, "/api/videos").await[0]["id"].as_str() {
+            break id.to_string();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
+    let (mut phone, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    phone
+        .send(Message::text(
+            r#"{"type":"state","at":30000,"paused":false,"rate":1}"#,
+        ))
+        .await
+        .unwrap();
+    let frame = loop {
+        let m = tokio::time::timeout(Duration::from_secs(20), tab.next())
+            .await
+            .expect("no TCode at the tab")
+            .unwrap()
+            .unwrap();
+        let t = m.into_text().unwrap().to_string();
+        if t.starts_with("L0") {
+            break t;
+        }
+    };
+    assert!(frame.ends_with("I17\n"), "{frame}");
+
+    // A newer tab replaces it.
+    let _newer = sink(port, Some(&origin)).await.unwrap();
+    let kicked = loop {
+        match tokio::time::timeout(Duration::from_secs(20), tab.next())
+            .await
+            .unwrap()
+        {
+            Some(Ok(Message::Text(t))) if t.contains("kicked") => break true,
+            Some(Ok(_)) => continue,
+            _ => break false,
+        }
+    };
+    assert!(kicked);
+    let s = status_until(port, |s| s["tcodeRelay"]["sink"]["portOpen"] == false).await;
+    assert_eq!(s["tcodeRelay"]["sink"]["attached"], true);
+    assert!(s["tcodeRelay"]["forwarded"].as_u64().unwrap() > 0);
+}

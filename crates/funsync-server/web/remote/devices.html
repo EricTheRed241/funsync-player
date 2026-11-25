@@ -27,9 +27,11 @@
     </select></label>
     <label>Transport <select name="transport">
       <option value="websocket">WebSocket</option><option value="serial">USB serial</option><option value="udp">UDP</option>
+      <option value="remote-serial">USB serial on another computer (browser relay)</option>
     </select></label>
     <label>WebSocket URL <input name="wsUrl" placeholder="ws://mirabot.local:8888"></label>
     <label>Serial port <input name="port" placeholder="/dev/tty.usbserial-…"> baud <input name="baudRate" type="number"></label>
+    <label>Browser relay baud <input name="remoteBaudRate" type="number" placeholder="115200"> (the web remote on the device's computer: header USB button → Connect device)</label>
     <label>UDP host <input name="udpHost"> port <input name="udpPort" type="number"></label>
     <label>Offset (ms) <input name="defaultOffset" type="number"></label>
     <table><thead><tr><th>Axis</th><th>On</th><th>Min</th><th>Max</th><th>Invert</th></tr></thead><tbody></tbody></table>
@@ -92,7 +94,7 @@
 <script>
 const AXES = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'V0', 'A0'];
 const $ = (s, r = document) => r.querySelector(s);
-const NUM = ['baudRate', 'udpPort', 'port', 'defaultOffset', 'speedLimit', 'lastPort', 'offset'];
+const NUM = ['baudRate', 'udpPort', 'port', 'defaultOffset', 'speedLimit', 'lastPort', 'offset', 'remoteBaudRate'];
 const SOURCE = { 'web-remote': 'Web remote', vr: 'VR' };
 const when = (ms) => (ms ? new Date(ms).toLocaleString() : '');
 let data;

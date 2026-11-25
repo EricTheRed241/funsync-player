@@ -11,6 +11,7 @@ mod buttplug;
 mod dashboard;
 mod interp;
 mod profiles;
+mod relay;
 mod routing;
 pub(crate) mod script;
 mod tcode;
@@ -168,6 +169,7 @@ pub struct Devices {
     /// Each Buttplug device's outputs (`Vibrate`, `Linear`, `Rotate`, …).
     buttplug_features: Mutex<HashMap<u64, Vec<String>>>,
     telem: Mutex<dashboard::Telem>,
+    relay: Mutex<relay::Relay>,
 }
 
 impl Devices {
@@ -198,6 +200,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/devices", get(get_devices).post(post_devices))
         .route("/api/devices/routing", get(get_routing).post(post_routing))
         .route("/api/remote/edge", axum::routing::post(edge))
+        .route("/api/remote/tcode-relay", get(relay::endpoint))
         .merge(dashboard::routes())
 }
 
@@ -286,6 +289,9 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
                 }
             };
             let r = match kind {
+                "tcode" if cfg["transport"] == "remote-serial" => {
+                    relay::session(&st2, &mut d.tcode.tx.subscribe(), on).await
+                }
                 "tcode" => tcode::session(&cfg, &mut d.tcode.tx.subscribe(), on).await,
                 "vr" => vr::session(&st2, &cfg, on).await,
                 _ => {
@@ -333,7 +339,10 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
                 }
                 s.since.get_or_insert(now);
                 s.attempts += 1;
-                s.retry_ms = if s.attempts <= 12 || unplugged {
+                s.retry_ms = if cfg["transport"] == "remote-serial" && kind == "tcode" {
+                    // A tab attaching should start the device at once.
+                    1000
+                } else if s.attempts <= 12 || unplugged {
                     5000
                 } else {
                     60_000
@@ -1018,6 +1027,9 @@ async fn post_devices(State(st): State<Arc<AppState>>, Json(b): Json<Value>) -> 
         (Some(k), Some("connect")) => connect(&st, k),
         (Some(k), Some("disconnect")) => disconnect(&st, k),
         (Some("tcode"), None) if b["settings"].get("funsr").is_some() => send_funsr(&st, &tc),
+        (Some("tcode"), None) if b["settings"].get("remoteBaudRate").is_some() => {
+            relay::reconfigure(&st, &tc)
+        }
         _ => {}
     }
     Json(devices_json(&st).await).into_response()

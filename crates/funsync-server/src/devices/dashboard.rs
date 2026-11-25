@@ -97,6 +97,7 @@ pub fn address(tc: &Value) -> String {
     match tc["transport"].as_str().unwrap_or("") {
         "websocket" => s("wsUrl"),
         "udp" => format!("{}:{}", s("udpHost"), tc["udpPort"]),
+        "remote-serial" => "browser serial relay".into(),
         _ => s("port"),
     }
 }
@@ -230,6 +231,7 @@ pub async fn status(st: &AppState) -> Value {
             "buttplug": {"connected": d.connected("buttplug"), "devices": names},
         },
         "vrBridge": vr_bridge,
+        "tcodeRelay": super::relay::json(st),
         "session": play.as_ref().map(|p| json!({
             "source": if p.source == "vr" { "VR" } else { "web remote" },
             "state": if p.paused { "paused" } else { "playing" },
