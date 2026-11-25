@@ -1,5 +1,5 @@
 //! HTTP: health, status, library listing, scan, media (stream, thumbnail,
-//! script, subtitle) and the page.
+//! script, subtitle), the web UI and the parity dashboard.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -16,13 +16,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
-use tower_http::services::ServeFile;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::data::{self, Library, SCAN_FILE, now_ms};
 use crate::media::Media;
 use crate::scan::{self, Source, Video};
 
-const INDEX_HTML: &str = include_str!("../web/index.html");
+/// The UI is the web remote (`backend/web-remote/`, served unchanged), with
+/// this crate's `web/remote/` files taking precedence where a page needs
+/// to differ.
+const WEB_OVERLAY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/remote");
+const WEB_REMOTE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../backend/web-remote");
+const LOCALES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../renderer/locales");
+const STATUS_HTML: &str = include_str!("../web/status.html");
+const PARITY_MD: &str = include_str!("../../../docs/rust-app/parity.md");
+const NAV_JS: &str = include_str!("../../../backend/site-nav.js");
+const NAV_LINKS: &str = r#"window.FUNSYNC_NAV=[{"name":"Remote","href":"/remote/"},{"name":"Status","href":"/status"}];"#;
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +41,15 @@ pub struct Snapshot {
     pub videos: Vec<Video>,
     pub unmatched_funscripts: usize,
     pub failed_paths: Vec<String>,
+}
+
+impl Snapshot {
+    pub fn ids_by_path(&self) -> std::collections::HashMap<&str, &str> {
+        self.videos
+            .iter()
+            .map(|v| (v.path.as_str(), v.id.as_str()))
+            .collect()
+    }
 }
 
 pub struct AppState {
@@ -70,12 +88,12 @@ impl AppState {
             .library
             .read()
             .await
-            .sources
-            .iter()
+            .sources()
+            .into_iter()
             .filter(|s| s.enabled)
             .map(|s| Source {
-                name: s.name.clone(),
-                path: s.path.clone(),
+                name: s.name,
+                path: s.path,
             })
             .collect();
         let started = std::time::Instant::now();
@@ -101,10 +119,47 @@ impl AppState {
             Err(e) => Err(e.to_string()),
         };
         self.scanning.store(false, Ordering::SeqCst);
+        let s = self.clone();
+        tokio::spawn(async move { s.probe_durations().await });
         out
     }
 
-    async fn video(&self, id: &str) -> Option<Video> {
+    /// Write `library.json` (after an edit).
+    pub async fn save(&self) -> Result<(), String> {
+        let bytes = serde_json::to_vec(&*self.library.read().await).map_err(|e| e.to_string())?;
+        data::write_atomic(&self.data_dir.join(data::LIBRARY_FILE), &bytes)
+            .map_err(|e| e.to_string())
+    }
+
+    /// ffprobe every video without a cached duration (`durationCache`, as
+    /// in the old app), one at a time, saving every 25.
+    async fn probe_durations(self: &Arc<Self>) {
+        let snap = self.snapshot.read().await.clone();
+        let mut done = 0;
+        for v in &snap.videos {
+            if self.library.read().await.lib()["durationCache"]
+                .get(&v.path)
+                .is_some()
+            {
+                continue;
+            }
+            let Ok(md) = self.media.metadata(Path::new(&v.path)).await else {
+                continue;
+            };
+            if md.duration > 0.0 {
+                self.library.write().await.lib_mut("durationCache")[&v.path] = json!(md.duration);
+                done += 1;
+                if done % 25 == 0 {
+                    let _ = self.save().await;
+                }
+            }
+        }
+        if done > 0 {
+            let _ = self.save().await;
+        }
+    }
+
+    pub async fn video(&self, id: &str) -> Option<Video> {
         self.snapshot
             .read()
             .await
@@ -116,8 +171,19 @@ impl AppState {
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
+    let remote_files = ServeDir::new(WEB_OVERLAY).fallback(ServeDir::new(WEB_REMOTE));
     Router::new()
-        .route("/", get(index))
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::to("/remote/") }),
+        )
+        .route(
+            "/remote",
+            get(|| async { axum::response::Redirect::to("/remote/") }),
+        )
+        .route("/site-nav.js", get(nav))
+        .route("/status", get(status_page))
+        .route("/api/parity", get(parity))
         .route("/health", get(health))
         .route("/api/status", get(status))
         .route("/api/videos", get(videos))
@@ -127,6 +193,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/media/thumb/{id}", get(thumb))
         .route("/api/media/script/{id}", get(script))
         .route("/api/media/subtitle/{id}", get(subtitle))
+        .merge(crate::remote::routes())
+        .nest_service("/remote/", remote_files)
+        .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)
 }
 
@@ -156,11 +225,59 @@ fn err(code: StatusCode, msg: impl Into<String>) -> Response {
     (code, Json(json!({ "error": msg.into() }))).into_response()
 }
 
-async fn index() -> impl IntoResponse {
+async fn nav() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        format!("{NAV_LINKS}\n{NAV_JS}"),
+    )
+}
+
+async fn status_page() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        INDEX_HTML,
+        STATUS_HTML,
     )
+}
+
+/// `docs/rust-app/parity.md` as `{counts, sections: [{name, rows}]}`.
+pub fn parse_parity(md: &str) -> serde_json::Value {
+    let mut sections: Vec<serde_json::Value> = Vec::new();
+    let mut counts = serde_json::Map::new();
+    for line in md.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            sections.push(json!({"name": h, "rows": []}));
+            continue;
+        }
+        let cells: Vec<&str> = line
+            .trim()
+            .trim_matches('|')
+            .split(" | ")
+            .map(str::trim)
+            .collect();
+        let [feature, status, notes] = cells[..] else {
+            continue;
+        };
+        if !["done", "partial", "not started", "not planned"].contains(&status) {
+            continue;
+        }
+        if let Some(s) = sections.last_mut() {
+            s["rows"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"feature": feature, "status": status, "notes": notes}));
+            let n = counts.get(status).and_then(|c| c.as_u64()).unwrap_or(0);
+            counts.insert(status.to_string(), json!(n + 1));
+        }
+    }
+    sections.retain(|s| !s["rows"].as_array().unwrap().is_empty());
+    json!({"counts": counts, "sections": sections})
+}
+
+async fn parity() -> impl IntoResponse {
+    Json(parse_parity(PARITY_MD))
 }
 
 async fn health() -> impl IntoResponse {
@@ -171,8 +288,8 @@ async fn status(State(st): State<Arc<AppState>>) -> impl IntoResponse {
     let lib = st.library.read().await;
     let snap = st.snapshot.read().await.clone();
     let sources: Vec<_> = lib
-        .sources
-        .iter()
+        .sources()
+        .into_iter()
         .map(|s| {
             json!({
                 "name": s.name, "path": s.path, "enabled": s.enabled,

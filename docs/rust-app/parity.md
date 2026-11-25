@@ -4,14 +4,7 @@ The Rust app (`crates/funsync-server`, http://127.0.0.1:5300/) is built beside t
 
 Ground rules while both run: the Rust app has its own data folder (`~/Library/Application Support/funsync-rust/`, seeded by `funsync-server import`, which only reads the old `config.json`) and treats the library as read-only (no deletes, renames, rating deletes or sidecar writes). Downloads, scouts and jobs stay with the Electron app.
 
-## Counts (2026-11-24)
-
-| Status | Rows |
-|---|---|
-| done | 5 |
-| partial | 5 |
-| not started | 63 |
-| not planned | 5 |
+The **status dashboard** at http://127.0.0.1:5300/status shows the counts, a progress bar and these tables (the server reads this file at build time), plus the server's own state.
 
 ## Server and data
 
@@ -23,21 +16,21 @@ Ground rules while both run: the Rust app has its own data folder (`~/Library/Ap
 | Status API with devices, issues (`/api/status` of the old backend) | not started | phase 5 (devices on the server) |
 | Device dashboard (`/device`) | not started | |
 | Access PIN, LAN mode | not started | loopback only until the PIN gate is ported (`--lan` then) |
-| One port + nav bar for the Rust sites (swipe deck, creators, status) | not started | |
+| Nav bar | partial | `/site-nav.js` (the old nav script) links Remote and Status; the swipe deck, Downloads and Creators sites aren't proxied yet |
 | Log file | not started | stderr only |
 
 ## Video Player
 
 | Feature | Status | Notes |
 |---|---|---|
-| Playback with range streaming | partial | `GET /api/media/stream/{id}` (Range, 206); the page plays it in a plain `<video>`; no custom controls yet |
-| Custom controls, keyboard shortcuts, drag-and-drop | not started | phase 2 |
+| Playback with range streaming | done | `GET /api/media/stream/{id}` (Range, 206), played by the web remote's player |
+| Custom controls, keyboard shortcuts, drag-and-drop | partial | the web remote's controls (seek bar with chapters, double-tap ±10 s); no desktop keyboard shortcuts or drag-and-drop yet |
 | Seek bar thumbnail preview | not started | |
-| Subtitles (.srt / .vtt, SRT→VTT) | partial | server side done (`GET /api/media/subtitle/{id}`); not wired into the player yet |
+| Subtitles (.srt / .vtt, SRT→VTT) | done | `GET /api/media/subtitle/{id}`, shown by the web remote |
 | Screenshot, picture-in-picture, aspect ratio cycling | not started | |
-| A-B loop | not started | |
+| A-B loop | done | web remote player |
 | Replay button at the end | not started | |
-| Script gap auto-skip | not started | |
+| Script gap auto-skip | done | web remote player |
 
 ## Play queue
 
@@ -54,20 +47,20 @@ Ground rules while both run: the Rust app has its own data folder (`~/Library/Ap
 | Library scan (pairing, variants, axis companions, subtitles, sidecars, fuzzy pass, AppleDouble skip, on-disk spelling) | done | port of `electron/library-scan.js`; on the real library (999 videos) every pairing, variant, subtitle, source and sidecar matches the JS scan |
 | Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | flat rule ported, `thumb-cache/` with the old names; VR one-eye crops wait for the VR decision; no versioned URLs / immutable caching, no pinned frames, no cache pruning |
 | Posters and custom thumbnails (EroScripts, FapTap, rule34video) | not started | |
-| Grid / list / folder views, hover preview | not started | phase 2 (the phase-1 page is a plain grid) |
+| Grid / list / folder views, hover preview | partial | the web remote's grid, list and folder views; no hover preview |
 | Sources: reorder, enable/disable, overlap, hot-plug | not started | enabled flag honoured, overlap deduped; no UI |
 | Manual script association | not started | |
-| Fuzzy search with exact-title precedence | not started | phase 2 (phase 1: substring on the path) |
-| Sort (preference score default, name, date, duration, speed, rating) | not started | phase 2 |
-| Playlists | not started | imported, not served yet (phase 3) |
-| Categories from EroScripts tags, VR, axis categories | not started | phase 3 |
+| Fuzzy search with exact-title precedence | done | the web remote's search (`library-search.js`) |
+| Sort (preference score default, name, date, duration, speed, rating) | partial | the web remote's sorts; scores are the imported snapshot until the server computes them |
+| Playlists | partial | listed and played (`/api/remote/playlists`); no edits yet |
+| Categories from EroScripts tags, VR, axis categories | partial | the imported categories are listed (`/api/remote/categories`); not computed by the server yet |
 | Artist playlists, aliases, playlist cleanup | not started | phase 3 |
-| Auto collections, score lists | not started | phase 3 |
+| Auto collections, score lists | partial | the imported collections are listed; not computed by the server yet |
 | Smart playlists (VR picks, Quick ones, Favorites) | not started | phase 3 |
 | Preference score and tag scores | not started | phase 3 (Rust `candidateScore` exists in `crates/slr-scout/src/score.rs`) |
 | Multi-select bulk assignment | not started | |
-| Ratings and favourites | not started | imported; phase 3 |
-| Watched videos last, Watched collection | not started | phase 3 |
+| Ratings and favourites | partial | imported and shown; no edits yet |
+| Watched videos last, Watched collection | done | from the ratings (`watched`, `watchedLast`, the `:watched` collection) |
 | Overview (capacity, ratings, artists, tag scores) | not started | |
 | Triage deletes (≤ 2★), duplicate deletes | not planned | read-only library until the user says the Rust app takes over |
 
@@ -83,12 +76,12 @@ Ground rules while both run: the Rust app has its own data folder (`~/Library/Ap
 
 | Feature | Status | Notes |
 |---|---|---|
-| One web UI everywhere (phone first, desktop layout) | partial | phase-1 page: grid, thumbnails, search, playback; phase 2 builds the real UI |
+| One web UI everywhere (phone first, desktop layout) | partial | the web remote (`backend/web-remote/`, unchanged, with `crates/funsync-server/web/remote/` overriding files when needed) at `/remote/`; desktop-only views (Overview, settings, devices) missing |
 | Triage from the phone (rating, heart, add to playlist) | not started | |
 | Review on end | not started | |
 | Tags / Artists views, tag scores, favourite artists | not started | |
-| Player controls: own or browser | not started | |
-| PWA install | not started | |
+| Player controls: own or browser | done | web remote |
+| PWA install | done | the web remote's manifest and service worker |
 | Local-only mode | done | loopback is the default (it's the only mode so far) |
 
 ## VR content server
@@ -108,11 +101,11 @@ Ground rules while both run: the Rust app has its own data folder (`~/Library/Ap
 | Feature | Status | Notes |
 |---|---|---|
 | Script loading (main, variant, axis) | partial | `GET /api/media/script/{id}?variant=&axis=` serves the files (hand-made axis beats generated); no playback yet |
-| Heatmap and gap indicators on the seek bar | not started | phase 2 |
+| Heatmap and gap indicators on the seek bar | done | web remote |
 | Script variants switch (V key) | not started | |
 | Multi-axis (TCode 10 axes, embedded axes) | not started | phase 5 |
 | Custom routing per device | not started | |
-| Speed stats | not started | |
+| Speed stats | partial | from the imported `speedStatsCache`; not computed for new scripts |
 
 ## Script smoothing
 

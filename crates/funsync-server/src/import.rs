@@ -2,9 +2,21 @@
 
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
-use crate::data::{Library, SourceEntry, load_library, now_ms, save_library};
+use crate::data::{Library, load_library, now_ms, save_library};
+
+/// The `settings` sections copied. Left out: `eroscripts` (the forum
+/// session), `security`, `handy` (connection keys) and window state.
+const SETTINGS: [&str; 6] = [
+    "library",
+    "player",
+    "tcode",
+    "buttplug",
+    "vr",
+    "knownDevices",
+];
+const TOP: [&str; 3] = ["playlists", "categories", "videoCategories"];
 
 #[derive(Debug)]
 pub struct ImportSummary {
@@ -29,44 +41,32 @@ pub fn import(old_user_data: &Path, data_dir: &Path, force: bool) -> Result<Impo
     let text = std::fs::read(&cfg_path).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
     let cfg: Value =
         serde_json::from_slice(&text).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    let lib_settings = cfg
-        .pointer("/settings/library")
-        .cloned()
-        .unwrap_or(Value::Null);
-    let sources: Vec<SourceEntry> = lib_settings
-        .get("sources")
-        .cloned()
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|e| format!("settings.library.sources: {e}"))?
-        .unwrap_or_default();
-    let count = |v: Option<&Value>| match v {
-        Some(Value::Array(a)) => a.len(),
-        Some(Value::Object(o)) => o.len(),
-        _ => 0,
+    let pick = |from: &Value, keys: &[&str]| -> Value {
+        Value::Object(
+            keys.iter()
+                .filter_map(|k| from.get(*k).map(|v| (k.to_string(), v.clone())))
+                .collect::<Map<_, _>>(),
+        )
     };
+    let mut config = pick(&cfg, &TOP);
+    config["settings"] = pick(&cfg["settings"], &SETTINGS);
     let lib = Library {
         version: 1,
         imported_from: Some(cfg_path.to_string_lossy().into_owned()),
         imported_at: Some(now_ms()),
-        sources,
-        playlists: cfg
-            .get("playlists")
-            .cloned()
-            .unwrap_or(Value::Array(vec![])),
-        categories: cfg
-            .get("categories")
-            .cloned()
-            .unwrap_or(Value::Array(vec![])),
-        video_categories: cfg.get("videoCategories").cloned().unwrap_or(Value::Null),
-        old_library: lib_settings,
+        config,
     };
     save_library(data_dir, &lib)?;
+    let count = |v: &Value| match v {
+        Value::Array(a) => a.len(),
+        Value::Object(o) => o.len(),
+        _ => 0,
+    };
     Ok(ImportSummary {
-        sources: lib.sources.len(),
-        playlists: count(Some(&lib.playlists)),
-        categories: count(Some(&lib.categories)),
-        ratings: count(lib.old_library.get("ratings")),
+        sources: lib.sources().len(),
+        playlists: count(&lib.config["playlists"]),
+        categories: count(&lib.config["categories"]),
+        ratings: count(&lib.lib()["ratings"]),
     })
 }
 
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!((s.sources, s.playlists, s.ratings), (1, 1, 1));
         assert_eq!(std::fs::read_dir(old.path()).unwrap().count(), before);
         let lib = load_library(new.path()).unwrap();
-        assert!(!lib.sources[0].enabled);
+        assert!(!lib.sources()[0].enabled);
         let written = std::fs::read_to_string(new.path().join("library.json")).unwrap();
         assert!(
             !written.contains("secret"),
