@@ -182,7 +182,9 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 /// The app with the access PIN read from `pin_dir` (the old app's folder).
 pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
-    let remote_files = ServeDir::new(WEB_OVERLAY).fallback(ServeDir::new(WEB_REMOTE));
+    let remote_files = Router::new()
+        .fallback_service(ServeDir::new(WEB_OVERLAY).fallback(ServeDir::new(WEB_REMOTE)))
+        .layer(axum::middleware::map_response(with_extras));
     Router::new()
         .route(
             "/",
@@ -218,6 +220,30 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
             crate::access::Access::new(pin_dir),
             crate::access::layer,
         ))
+}
+
+/// The web remote's pages get `extras.js` (web/remote/extras.js: the desktop
+/// player's keyboard shortcuts, screenshot, PiP, …) before `</body>`.
+async fn with_extras(resp: Response) -> Response {
+    let html = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|c| c.to_str().ok())
+        .is_some_and(|c| c.starts_with("text/html"));
+    if !html {
+        return resp;
+    }
+    let (mut parts, body) = resp.into_parts();
+    let page = axum::body::to_bytes(body, 8 << 20)
+        .await
+        .unwrap_or_default();
+    let page = String::from_utf8_lossy(&page).replacen(
+        "</body>",
+        "<script src=\"/remote/extras.js\" defer></script></body>",
+        1,
+    );
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(page))
 }
 
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> Result<(), String> {

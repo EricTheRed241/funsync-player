@@ -117,7 +117,8 @@ fn import_then_serve() {
     );
     let (head, body) = http(port, "GET", "/remote/", "");
     assert!(head.starts_with("HTTP/1.1 200"), "{head}");
-    assert!(String::from_utf8_lossy(&body).contains("app.js"));
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("app.js") && page.contains("/remote/extras.js"));
     let (_, body) = http(port, "GET", "/api/parity", "");
     let parity: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(parity["counts"]["done"].as_u64().unwrap() > 0);

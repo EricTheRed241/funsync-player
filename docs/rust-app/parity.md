@@ -24,12 +24,12 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | Playback with range streaming | done | `GET /api/media/stream/{id}` (Range, 206), played by the web remote's player |
-| Custom controls, keyboard shortcuts, drag-and-drop | partial | the web remote's controls (seek bar with chapters, double-tap ±10 s); no desktop keyboard shortcuts or drag-and-drop yet |
+| Custom controls, keyboard shortcuts, drag-and-drop | partial | the web remote's controls plus `web/remote/extras.js` (added to its page by the server): Space/K, ←/→, J/L, ↑/↓, M, F, S, P, R, G/Shift+G. Not ported: drag-and-drop / O (open a file outside the library), H, I, A/B and V keys (the player's own buttons do loops and variants) |
 | Seek bar thumbnail preview | not started | |
 | Subtitles (.srt / .vtt, SRT→VTT) | done | `GET /api/media/subtitle/{id}`, shown by the web remote |
-| Screenshot, picture-in-picture, aspect ratio cycling | not started | |
+| Screenshot, picture-in-picture, aspect ratio cycling | done | `extras.js`: S saves a PNG of the frame, P picture-in-picture, R cycles contain / cover / fill |
 | A-B loop | done | web remote player |
-| Replay button at the end | not started | |
+| Replay button at the end | done | `extras.js`: a Replay button over the player when a video ends (and Space replays) |
 | Script gap auto-skip | done | web remote player |
 
 ## Play queue
