@@ -49,6 +49,8 @@ pub fn start(data: &Path, env: &[(&str, &str)]) -> (Kill, u16) {
             Command::new(BIN)
                 .args(["--port", &port.to_string(), "--data-dir"])
                 .arg(data)
+                // Never the user's ~/Library/Logs/funsync-rust/server.log.
+                .env("FUNSYNC_RUST_LOG", data.join("server.log"))
                 .envs(env.iter().copied())
                 .spawn()
                 .unwrap(),
