@@ -102,26 +102,26 @@ pub async fn session(
             }
         }
         "serial" => {
-            let port = s("port");
+            let port = callout_path(&s("port"));
             let baud = cfg["baudRate"].as_u64().unwrap_or(115200).to_string();
-            let flag = if cfg!(target_os = "macos") {
-                "-f"
-            } else {
-                "-F"
-            };
+            // Open first, then set the line on that open port (stty works on its
+            // stdin): a separate `stty -f` open hung or failed on macOS, and its
+            // settings needn't outlive its own open.
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&port)
+                .map_err(e)?;
             let ok = tokio::process::Command::new("stty")
-                .args([flag, &port, &baud, "raw", "-echo"])
+                .args([&baud, "raw", "-echo", "clocal"])
+                .stdin(file.try_clone().map_err(e)?)
                 .status()
                 .await
                 .map_err(e)?;
             if !ok.success() {
                 return Err(format!("stty {port} failed"));
             }
-            let mut f = tokio::fs::OpenOptions::new()
-                .write(true)
-                .open(&port)
-                .await
-                .map_err(e)?;
+            let mut f = tokio::fs::File::from_std(file);
             connected();
             loop {
                 rx.changed().await.map_err(|e| e.to_string())?;
@@ -130,6 +130,16 @@ pub async fn session(
             }
         }
         t => Err(format!("unsupported transport {t:?}")),
+    }
+}
+
+/// macOS: the callout device (`/dev/cu.*`) for a `/dev/tty.*` port. Opening the
+/// dial-in `tty.*` waits for a carrier a USB-serial stroker never raises, so the
+/// open (and any `stty` on it) hangs; `cu.*` opens at once.
+fn callout_path(port: &str) -> String {
+    match port.strip_prefix("/dev/tty.") {
+        Some(rest) if cfg!(target_os = "macos") => format!("/dev/cu.{rest}"),
+        _ => port.to_string(),
     }
 }
 
@@ -177,5 +187,18 @@ mod tests {
             &mut last,
         );
         assert_eq!(f, "L08455I17 R10680I17\n");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_serial_ports_open_as_callout_devices() {
+        assert_eq!(
+            callout_path("/dev/tty.wchusbserial2110"),
+            "/dev/cu.wchusbserial2110"
+        );
+        assert_eq!(
+            callout_path("/dev/cu.wchusbserial2110"),
+            "/dev/cu.wchusbserial2110"
+        );
     }
 }
