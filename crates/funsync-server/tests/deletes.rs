@@ -1,21 +1,15 @@
 //! End to end: triage and duplicate deletes happen only when the server owns
 //! the library (`FUNSYNC_OWNS_LIBRARY=1`); temp dirs only.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use common::Kill;
 use serde_json::{Value, json};
-
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn call(port: u16, method: &str, path: &str, body: Value) -> (u16, Value) {
     let body = body.to_string();
@@ -51,19 +45,14 @@ fn serve(
     let library = json!({"version": 1, "config": {"settings": {"library": {"sources": [
         {"id": "1", "name": "Lib", "path": lib, "enabled": true}]}}}});
     std::fs::write(data.join("library.json"), library.to_string()).unwrap();
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let srv = Kill(
-        Command::new(env!("CARGO_BIN_EXE_funsync-server"))
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data)
-            .env("FUNSYNC_OWNS_LIBRARY", if owns { "1" } else { "0" })
-            .env("FUNSYNC_USER_DATA", user_data)
-            .spawn()
-            .unwrap(),
+    let owns = if owns { "1" } else { "0" };
+    let user_data = user_data.to_str().unwrap();
+    let (srv, port) = common::start(
+        data,
+        &[
+            ("FUNSYNC_OWNS_LIBRARY", owns),
+            ("FUNSYNC_USER_DATA", user_data),
+        ],
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {

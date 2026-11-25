@@ -1,19 +1,12 @@
 //! End to end: the HereSphere listing and scene detail against a temp library.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn post(port: u16, path: &str) -> Value {
     post_json(port, path, json!({}))
@@ -36,10 +29,7 @@ fn post_json(port: u16, path: &str, body: Value) -> Value {
 
 #[test]
 fn heresphere_listing_and_scene() {
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
     let lib = tempfile::tempdir().unwrap();
-    let old = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
     let dir = lib.path().join("Studio");
     std::fs::create_dir_all(&dir).unwrap();
     let vr = dir.join("Scene_180_sbs.mp4");
@@ -60,29 +50,8 @@ fn heresphere_listing_and_scene() {
         }},
         "playlists": [{"id": "p", "name": "Picks", "videoPaths": [vr]}],
     });
-    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
-    assert!(
-        Command::new(bin)
-            .args(["import", "--from"])
-            .arg(old.path())
-            .arg("--data-dir")
-            .arg(data.path())
-            .status()
-            .unwrap()
-            .success()
-    );
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let _srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .spawn()
-            .unwrap(),
-    );
+    let data = common::import(&cfg);
+    let (_srv, port) = common::start(data.path(), &[]);
     let deadline = Instant::now() + Duration::from_secs(10);
     let listing = loop {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {

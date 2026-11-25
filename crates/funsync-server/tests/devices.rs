@@ -1,20 +1,14 @@
 //! End to end: a fake TCode WebSocket device receives the script's strokes
 //! while a fake phone plays the video over `/api/remote/sync`.
 
-use std::process::{Child, Command};
+mod common;
+
 use std::time::Duration;
 
+use common::Kill;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::tungstenite::Message;
-
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 async fn get(port: u16, path: &str) -> serde_json::Value {
     let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
@@ -233,52 +227,17 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
     assert_eq!(d["tcode"]["wsUrl"], format!("ws://127.0.0.1:{dev_port}"));
 }
 
-/// Import `cfg` into a temp data folder (auto-connect TCode again, as the
-/// Devices page would) and serve it; returns once it answers. The port is
-/// picked free but another test may take it before the server binds it: a
-/// server that exits is started again on another port.
+/// Import `cfg` and serve it with TCode auto-connect on again (an import
+/// never carries it over; the Devices page's Connect sets it).
 fn serve(cfg: serde_json::Value) -> (Kill, u16, tempfile::TempDir) {
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
-    let (old, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
-    let ok = Command::new(bin)
-        .args(["import", "--from"])
-        .arg(old.path())
-        .arg("--data-dir")
-        .arg(data.path())
-        .status()
-        .unwrap();
-    assert!(ok.success());
+    let data = common::import(&cfg);
     let lib_file = data.path().join("library.json");
     let mut saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&lib_file).unwrap()).unwrap();
     saved["config"]["settings"]["tcode"]["autoConnect"] = true.into();
     std::fs::write(&lib_file, saved.to_string()).unwrap();
-    for _ in 0..5 {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let mut srv = Kill(
-            Command::new(bin)
-                .args(["--port", &port.to_string(), "--data-dir"])
-                .arg(data.path())
-                .spawn()
-                .unwrap(),
-        );
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while std::time::Instant::now() < deadline {
-            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                return (srv, port, data);
-            }
-            if srv.0.try_wait().unwrap().is_some() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-    panic!("the server never started");
+    let (srv, port) = common::start(data.path(), &[]);
+    (srv, port, data)
 }
 
 /// The next TCode frame the fake device gets that starts with `prefix`

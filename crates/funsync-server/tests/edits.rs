@@ -1,20 +1,13 @@
 //! End to end: the web remote's write API and play queue over HTTP, saved
 //! to library.json; nothing in the library folder changes.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn call(port: u16, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
     let body = body.map(|b| b.to_string()).unwrap_or_default();
@@ -40,7 +33,6 @@ fn post(port: u16, path: &str, body: Value) -> Value {
 
 #[test]
 fn edits_over_http() {
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
     let lib = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
     for scene in ["Mira/One", "Mira/Two"] {
@@ -54,18 +46,7 @@ fn edits_over_http() {
         {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}}});
     std::fs::write(data.path().join("library.json"), library.to_string()).unwrap();
 
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let _srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .spawn()
-            .unwrap(),
-    );
+    let (_srv, port) = common::start(data.path(), &[]);
     let deadline = Instant::now() + Duration::from_secs(10);
     let videos = loop {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
