@@ -394,25 +394,47 @@ async fn thumb(
     let Some(v) = st.video(&id).await else {
         return err(StatusCode::NOT_FOUND, "no such video");
     };
-    // The VR crop needs the frame size; the thumbnail probes it anyway.
-    let dims = st
-        .media
-        .metadata(Path::new(&v.path))
-        .await
-        .ok()
-        .map(|m| (m.width, m.height));
-    let crop = crate::vr::thumb_crop(crate::vr::detect(&*st.library.read().await, &v, dims));
-    match st.media.thumbnail(&v.id, Path::new(&v.path), crop).await {
-        Ok(p) => {
-            let mut r = send_file(&p.to_string_lossy(), req, Some("image/jpeg")).await;
-            r.headers_mut().insert(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("public, max-age=86400"),
-            );
-            r
+    // `?v=` names one version for good (crate::remote::thumb_url).
+    let versioned = req
+        .uri()
+        .query()
+        .is_some_and(|q| q.split('&').any(|p| p.starts_with("v=")));
+    let poster = crate::remote::poster(&*st.library.read().await, &v.path);
+    let (file, ct, cache) = if let Some(p) = poster {
+        let ct = match p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => "image/png",
+            Some("webp") => "image/webp",
+            _ => "image/jpeg",
+        };
+        (p, ct, "public, max-age=3600")
+    } else {
+        // The VR crop needs the frame size; the thumbnail probes it anyway.
+        let dims = st
+            .media
+            .metadata(Path::new(&v.path))
+            .await
+            .ok()
+            .map(|m| (m.width, m.height));
+        let crop = crate::vr::thumb_crop(crate::vr::detect(&*st.library.read().await, &v, dims));
+        match st.media.thumbnail(&v.id, Path::new(&v.path), crop).await {
+            Ok(p) => (p, "image/jpeg", "public, max-age=86400"),
+            Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, e),
         }
-        Err(e) => err(StatusCode::UNPROCESSABLE_ENTITY, e),
-    }
+    };
+    let cache = if versioned {
+        "public, max-age=31536000, immutable"
+    } else {
+        cache
+    };
+    let mut r = send_file(&file.to_string_lossy(), req, Some(ct)).await;
+    r.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    r
 }
 
 #[derive(Deserialize)]

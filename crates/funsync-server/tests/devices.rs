@@ -59,6 +59,13 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
         .status()
         .unwrap();
     assert!(ok.success());
+    // An import never carries auto-connect over (the desktop app holds its
+    // devices); this server was told to connect, as its Devices page does.
+    let lib_file = data.path().join("library.json");
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&lib_file).unwrap()).unwrap();
+    saved["config"]["settings"]["tcode"]["autoConnect"] = true.into();
+    std::fs::write(&lib_file, saved.to_string()).unwrap();
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()

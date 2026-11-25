@@ -17,6 +17,48 @@ use crate::vr;
 
 pub const WATCHED_COLLECTION_ID: &str = ":watched";
 
+/// A video's uploaded poster (`library.customThumbnails[path]`, type
+/// `image`), only when it is a file inside the old app's `custom-thumbs`.
+pub fn poster(lib: &Library, path: &str) -> Option<std::path::PathBuf> {
+    let c = &lib.lib()["customThumbnails"][path];
+    if c["type"] != "image" {
+        return None;
+    }
+    let root = crate::data::default_old_user_data()?.join("custom-thumbs");
+    let img = std::path::PathBuf::from(c["imagePath"].as_str()?);
+    let clean = img.components().all(|c| {
+        matches!(
+            c,
+            std::path::Component::RootDir | std::path::Component::Normal(_)
+        )
+    });
+    (clean && img.starts_with(&root) && img.is_file()).then_some(img)
+}
+
+/// `/api/media/thumb/<id>?v=<version>` (`thumb_url` of backend/routes/media.py):
+/// a new poster, VR crop or replaced file is a new URL, so clients may keep
+/// each version for good.
+pub fn thumb_url(lib: &Library, v: &Video) -> String {
+    let ident = match poster(lib, &v.path) {
+        Some(p) => {
+            let mtime = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
+            format!("poster:{}:{mtime:?}", p.display())
+        }
+        None => format!(
+            "frame:{}:{:?}:{}:{}",
+            crate::media::THUMB_MARKER,
+            vr::thumb_crop(vr::detect(lib, v, None)),
+            v.size,
+            v.date_added
+        ),
+    };
+    format!(
+        "/api/media/thumb/{}?v={}",
+        v.id,
+        &format!("{:x}", md5::compute(ident))[..8]
+    )
+}
+
 /// Post tags worth a chip (`backend/services/video_tags.py`).
 const NOISE_TAGS: [&str; 13] = [
     "the-handy",
@@ -112,7 +154,7 @@ pub fn video_json(lib: &Library, v: &Video, categories: &HashMap<String, Vec<Str
         "streamUrl": format!("/api/media/stream/{}", v.id),
         "scriptUrl": v.funscript_path.as_ref().map(|_| format!("/api/media/script/{}", v.id)),
         "subtitleUrl": v.subtitle_path.as_ref().map(|_| format!("/api/media/subtitle/{}", v.id)),
-        "thumbUrl": format!("/api/media/thumb/{}", v.id),
+        "thumbUrl": thumb_url(lib, v),
         "variants": variants,
         "manualVRType": l["manualVRType"].get(&v.path),
         "isVR": vr::is_vr(lib, v),
