@@ -367,6 +367,7 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> R
     ));
     crate::settings::watch_drives(state.clone());
     crate::devices::start(&state).await;
+    crate::eroscripts::start(&state);
     let s = state.clone();
     tokio::spawn(async move {
         if let Err(e) = s.rescan().await {
@@ -479,6 +480,7 @@ async fn status(State(st): State<Arc<AppState>>) -> impl IntoResponse {
         "withScript": snap.videos.iter().filter(|v| v.funscript_path.is_some()).count(),
         "unmatchedFunscripts": snap.unmatched_funscripts,
         "failedPaths": snap.failed_paths,
+        "eroscripts": crate::eroscripts::status(&st.data_dir),
     });
     for (k, v) in own.as_object().into_iter().flatten() {
         out[k] = v.clone();

@@ -70,7 +70,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 |---|---|---|
 | Video tags merge (`video-tags.json`) | done | with the scan sidecars and `eroscripts-links.json` into `library.scriptTags` (`addedTags`, VIDEO_TAGGER_TAGS), read-only; real library: all 1470 records identical |
 | Pornstar tags merge (`pornstar-tags.json`) | done | applied performers' tags, merged with the video tags |
-| Underage screener integration (review playlist, 1★) | not started | screener talks to the old backend today |
+| Underage screener integration (review playlist, 1★) | done | `age-screen --backend http://127.0.0.1:<port>` runs against this server unchanged (`/api/remote/videos`, `/api/media/vr-flags`, `/api/remote/rating`, `/api/remote/playlists/add-video`): checked with `--dry-run --limit 2` and `--run --limit 2` (fake judge, temp data and userData copy), which filed a review and a favourite into "Underage review". A 1★ verdict deletes only while this server owns the library |
 
 ## Remote access / web UI
 
@@ -134,7 +134,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| EroScripts search / download in the app, login | partial | `/remote/eroscripts.html` + `/api/eroscripts/*`: Discourse login with 2FA or a pasted `_t` cookie (session in the Rust data dir, 0600), search with thumbnails and Paid badge, find scripts for an unscripted video, every script across the post and replies labelled by poster, pixeldrain listed, other hosts named; saving a `.funscript` next to its video (axis suffix kept, replace or variant on conflict, rescan) only while `FUNSYNC_OWNS_LIBRARY=1`, else 409. No `.zip` saving, no auto-match on video load, no session check at start, no `eroscripts:sync` links / scout |
+| EroScripts search / download in the app, login | done | `/remote/eroscripts.html` + `/api/eroscripts/*`: Discourse login with 2FA or a pasted `_t` cookie (session in the Rust data dir, 0600; checked at start, an expired one shows on the page and `/parity`), search with thumbnails and Paid badge, every script across the post and replies labelled by poster (forum uploads incl. CDN `original/` links), pixeldrain listed, other hosts named; saving a `.funscript` or the video's scripts from a `.zip` next to the video (axis suffix kept, replace or variant on conflict, rescan) only while `FUNSYNC_OWNS_LIBRARY=1`, else 409. Auto-match: the videos without a script are searched by name in the background (one search / 5 s, again after a week, `eroscripts-matches.json`) and listed first with their hit count in *Find scripts for…*, instead of a toast when one is opened. `eroscripts:sync` links / scout stay their CLIs |
 | Post previews as thumbnails | partial | by hand: *Use the post picture* saves the topic's poster-size picture into the Rust data dir's `custom-thumbs/` and records `customThumbnails` (served as the video's poster). Not automatic after a download, no perceptual-hash match against the video's frames, no resizing, no library-wide fetch |
 | Scouts, swipe deck, downloads, creators, job runner | done | the sites are relayed on 5300; `--supervise` builds and runs them and `job-runner serve` like the desktop app (a site whose port already answers is left alone). The scouts and jobs themselves stay their own crates |
 | `eroscripts:sync`, dedupe, reorganize, `upgrade:axes` CLIs | not planned | CLIs, unchanged; they keep writing side files both apps can read |
