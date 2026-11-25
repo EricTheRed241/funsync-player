@@ -369,12 +369,15 @@ fn cors(body: Value, heresphere: bool) -> Response {
 async fn sections_for<T: Clone>(
     st: &AppState,
     filter: &str,
-    item: impl Fn(&Video, &Facts) -> T,
+    item: impl Fn(&Library, &Video, &Facts) -> T,
 ) -> Vec<(String, Vec<T>)> {
     let (videos, now) = listing(st, filter).await;
-    let entries: Vec<(T, Facts)> = videos.into_iter().map(|(v, f)| (item(&v, &f), f)).collect();
     let snap = st.snapshot.read().await.clone();
     let lib = st.library.read().await;
+    let entries: Vec<(T, Facts)> = videos
+        .into_iter()
+        .map(|(v, f)| (item(&lib, &v, &f), f))
+        .collect();
     let queued = crate::queue::queued_paths(&lib, &snap.videos, now);
     build_sections(&lib, &entries, &queued, now)
 }
@@ -385,12 +388,13 @@ async fn hs_library(
     headers: HeaderMap,
 ) -> Response {
     let base = base_url(&headers);
-    let library: Vec<Value> =
-        sections_for(&st, &q.filter, |v, _| format!("{base}/heresphere/{}", v.id))
-            .await
-            .into_iter()
-            .map(|(name, list)| json!({"name": name, "list": list}))
-            .collect();
+    let library: Vec<Value> = sections_for(&st, &q.filter, |_, v, _| {
+        format!("{base}/heresphere/{}", v.id)
+    })
+    .await
+    .into_iter()
+    .map(|(name, list)| json!({"name": name, "list": list}))
+    .collect();
     cors(json!({"access": 1, "library": library}), true)
 }
 
@@ -400,11 +404,11 @@ async fn deovr_library(
     headers: HeaderMap,
 ) -> Response {
     let base = base_url(&headers);
-    let scenes: Vec<Value> = sections_for(&st, &q.filter, |v, f| {
+    let scenes: Vec<Value> = sections_for(&st, &q.filter, |lib, v, f| {
         json!({
             "title": stem(v),
             "videoLength": f.duration as u64,
-            "thumbnailUrl": format!("{base}/api/media/thumb/{}", v.id),
+            "thumbnailUrl": format!("{base}{}", crate::remote::thumb_url(lib, v)),
             "video_url": format!("{base}/deovr/{}", v.id),
         })
     })
@@ -426,6 +430,7 @@ struct Scene {
     rating: f64,
     favorite: bool,
     queued: bool,
+    thumb: String,
 }
 
 async fn scene(st: &AppState, id: &str) -> Option<Scene> {
@@ -450,6 +455,7 @@ async fn scene(st: &AppState, id: &str) -> Option<Scene> {
         rating,
         favorite,
         queued: queued.contains(&v.path),
+        thumb: crate::remote::thumb_url(&lib, &v),
         v,
     })
 }
@@ -557,7 +563,7 @@ async fn hs_scene(
             "access": 1,
             "title": stem(&s.v),
             "description": "",
-            "thumbnailImage": format!("{base}/api/media/thumb/{id}"),
+            "thumbnailImage": format!("{base}{}", s.thumb),
             "dateReleased": "",
             "dateAdded": "",
             "duration": s.duration * 1000,
@@ -619,7 +625,7 @@ async fn deovr_scene(
             "screenType": s.fmt.screen,
             "stereoMode": s.fmt.stereo,
             "videoLength": s.duration,
-            "thumbnailUrl": format!("{base}/api/media/thumb/{id}"),
+            "thumbnailUrl": format!("{base}{}", s.thumb),
             "encodings": [{"name": "h264", "videoSources": [{
                 "resolution": s.height, "height": s.height, "width": s.width,
                 "size": s.v.size, "url": format!("{base}/api/media/stream/{id}")}]}],

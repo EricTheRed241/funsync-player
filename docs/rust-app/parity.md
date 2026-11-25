@@ -88,7 +88,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue with auto-fill, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header; writable rating / heart / tags and `eventServer`. Hand-made from companion files only (no embedded axes); no access PIN; no `?v=` thumb versions |
+| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue with auto-fill, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header; writable rating / heart / tags and `eventServer`. Hand-made from companion files only (no embedded axes); versioned thumbnail URLs (`?v=`); no access PIN |
 | DeoVR API | partial | `/deovr` and `/deovr/<id>` with the same sections and tags; encoding name always `h264`; no access PIN |
 | Rate / favourite / playlist / queue edits from the headset | done | HereSphere scene POST: rating, `isFavorite`, `Playlist:<name>` and `Queue:Up next` tags (only tags changed since the scene was served count); DeoVR is read-only, as before |
 | Review on end from the headset | done | `POST /heresphere/events/<id>`: a play takes the video out of the queue (once per video); a pause / close at ≥ 90 % of an unrated video files it under Needs review |
