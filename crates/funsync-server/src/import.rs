@@ -50,6 +50,14 @@ pub fn import(old_user_data: &Path, data_dir: &Path, force: bool) -> Result<Impo
     };
     let mut config = pick(&cfg, &TOP);
     config["settings"] = pick(&cfg["settings"], &SETTINGS);
+    // The desktop app holds its devices (a serial port can't be opened twice);
+    // the Rust app connects only once told to on its Devices page.
+    if let Some(t) = config
+        .pointer_mut("/settings/tcode")
+        .and_then(Value::as_object_mut)
+    {
+        t.insert("autoConnect".into(), Value::Bool(false));
+    }
     let lib = Library {
         version: 1,
         imported_from: Some(cfg_path.to_string_lossy().into_owned()),
@@ -79,7 +87,8 @@ mod tests {
         let old = tempfile::tempdir().unwrap();
         let new = tempfile::tempdir().unwrap();
         let cfg = r#"{"settings":{"library":{"sources":[{"id":"a","name":"Ero","path":"/x","enabled":false}],
-            "ratings":{"/x/a.mp4":{"rating":4}}},"eroscripts":{"session":{"cookie":"secret"}}},
+            "ratings":{"/x/a.mp4":{"rating":4}}},"eroscripts":{"session":{"cookie":"secret"}},
+            "tcode":{"autoConnect":true,"port":"/dev/tty.x"}},
             "playlists":[{"name":"P","videoPaths":[]}],"categories":[]}"#;
         std::fs::write(old.path().join("config.json"), cfg).unwrap();
         let before = std::fs::read_dir(old.path()).unwrap().count();
@@ -88,6 +97,8 @@ mod tests {
         assert_eq!(std::fs::read_dir(old.path()).unwrap().count(), before);
         let lib = load_library(new.path()).unwrap();
         assert!(!lib.sources()[0].enabled);
+        assert_eq!(lib.config["settings"]["tcode"]["autoConnect"], false);
+        assert_eq!(lib.config["settings"]["tcode"]["port"], "/dev/tty.x");
         let written = std::fs::read_to_string(new.path().join("library.json")).unwrap();
         assert!(
             !written.contains("secret"),
