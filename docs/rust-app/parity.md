@@ -36,9 +36,9 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| One queue (user additions + auto-fill to 10) | not started | phase 2 |
-| Queue on every client (page, headset section, `Queue:Up next` tag) | not started | phase 2 / 4 |
-| Queue API (`/api/remote/queue*`) | not started | |
+| One queue (user additions + auto-fill to 10) | done | `src/queue.rs`, port of `play-queue.js` (`player.userQueue` / `queuePlayed` / `queueAutoFill`, auto-fill from `preferenceScores`, review playlists and the delete rating skipped) |
+| Queue on every client (page, headset section, `Queue:Up next` tag) | partial | the web remote's Queue tab and queue buttons; no headset section yet |
+| Queue API (`/api/remote/queue*`) | done | `GET /queue`, `add` / `remove` / `played` / `clear` / `auto-fill`, applied at once |
 
 ## Library
 
@@ -52,14 +52,14 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Manual script association | not started | |
 | Fuzzy search with exact-title precedence | done | the web remote's search (`library-search.js`) |
 | Sort (preference score default, name, date, duration, speed, rating) | partial | the web remote's sorts; scores are the imported snapshot until the server computes them |
-| Playlists | partial | listed and played (`/api/remote/playlists`); no edits yet |
+| Playlists | partial | listed and played; add / remove a video and create by name from the phone (`/api/remote/playlists/add-video`, `remove-video`); no rename / delete / reorder |
 | Categories from EroScripts tags, VR, axis categories | partial | the imported categories are listed (`/api/remote/categories`); not computed by the server yet |
 | Artist playlists, aliases, playlist cleanup | not started | phase 3 |
 | Auto collections, score lists | partial | the imported collections are listed; not computed by the server yet |
 | Smart playlists (VR picks, Quick ones, Favorites) | not started | phase 3 |
 | Preference score and tag scores | not started | phase 3 (Rust `candidateScore` exists in `crates/slr-scout/src/score.rs`) |
 | Multi-select bulk assignment | not started | |
-| Ratings and favourites | partial | imported and shown; no edits yet |
+| Ratings and favourites | done | `POST /api/remote/rating` (half stars, heart) saved to `library.ratings`; ≤ 2★ deletes nothing (read-only library) |
 | Watched videos last, Watched collection | done | from the ratings (`watched`, `watchedLast`, the `:watched` collection) |
 | Overview (capacity, ratings, artists, tag scores) | not started | |
 | Triage deletes (≤ 2★), duplicate deletes | not planned | read-only library until the user says the Rust app takes over |
@@ -77,9 +77,9 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | One web UI everywhere (phone first, desktop layout) | partial | the web remote (`backend/web-remote/`, unchanged, with `crates/funsync-server/web/remote/` overriding files when needed) at `/remote/`; desktop-only views (Overview, settings, devices) missing |
-| Triage from the phone (rating, heart, add to playlist) | not started | |
-| Review on end | not started | |
-| Tags / Artists views, tag scores, favourite artists | not started | |
+| Triage from the phone (rating, heart, add to playlist) | done | `src/edits.rs`, applied to the library at once (no desktop edit queue) |
+| Review on end | done | the phone's flow (add to *Needs review* by name; a rating takes the video out) |
+| Tags / Artists views, tag scores, favourite artists | partial | views, tag scores, favourite artists and bonus are stored; Recalculate only saves until the server computes scores |
 | Player controls: own or browser | done | web remote |
 | PWA install | done | the web remote's manifest and service worker |
 | Local-only mode | done | loopback is the default; `--lan` opts in |
