@@ -70,6 +70,8 @@ struct Play {
     orgasm: Option<(Axes, Instant)>,
     /// Stopped by the Orgasm Switch's finish (toggle mode) until `play`.
     halted: bool,
+    /// The Edge hold: devices idle while it lasts.
+    edge: bool,
 }
 
 impl Play {
@@ -105,7 +107,7 @@ impl Play {
             let len = axes[0].1.last().map_or(1.0, |a| a.at.max(1.0));
             return Some((axes, start.elapsed().as_secs_f64() * 1000.0 % len));
         }
-        (!self.paused && !self.halted).then(|| (&self.axes, self.time()))
+        (!self.paused && !self.halted && !self.edge).then(|| (&self.axes, self.time()))
     }
 }
 
@@ -189,6 +191,8 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/remote/sync", get(sync))
         .route("/api/devices", get(get_devices).post(post_devices))
+        .route("/api/devices/routing", get(get_routing).post(post_routing))
+        .route("/api/remote/edge", axum::routing::post(edge))
         .merge(dashboard::routes())
 }
 
@@ -319,19 +323,19 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
 }
 
 /// `(device index, pos, speed)` per routed Buttplug device, and the
-/// `(route, index)` pairs of routes found by name under a new index.
+/// `(route slot, index)` pairs of routes found by name under a new index.
 type Routed = (Vec<(u64, f64, f64)>, Vec<(usize, u64)>);
 
 /// Each routed Buttplug device's position and speed at `t`.
 fn route_frame(p: &Play, devices: &[(u64, String)], mode: &str, t: f64) -> Routed {
     let (mut out, mut healed, mut taken) = (Vec::new(), Vec::new(), Vec::new());
-    for (i, r) in p.routes.iter().enumerate() {
+    for r in p.routes.iter() {
         let Some(idx) = routing::find(r, devices, &taken) else {
             continue;
         };
         taken.push(idx);
         if r.index != Some(idx) {
-            healed.push((i, idx));
+            healed.push((r.slot, idx));
         }
         let pos = interp::position(mode, &r.actions, t).unwrap_or(0.0).round();
         out.push((idx, pos, interp::speed(&r.actions, t).round()));
@@ -339,14 +343,15 @@ fn route_frame(p: &Play, devices: &[(u64, String)], mode: &str, t: f64) -> Route
     (out, healed)
 }
 
-/// Store routes' new Buttplug indexes in the video's association.
-async fn heal_routes(st: &AppState, path: &str, healed: &[(usize, u64)]) {
+/// Store `(route slot, key, value)` changes (new Buttplug index, script
+/// found again) in the video's association.
+async fn heal_routes(st: &AppState, path: &str, changes: Vec<(usize, &str, Value)>) {
     {
         let mut lib = st.library.write().await;
         let routes = &mut lib.lib_mut("associations")[path]["custom"]["routes"];
-        for (i, idx) in healed {
-            if routes[*i].is_object() {
-                routes[*i]["buttplugIndex"] = json!(idx);
+        for (slot, key, v) in changes {
+            if routes[slot].is_object() {
+                routes[slot][key] = v;
             }
         }
     }
@@ -413,12 +418,18 @@ fn ensure_ticker(st: &Arc<AppState>) {
                             .filter(|c| c.session == p.session)
                         {
                             let r = Arc::make_mut(&mut cur.routes);
-                            for (i, idx) in &healed {
-                                r[*i].index = Some(*idx);
+                            for (slot, idx) in &healed {
+                                if let Some(r) = r.iter_mut().find(|r| r.slot == *slot) {
+                                    r.index = Some(*idx);
+                                }
                             }
                         }
                         let (st, path) = (st.clone(), p.path.clone());
-                        tokio::spawn(async move { heal_routes(&st, &path, &healed).await });
+                        let changes = healed
+                            .into_iter()
+                            .map(|(slot, idx)| (slot, "buttplugIndex", json!(idx)))
+                            .collect();
+                        tokio::spawn(async move { heal_routes(&st, &path, changes).await });
                     }
                     out
                 });
@@ -525,15 +536,32 @@ async fn load_play(
         Some(v) => {
             let (v, variant) = (v.clone(), variant.map(String::from));
             tokio::task::spawn_blocking(move || {
-                let axes = script::load(&v, variant.as_deref())?;
-                let routes = routing::load(&entry, &axes[0].1);
-                Some((axes, routes))
+                let mut axes = script::load(&v, variant.as_deref())?;
+                let dir = std::path::Path::new(&v.path).parent()?.to_path_buf();
+                let (routes, moved) = routing::load(&entry, &axes[0].1, &dir);
+                if let Some(r) = routes.iter().find(|r| r.device_id == "tcode") {
+                    axes[0].1 = r.actions.clone();
+                }
+                Some((axes, routes, moved))
             })
             .await
             .ok()
             .flatten()
         }
         None => None,
+    };
+    let loaded = match (video, loaded) {
+        (Some(v), Some((a, r, moved))) => {
+            if !moved.is_empty() {
+                let changes = moved
+                    .into_iter()
+                    .map(|(s, p)| (s, "scriptPath", json!(p)))
+                    .collect();
+                heal_routes(st, &v.path, changes).await;
+            }
+            Some((a, r))
+        }
+        _ => None,
     };
     if let Some(v) = video {
         let mut cur = d.current.lock().unwrap();
@@ -581,6 +609,7 @@ async fn load_play(
             stamp: Instant::now(),
             orgasm: None,
             halted: false,
+            edge: false,
         });
         if let Some(v) = video {
             (p.video_id, p.path, p.name) = (v.id.clone(), v.path.clone(), v.name.clone());
@@ -661,6 +690,9 @@ async fn orgasm_hold(st: &AppState, n: u64, active: bool) {
         .filter(|x| x.session == n)
     {
         x.halted = toggle && running;
+        if plan.is_some() {
+            x.edge = false;
+        }
         x.orgasm = plan.map(|a| (Arc::new(a), Instant::now()));
     }
 }
@@ -878,4 +910,149 @@ async fn post_devices(State(st): State<Arc<AppState>>, Json(b): Json<Value>) -> 
         _ => {}
     }
     Json(devices_json(&st).await).into_response()
+}
+
+#[derive(Deserialize)]
+struct EdgeBody {
+    active: bool,
+}
+
+/// The Edge hold (Z in the old player, `extras.js` here): the devices idle
+/// while it is held (`player.edgeHoldMode` `toggle`: each press flips it);
+/// ignored while the Orgasm Switch plays.
+async fn edge(State(st): State<Arc<AppState>>, Json(b): Json<EdgeBody>) -> Json<Value> {
+    let toggle = device_settings(&st).await["player"]["edgeHoldMode"] == "toggle";
+    let mut play = st.devices.play.lock().unwrap();
+    let Some(p) = play.as_mut().filter(|p| p.orgasm.is_none()) else {
+        return Json(json!({"active": false}));
+    };
+    if !toggle {
+        p.edge = b.active;
+    } else if b.active {
+        p.edge = !p.edge;
+    }
+    Json(json!({"active": p.edge}))
+}
+
+#[derive(Deserialize)]
+struct RoutingQuery {
+    #[serde(rename = "videoId")]
+    video_id: String,
+}
+
+/// The custom-routing editor's data: the video, the scripts in its folder,
+/// the devices to route to and the stored routes.
+async fn get_routing(State(st): State<Arc<AppState>>, Query(q): Query<RoutingQuery>) -> Response {
+    let Some(v) = st.video(&q.video_id).await else {
+        return (StatusCode::NOT_FOUND, "no such video").into_response();
+    };
+    let dir = std::path::Path::new(&v.path)
+        .parent()
+        .map(|d| d.to_path_buf());
+    let mut scripts: Vec<String> = dir
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().to_string_lossy().into_owned())
+        .filter(|p| {
+            p.ends_with(".funscript") && !p.rsplit('/').next().unwrap_or("").starts_with("._")
+        })
+        .collect();
+    scripts.sort();
+    let tc = settings(&st, "tcode").await;
+    let mut devices = vec![json!({"deviceId": "tcode", "label": dashboard::label(&tc),
+                                  "connected": st.devices.connected("tcode")})];
+    for (i, n) in st.devices.buttplug_names.lock().unwrap().iter() {
+        devices.push(
+            json!({"deviceId": format!("buttplug:{n}"), "buttplugIndex": i,
+                            "label": n, "connected": true}),
+        );
+    }
+    let entry = st.library.read().await.lib()["associations"][&v.path].clone();
+    // Routed devices that aren't connected now keep their rows (and routes).
+    for r in entry["custom"]["routes"].as_array().into_iter().flatten() {
+        let id = r["deviceId"].as_str().unwrap_or("");
+        if let Some(name) = id.strip_prefix("buttplug:")
+            && !devices.iter().any(|d| d["deviceId"] == id)
+        {
+            devices.push(json!({"deviceId": id, "buttplugIndex": r["buttplugIndex"],
+                                "label": name, "connected": false}));
+        }
+    }
+    Json(json!({
+        "video": {"id": v.id, "name": v.name, "funscript": v.funscript_path},
+        "scripts": scripts, "devices": devices,
+        "active": entry["active"], "routes": entry["custom"]["routes"],
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct RoutingBody {
+    #[serde(rename = "videoId")]
+    video_id: String,
+    /// `[{deviceId, buttplugIndex?, scriptPath}]`; empty clears the routing.
+    routes: Vec<Value>,
+}
+
+/// Save a video's custom routing as the renderer's association entry
+/// (`buildAssociationEntry('custom', single, multi, {routes})`: the
+/// `single` / `multi` slots stay, `mode` / `routes` mirror the active
+/// custom slot); no routes makes the entry inactive. The playing video
+/// picks it up at once.
+async fn post_routing(State(st): State<Arc<AppState>>, Json(b): Json<RoutingBody>) -> Response {
+    let Some(v) = st.video(&b.video_id).await else {
+        return (StatusCode::NOT_FOUND, "no such video").into_response();
+    };
+    let routes: Vec<Value> = b
+        .routes
+        .into_iter()
+        .filter(|r| r["deviceId"].is_string() && r["scriptPath"].is_string())
+        .map(|mut r| {
+            if r["scriptPath"].as_str() == v.funscript_path.as_deref() {
+                r["role"] = json!("main");
+            }
+            r
+        })
+        .collect();
+    {
+        let mut lib = st.library.write().await;
+        let e = &mut lib.lib_mut("associations")[&v.path];
+        if !e.is_object() {
+            *e = json!({"active": null, "single": null, "multi": null, "custom": null});
+        }
+        let o = e.as_object_mut().unwrap();
+        o.remove("mode");
+        o.remove("routes");
+        if routes.is_empty() {
+            if o.get("active") == Some(&json!("custom")) {
+                o.insert("active".into(), Value::Null);
+            }
+            o.insert("custom".into(), Value::Null);
+        } else {
+            // Only the active slot is mirrored at the top level.
+            for k in ["main", "axes", "buttplugVib"] {
+                o.remove(k);
+            }
+            o.insert("active".into(), json!("custom"));
+            o.insert("custom".into(), json!({"routes": routes}));
+            o.insert("mode".into(), json!("custom"));
+            o.insert("routes".into(), json!(routes));
+        }
+    }
+    if let Err(e) = st.save().await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let playing = st
+        .devices
+        .play
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|p| p.video_id == v.id);
+    if let Some(p) = playing {
+        load_play(&st, p.session, p.source, Some(&v), None).await;
+    }
+    get_routing(State(st), Query(RoutingQuery { video_id: v.id })).await
 }

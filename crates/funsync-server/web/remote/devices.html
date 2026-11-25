@@ -61,6 +61,19 @@
     <p class="st"></p>
     <details><summary>History</summary><ol reversed></ol></details>
   </fieldset>
+  <fieldset id="sync">
+    <legend>Sync</legend>
+    <p>Each device's offset adds to the source's: the VR bridge's offset applies on top while the headset drives.</p>
+    <table><thead><tr><th>Device</th><th>Device offset</th><th>Web remote</th><th>VR bridge</th></tr></thead><tbody></tbody></table>
+  </fieldset>
+  <fieldset id="routing">
+    <legend>Custom routing</legend>
+    <label>Video <input id="routeSearch" placeholder="Search a video"></label>
+    <select id="routeVideos" size="5" hidden></select>
+    <p class="st"></p>
+    <table><tbody></tbody></table>
+    <button id="routeSave" hidden>Save routing</button> <button id="routeClear" hidden>Clear routing</button>
+  </fieldset>
   <fieldset id="player">
     <legend>Smoothing</legend>
     <label>Interpolation <select name="smoothing">
@@ -108,6 +121,12 @@ function render(d, fill = true) {
     li.textContent = `${when(s.startedAt)} – ${SOURCE[s.source]} (${s.identifier}): ${(s.videos || []).map((v) => v.name).join(', ') || 'no video'}`;
     return li.outerHTML;
   }).join('');
+  const ms = (v) => `${v > 0 ? '+' : ''}${v || 0} ms`;
+  const vrOff = Number(d.vr?.offset) || 0;
+  $('#sync tbody').innerHTML = [['TCode', d.tcode], ['Buttplug', d.buttplug]].map(([name, s]) => {
+    const own = Number(s?.defaultOffset) || 0;
+    return `<tr><td>${name}</td><td>${ms(own)}</td><td>${ms(own)}</td><td>${ms(own + vrOff)}</td></tr>`;
+  }).join('') + `<tr><td>VR bridge</td><td>${ms(vrOff)}</td><td>—</td><td>${ms(vrOff)}</td></tr>`;
   const body = $('#tcode tbody');
   if (!body.children.length) body.innerHTML = AXES.map(a => {
     const x = (d.tcode?.axes || {})[a] || {};
@@ -149,6 +168,51 @@ for (const btn of document.querySelectorAll('button[data-a]')) btn.onclick = asy
   }
   await post({ kind, settings, action: btn.dataset.a || undefined });
 };
+let videos = null, routing = null;
+$('#routeSearch').oninput = async () => {
+  videos ??= await (await fetch('/api/videos')).json();
+  const q = $('#routeSearch').value.toLowerCase();
+  const hits = q ? videos.filter((v) => v.name.toLowerCase().includes(q)).slice(0, 30) : [];
+  const sel = $('#routeVideos');
+  sel.hidden = !hits.length;
+  sel.replaceChildren(...hits.map((v) => new Option(v.name, v.id)));
+};
+async function showRouting(r) {
+  routing = r;
+  $('#routeVideos').hidden = true;
+  $('#routing .st').textContent = `${r.video.name}: ${r.active === 'custom' ? 'custom routing on' : 'no custom routing'}`;
+  const stored = r.routes || [];
+  $('#routing tbody').replaceChildren(...r.devices.map((dev) => {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.textContent = dev.label + (dev.connected ? '' : ' (not connected)');
+    const sel = document.createElement('select');
+    sel.append(new Option('— not routed —', ''), ...r.scripts.map((p) => new Option(p.split('/').pop(), p)));
+    sel.value = stored.find((x) => x.deviceId === dev.deviceId)?.scriptPath || '';
+    sel.dataset.device = dev.deviceId;
+    if (dev.buttplugIndex != null) sel.dataset.index = dev.buttplugIndex;
+    const td2 = document.createElement('td');
+    td2.append(sel);
+    tr.append(td, td2);
+    return tr;
+  }));
+  $('#routeSave').hidden = $('#routeClear').hidden = false;
+}
+$('#routeVideos').onchange = async () => {
+  showRouting(await (await fetch(`/api/devices/routing?videoId=${$('#routeVideos').value}`)).json());
+};
+async function saveRouting(routes) {
+  const r = await fetch('/api/devices/routing', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoId: routing.video.id, routes }),
+  });
+  showRouting(await r.json());
+}
+$('#routeSave').onclick = () => saveRouting([...document.querySelectorAll('#routing select[data-device]')]
+  .filter((s) => s.value)
+  .map((s) => ({ deviceId: s.dataset.device, scriptPath: s.value,
+    ...(s.dataset.index != null ? { buttplugIndex: +s.dataset.index } : {}) })));
+$('#routeClear').onclick = () => saveRouting([]);
 load(true);
 setInterval(() => load(false), 2000);
 </script>

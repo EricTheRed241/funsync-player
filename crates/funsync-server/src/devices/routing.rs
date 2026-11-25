@@ -1,8 +1,12 @@
 //! Custom routing (`renderer/js/custom-routing-match.js`): a video's
 //! association (`settings.library.associations[path]`, `active: "custom"`)
-//! gives each Buttplug device its own script. A route finds its device by
+//! gives each device its own script: `tcode`, or a Buttplug device found by
 //! the stored index when the name there still matches, else by name (the
-//! caller then stores the new index); devices without a route get nothing.
+//! caller then stores the new index); Buttplug devices without a route get
+//! nothing. A route's script that moved is looked for by name in the
+//! video's folder (and the new path stored).
+
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -11,36 +15,49 @@ use super::script;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Route {
-    /// `buttplug:<device name>`.
+    /// Position in the stored `custom.routes`.
+    pub slot: usize,
+    /// `tcode` or `buttplug:<device name>`.
     pub device_id: String,
     pub index: Option<u64>,
     pub actions: Vec<Action>,
 }
 
-/// The routes of an association entry; the `main` route plays `main`.
-pub fn load(entry: &Value, main: &[Action]) -> Vec<Route> {
+/// The routes of an association entry (the `main` route plays `main`), and
+/// `(slot, new path)` for scripts found again in `dir`.
+pub fn load(entry: &Value, main: &[Action], dir: &Path) -> (Vec<Route>, Vec<(usize, String)>) {
+    let mut moved = Vec::new();
     if entry["active"] != "custom" {
-        return Vec::new();
+        return (Vec::new(), moved);
     }
-    entry["custom"]["routes"]
+    let routes = entry["custom"]["routes"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|r| {
+        .enumerate()
+        .filter_map(|(slot, r)| {
             let device_id = r["deviceId"].as_str()?;
-            device_id.starts_with("buttplug:").then_some(())?;
+            (device_id == "tcode" || device_id.starts_with("buttplug:")).then_some(())?;
             let actions = if r["role"] == "main" {
                 main.to_vec()
             } else {
-                script::read_actions(r["scriptPath"].as_str()?)?
+                let p = r["scriptPath"].as_str()?;
+                script::read_actions(p).or_else(|| {
+                    let again = dir.join(Path::new(p).file_name()?);
+                    let a = script::read_actions(again.to_str()?)?;
+                    moved.push((slot, again.to_string_lossy().into_owned()));
+                    Some(a)
+                })?
             };
             Some(Route {
+                slot,
                 device_id: device_id.into(),
                 index: r["buttplugIndex"].as_u64(),
                 actions,
             })
         })
-        .collect()
+        .collect();
+    (routes, moved)
 }
 
 /// The device a route drives among `(index, name)`: the stored index when
@@ -65,6 +82,7 @@ mod tests {
 
     fn route(name: &str, index: Option<u64>) -> Route {
         Route {
+            slot: 0,
             device_id: format!("buttplug:{name}"),
             index,
             actions: vec![],
@@ -88,21 +106,35 @@ mod tests {
     }
 
     #[test]
-    fn only_custom_entries_route_buttplug_devices() {
+    fn custom_entries_route_tcode_and_buttplug_and_find_moved_scripts() {
+        let t = tempfile::tempdir().unwrap();
+        let flat = r#"{"actions":[{"at":0,"pos":5},{"at":9,"pos":5}]}"#;
+        std::fs::write(t.path().join("moved.funscript"), flat).unwrap();
         let main = vec![Action { at: 0.0, pos: 0.0 }, Action { at: 1.0, pos: 1.0 }];
         let e = serde_json::json!({"active": "custom", "custom": {"routes": [
             {"deviceId": "buttplug:Handy", "buttplugIndex": 3, "role": "main"},
-            {"deviceId": "tcode", "role": "main"},
+            {"deviceId": "other", "role": "main"},
             {"deviceId": "buttplug:Lush", "scriptPath": "/nope.funscript"},
+            {"deviceId": "tcode", "scriptPath": "/old/place/moved.funscript"},
         ]}});
-        assert_eq!(
-            load(&e, &main),
-            vec![Route {
-                device_id: "buttplug:Handy".into(),
-                index: Some(3),
-                actions: main.clone()
-            }]
+        let (routes, moved) = load(&e, &main, t.path());
+        let ids: Vec<_> = routes
+            .iter()
+            .map(|r| (r.slot, r.device_id.as_str()))
+            .collect();
+        assert_eq!(ids, [(0, "buttplug:Handy"), (3, "tcode")]);
+        assert_eq!(routes[0].actions, main);
+        assert_eq!(routes[1].actions[0].pos, 5.0);
+        let p = t
+            .path()
+            .join("moved.funscript")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(moved, [(3, p)]);
+        assert!(
+            load(&serde_json::json!({"active": "single"}), &main, t.path())
+                .0
+                .is_empty()
         );
-        assert!(load(&serde_json::json!({"active": "single"}), &main).is_empty());
     }
 }

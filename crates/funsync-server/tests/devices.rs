@@ -334,7 +334,7 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
     let finisher = lib.path().join("finisher.json");
     std::fs::write(
         &finisher,
-        br#"{"actions":[{"at":0,"pos":50},{"at":1000,"pos":50}]}"#,
+        br#"{"actions":[{"at":0,"pos":20},{"at":1000,"pos":20}]}"#,
     )
     .unwrap();
     let (_srv, port, _data) = serve(serde_json::json!({"settings": {
@@ -412,5 +412,93 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
         .send(Message::text(r#"{"type":"orgasm-hold","active":true}"#))
         .await
         .unwrap();
-    assert_eq!(frame_starting(&mut device, "L0").await, "L05000I17\n");
+    assert_eq!(frame_starting(&mut device, "L0").await, "L02000I17\n");
+}
+
+#[tokio::test]
+async fn routing_editor_sends_tcode_another_script_and_edge_holds_it() {
+    let dev = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dev_port = dev.local_addr().unwrap().port();
+    let lib = tempfile::tempdir().unwrap();
+    std::fs::write(lib.path().join("Scene.mp4"), b"0").unwrap();
+    std::fs::write(
+        lib.path().join("Scene.funscript"),
+        br#"{"actions":[{"at":0,"pos":0},{"at":60000,"pos":100}]}"#,
+    )
+    .unwrap();
+    let alt = lib.path().join("Alt.funscript");
+    std::fs::write(
+        &alt,
+        br#"{"actions":[{"at":0,"pos":30},{"at":60000,"pos":30}]}"#,
+    )
+    .unwrap();
+    let (_srv, port, data) = serve(serde_json::json!({"settings": {
+        "library": {"sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]},
+        "tcode": {"transport": "websocket", "wsUrl": format!("ws://127.0.0.1:{dev_port}"),
+                  "axes": {"L0": {"min": 0, "max": 100}}},
+    }}));
+    let (sock, _) = tokio::time::timeout(Duration::from_secs(10), dev.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut device = tokio_tungstenite::accept_async(sock).await.unwrap();
+    let id = loop {
+        if let Some(id) = get(port, "/api/videos").await[0]["id"].as_str() {
+            break id.to_string();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    // The editor lists the folder's scripts and the devices.
+    let r = get(port, &format!("/api/devices/routing?videoId={id}")).await;
+    assert_eq!(r["scripts"].as_array().unwrap().len(), 2, "{r}");
+    assert_eq!(r["devices"][0]["deviceId"], "tcode");
+    let body = serde_json::json!({"videoId": id,
+        "routes": [{"deviceId": "tcode", "scriptPath": alt}]})
+    .to_string();
+    let r = post(port, "/api/devices/routing", &body).await;
+    assert_eq!(r["active"], "custom");
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(data.path().join("library.json")).unwrap()).unwrap();
+    let entry = &saved["config"]["settings"]["library"]["associations"]
+        [lib.path().join("Scene.mp4").to_str().unwrap()];
+    assert_eq!(entry["mode"], "custom");
+    assert_eq!(entry["routes"][0]["deviceId"], "tcode");
+    assert!(entry.get("single").is_some() && entry.get("multi").is_some());
+
+    let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
+    let (mut phone, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    phone
+        .send(Message::text(
+            r#"{"type":"state","at":1000,"paused":false,"rate":1}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(frame_starting(&mut device, "L0").await, "L03000I17\n");
+
+    // Edge: nothing is sent while it is held.
+    let e = post(port, "/api/remote/edge", r#"{"active":true}"#).await;
+    assert_eq!(e["active"], true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(50), device.next()).await {}
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), device.next())
+            .await
+            .is_err()
+    );
+    post(port, "/api/remote/edge", r#"{"active":false}"#).await;
+    // The phone's next state resumes the stream (a frame differing from the last).
+    phone
+        .send(Message::text(r#"{"type":"seek","at":2000}"#))
+        .await
+        .unwrap();
+    let r = post(
+        port,
+        "/api/devices/routing",
+        &serde_json::json!({"videoId": id, "routes": []}).to_string(),
+    )
+    .await;
+    assert_eq!(r["active"], serde_json::Value::Null);
+    let f = frame_starting(&mut device, "L0").await;
+    assert_ne!(f, "L03000I17\n", "back on the main script");
 }

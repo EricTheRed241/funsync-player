@@ -73,8 +73,20 @@
         if (next !== undefined) v.currentTime = next;
         break;
       }
+      case 'z': case 'Z':
+        if (!e.repeat) edge(true);
+        break;
       default: return;
     }
     e.preventDefault();
+  });
+
+  // Edge hold (Z): the devices idle while it is held (toggle mode: each
+  // press flips it; the server ignores the release then).
+  const edge = (active) => fetch('/api/remote/edge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active }),
+  }).catch(() => {});
+  document.addEventListener('keyup', (e) => {
+    if ((e.key === 'z' || e.key === 'Z') && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) edge(false);
   });
 })();
