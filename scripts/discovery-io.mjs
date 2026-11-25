@@ -79,11 +79,16 @@ export function librarySources(config, incoming) {
     .filter((s) => s.enabled !== false && s.path && path.resolve(s.path) !== path.resolve(incoming || '/nonexistent'));
 }
 
-/** How many videos the enabled library sources hold (LIBRARY_MAX_VIDEOS is checked against it). */
+/**
+ * How many unwatched videos the enabled library sources hold (LIBRARY_MAX_VIDEOS is checked
+ * against it; user, 2026-11-25: watching makes room). Watched = rated (`library.ratings[path]
+ * .rating` > 0, the app's rule; a heart alone isn't). Same count as crates/video-tags library.rs.
+ */
 export function libraryVideoCount(config) {
+  const ratings = config.settings?.library?.ratings || {};
   let n = 0;
   for (const s of (config.settings?.library?.sources || []).filter((x) => x.enabled !== false && x.path)) {
-    walk(s.path, 0, (full, e) => { if (!e.isDirectory() && isVideoName(e.name)) n++; });
+    walk(s.path, 0, (full, e) => { if (!e.isDirectory() && isVideoName(e.name) && !(ratings[full]?.rating > 0)) n++; });
   }
   return n;
 }

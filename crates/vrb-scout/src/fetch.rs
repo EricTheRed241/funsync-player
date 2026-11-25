@@ -219,7 +219,7 @@ impl Fetch<'_> {
             .parent()
             .map_or_else(|| other.join("_staging"), |p| p.join("_staging"));
         let cap = self.prefs.library_max_videos;
-        let mut held = library::video_count(&user.sources);
+        let mut held = library::video_count(&user);
         let mut access: HashMap<&'static str, Access> = HashMap::new();
         let (mut fetched, mut failed, mut skipped, mut code) = (0, 0, 0, 0);
         let mut taken = 0;
@@ -237,7 +237,7 @@ impl Fetch<'_> {
             if held >= cap {
                 writeln!(
                     out,
-                    "Library holds {held} videos, the cap is {cap} (libraryMaxVideos): nothing more downloaded. Delete scenes or raise the cap."
+                    "Library holds {held} unwatched videos, the cap is {cap} (libraryMaxVideos): nothing more downloaded. Watch and rate, delete scenes or raise the cap."
                 )
                 .map_err(io)?;
                 code = code.max(2);

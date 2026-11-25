@@ -69,7 +69,7 @@ pub struct Downloads {
     pub blocked: Vec<Blocked>,
 }
 
-/// One reason downloads are paused: `library` (the library holds `libraryMaxVideos`),
+/// One reason downloads are paused: `library` (the library holds `libraryMaxVideos` unwatched videos),
 /// `drive` (less than `swipeDeck.minFreeGb` free) or `slr-quota` (the SLR queue waits for
 /// the account's weekly video quota).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -88,7 +88,7 @@ fn library_max_videos() -> Result<usize, String> {
         .ok_or_else(|| "content-preferences.json: libraryMaxVideos must be a whole number".into())
 }
 
-/// Why downloads are paused: the library cap (`held` videos as the scouts count them,
+/// Why downloads are paused: the library cap (`held` unwatched videos as the scouts count them,
 /// `cap`), the library drive's free space, and an SLR queue waiting for a used-up weekly
 /// video quota.
 pub fn blocked(
@@ -103,7 +103,7 @@ pub fn blocked(
         out.push(Blocked {
             reason: "library",
             detail: format!(
-                "Library full: {held} / {cap} videos (libraryMaxVideos). Delete or rate down scenes to make room."
+                "Library full: {held} / {cap} unwatched videos (libraryMaxVideos). Watch and rate, delete or rate down scenes to make room."
             ),
         });
     }
@@ -349,6 +349,7 @@ pub fn load(user_data: &Path) -> Downloads {
         video_tags::library::enabled_sources(&config)
             .iter()
             .map(std::path::PathBuf::as_path),
+        &video_tags::library::watched(&config),
     );
     let cap = library_max_videos().map_err(|e| problems.push(e)).ok();
     let drive = crate::drive::status(user_data);
@@ -825,7 +826,7 @@ mod tests {
         );
         assert_eq!(
             b[0].detail,
-            "Library full: 1000 / 1000 videos (libraryMaxVideos). Delete or rate down scenes to make room."
+            "Library full: 1000 / 1000 unwatched videos (libraryMaxVideos). Watch and rate, delete or rate down scenes to make room."
         );
         assert_eq!(
             b[1].detail,

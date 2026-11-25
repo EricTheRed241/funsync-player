@@ -46,9 +46,11 @@ async function load() {
   const [settings, raw, remote] = await Promise.all(['/api/settings', '/api/videos', '/api/remote/videos'].map((u) => fetch(u).then((r) => r.json())));
   const size = new Map(raw.map((v) => [v.id, v.size || 0]));
   const max = settings.libraryMaxVideos || 1000;
+  // The cap counts unwatched (unrated) videos only: watching makes room.
   const total = raw.length;
-  const share = total / max;
-  $('capacity').innerHTML = tile('Videos', `${total} / ${max}`) + tile('Full', `${Math.round(share * 100)} %`) + tile('On disk', gb(raw.reduce((n, v) => n + (v.size || 0), 0)));
+  const unwatched = (remote.videos || []).filter((v) => !v.watched).length;
+  const share = unwatched / max;
+  $('capacity').innerHTML = tile('Unwatched', `${unwatched} / ${max}`) + tile('Full', `${Math.round(share * 100)} %`) + tile('All videos', String(total)) + tile('On disk', gb(raw.reduce((n, v) => n + (v.size || 0), 0)));
   $('capbar').className = `bar${share >= 1 ? ' full' : share >= 0.9 ? ' warn' : ''}`;
   $('capbar').firstElementChild.style.width = `${Math.min(100, share * 100)}%`;
   $('sources').innerHTML = settings.sources.map((s) => {
