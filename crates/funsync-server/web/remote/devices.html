@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" data-style="modern">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FunSync Devices</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="/site-nav.js" defer></script>
+  <style>
+    main { padding: 1rem; max-width: 40rem; margin: auto; }
+    fieldset { margin: 0 0 1rem; border: 1px solid #444; border-radius: 8px; }
+    label { display: block; margin: .4rem 0; }
+    input[type=number] { width: 5rem; }
+    .st { font-weight: bold; }
+    td { padding: 0 .4rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Devices</h1>
+  <p>The server drives the devices while a video plays in the web remote.</p>
+  <fieldset id="tcode">
+    <legend>TCode (MiraBot, OSR, SR6)</legend>
+    <p class="st"></p>
+    <label>Transport <select name="transport">
+      <option value="websocket">WebSocket</option><option value="serial">USB serial</option><option value="udp">UDP</option>
+    </select></label>
+    <label>WebSocket URL <input name="wsUrl" placeholder="ws://mirabot.local:8888"></label>
+    <label>Serial port <input name="port" placeholder="/dev/tty.usbserial-…"> baud <input name="baudRate" type="number"></label>
+    <label>UDP host <input name="udpHost"> port <input name="udpPort" type="number"></label>
+    <label>Offset (ms) <input name="defaultOffset" type="number"></label>
+    <table><thead><tr><th>Axis</th><th>On</th><th>Min</th><th>Max</th><th>Invert</th></tr></thead><tbody></tbody></table>
+    <button data-a="connect">Connect</button> <button data-a="disconnect">Disconnect</button> <button data-a="">Save</button>
+  </fieldset>
+  <fieldset id="buttplug">
+    <legend>Buttplug (Intiface Central)</legend>
+    <p class="st"></p>
+    <label>Port <input name="port" type="number" placeholder="12345"></label>
+    <label>Offset (ms) <input name="defaultOffset" type="number"></label>
+    <button data-a="connect">Connect</button> <button data-a="disconnect">Disconnect</button> <button data-a="">Save</button>
+  </fieldset>
+  <fieldset id="player">
+    <legend>Smoothing</legend>
+    <label>Interpolation <select name="smoothing">
+      <option value="linear">Linear</option><option value="pchip">PCHIP</option><option value="makima">Makima</option>
+    </select></label>
+    <label>Speed limit (units/s, 0 = off) <input name="speedLimit" type="number"></label>
+    <button data-a="">Save</button>
+  </fieldset>
+</main>
+<script>
+const AXES = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'V0', 'A0'];
+const $ = (s, r = document) => r.querySelector(s);
+const NUM = ['baudRate', 'udpPort', 'port', 'defaultOffset', 'speedLimit'];
+let data;
+
+function render(d, fill = true) {
+  data = d;
+  for (const kind of ['tcode', 'buttplug', 'player']) {
+    const box = $('#' + kind), s = d[kind] || {};
+    if (fill) for (const el of box.querySelectorAll('[name]')) el.value = s[el.name] ?? '';
+    const st = d.status[kind];
+    if (st) $('.st', box).textContent = st.connected
+      ? 'Connected' + (st.devices?.length ? ': ' + st.devices.join(', ') : '')
+      : 'Not connected' + (st.error ? ` (${st.error})` : '');
+  }
+  const body = $('#tcode tbody');
+  if (!body.children.length) body.innerHTML = AXES.map(a => {
+    const x = (d.tcode?.axes || {})[a] || {};
+    return `<tr data-axis="${a}"><td>${a}</td><td><input type=checkbox ${x.enabled !== false ? 'checked' : ''}></td>`
+      + `<td><input type=number value="${x.min ?? 0}"></td><td><input type=number value="${x.max ?? 100}"></td>`
+      + `<td><input type=checkbox ${x.inverted ? 'checked' : ''}></td></tr>`;
+  }).join('');
+}
+
+async function load(fill) { render(await (await fetch('/api/devices')).json(), fill); }
+
+for (const btn of document.querySelectorAll('button')) btn.onclick = async () => {
+  const box = btn.closest('fieldset'), kind = box.id, settings = {};
+  for (const el of box.querySelectorAll('[name]')) {
+    settings[el.name] = NUM.includes(el.name) && !(kind === 'tcode' && el.name === 'port') ? Number(el.value) || 0 : el.value;
+  }
+  if (kind === 'tcode') {
+    settings.axes = { ...(data.tcode?.axes || {}) };
+    for (const tr of box.querySelectorAll('tr[data-axis]')) {
+      const [on, min, max, inv] = tr.querySelectorAll('input');
+      settings.axes[tr.dataset.axis] = { ...settings.axes[tr.dataset.axis], enabled: on.checked, min: +min.value, max: +max.value, inverted: inv.checked };
+    }
+  }
+  const r = await fetch('/api/devices', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, settings, action: btn.dataset.a || undefined }),
+  });
+  render(await r.json());
+};
+load(true);
+setInterval(() => load(false), 2000);
+</script>
+</body>
+</html>
