@@ -99,6 +99,14 @@ fn ensure_object(v: &mut Value) {
     }
 }
 
+/// Whether this server owns the library files (`FUNSYNC_OWNS_LIBRARY=1`):
+/// only then does it delete (triage, duplicates), download scripts into
+/// scene folders or write sidecars. Off while the Electron app owns the
+/// library; turned on when the Rust app takes over.
+pub fn owns_library() -> bool {
+    std::env::var("FUNSYNC_OWNS_LIBRARY").is_ok_and(|v| v == "1")
+}
+
 pub fn default_data_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("FUNSYNC_RUST_DATA").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
