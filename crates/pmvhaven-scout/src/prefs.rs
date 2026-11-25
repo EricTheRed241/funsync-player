@@ -1,12 +1,12 @@
 //! `pmvhavenScout` in the shared preferences
-//! (`renderer/js/content-preferences.json`): the PMVHaven-only words and
+//! (`shared/content-preferences.json`): the PMVHaven-only words and
 //! scales. Everything the other scouts share (screening, ranking, tag
 //! scores, favourites, the library cap) comes through `slr_scout::prefs`.
 //! Embedded at compile time; no value lives in Rust.
 
 use serde::Deserialize;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +42,7 @@ pub fn load() -> Result<PmvhavenScout, String> {
 
 pub fn parse(raw: &str) -> Result<PmvhavenScout, String> {
     let p = serde_json::from_str::<Wrapper>(raw)
-        .map_err(|e| format!("renderer/js/content-preferences.json: {e}"))?
+        .map_err(|e| format!("shared/content-preferences.json: {e}"))?
         .pmvhaven_scout;
     if p.popularity_per <= 0.0 {
         return Err("content-preferences.json: pmvhavenScout.popularityPer must be above 0".into());

@@ -17,8 +17,8 @@ import {
   scriptPreview, mainScriptOf, candidatesMissingPreview, HEAT_BINS, IMAGES_VERSION, creatorWants, nextFetchUnit, HOST_SLOTS,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { SLR_HOST } from '../../scripts/slr-host.mjs';
-import { MIN_VIDEO_MS, RANKING } from '../../renderer/js/content-preferences.js';
-import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
+import { MIN_VIDEO_MS, RANKING } from '../../shared/content-preferences.js';
+import { DEFAULT_TAG_SCORES as D } from '../../shared/preference-score.js';
 
 const topic = (tags, title = 'Some riding scene', id = 1) => ({ id, title, tags });
 const files = (...names) => names.map((name) => ({ name, host: 'forum', url: `https://x/${encodeURIComponent(name)}` }));

@@ -12,8 +12,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 
 // See eroscripts-auth-expiry.test.js — vi.mock can't silence a CJS require.
-const log = (await import('../../electron/logger.js')).default;
-const { EroScriptsAPI } = await import('../../electron/eroscripts-api.js');
+const log = (await import('../../shared/logger.js')).default;
+const { EroScriptsAPI } = await import('../../shared/eroscripts-api.js');
 
 let prevFileLevel;
 let prevConsoleLevel;

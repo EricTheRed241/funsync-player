@@ -1,14 +1,12 @@
 {
   "name": "funsync-player",
   "version": "0.11.0",
-  "description": "Local desktop video player with Buttplug/Intiface and TCode device integration for synchronized funscript playback",
-  "main": "electron/main.js",
+  "description": "FunSync: funscript playback on stroker and vibration devices; the server (crates/funsync-server) plus the scout and library CLIs",
   "scripts": {
-    "start": "electron .",
+    "start": "cargo run -q --release -p funsync-server -- --lan --supervise",
+    "server": "cargo run -q --release -p funsync-server --",
     "test": "vitest run",
     "test:watch": "vitest",
-    "backend:dev": "cd backend && python3 main.py || python main.py",
-    "backend:test": "cd backend && python3 -m pytest -v || python -m pytest -v",
     "backup": "node scripts/backup-ignored.mjs",
     "upgrade:axes": "node scripts/upgrade-multi-axis.mjs",
     "prune:generated": "node scripts/prune-generated.mjs",
@@ -33,33 +31,22 @@
     "jobs": "cargo run -q --release -p job-runner --",
     "library:thumbs": "cargo run -q --release -p library-thumbs --",
     "access:pin": "cargo run -q --release -p access-pin --",
-    "app:autostart": "bash deploy/macos/app-autostart.sh"
+    "app:autostart": "cargo build -q --release -p funsync-server && target/release/funsync-server autostart"
   },
   "keywords": [
-    "video-player",
     "funscript",
     "buttplug",
-    "tcode",
-    "electron"
+    "tcode"
   ],
   "author": "FunSync",
   "license": "GPL-3.0-or-later",
   "private": true,
   "dependencies": {
-    "buttplug": "^4.0.1",
-    "electron-conf": "^1.3.0",
-    "electron-log": "^5.4.3",
-    "hls.js": "^1.6.16",
-    "intl-messageformat": "^11.2.6",
     "jszip": "^3.10.1",
-    "lucide": "^1.8.0",
-    "qrcode-generator": "^2.0.4",
-    "serialport": "^13.0.0"
+    "megajs": "^1.3.10"
   },
   "devDependencies": {
-    "electron": "^41.2.0",
     "jsdom": "^29.0.2",
-    "megajs": "^1.3.10",
     "vitest": "^4.1.4"
   }
 }

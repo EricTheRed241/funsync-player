@@ -11,7 +11,7 @@ import {
   generatedCompanionFiles,
   preferHandmadeAxes,
   filesBeside,
-} from '../../renderer/js/handmade-axes.js';
+} from '../../shared/handmade-axes.js';
 
 const two = [{ at: 0, pos: 10 }, { at: 100, pos: 90 }];
 const one = [{ at: 0, pos: 10 }];

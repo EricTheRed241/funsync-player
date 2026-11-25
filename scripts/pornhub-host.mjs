@@ -3,7 +3,7 @@
 // yt-dlp). Used by npm run eroscripts:scout (scripts/eroscripts-scout.mjs):
 // the scan reads each link's metadata (`yt-dlp -J --no-playlist`) and turns it
 // into one pseudo video file in the best quality within the caps
-// (FLAT_MAX_HEIGHT / VR_MAX_HEIGHT, renderer/js/content-preferences.js), which
+// (FLAT_MAX_HEIGHT / VR_MAX_HEIGHT, shared/content-preferences.js), which
 // the post's scripts pair with by length like a rule34video page; --fetch reads
 // the metadata again, checks the length, and has yt-dlp download and merge
 // that quality into an mp4.

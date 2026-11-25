@@ -1,7 +1,7 @@
-//! Settings the desktop app kept in its own windows: library sources (add,
+//! Settings (ported from the old Electron app's windows): library sources (add,
 //! remove, enable, reorder, overlap warning, drives coming and going), the
 //! library's display setting, and `.funsync-backup` export / import
-//! (`electron/data-export.js`: a zip with `config.json` + `metadata.json`).
+//! (a zip with `config.json` + `metadata.json`).
 
 use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::data::{SourceEntry, now_ms};
 use crate::server::AppState;
 
-/// Derived caches a backup leaves out (`BACKUP_BLACKLIST`, electron/data-backup.js).
+/// Derived caches a backup leaves out.
 const BACKUP_SKIP: [&str; 3] = ["speedStatsCache", "durationCache", "thumbnailCache"];
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -146,7 +146,7 @@ pub fn backup_zip(config: &Value) -> zip::result::ZipResult<Vec<u8>> {
     Ok(w.finish()?.into_inner())
 }
 
-/// `mergeConfig` of electron/data-export.js: settings deep-merged (the
+/// The old app's `mergeConfig`: settings deep-merged (the
 /// backup wins), playlists and categories added when their name is new,
 /// video categories unioned. `overwrite` takes the backup as it is.
 pub fn merge_config(existing: &Value, imported: &Value, overwrite: bool) -> Value {

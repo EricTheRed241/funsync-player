@@ -2,7 +2,7 @@
 //
 // For every folder where any stroke script has hand-made axes (a companion
 // that isn't `.generated.`, or axes embedded in the script; see
-// renderer/js/handmade-axes.js):
+// shared/handmade-axes.js):
 //   - embedded axes are written out as `<stem>.<axis>.funscript` companions
 //     of their script (canonical suffix; an existing file or a hand-made
 //     companion for the axis is never replaced; the script is not touched);
@@ -20,9 +20,9 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { extractEmbeddedAxes, buildCompanionFiles } from '../renderer/js/embedded-multi-axis.js';
-import { getBaseName, isGeneratedCompanion, listCompanionFiles } from '../renderer/js/multi-axis.js';
-import { handmadeAxisSuffixes, canonicalAxisSuffix } from '../renderer/js/handmade-axes.js';
+import { extractEmbeddedAxes, buildCompanionFiles } from '../shared/embedded-multi-axis.js';
+import { getBaseName, isGeneratedCompanion, listCompanionFiles } from '../shared/multi-axis.js';
+import { handmadeAxisSuffixes, canonicalAxisSuffix } from '../shared/handmade-axes.js';
 import { groupScenes, readStrokeScript, sceneHandmadeAxes, timingMatch } from './handmade-scenes.mjs';
 
 const MANIFEST = 'MANIFEST.txt';

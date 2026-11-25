@@ -23,7 +23,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-// renderer/*.js is ESM inside a CommonJS package. Re-exec once so Node does
+// shared/*.js is ESM inside a CommonJS package. Re-exec once so Node does
 // not print MODULE_TYPELESS_PACKAGE_JSON on every run.
 if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')) {
   const relaunch = spawnSync(process.execPath, [
@@ -149,12 +149,12 @@ async function main() {
   }
 
   // The API module logs through electron-log; keep the CLI's output clean.
-  const log = require('../electron/logger.js');
+  const log = require('../shared/logger.js');
   log.transports.file.level = false;
   log.transports.console.level = false;
-  const { EroScriptsAPI } = require('../electron/eroscripts-api.js');
-  const { scanLibrary } = require('../electron/library-scan.js');
-  const { readLinksFile, writeLinksFile, linksFilePath } = require('../electron/eroscripts-links.js');
+  const { EroScriptsAPI } = require('../shared/eroscripts-api.js');
+  const { scanLibrary } = require('../shared/library-scan.js');
+  const { readLinksFile, writeLinksFile, linksFilePath } = require('../shared/eroscripts-links.js');
 
   const api = new EroScriptsAPI();
   api.restoreSession(session.cookie, session.username);

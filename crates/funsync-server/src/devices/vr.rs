@@ -1,5 +1,5 @@
-//! PCVR companion bridge (`electron/main.js` `vr-connect` +
-//! `renderer/js/vr-bridge.js`): a TCP client to HereSphere / DeoVR's
+//! PCVR companion bridge (ported from the old Electron app): a TCP client
+//! to HereSphere / DeoVR's
 //! timestamp server (port 23554). Packets are a 4-byte little-endian length
 //! and JSON (`path`, `currentTime` s, `playbackSpeed`, `playerState` 0 =
 //! playing, 1 = paused); four zero bytes every second keep it open. The

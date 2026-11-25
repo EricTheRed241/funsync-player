@@ -12,7 +12,7 @@ import {
   livePerformerNames, hasLivePerformer, mergeCookies, withPerformers, faptapArtist, faptapSceneName, thumbnailUrl, stillWanted,
 } from '../../scripts/faptap-scout-lib.mjs';
 import { emptyScoutState, listFeed, markTopic, seenTopic, RULES_VERSION } from '../../scripts/eroscripts-scout-lib.mjs';
-import { DEFAULT_TAG_SCORES as D } from '../../renderer/js/preference-score.js';
+import { DEFAULT_TAG_SCORES as D } from '../../shared/preference-score.js';
 
 const video = (tagNames, extra = {}) => ({
   id: '1', name: 'Bulma Yoga', description: '', duration: 300, user: { username: 'Zoot' },

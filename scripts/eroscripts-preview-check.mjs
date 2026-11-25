@@ -12,7 +12,7 @@
 //     would set once the failing poster is gone).
 // Frames are sampled by the backend's sampler (backend/services/ffmpeg.py)
 // in a Python child process, images decoded by ffmpeg; the matching itself
-// is the app's (electron/preview-match.js, electron/preview-validator.js).
+// is the app's (shared/preview-match.js, shared/preview-validator.js).
 //
 //   npm run eroscripts:preview-check -- [--out <dir>] [--pending] [--limit N]
 //       [--only <text>] [--no-candidates] [--user-data <dir>] [--python <bin>]
@@ -159,12 +159,12 @@ async function main() {
   const custom = lib.customThumbnails || {};
   const links = lib.scriptTags || {};
 
-  const log = require('../electron/logger.js');
+  const log = require('../shared/logger.js');
   log.transports.file.level = false;
   log.transports.console.level = false;
-  const pm = require('../electron/preview-match.js');
-  const { createPreviewValidator } = require('../electron/preview-validator.js');
-  const { EroScriptsAPI } = require('../electron/eroscripts-api.js');
+  const pm = require('../shared/preview-match.js');
+  const { createPreviewValidator } = require('../shared/preview-validator.js');
+  const { EroScriptsAPI } = require('../shared/eroscripts-api.js');
 
   let videos = Object.keys(custom).filter((p) => custom[p]?.type === 'image' && custom[p].source === 'eroscripts' && !custom[p].forced)
     .map((p) => ({ path: p, kind: 'poster', entry: custom[p] }));

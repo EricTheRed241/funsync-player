@@ -342,7 +342,7 @@ mod tests {
             url(Some("http://10.0.0.2:5200"), none),
             "http://10.0.0.2:5200"
         );
-        assert_eq!(url(None, none), "http://127.0.0.1:5123");
+        assert_eq!(url(None, none), "http://127.0.0.1:5300");
     }
 
     #[test]

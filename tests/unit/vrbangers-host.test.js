@@ -21,7 +21,7 @@ import {
   isVrbangersCandidate, videoPreference, RULES_VERSION,
 } from '../../scripts/eroscripts-scout-lib.mjs';
 import { RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from '../../scripts/eroscripts-sync-lib.mjs';
-import { FEED_TAGS, SEARCH_FEEDS } from '../../renderer/js/content-preferences.js';
+import { FEED_TAGS, SEARCH_FEEDS } from '../../shared/content-preferences.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCENE_HTML = fs.readFileSync(path.join(HERE, 'fixtures/vrbangers-scene.html'), 'utf8');

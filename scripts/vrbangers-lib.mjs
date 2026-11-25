@@ -12,7 +12,7 @@
 // Trailers (`_trailer_`, trailers.vrbangers.com), MISC/ extras (the toy
 // funscript, the 250p preview) are not downloads.
 
-import { VR_MAX_FPS, VR_MAX_HEIGHT } from '../renderer/js/content-preferences.js';
+import { VR_MAX_FPS, VR_MAX_HEIGHT } from '../shared/content-preferences.js';
 
 export const SITE = 'https://vrbangers.com';
 export const LOGIN_URL = `${SITE}/login/`;

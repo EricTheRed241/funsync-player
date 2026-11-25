@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Main-process half of rule34video covers (electron/rule34video-thumbnail.js):
+// Main-process half of rule34video covers (shared/rule34video-thumbnail.js):
 // only the exact cover link is fetched (no cookies, every redirect hop
 // checked, size capped), it is imported without a frame check, and a link
 // that can't work again is told apart from a failure that may pass.
@@ -11,8 +11,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 const {
   isRule34videoPosterUrl, downloadRule34videoPoster, importRule34videoPoster,
-} = await import('../../electron/rule34video-thumbnail.js');
-const { MAX_BYTES } = await import('../../electron/thumbnail-download.js');
+} = await import('../../shared/rule34video-thumbnail.js');
+const { MAX_BYTES } = await import('../../shared/thumbnail-download.js');
 const { rule34videoPosterUrl } = await import('../../scripts/stream-hosts.mjs');
 
 const COVER = 'https://rule34video.com/contents/videos_screenshots/3065000/3065491/preview.jpg';

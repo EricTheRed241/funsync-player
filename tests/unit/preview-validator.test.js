@@ -5,13 +5,13 @@
  */
 // The I/O around preview matching: per-video frame samples cached by
 // path + size + mtime, bounded sampling concurrency, and scoring a topic's
-// candidates. See electron/preview-validator.js.
+// candidates. See shared/preview-validator.js.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const { createPreviewValidator, limiter, SAMPLE_CONCURRENCY } = await import('../../electron/preview-validator.js');
+const { createPreviewValidator, limiter, SAMPLE_CONCURRENCY } = await import('../../shared/preview-validator.js');
 
 const W = 128;
 const H = 72;

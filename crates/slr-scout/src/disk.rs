@@ -1,5 +1,5 @@
 //! Room on the library drive for a download (the scouts' `--fetch`): the drive must keep
-//! `swipeDeck.minFreeGb` (renderer/js/content-preferences.json, `scout_report::drive`) free
+//! `swipeDeck.minFreeGb` (shared/content-preferences.json, `scout_report::drive`) free
 //! after the download, so `free − size ≥ minFree`; a size that isn't known needs `free ≥
 //! minFree`. These fetches download one video at a time, so nothing else of the run is in
 //! flight when a download starts. A drive `df` can't measure lets the download go. A video

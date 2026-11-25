@@ -1,5 +1,5 @@
-//! The web remote's read API (`backend/routes/remote.py`): the same JSON,
-//! so `backend/web-remote/` runs against this server unchanged.
+//! The web remote's read API (ported from the old backend): the JSON that
+//! `web/remote/` reads.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,7 +48,7 @@ pub fn pin(lib: &Library, path: &str) -> Option<f64> {
     p.is_finite().then(|| p.clamp(0.0, 0.999))
 }
 
-/// `/api/media/thumb/<id>?v=<version>` (`thumb_url` of backend/routes/media.py):
+/// `/api/media/thumb/<id>?v=<version>`:
 /// a new poster, VR crop or replaced file is a new URL, so clients may keep
 /// each version for good.
 pub fn thumb_url(lib: &Library, v: &Video) -> String {
@@ -73,7 +73,7 @@ pub fn thumb_url(lib: &Library, v: &Video) -> String {
     )
 }
 
-/// Post tags worth a chip (`backend/services/video_tags.py`).
+/// Post tags worth a chip.
 const NOISE_TAGS: [&str; 13] = [
     "the-handy",
     "the-handy-2-pro",

@@ -1,4 +1,4 @@
-//! Custom routing (`renderer/js/custom-routing-match.js`): a video's
+//! Custom routing (ported from the old Electron app): a video's
 //! association (`settings.library.associations[path]`, `active: "custom"`)
 //! gives each device its own script: `tcode`, or a Buttplug device found by
 //! the stored index when the name there still matches, else by name (the

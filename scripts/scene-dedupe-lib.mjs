@@ -28,12 +28,12 @@
 // and matched it: A = B and B = C doesn't remove C next to A.
 //
 // Which video stays: DEDUPE_KEEP_ORDER; which scripts it keeps:
-// DEDUPE_SCRIPT_ORDER (renderer/js/content-preferences.js; the first
+// DEDUPE_SCRIPT_ORDER (shared/content-preferences.js; the first
 // difference decides).
 
 import {
   DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER, GENRE_WORDS, NAME_NOISE_TOKEN, NAME_NOISE_WORDS, PROJECTION_WORD, VR_MAX_FPS, VR_MAX_HEIGHT,
-} from '../renderer/js/content-preferences.js';
+} from '../shared/content-preferences.js';
 
 /** Any two titles: the same video lasts as long within this. */
 export const DURATION_TOLERANCE_S = 1.5;

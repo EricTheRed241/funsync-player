@@ -1,7 +1,7 @@
 //! Video metadata (ffprobe) and generated thumbnails (ffmpeg).
 //!
-//! The thumbnail rule is the old backend's (`backend/services/ffmpeg.py`,
-//! `generate_single_thumbnail`): a frame 10 % in (at least 10 s in for
+//! The thumbnail rule (ported from the old backend):
+//! a frame 10 % in (at least 10 s in for
 //! videos over a minute), retried at 25 / 40 / 60 % when it is dark, blown
 //! out, flat or a title card, the best-scoring try kept, all inside one
 //! 25 s budget. Cache names match the old `thumb-cache` so the two caches

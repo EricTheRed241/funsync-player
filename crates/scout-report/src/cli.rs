@@ -57,7 +57,7 @@ videos left in the 7-day window, hand-crafted and AI scripts left this month.
 
 Under the tabs a bar shows the library drive's free space in GB (df on the library
 sources in config.json; with sources on several drives, the one with the least free).
-Below swipeDeck.minFreeGb free (renderer/js/content-preferences.json) the drive counts
+Below swipeDeck.minFreeGb free (shared/content-preferences.json) the drive counts
 as full: Multi, VR, Flat and SLR take no swipes (the page turns them off, the swipe routes
 answer 507) until space is freed; skip, undo and the Free space tab still work. The
 bar rereads /api/drive every minute.

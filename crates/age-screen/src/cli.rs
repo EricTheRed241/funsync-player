@@ -18,7 +18,7 @@ file size changes. For each new video, 12 frames spread over it (the left eye
 of VR) make a contact sheet; a judge (an omp run with one subagent per batch
 of 15 sheets) gives each video p_minor, the probability that it depicts
 someone under 18, judged from the sheet and the video's path in the library.
-Thresholds (ageScreen in renderer/js/content-preferences.json):
+Thresholds (ageScreen in shared/content-preferences.json):
   p_minor >= purgeAt (0.8)   rated 1 star, so the app deletes it from disk;
                              a favourite goes to the review playlist instead
   p_minor >= reviewAt (0.5)  added to the review playlist (\"Underage review\")
@@ -40,8 +40,8 @@ Modes:
 Options:
   --user-data <dir>    FunSync's userData folder
                        (default $FUNSYNC_USER_DATA, else ~/Library/Application Support/funsync-player)
-  --backend <url>      The app's backend (default http://127.0.0.1 on the port in
-                       config.json, else 5123)
+  --backend <url>      The FunSync server (default http://127.0.0.1 on the port in
+                       config.json, else 5300)
   --limit N            Screen at most N videos this run (smoke tests); the rest
                        wait, and a --weekly run stays due
   --max-cost <usd>     Spending cap of the default judge (default 30)

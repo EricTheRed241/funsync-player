@@ -36,7 +36,7 @@ Options:
                         (default $FUNSYNC_SLR_CREDENTIALS, else slr_creds.txt at the repo root)
   -h, --help            This text
 
-A full run looks up the performers of slrScout (renderer/js/content-preferences.json):
+A full run looks up the performers of slrScout (shared/content-preferences.json):
 its actors, the favourite artists (includeFavourites: FAVOURITES with the Artists view's
 changes in config.json) and the listed pornstars (includePornstars, with their aliases);
 names SLR doesn't know are skipped and listed. It walks each one's scenes (each scene

@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { planUpgrade } from '../../renderer/js/upgrade-multi-axis.js';
+import { planUpgrade } from '../../shared/upgrade-multi-axis.js';
 import { groupScenes, timingMatch } from '../../scripts/handmade-scenes.mjs';
 import { sceneVideoStem } from '../../scripts/upgrade-pairing.mjs';
 import { planPrune, applyPrune, archiveFiles } from '../../scripts/prune-generated-lib.mjs';

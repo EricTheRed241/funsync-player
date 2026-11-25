@@ -49,14 +49,14 @@ Probe results (2026-11-03, from this Mac, no account):
 - `get_links.php?link_type=direct_download` → error 45 "Insufficient Permissions" (needs a session).
 - Cloudflare check, solved with a real engine:
   - Managed headless Chromium on `/file/gt9xnbh2gdz1tca/x/file`: `#downloadButton` appeared on the `?action=check` URL with no interaction. Node `fetch` of that href with no cookies, `bytes=0-1048575` → `206 bytes 0-1048575/3969368774`, `ftyp`.
-  - Hidden Electron 41.2.0 `BrowserWindow` (`show:false`, the repo's own `node_modules/.bin/electron`, userData in /tmp) on `/file/qg9hq0mv6p3lzh3/file` → resolved `download1529.mediafire.com/<dkey>/qg9hq0mv6p3lzh3/Fap+Hero+-+Kingdom+Come.mp4` in **7.3 s**.
+  - Hidden Electron 41.2.0 `BrowserWindow` (`show:false`, userData in /tmp; tested while the repo still shipped Electron) on `/file/qg9hq0mv6p3lzh3/file` → resolved `download1529.mediafire.com/<dkey>/qg9hq0mv6p3lzh3/Fap+Hero+-+Kingdom+Come.mp4` in **7.3 s**.
 - All partial files were deleted after the checks.
 
 Workarounds considered:
 - **Plain HTTP page scrape:** works for files under about 800 MB. This is the main path.
 - **`get_links.php` direct_download:** doesn't work; needs an account session (error 45).
-- **Hidden Electron `BrowserWindow` for `?action=check` files:** works. It passed Cloudflare non-interactively in about 7 s, and the link it yields is cookie-free, so the existing Node stream/size-check path does the download. Electron is already a dependency, so nothing new is installed.
-- **Playwright:** possible, but no Playwright browsers are installed (`~/Library/Caches/ms-playwright` is missing). Playwright 1.59 is only a transitive dependency. `channel:'chrome'` with `/Applications/Google Chrome.app` could also work. It is not needed when Electron is available.
+- **Hidden browser window for `?action=check` files:** works (tested with a hidden Electron window, which passed Cloudflare non-interactively in about 7 s), and the link it yields is cookie-free, so the existing Node stream/size-check path does the download. Electron is no longer in the repo (2026-11-25), so use headless Google Chrome over CDP, as `vrb:scout --fetch` and `slr:scout --login` already do.
+- **Playwright:** possible, but no Playwright browsers are installed (`~/Library/Caches/ms-playwright` is missing). Playwright 1.59 is only a transitive dependency. Not needed: the repo already drives `/Applications/Google Chrome.app` over CDP.
 - **Copying `cf_clearance` cookies into Node `fetch`:** not tested and not needed. Cloudflare binds clearance to the browser's TLS fingerprint/UA, so this is fragile.
 - **CAPTCHA-solving services:** not considered (out of scope).
 - **Referer/UA tweaks to skip the check:** don't work; it is per file.
@@ -67,12 +67,12 @@ Recommendation for the scout:
 - **Download** (`download()` branch `file.host === 'mediafire'`):
   1. `fetch(pageUrl, {redirect:'manual', UA})`.
   2. If the redirect has `errno=` → throw `mediafire: blocked/removed (errno N)`. This is permanent; mark the file gone.
-  3. If the redirect has `action=check` → resolve with a hidden Electron window: spawn `electron scripts/mediafire-resolve.cjs <pageUrl>`, which prints `#downloadButton.href` and exits. Timeout 45 s.
+  3. If the redirect has `action=check` → resolve with a headless Chrome: open `<pageUrl>` over CDP, read `#downloadButton.href`, close it. Timeout 45 s.
   4. Otherwise regex the href, `fetch` it with no headers and pipe it to `.part` exactly like pixeldrain.
   - The existing `size !== file.size` check covers truncation. Optionally verify the sha256 against `hash`.
 - **Retry:** tokens are short-lived but valid for minutes, so a failed attempt simply re-resolves the page. Range resume (`Range: bytes=<partSize>-` → `206`) is possible if the scout ever keeps `.part` files.
 - **Fall back to the manual list:**
-  - If the Electron resolver fails or times out (for example a reCAPTCHA appears): add `'mediafire'` to `MANUAL_HOSTS`, with `manualPageUrl` returning `https://www.mediafire.com/file/<key>/file`.
+  - If the Chrome resolver fails or times out (for example a reCAPTCHA appears): add `'mediafire'` to `MANUAL_HOSTS`, with `manualPageUrl` returning `https://www.mediafire.com/file/<key>/file`.
   - Password-protected files.
 ```js
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
@@ -90,22 +90,22 @@ async function mediafireFiles(kind, key) {
   }
   return out;
 }
-/** Direct (cookie-free) URL of a MediaFire file page, via Electron when Cloudflare checks it. */
+/** Direct (cookie-free) URL of a MediaFire file page, via headless Chrome when Cloudflare checks it. */
 async function mediafireDirect(pageUrl) {
   const r = await fetch(pageUrl, { headers: { 'User-Agent': UA }, redirect: 'manual' });
   const loc = r.headers.get('location') || '';
   if (/errno=(\d+)/.test(loc)) throw new Error(`mediafire: removed/blocked (errno ${loc.match(/errno=(\d+)/)[1]})`);
   let href;
-  if (/action=check/.test(loc)) href = await resolveInElectron(pageUrl); // spawn electron scripts/mediafire-resolve.cjs, read stdout, 45 s timeout
+  if (/action=check/.test(loc)) href = await resolveInChrome(pageUrl); // headless Chrome over CDP, 45 s timeout
   else href = (await (r.status === 200 ? r : await fetch(new URL(loc, pageUrl), { headers: { 'User-Agent': UA } })).text())
     .match(/aria-label="Download file"\s+href="(https:\/\/download\d+\.mediafire\.com\/[^"]+)"/)?.[1];
   if (!href) throw new Error('mediafire: no download button (CAPTCHA or password?) – use --manual-list');
   return href.replace(/'\+'/g, '');
 }
 // download(): const resp = await fetch(await mediafireDirect(file.url)); if (resp.status !== 200) throw …; pipeline(Readable.fromWeb(resp.body), createWriteStream(tmp))
-// scripts/mediafire-resolve.cjs (Electron main): new BrowserWindow({show:false}).loadURL(argv.at(-1)); poll
-//   executeJavaScript("document.querySelector('#downloadButton')?.href") every 1 s up to 30 s; console.log(href); app.quit().
-//   Set app.setPath('userData', <tmp or scout dir>) so it never touches the player's profile.
+// resolveInChrome: launch headless Chrome with a temp --user-data-dir, Page.navigate(pageUrl); poll
+//   Runtime.evaluate("document.querySelector('#downloadButton')?.href") every 1 s up to 30 s; return href; close Chrome.
+//   The temp profile keeps it away from the user's own Chrome profile.
 ```
 
 Manual (browser) instructions if needed:

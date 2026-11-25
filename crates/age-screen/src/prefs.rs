@@ -1,11 +1,11 @@
 //! The screener's preferences, from the shared part of the content
-//! preferences (`renderer/js/content-preferences.json`, also exported by
+//! preferences (`shared/content-preferences.json`, also exported by
 //! `content-preferences.js`). Embedded at compile time, so `cargo run`
 //! rebuilds when the file changes; no rule constant lives in Rust.
 
 use serde::Deserialize;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,8 +40,8 @@ pub fn load() -> Result<Prefs, String> {
 }
 
 pub fn parse(raw: &str) -> Result<Prefs, String> {
-    let prefs: Prefs = serde_json::from_str(raw)
-        .map_err(|e| format!("renderer/js/content-preferences.json: {e}"))?;
+    let prefs: Prefs =
+        serde_json::from_str(raw).map_err(|e| format!("shared/content-preferences.json: {e}"))?;
     let a = &prefs.age_screen;
     let unit = |v: f64| (0.0..=1.0).contains(&v);
     if !(unit(a.review_at) && unit(a.purge_at) && a.review_at <= a.purge_at) {

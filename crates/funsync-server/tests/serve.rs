@@ -122,7 +122,4 @@ fn import_then_serve() {
         "a pin is a new thumbnail version"
     );
     assert_eq!(pin(r#"{"pct": null}"#), before);
-    let (_, body) = http(port, "GET", "/api/parity", "");
-    let parity: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(parity["counts"]["done"].as_u64().unwrap() > 0);
 }

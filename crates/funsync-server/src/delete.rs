@@ -1,7 +1,7 @@
 //! Deletes from disk, only while this server owns the library
 //! (`data::owns_library()`): triage (a rating at or below
-//! `ratings.deleteAtOrBelow`, not a favourite) and duplicates. Port of
-//! `electron/rejected-videos.js` + `renderer/js/reject-rule.js`: the video
+//! `ratings.deleteAtOrBelow`, not a favourite) and duplicates, ported from
+//! the old Electron app and kept in step with `shared/rejected-videos.js`: the video
 //! with its scripts, axis companions and subtitles; a scene folder left with
 //! only its scout sidecar goes too, and an emptied creator folder. EroScripts
 //! / FapTap scenes are remembered in `<old userData>/eroscripts-scout-rejected.json`

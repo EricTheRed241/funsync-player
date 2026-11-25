@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
 /// Video extensions the library scan pairs with scripts
-/// (`VIDEO_EXTS` in electron/library-scan.js).
+/// (`VIDEO_EXTS` in shared/library-scan.js).
 pub const VIDEO_EXTS: &[&str] = &[
     "mp4", "m4v", "mkv", "webm", "avi", "mov", "mp3", "wav", "ogg", "flac", "m4a",
 ];

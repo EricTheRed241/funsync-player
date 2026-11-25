@@ -17,13 +17,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { getAxisBySuffix, parseAxisSuffix, getBaseName } from '../renderer/js/multi-axis.js';
-import { handmadeAxisSuffixes, generatedCompanionFiles } from '../renderer/js/handmade-axes.js';
+import { getAxisBySuffix, parseAxisSuffix, getBaseName } from '../shared/multi-axis.js';
+import { handmadeAxisSuffixes, generatedCompanionFiles } from '../shared/handmade-axes.js';
 import { archiveFiles, planFolder, applyPrune } from './prune-generated-lib.mjs';
 import { actionsHash, normalisedActions } from './handmade-scenes.mjs';
 
 const require = createRequire(import.meta.url);
-const { AXIS_SUFFIXES } = require('../electron/library-scan.js');
+const { AXIS_SUFFIXES } = require('../shared/library-scan.js');
 const JSZip = require('jszip');
 
 export const FORUM_INTERVAL_MS = 700;

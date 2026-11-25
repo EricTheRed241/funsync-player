@@ -1,10 +1,14 @@
-//! Seed the Rust app's library from the old app's `config.json`, read-only.
+//! The library's `config.json` in the shared userData folder: seeded from
+//! it (`import`), kept in step with it (every save writes the parts this
+//! server owns back, `write_through`; a `config.json` changed while the
+//! server was down, e.g. by a CLI, is read again at start, `newer_config`),
+//! so the CLIs and scouts keep reading the library state from there.
 
 use std::path::Path;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
-use crate::data::{Library, load_library, now_ms, save_library};
+use crate::data::{Library, load_library, now_ms, save_library, write_atomic};
 
 /// The `settings` sections copied. Left out: `eroscripts` (the forum
 /// session), `security`, `handy` (connection keys) and window state.
@@ -38,26 +42,7 @@ pub fn import(old_user_data: &Path, data_dir: &Path, force: bool) -> Result<Impo
         ));
     }
     let cfg_path = old_user_data.join("config.json");
-    let text = std::fs::read(&cfg_path).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    let cfg: Value =
-        serde_json::from_slice(&text).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    let pick = |from: &Value, keys: &[&str]| -> Value {
-        Value::Object(
-            keys.iter()
-                .filter_map(|k| from.get(*k).map(|v| (k.to_string(), v.clone())))
-                .collect::<Map<_, _>>(),
-        )
-    };
-    let mut config = pick(&cfg, &TOP);
-    config["settings"] = pick(&cfg["settings"], &SETTINGS);
-    // The desktop app holds its devices (a serial port can't be opened twice);
-    // the Rust app connects only once told to on its Devices page.
-    if let Some(t) = config
-        .pointer_mut("/settings/tcode")
-        .and_then(Value::as_object_mut)
-    {
-        t.insert("autoConnect".into(), Value::Bool(false));
-    }
+    let config = pick_config(&read_json(&cfg_path)?);
     let lib = Library {
         version: 1,
         imported_from: Some(cfg_path.to_string_lossy().into_owned()),
@@ -85,6 +70,64 @@ pub fn import(old_user_data: &Path, data_dir: &Path, force: bool) -> Result<Impo
     })
 }
 
+fn read_json(path: &Path) -> Result<Value, String> {
+    let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_slice(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The parts of a `config.json` this server keeps.
+pub fn pick_config(cfg: &Value) -> Value {
+    let pick = |from: &Value, keys: &[&str]| -> Value {
+        Value::Object(
+            keys.iter()
+                .filter_map(|k| from.get(*k).map(|v| (k.to_string(), v.clone())))
+                .collect::<Map<_, _>>(),
+        )
+    };
+    let mut config = pick(cfg, &TOP);
+    config["settings"] = pick(&cfg["settings"], &SETTINGS);
+    config
+}
+
+/// Write this server's parts of `config` into `cfg_path`, keeping every other
+/// key there (the forum session, …), with `settings.backend.port` = `port` so
+/// the CLIs reach this server.
+pub fn write_through(config: &Value, cfg_path: &Path, port: u16) -> Result<(), String> {
+    let mut out = read_json(cfg_path).unwrap_or_else(|_| json!({}));
+    if !out.is_object() {
+        out = json!({});
+    }
+    for k in TOP {
+        if let Some(v) = config.get(k) {
+            out[k] = v.clone();
+        }
+    }
+    if !out["settings"].is_object() {
+        out["settings"] = json!({});
+    }
+    for k in SETTINGS {
+        if let Some(v) = config["settings"].get(k) {
+            out["settings"][k] = v.clone();
+        }
+    }
+    if !out["settings"]["backend"].is_object() {
+        out["settings"]["backend"] = json!({});
+    }
+    out["settings"]["backend"]["port"] = json!(port);
+    let bytes = serde_json::to_vec_pretty(&out).map_err(|e| e.to_string())?;
+    write_atomic(cfg_path, &bytes).map_err(|e| format!("{}: {e}", cfg_path.display()))
+}
+
+/// `config.json`'s parts when it changed after `library.json` was last
+/// written (someone else edited it while this server was down).
+pub fn newer_config(lib: &Library, data_dir: &Path) -> Option<Value> {
+    let cfg_path = Path::new(lib.imported_from.as_deref()?);
+    let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    (mtime(cfg_path)? > mtime(&data_dir.join(crate::data::LIBRARY_FILE))?)
+        .then(|| read_json(cfg_path).ok().map(|c| pick_config(&c)))
+        .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,7 +152,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(old.path()).unwrap().count(), before);
         let lib = load_library(new.path()).unwrap();
         assert!(!lib.sources()[0].enabled);
-        assert_eq!(lib.config["settings"]["tcode"]["autoConnect"], false);
+        assert_eq!(lib.config["settings"]["tcode"]["autoConnect"], true);
         assert_eq!(lib.config["settings"]["tcode"]["port"], "/dev/tty.x");
         let written = std::fs::read_to_string(new.path().join("library.json")).unwrap();
         assert!(
@@ -119,5 +162,25 @@ mod tests {
         assert!(import(old.path(), new.path(), false).is_err());
         assert!(import(old.path(), new.path(), true).is_ok());
         assert!(new.path().join("vr-stereo-cache.json").is_file());
+    }
+
+    #[test]
+    fn write_through_keeps_other_keys_and_sets_the_port() {
+        let old = tempfile::tempdir().unwrap();
+        let cfg = old.path().join("config.json");
+        std::fs::write(
+            &cfg,
+            r#"{"settings":{"eroscripts":{"session":"s"},"library":{"ratings":{}}},"x":1}"#,
+        )
+        .unwrap();
+        let config = json!({"playlists": [{"name": "P"}], "settings": {"library": {"ratings": {"/a": {"rating": 5}}}}});
+        write_through(&config, &cfg, 5300).unwrap();
+        let out: Value = serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+        assert_eq!(out["settings"]["eroscripts"]["session"], "s");
+        assert_eq!(out["x"], 1);
+        assert_eq!(out["playlists"][0]["name"], "P");
+        assert_eq!(out["settings"]["library"]["ratings"]["/a"]["rating"], 5);
+        assert_eq!(out["settings"]["backend"]["port"], 5300);
+        assert_eq!(pick_config(&out)["settings"].get("eroscripts"), None);
     }
 }

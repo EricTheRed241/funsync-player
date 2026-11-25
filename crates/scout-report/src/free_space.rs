@@ -7,7 +7,7 @@
 //! artist's videos, hand-made multi-axis scenes (and videos whose axes the backend hasn't
 //! checked yet), videos already on their way out (rated `ratings.deleteAtOrBelow` or lower),
 //! and files not inside a library source. Both thresholds come from
-//! `renderer/js/content-preferences.json`.
+//! `shared/content-preferences.json`.
 //!
 //! A swipe only marks: left = delete, right = keep (hidden from the tab), in
 //! `free-space-swipes.json` by the backend's video id. `POST /api/free-space/delete` then rates
@@ -37,7 +37,7 @@ pub const SWIPES: Store = Store {
 const WRITE_WAIT: Duration = Duration::from_secs(10);
 const WRITE_RETRY_EVERY: Duration = Duration::from_secs(2);
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,7 +55,7 @@ pub fn ratings() -> Ratings {
         ratings: Ratings,
     }
     serde_json::from_str::<Shared>(SHARED)
-        .expect("renderer/js/content-preferences.json: ratings")
+        .expect("shared/content-preferences.json: ratings")
         .ratings
 }
 

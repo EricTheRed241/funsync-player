@@ -9,8 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { freeBytes, roomFor } from '../../scripts/disk-space.mjs';
-import { MIN_FREE_GB } from '../../renderer/js/content-preferences.js';
-import shared from '../../renderer/js/content-preferences.json' with { type: 'json' };
+import { MIN_FREE_GB } from '../../shared/content-preferences.js';
+import shared from '../../shared/content-preferences.json' with { type: 'json' };
 
 const GB = 1e9;
 

@@ -16,7 +16,7 @@
 // pseudo file; requests go PMVHAVEN_INTERVAL_MS apart.
 
 import { createPacer } from './eroscripts-sync-lib.mjs';
-import { NAME_NOISE_TOKEN } from '../renderer/js/content-preferences.js';
+import { NAME_NOISE_TOKEN } from '../shared/content-preferences.js';
 
 export const RULE34VIDEO_HOST = 'rule34video';
 export const RULE34VIDEO_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -52,7 +52,7 @@ export function rule34videoLinks(hrefs) {
  * `https://rule34video.com/contents/videos_screenshots/<id rounded down to
  * 1000>/<id>/preview.jpg` (public, no token). The scout writes it into the
  * scene's `eroscripts.json` (`posterUrl`) and the app makes it the
- * library thumbnail (electron/rule34video-thumbnail.js). null when
+ * library thumbnail (shared/rule34video-thumbnail.js). null when
  * `pageUrl` isn't a video page.
  */
 export function rule34videoPosterUrl(pageUrl) {

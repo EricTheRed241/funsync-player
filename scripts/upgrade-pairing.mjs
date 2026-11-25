@@ -15,7 +15,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { underscoreVariant } = require('../electron/script-variant.js');
+const { underscoreVariant } = require('../shared/script-variant.js');
 
 function normStem(name) {
   return name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();

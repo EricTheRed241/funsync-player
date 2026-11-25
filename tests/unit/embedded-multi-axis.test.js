@@ -8,7 +8,7 @@ import {
   extractEmbeddedAxes,
   buildCompanionFiles,
   companionPathMap,
-} from '../../renderer/js/embedded-multi-axis.js';
+} from '../../shared/embedded-multi-axis.js';
 
 describe('extractEmbeddedAxes', () => {
   describe('Format A — HereSphere `additional_axes`', () => {

@@ -1,7 +1,6 @@
-//! Speed stats (`library.speedStatsCache`, backend/routes/media.py
-//! `_compute_speed_stats`) and preference scores (`library.preferenceScores`,
-//! renderer/js/preference-score.js `candidateScore` over
-//! library-scores.js `planPreferenceScores`).
+//! Speed stats (`library.speedStatsCache`) and preference scores
+//! (`library.preferenceScores`, `shared/preference-score.js` `candidateScore`
+//! over the library), ported from the old Electron app and backend.
 
 use std::collections::{HashMap, HashSet};
 

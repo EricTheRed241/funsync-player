@@ -487,8 +487,7 @@ fn a_held_lock_exits_2() {
 fn prefs() -> Value {
     serde_json::from_str(
         &fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../renderer/js/content-preferences.json"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../shared/content-preferences.json"),
         )
         .unwrap(),
     )

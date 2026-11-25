@@ -13,8 +13,8 @@ import path from 'node:path';
 
 // Silence the real logger the CommonJS module holds (vi.mock can't reach it;
 // see eroscripts-auth-expiry.test.js).
-const log = (await import('../../electron/logger.js')).default;
-const { EroScriptsAPI } = await import('../../electron/eroscripts-api.js');
+const log = (await import('../../shared/logger.js')).default;
+const { EroScriptsAPI } = await import('../../shared/eroscripts-api.js');
 
 let prev;
 let dir;

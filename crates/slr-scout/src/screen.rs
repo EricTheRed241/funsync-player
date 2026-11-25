@@ -1,7 +1,7 @@
 //! What never comes in, for the Rust scouts (`vrb-scout`, `pmvhaven-scout`):
 //! the `screening` values of content-preferences.json, applied the way the JS
 //! scouts apply EXCLUDED_TEXT, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE,
-//! FURRY_TAGS, SFW_TAGS and MIN_VIDEO_MS (renderer/js/content-preferences.js).
+//! FURRY_TAGS, SFW_TAGS and MIN_VIDEO_MS (shared/content-preferences.js).
 //!
 //! Words match whole words of the folded text (`text::normalise`: ASCII, lower
 //! case, anything else a space), so a hyphenated tag (`futa-on-male`) matches

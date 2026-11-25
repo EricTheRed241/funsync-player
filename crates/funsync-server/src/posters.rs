@@ -1,5 +1,5 @@
-//! Posters the old app imports after each scan (renderer/js/eroscripts-preview.js,
-//! electron/faptap-thumbnail.js, rule34video-thumbnail.js, preview-match.js):
+//! Posters imported after each scan (ported from the old Electron app; see
+//! `shared/faptap-thumbnail.js`, `rule34video-thumbnail.js`, `preview-match.js`):
 //!
 //! - **FapTap**: a FapTap scene's thumbnail (`scriptTags[path].previewUrl`
 //!   of a `faptap-scout` record), only when it shows the video: its pHash is
@@ -296,7 +296,7 @@ pub fn plan(lib: &Library, videos: &[Video], now: u64) -> Vec<Job> {
     jobs
 }
 
-// ---- perceptual hash (electron/preview-match.js) ----
+// ---- perceptual hash (shared/preview-match.js) ----
 
 /// Box-filter `rect` (x, y, w, h) of `gray` (w×h) to tw×th, with fractional
 /// pixel coverage.

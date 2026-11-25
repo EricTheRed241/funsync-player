@@ -14,7 +14,7 @@
 // When the scripts that stay belong to another copy, that copy's main script
 // and its axis files are copied next to the kept video under its name,
 // replacing the kept video's own. An extra copy then goes the way the app's
-// triage deletes a scene (electron/rejected-videos.js, reason `duplicate`),
+// triage deletes a scene (shared/rejected-videos.js, reason `duplicate`),
 // so the scouts don't download it again; a copy in the same folder as the
 // kept one loses its video and its own scripts (scripts the folder shares
 // stay).
@@ -38,13 +38,13 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
 }
 
 const lib = await import('./scene-dedupe-lib.mjs');
-const { DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER } = await import('../renderer/js/content-preferences.js');
+const { DEDUPE_KEEP_ORDER, DEDUPE_SCRIPT_ORDER } = await import('../shared/content-preferences.js');
 const { appRunning, readConfig, writeConfig } = await import('./discovery-io.mjs');
 const { defaultUserDataDir } = await import('./host-env.mjs');
 const { VIDEO_EXTS, groupScenes, readStrokeScript, sceneHandmadeAxes, actionsHash, isStrokeScriptName } = await import('./handmade-scenes.mjs');
 const { probeVideo, readFrameCache, readProbeCache, readStereoCache, stereoVr, writeFrameCache, writeProbeCache } = await import('./scene-probe.mjs');
 const require = createRequire(import.meta.url);
-const rejectedVideos = require('../electron/rejected-videos.js');
+const rejectedVideos = require('../shared/rejected-videos.js');
 const run = promisify(execFile);
 
 const USAGE = `Usage: npm run dedupe:scenes -- [options]

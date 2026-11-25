@@ -11,10 +11,10 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { addLibrarySource, coreName, isVideoName, normName, remapPaths } from './eroscripts-scout-lib.mjs';
-import { canonicalArtist } from '../renderer/js/artist-playlists.js';
+import { canonicalArtist } from '../shared/artist-playlists.js';
 import { assertConfigWritable, configReadonly, pidAlive } from './host-env.mjs';
 
-const { rewriteVideoTagsFile } = createRequire(import.meta.url)('../electron/video-tags.js');
+const { rewriteVideoTagsFile } = createRequire(import.meta.url)('../shared/video-tags.js');
 
 const configPath = (userData) => path.join(userData, 'config.json');
 export const readConfig = (userData) => JSON.parse(fs.readFileSync(configPath(userData), 'utf8'));

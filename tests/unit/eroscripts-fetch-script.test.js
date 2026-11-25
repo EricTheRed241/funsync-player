@@ -9,8 +9,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 
 // Silence the real logger the CommonJS module holds (see eroscripts-auth-expiry.test.js).
-const log = (await import('../../electron/logger.js')).default;
-const { EroScriptsAPI } = await import('../../electron/eroscripts-api.js');
+const log = (await import('../../shared/logger.js')).default;
+const { EroScriptsAPI } = await import('../../shared/eroscripts-api.js');
 
 let prev;
 const realFetch = globalThis.fetch;

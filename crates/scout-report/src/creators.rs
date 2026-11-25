@@ -50,7 +50,7 @@ const MIN_TITLE_WORD: usize = 6;
 /// Shortest name (folded, words run together) matched at all.
 const MIN_NAME: usize = 3;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

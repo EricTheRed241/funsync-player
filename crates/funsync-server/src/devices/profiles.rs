@@ -1,4 +1,4 @@
-//! TCode device profiles (`renderer/js/tcode-profiles.js`): MiraBot, FUNSR
+//! TCode device profiles (ported from the old Electron app): MiraBot, FUNSR
 //! MINI and Custom, one at a time. `settings.tcode.*` holds the active one,
 //! `settings.tcode.profiles.saved` the others; FUNSR MINI `D` commands.
 

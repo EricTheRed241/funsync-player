@@ -1,20 +1,17 @@
-//! What the Electron renderer derives after each scan, computed by the
-//! server into the same keys of the old `config.json` shape, so the web
-//! remote (and later the headsets) show it:
+//! What the old Electron app derived after each scan (ported from it),
+//! computed by the server into the same keys of the `config.json` shape, so
+//! the web remote and the headsets show it:
 //!
 //! - script tags (`tags`): scan sidecars, `eroscripts-links.json`, then
-//!   `video-tags.json` + `pornstar-tags.json` (renderer/js/eroscripts-links.js,
-//!   video-tags.js), all read from the old app's folder (`side_dir`), never
-//!   written;
+//!   `video-tags.json` + `pornstar-tags.json` (`shared/eroscripts-links.js`,
+//!   `shared/video-tags.js`), all read from the userData folder (`side_dir`),
+//!   never written;
 //! - auto categories, artist playlists and their cleanup, auto collections,
-//!   score lists, smart playlists (`lists`: renderer/js/auto-categories.js,
-//!   artist-playlists.js, playlist-cleanup.js, auto-collections.js,
-//!   score-bands.js, smart-playlists.js), with the same bookkeeping keys;
-//! - speed stats and preference scores (`score`: backend/routes/media.py
-//!   `_compute_speed_stats`, renderer/js/preference-score.js,
-//!   library-scores.js, favourite-artists.js).
+//!   score lists, smart playlists (`lists`), with the same bookkeeping keys;
+//! - speed stats and preference scores (`score`: `shared/preference-score.js`,
+//!   `shared/favourite-artists.js`).
 //!
-//! Values come from renderer/js/content-preferences.json; the ones that live
+//! Values come from shared/content-preferences.json; the ones that live
 //! only in content-preferences.js are mirrored in `mirror.json` until they
 //! move into the shared JSON.
 //!
@@ -49,7 +46,7 @@ use crate::server::{AppState, Snapshot};
 pub use score::{effective_tag_scores, normalize_tag_score};
 pub use tags::SideFiles;
 
-/// `renderer/js/content-preferences.json`, parsed once.
+/// `shared/content-preferences.json`, parsed once.
 pub fn content_preferences() -> &'static Value {
     &RULES.prefs
 }
@@ -131,7 +128,7 @@ pub(crate) struct Ctx<'a> {
 }
 
 pub(crate) struct Rules {
-    /// renderer/js/content-preferences.json
+    /// shared/content-preferences.json
     prefs: Value,
     /// mirror.json
     mirror: Value,
@@ -144,10 +141,9 @@ pub(crate) struct Rules {
 }
 
 pub(crate) static RULES: LazyLock<Rules> = LazyLock::new(|| {
-    let prefs: Value = serde_json::from_str(include_str!(
-        "../../../../renderer/js/content-preferences.json"
-    ))
-    .expect("content-preferences.json");
+    let prefs: Value =
+        serde_json::from_str(include_str!("../../../../shared/content-preferences.json"))
+            .expect("content-preferences.json");
     let mirror: Value = serde_json::from_str(include_str!("mirror.json")).expect("mirror.json");
     // `(?<![\p{L}\p{N}])…(?![\p{L}\p{N}])` without look-around: fine for is_match.
     let word = |body: &str| format!(r"(?:^|[^\p{{L}}\p{{N}}])(?:{body})(?:$|[^\p{{L}}\p{{N}}])");

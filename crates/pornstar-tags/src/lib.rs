@@ -1,6 +1,6 @@
 //! `npm run pornstar:tags`: tag library videos with the pornstars they show.
 //! The list and threshold are `pornstarTags` in
-//! renderer/js/content-preferences.json; performers the VRBangers scout names
+//! shared/content-preferences.json; performers the VRBangers scout names
 //! in its scene folders join it. Each run recomputes
 //! `<userData>/pornstar-tags.json` from the library (applied tags per video,
 //! every performer's scene count), which the app merges into

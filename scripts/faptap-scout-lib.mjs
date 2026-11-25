@@ -14,7 +14,7 @@
 //
 // Rules: those of the EroScripts scout (scripts/eroscripts-scout-lib.mjs)
 // except the multi-axis one, narrowed to what the user wants from FapTap.
-// The values are in renderer/js/content-preferences.js.
+// The values are in shared/content-preferences.js.
 //   • Never excluded content (tags, title or description), nor FURRY_TAGS.
 //     Monsters and feet (tags or title, as on EroScripts) come in, ranked
 //     lower.
@@ -63,7 +63,7 @@ import {
 import {
   ANIMATION_TAGS, AUDIO_TITLE, FAPTAP_ANIMATION_TAGS, FAPTAP_FOCUS, FAPTAP_FOCUS_MIN, FLAT_MAX_HEIGHT, FURRY_TAGS, LIVE_TAGS,
   MIN_STREAM_HEIGHT, MIN_VIDEO_MS, MUSIC_TAGS, SFW_TAGS, VR_MAX_HEIGHT, isAudioRoleplayTag,
-} from '../renderer/js/content-preferences.js';
+} from '../shared/content-preferences.js';
 import { currentFavourite, favouriteIn } from './scout-live.mjs';
 import { firstDuplicate, titleWords } from './scene-dedupe-lib.mjs';
 
@@ -398,7 +398,7 @@ export function toCandidate(video, screen, scoring = {}) {
   return { ...c, score: candidateScore(c, scoring) };
 }
 
-/** Key of a fetched or rejected FapTap scene; the same as electron/rejected-videos.js `faptapRejectionKey`. */
+/** Key of a fetched or rejected FapTap scene; the same as shared/rejected-videos.js `faptapRejectionKey`. */
 export function fetchedKey(id) {
   return `faptap|${id}`;
 }

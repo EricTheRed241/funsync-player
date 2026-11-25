@@ -33,7 +33,7 @@ the path absolute, an existing regular file, not an AppleDouble '._' file, and
 inside one of the library sources in config.json (read only). Each path segment
 is stored in the filesystem's own spelling (NFC vs NFD). Any invalid entry:
 nothing is written. The app applies only the tags in VIDEO_TAGGER_TAGS
-(renderer/js/content-preferences.js) and ignores the rest.
+(shared/content-preferences.js) and ignores the rest.
 
 The CLI never writes config.json or the library.
 

@@ -5,10 +5,10 @@
  */
 // Is an EroScripts post image a picture of the video? Candidate rules
 // (what can't be one) and the perceptual-hash comparison against frames
-// sampled from the video. See electron/preview-match.js.
+// sampled from the video. See shared/preview-match.js.
 import { describe, it, expect } from 'vitest';
 
-const pm = await import('../../electron/preview-match.js');
+const pm = await import('../../shared/preview-match.js');
 
 const CDN = 'https://eroscripts-discourse.eroscripts.com';
 const FORUM = 'https://discuss.eroscripts.com';
