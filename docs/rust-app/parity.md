@@ -24,11 +24,12 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | Playback with range streaming | done | `GET /api/media/stream/{id}` (Range, 206), played by the web remote's player |
-| Custom controls, keyboard shortcuts, drag-and-drop | partial | the web remote's controls plus `web/remote/extras.js` (added to its page by the server): Space/K, ←/→, J/L, ↑/↓, M, F, S, P, R, G/Shift+G. Not ported: drag-and-drop / O (open a file outside the library), H, I, A/B and V keys (the player's own buttons do loops and variants) |
+| Custom controls, keyboard shortcuts | done | the web remote's controls plus `web/remote/extras.js` (added to its page by the server): Space/K, ←/→, J/L, ↑/↓, M, F, S, P (picture-in-picture), I (info), A/B/Escape (loop), R, V/Shift+V, G/Shift+G, H (Devices page), Z (Edge hold) |
+| Drag-and-drop / O (open a file outside the library) | not planned | a browser page gets a dropped file's bytes but not its path, so it can't find the scripts beside it or drive devices from them; add the folder as a library source instead |
 | Seek bar thumbnail preview | done | `extras.js`: hovering the player's seek bar (mouse) shows the frame at that time from a hidden second `<video>` of the stream, with the time |
 | Subtitles (.srt / .vtt, SRT→VTT) | done | `GET /api/media/subtitle/{id}`, shown by the web remote |
 | Screenshot, picture-in-picture, aspect ratio cycling | done | `extras.js`: S saves a PNG of the frame, P picture-in-picture, R cycles contain / cover / fill |
-| A-B loop | done | web remote player |
+| A-B loop | done | `extras.js`: A / B set the points, Escape clears (the web remote's phone player has no loop of its own) |
 | Replay button at the end | done | `extras.js`: a Replay button over the player when a video ends (and Space replays) |
 | Script gap auto-skip | done | web remote player |
 
@@ -76,7 +77,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| One web UI everywhere (phone first, desktop layout) | partial | the web remote (`backend/web-remote/`, unchanged, with `crates/funsync-server/web/remote/` overriding files when needed) at `/remote/`; desktop-only views (Overview, settings, devices) missing |
+| One web UI everywhere (phone first, desktop layout) | done | the web remote (`backend/web-remote/`, unchanged; phone layout and its sidebar desktop layout) at `/remote/`, plus this app's desktop pages in `crates/funsync-server/web/remote/` (Devices, Lists, Associate, Overview, EroScripts, Settings) and `extras.js` for the desktop player's keys and previews |
 | Triage from the phone (rating, heart, add to playlist) | done | `src/edits.rs`, applied to the library at once (no desktop edit queue) |
 | Review on end | done | the phone's flow (add to *Needs review* by name; a rating takes the video out) |
 | Tags / Artists views, tag scores, favourite artists | done | the web remote's views; tag scores, favourite artists and the bonus are stored and every change (and Recalculate) reruns the library rules (`library_changed` → `prefs::refresh`), so scores, score lists and smart playlists follow at once |
