@@ -583,13 +583,13 @@ impl Fetch<'_> {
             staging,
         };
         let cap = self.prefs.library_max_videos;
-        let mut held = library::video_count(&user.sources);
+        let mut held = library::video_count(&user);
         let (mut fetched, mut failed, mut skipped, mut code) = (0, 0, 0, 0);
         for item in queue {
             if held >= cap {
                 writeln!(
                     out,
-                    "Library holds {held} videos, the cap is {cap} (libraryMaxVideos): nothing more downloaded. Delete scenes or raise the cap."
+                    "Library holds {held} unwatched videos, the cap is {cap} (libraryMaxVideos): nothing more downloaded. Watch and rate, delete scenes or raise the cap."
                 )
                 .map_err(io)?;
                 code = 2;
@@ -618,7 +618,7 @@ impl Fetch<'_> {
                 }
                 file.quota = Some(ctx.quota.clone());
                 store::write(self.user_data, &file)?;
-                held = library::video_count(&user.sources);
+                held = library::video_count(&user);
                 match c {
                     0 => {
                         fetched += 1;

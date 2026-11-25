@@ -1,10 +1,14 @@
-//! How many videos the library holds, counted the way every scout checks it
-//! against `libraryMaxVideos` (scripts/discovery-io.mjs libraryVideoCount):
-//! the enabled sources of `config.json`, up to four folder levels down, dot
-//! names (AppleDouble `._*` included) skipped. Shared by the scouts and the
-//! Downloads page, so the page's "library full" is the scouts' own stop.
+//! How many unwatched videos the library holds, counted the way every scout
+//! checks it against `libraryMaxVideos` (scripts/discovery-io.mjs
+//! libraryVideoCount): the enabled sources of `config.json`, up to four
+//! folder levels down, dot names (AppleDouble `._*` included) skipped, and
+//! watched videos (rated: `library.ratings[path].rating` > 0, the app's rule)
+//! left out (user, 2026-11-25: the cap is on unwatched videos, so watching
+//! makes room). Shared by the scouts and the Downloads page, so the page's
+//! "library full" is the scouts' own stop.
 
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -33,9 +37,30 @@ pub fn enabled_sources(config: &Value) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Videos under `dirs`, up to four levels down, dot names skipped.
-pub fn video_count<'a>(dirs: impl IntoIterator<Item = &'a Path>) -> usize {
-    fn walk(dir: &Path, depth: u32, n: &mut usize) {
+/// The watched videos of `config.json`: paths with a rating above 0
+/// (`settings.library.ratings`; a favourite heart alone isn't watched).
+pub fn watched(config: &Value) -> HashSet<PathBuf> {
+    let settings = config.get("settings").unwrap_or(config);
+    settings
+        .pointer("/library/ratings")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, r)| {
+            r.get("rating")
+                .and_then(Value::as_f64)
+                .is_some_and(|x| x > 0.0)
+        })
+        .map(|(p, _)| PathBuf::from(p))
+        .collect()
+}
+
+/// Unwatched videos under `dirs`, up to four levels down, dot names skipped.
+pub fn video_count<'a>(
+    dirs: impl IntoIterator<Item = &'a Path>,
+    watched: &HashSet<PathBuf>,
+) -> usize {
+    fn walk(dir: &Path, depth: u32, watched: &HashSet<PathBuf>, n: &mut usize) {
         let Ok(entries) = fs::read_dir(dir) else {
             return;
         };
@@ -49,16 +74,16 @@ pub fn video_count<'a>(dirs: impl IntoIterator<Item = &'a Path>) -> usize {
             let Ok(kind) = e.file_type() else { continue };
             if kind.is_dir() {
                 if depth < 3 {
-                    walk(&e.path(), depth + 1, n);
+                    walk(&e.path(), depth + 1, watched, n);
                 }
-            } else if is_video_name(&name) {
+            } else if is_video_name(&name) && !watched.contains(&e.path()) {
                 *n += 1;
             }
         }
     }
     let mut n = 0;
     for d in dirs {
-        walk(d, 0, &mut n);
+        walk(d, 0, watched, &mut n);
     }
     n
 }
@@ -87,11 +112,28 @@ mod tests {
             fs::write(on.join(f), "").unwrap();
         }
         fs::write(root.join("Off/o.mp4"), "").unwrap();
+        let mut ratings = serde_json::Map::new();
+        ratings.insert(
+            on.join("x.mp4").display().to_string(),
+            json!({"rating": 3.5}),
+        );
+        ratings.insert(
+            on.join("A/B/C/y.MKV").display().to_string(),
+            json!({"rating": 0, "favorite": true}),
+        );
         let config = json!({"settings": {"library": {"sources": [
-            {"path": on}, {"path": root.join("Off"), "enabled": false}, {"path": ""}]}}});
+            {"path": on}, {"path": root.join("Off"), "enabled": false}, {"path": ""}],
+            "ratings": ratings}}});
         let sources = enabled_sources(&config);
         assert_eq!(sources, std::slice::from_ref(&on));
-        assert_eq!(video_count(sources.iter().map(PathBuf::as_path)), 2);
+        assert_eq!(
+            video_count(sources.iter().map(PathBuf::as_path), &HashSet::new()),
+            2
+        );
+        // A rated video is watched and makes room; a heart alone doesn't.
+        let seen = watched(&config);
+        assert_eq!(seen, HashSet::from([on.join("x.mp4")]));
+        assert_eq!(video_count(sources.iter().map(PathBuf::as_path), &seen), 1);
         let _ = fs::remove_dir_all(&root);
     }
 }

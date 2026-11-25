@@ -507,10 +507,10 @@ async function fetchAll(opts, { userData, config, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     const held = libraryVideoCount(readConfig(userData));
     if (held >= prefs.LIBRARY_MAX_VIDEOS) {
-      console.log(`Library holds ${held} videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Delete scenes or raise the cap.`);
+      console.log(`Library holds ${held} unwatched videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Watch and rate, delete scenes or raise the cap.`);
       break;
     }
-    console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
+    console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} unwatched videos)`);
     const r = await fetchPass(queue, { userData, incoming, staging, naming: namingContext(config, userData, incoming), room: prefs.LIBRARY_MAX_VIDEOS - held });
     const noRoom = r.noRoom ? `; ${r.noRoom} left for later: not enough disk space (${prefs.MIN_FREE_GB} GB kept free)` : '';
     console.log(`Pass ${pass}: ${r.ok} downloaded with generated axes, ${r.failed} failed${r.capped ? `; stopped at the library cap (${prefs.LIBRARY_MAX_VIDEOS} videos)` : ''}${noRoom}`);

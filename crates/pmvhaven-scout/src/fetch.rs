@@ -194,14 +194,14 @@ impl Fetch<'_> {
             .parent()
             .map_or_else(|| other.join("_staging"), |p| p.join("_staging"));
         let cap = self.library_max_videos;
-        let mut held = slr_library::video_count(&user.sources);
+        let mut held = slr_library::video_count(&user);
         let (mut fetched, mut failed, mut skipped, mut code) = (0, 0, 0, 0);
         for (planned, id) in queue.iter().enumerate() {
             let scene = file.scene(id).cloned().ok_or("scene vanished")?;
             if held >= cap {
                 writeln!(
                     out,
-                    "Library holds {held} videos, the cap is {cap} (libraryMaxVideos): nothing more downloaded. Delete scenes or raise the cap."
+                    "Library holds {held} unwatched videos, the cap is {cap} (libraryMaxVideos): nothing more downloaded. Watch and rate, delete scenes or raise the cap."
                 )
                 .map_err(io)?;
                 code = 2;

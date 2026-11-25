@@ -113,7 +113,7 @@ export const PMV_TITLE = /(?<![\p{L}\p{N}])(pmv|hmv|cock ?hero|fap ?hero)(?![\p{
 // get generated twist / roll / pitch; hand-made axes always win, rank
 // RANKING.multiAxis higher and download first. FapTap has no multi-axis
 // scripts, so all of its scenes come in single-axis.
-/** Most videos the library holds: at this many, a scout `--fetch` downloads nothing more (delete scenes or raise it). */
+/** Most unwatched (unrated) videos the library holds: at this many, a scout `--fetch` downloads nothing more (watch and rate, delete scenes or raise it). */
 export const LIBRARY_MAX_VIDEOS = data.libraryMaxVideos;
 /** Gigabytes (10⁹ bytes) the library drive keeps free: a scout download that would leave less is skipped (scripts/disk-space.mjs). */
 export const MIN_FREE_GB = data.swipeDeck.minFreeGb;

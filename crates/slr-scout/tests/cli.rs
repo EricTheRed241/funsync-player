@@ -871,7 +871,7 @@ fn fetch_stops_at_the_library_cap_and_without_a_session() {
         Some(&fixtures),
     );
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
-    assert!(stdout(&o).contains("Library holds 1000 videos, the cap is 1000"));
+    assert!(stdout(&o).contains("Library holds 1000 unwatched videos, the cap is 1000"));
     assert!(!stdout(&o).contains("#11"));
 
     fs::remove_file(ud.join("slr-session.json")).unwrap();

@@ -29,6 +29,8 @@ pub struct UserConfig {
     /// `library.favouriteArtistScore`, raw.
     pub favourite_score: Value,
     pub sources: Vec<Source>,
+    /// Watched videos (rated), left out of the library cap's count.
+    pub watched: HashSet<PathBuf>,
 }
 
 /// Settings live under `settings` (electron-conf); a bare settings object is
@@ -72,6 +74,7 @@ pub fn from_json(config: &Value) -> UserConfig {
             .cloned()
             .unwrap_or(Value::Null),
         sources,
+        watched: video_tags::library::watched(config),
     }
 }
 
@@ -127,10 +130,13 @@ pub fn creators(sources: &[Source]) -> HashSet<String> {
     out
 }
 
-/// Videos in the enabled sources, counted like every scout
-/// (video_tags::library::video_count).
-pub fn video_count(sources: &[Source]) -> usize {
-    video_tags::library::video_count(enabled(sources).map(|s| s.path.as_path()))
+/// Unwatched videos in the enabled sources, counted like every scout
+/// (video_tags::library::video_count): what `libraryMaxVideos` caps.
+pub fn video_count(user: &UserConfig) -> usize {
+    video_tags::library::video_count(
+        enabled(&user.sources).map(|s| s.path.as_path()),
+        &user.watched,
+    )
 }
 
 /// Where SLR scenes go: the library source called `name`, else `<name>`
@@ -217,7 +223,11 @@ mod tests {
                 enabled: false,
             },
         ];
-        assert_eq!(video_count(&sources), 2);
+        let user = UserConfig {
+            sources: sources.clone(),
+            ..UserConfig::default()
+        };
+        assert_eq!(video_count(&user), 2);
         assert_eq!(creators(&sources), HashSet::from(["miss lexa".to_string()]));
         assert_eq!(
             download_folder(&sources, "Other"),

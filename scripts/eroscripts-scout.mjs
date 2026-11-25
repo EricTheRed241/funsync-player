@@ -1179,10 +1179,10 @@ async function fetchAll(opts, { api, userData, config, incoming }) {
   for (let pass = 1; pass <= Math.max(1, opts.passes); pass++) {
     const held = libraryVideoCount(readConfig(userData));
     if (held >= prefs.LIBRARY_MAX_VIDEOS) {
-      console.log(`Library holds ${held} videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Delete scenes or raise the cap.`);
+      console.log(`Library holds ${held} unwatched videos, the cap is ${prefs.LIBRARY_MAX_VIDEOS} (LIBRARY_MAX_VIDEOS): nothing more downloaded. Watch and rate, delete scenes or raise the cap.`);
       return 2;
     }
-    console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} videos)`);
+    console.log(`Pass ${pass}/${Math.max(1, opts.passes)} (library ${held}/${prefs.LIBRARY_MAX_VIDEOS} unwatched videos)`);
     // Chrome (vrbangers.com) starts with the pass's first VRBangers scene and is closed when the pass ends, failed or not.
     const r = await vrbangers.run(() => fetchPass(queue, { api, userData, incoming, staging, room: prefs.LIBRARY_MAX_VIDEOS - held, manualDir: opts.manualDir, parallel: opts.parallel ?? 1 }));
     const slrWaiting = r.slrSkipped ? `; ${r.slrSkipped} SexLikeReal scene${r.slrSkipped > 1 ? 's' : ''} waiting (${r.slrStop === 'quota' ? 'no video download left on the account' : 'not logged in to SexLikeReal'})` : '';
