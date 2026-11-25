@@ -27,6 +27,31 @@ async fn get(port: u16, path: &str) -> serde_json::Value {
     serde_json::from_str(buf.split("\r\n\r\n").nth(1).unwrap_or("")).unwrap_or_default()
 }
 
+async fn raw(port: u16, path: &str) -> String {
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let req = format!("GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut buf = String::new();
+    s.read_to_string(&mut buf).await.unwrap();
+    buf
+}
+
+async fn post(port: u16, path: &str, body: &str) -> serde_json::Value {
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut buf = String::new();
+    s.read_to_string(&mut buf).await.unwrap();
+    serde_json::from_str(buf.split("\r\n\r\n").nth(1).unwrap_or("")).unwrap()
+}
+
 #[tokio::test]
 async fn phone_playback_drives_a_tcode_websocket_device() {
     // The fake device.
@@ -45,6 +70,15 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
         br#"{"actions":[{"at":0,"pos":0},{"at":500,"pos":100},{"at":1000,"pos":0},{"at":60000,"pos":100}]}"#,
     )
     .unwrap();
+    // A variant with its own hand-made twist and a generated roll.
+    let flat = br#"{"actions":[{"at":0,"pos":100},{"at":60000,"pos":100}]}"#;
+    for f in [
+        "Scene (Soft).funscript",
+        "Scene (Soft).twist.funscript",
+        "Scene (Soft).generated.roll.funscript",
+    ] {
+        std::fs::write(lib.path().join(f), flat).unwrap();
+    }
     let cfg = serde_json::json!({"settings": {
         "library": {"sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]},
         "tcode": {"transport": "websocket", "wsUrl": format!("ws://127.0.0.1:{dev_port}"),
@@ -145,4 +179,87 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
             .await
             .is_err()
     );
+
+    // Switch to the variant: its own hand-made twist plays, not its
+    // generated roll.
+    phone
+        .send(Message::text(r#"{"type":"switch-variant","label":"Soft"}"#))
+        .await
+        .unwrap();
+    let mut types = Vec::new();
+    while !types.contains(&"variant-changed".to_string()) {
+        if let Some(Ok(Message::Text(t))) = phone.next().await {
+            let m: serde_json::Value = serde_json::from_str(&t).unwrap();
+            types.push(m["type"].as_str().unwrap().to_string());
+        }
+    }
+    assert_eq!(types, ["script-ready", "variant-changed"]);
+    phone
+        .send(Message::text(r#"{"type":"play"}"#))
+        .await
+        .unwrap();
+    let f = loop {
+        let m = tokio::time::timeout(Duration::from_secs(5), device.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let f = m.into_text().unwrap().to_string();
+        if f.starts_with("L09999") {
+            break f;
+        }
+    };
+    assert_eq!(f, "L09999I17 R09999I17\n");
+
+    // The status API and the dashboard (this computer only).
+    let status = get(port, "/api/status").await;
+    assert_eq!(status["devices"]["tcode"]["link"]["state"], "connected");
+    assert_eq!(status["session"]["state"], "playing");
+    assert_eq!(status["phone"]["connected"], true);
+    assert_eq!(status["issues"], serde_json::json!([]));
+    assert_eq!(status["videos"], 1, "the server's own status stays");
+    let tele = get(port, "/api/device/telemetry").await;
+    assert!(
+        tele["commands"][0]["cmd"]
+            .as_str()
+            .unwrap()
+            .starts_with("L0")
+    );
+    assert_eq!(tele["status"]["desktop"]["connected"], true);
+    let page = raw(port, "/device/").await;
+    assert!(page.starts_with("HTTP/1.1 200") && page.contains("dashboard.js"));
+
+    // A newer phone takes over; the older one is told so.
+    let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
+    let (_phone2, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let kicked = loop {
+        let m = tokio::time::timeout(Duration::from_secs(5), phone.next())
+            .await
+            .unwrap();
+        if let Some(Ok(Message::Text(t))) = m {
+            let m: serde_json::Value = serde_json::from_str(&t).unwrap();
+            if m["type"] == "kicked" {
+                break m;
+            }
+        }
+    };
+    assert_eq!(kicked["reason"], "Another device took over this session.");
+
+    // Picking the FUNSR MINI profile swaps the TCode settings.
+    let d = post(
+        port,
+        "/api/devices",
+        r#"{"kind":"tcode","profile":"funsr-mini"}"#,
+    )
+    .await;
+    assert_eq!(d["profile"], "funsr-mini");
+    assert_eq!(d["tcode"]["transport"], "serial");
+    assert_eq!(d["tcode"]["axes"]["L0"]["max"], 95);
+    let d = post(
+        port,
+        "/api/devices",
+        r#"{"kind":"tcode","profile":"custom","action":"disconnect"}"#,
+    )
+    .await;
+    assert_eq!(d["tcode"]["wsUrl"], format!("ws://127.0.0.1:{dev_port}"));
 }

@@ -2,40 +2,52 @@
 //! state over `/api/remote/sync` (the phone side of
 //! `backend/web-remote/remote-sync.js`), a 60 Hz engine plays the video's
 //! scripts from it, and sends TCode (WebSocket, UDP, USB serial) and
-//! Buttplug (Intiface) commands. Settings: `settings.tcode`,
-//! `settings.buttplug`, `settings.player.{smoothing,speedLimit}`.
+//! Buttplug (Intiface) commands. Settings: `settings.tcode` (with its
+//! device profiles), `settings.buttplug`, `settings.player.{smoothing,speedLimit}`.
 
 mod buttplug;
+mod dashboard;
 mod interp;
+mod profiles;
 mod script;
 mod tcode;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::extract::{ConnectInfo, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 
+use crate::data::now_ms;
 use crate::server::AppState;
 use interp::Action;
+
+pub use dashboard::status;
 
 const KINDS: [&str; 2] = ["tcode", "buttplug"];
 /// One engine tick, in ms (60 Hz).
 const TICK: f64 = 1000.0 / 60.0;
+/// What the old backend tells a phone another one replaced.
+const KICK_REPLACED: &str = "Another device took over this session.";
+/// FUNSR MINI settings are sent again this long after each connect.
+const FUNSR_RESEND: Duration = Duration::from_millis(2500);
 
 #[derive(Clone)]
 struct Play {
     session: u64,
+    video_id: String,
+    name: String,
     axes: Arc<Vec<(String, Vec<Action>)>>,
     at: f64,
     paused: bool,
@@ -67,10 +79,22 @@ impl Play {
     }
 }
 
+/// A device link, as `/api/status` and the dashboard report it.
 #[derive(Default)]
 struct Status {
+    running: bool,
     connected: bool,
-    error: Option<String>,
+    /// Connected at least once since Connect.
+    ever: bool,
+    /// Connected since / down since.
+    since: Option<u64>,
+    attempts: u32,
+    retry_ms: u64,
+    next_retry: Option<u64>,
+    error: Option<(String, u64)>,
+    commands: u64,
+    bytes: u64,
+    last_send: Option<u64>,
 }
 
 struct Out<T> {
@@ -93,10 +117,16 @@ impl<T: Default> Default for Out<T> {
 pub struct Devices {
     play: Mutex<Option<Play>>,
     sessions: AtomicU64,
+    /// The phone session that drives the devices; older ones are kicked.
+    active: AtomicU64,
+    kick: Notify,
+    /// `(ip, videoId)` of the active phone.
+    phone: Mutex<Option<(String, String)>>,
     ticking: AtomicBool,
     tcode: Out<String>,
     buttplug: Out<buttplug::Frame>,
     buttplug_names: Mutex<Vec<String>>,
+    telem: Mutex<dashboard::Telem>,
 }
 
 impl Devices {
@@ -119,16 +149,22 @@ impl Devices {
     fn connected(&self, kind: &str) -> bool {
         self.status(kind).lock().unwrap().connected
     }
+
+    fn event(&self, kind: &str, level: &str, text: String) {
+        self.telem.lock().unwrap().event(kind, level, text);
+    }
 }
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/remote/sync", get(sync))
         .route("/api/devices", get(get_devices).post(post_devices))
+        .merge(dashboard::routes())
 }
 
 /// Start the engine and reconnect the devices that were connected.
 pub async fn start(st: &Arc<AppState>) {
+    ensure_ticker(st);
     for kind in KINDS {
         if settings(st, kind).await["autoConnect"] == true {
             connect(st, kind);
@@ -155,25 +191,54 @@ async fn device_settings(st: &AppState) -> Value {
 fn disconnect(st: &AppState, kind: &str) {
     if let Some(h) = st.devices.task(kind).lock().unwrap().take() {
         h.abort();
+        st.devices
+            .event("link", "info", format!("{kind} disconnected"));
     }
     *st.devices.status(kind).lock().unwrap() = Status::default();
     st.devices.buttplug_names.lock().unwrap().clear();
+}
+
+/// Send the FUNSR MINI's `D` settings now, when it is the active profile.
+fn send_funsr(st: &AppState, tc: &Value) {
+    let cmds = profiles::funsr_commands(&tc["funsr"]);
+    if profiles::active(tc) == "funsr-mini" && !cmds.is_empty() && st.devices.connected("tcode") {
+        st.devices.tcode.tx.send_replace(cmds);
+    }
 }
 
 /// (Re)connect `kind`, retrying every 5 s for a minute, then every minute.
 fn connect(st: &Arc<AppState>, kind: &'static str) {
     disconnect(st, kind);
     ensure_ticker(st);
+    st.devices.status(kind).lock().unwrap().running = true;
     let st2 = st.clone();
     let h = tokio::spawn(async move {
         let d = &st2.devices;
-        let mut fails = 0;
         loop {
             let cfg = settings(&st2, kind).await;
             let on = || {
-                *d.status(kind).lock().unwrap() = Status {
-                    connected: true,
-                    error: None,
+                {
+                    let mut s = d.status(kind).lock().unwrap();
+                    *s = Status {
+                        running: true,
+                        connected: true,
+                        ever: true,
+                        since: Some(now_ms()),
+                        ..Status::default()
+                    };
+                }
+                let to = if kind == "tcode" {
+                    dashboard::address(&cfg)
+                } else {
+                    "Intiface".into()
+                };
+                d.event("link", "ok", format!("{kind} connected to {to}"));
+                if kind == "tcode" {
+                    let (st3, cfg) = (st2.clone(), cfg.clone());
+                    tokio::spawn(async move {
+                        tokio::time::sleep(FUNSR_RESEND).await;
+                        send_funsr(&st3, &cfg);
+                    });
                 }
             };
             let r = if kind == "tcode" {
@@ -182,23 +247,34 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
                 let port = cfg["port"].as_u64().unwrap_or(12345);
                 buttplug::session(port, &mut d.buttplug.tx.subscribe(), &d.buttplug_names, on).await
             };
-            {
+            let err = r.err().unwrap_or_default();
+            let wait = {
                 let mut s = d.status(kind).lock().unwrap();
-                fails = if s.connected { 1 } else { fails + 1 };
-                *s = Status {
-                    connected: false,
-                    error: r.err(),
-                };
-            }
+                let now = now_ms();
+                if s.connected {
+                    s.connected = false;
+                    s.attempts = 0;
+                    s.since = Some(now);
+                    d.event("link", "bad", format!("{kind} dropped: {err}"));
+                } else if s.error.as_ref().is_none_or(|e| e.0 != err) {
+                    d.event("link", "warn", format!("{kind} connect failed: {err}"));
+                }
+                s.since.get_or_insert(now);
+                s.attempts += 1;
+                s.retry_ms = if s.attempts <= 12 { 5000 } else { 60_000 };
+                s.next_retry = Some(now + s.retry_ms);
+                s.error = Some((err, now));
+                s.retry_ms
+            };
             d.buttplug_names.lock().unwrap().clear();
-            let wait = if fails <= 12 { 5 } else { 60 };
-            tokio::time::sleep(Duration::from_secs(wait)).await;
+            tokio::time::sleep(Duration::from_millis(wait)).await;
         }
     });
     *st.devices.task(kind).lock().unwrap() = Some(h);
 }
 
-/// The 60 Hz engine: one task, started with the first device or phone.
+/// The 60 Hz engine: one task, started with the server. Also takes the
+/// dashboard's sample once a second.
 fn ensure_ticker(st: &Arc<AppState>) {
     if st.devices.ticking.swap(true, Ordering::SeqCst) {
         return;
@@ -209,9 +285,14 @@ fn ensure_ticker(st: &Arc<AppState>) {
         let mut iv = tokio::time::interval(Duration::from_secs_f64(TICK / 1000.0));
         iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last = HashMap::new();
-        loop {
+        for n in 0u64.. {
             iv.tick().await;
             let play = d.play.lock().unwrap().clone();
+            let s = device_settings(&st).await;
+            if n % 60 == 0 {
+                let sample = dashboard::sample(&st, play.as_ref(), &s);
+                d.telem.lock().unwrap().sample(sample);
+            }
             let Some(p) = play.filter(|p| !p.paused) else {
                 // Vibrators stop with the video; strokers hold.
                 d.buttplug
@@ -219,26 +300,32 @@ fn ensure_ticker(st: &Arc<AppState>) {
                     .send_if_modified(|f| std::mem::replace(&mut f.speed, 0.0) != 0.0);
                 continue;
             };
-            let s = device_settings(&st).await;
             let (tc, player) = (&s["tcode"], &s["player"]);
-            let bp_off = s["buttplug"]["defaultOffset"].as_f64().unwrap_or(0.0);
             let t = p.time();
             if d.connected("tcode") {
                 let off = tc["defaultOffset"].as_f64().unwrap_or(0.0);
                 let f = tcode::frame(&p.axes, t + off, tc, player, TICK, &mut last);
-                d.tcode.tx.send_if_modified(|v| {
+                let sent = d.tcode.tx.send_if_modified(|v| {
                     !f.is_empty() && *v != f && {
-                        *v = f;
+                        v.clone_from(&f);
                         true
                     }
                 });
+                if sent {
+                    let mut s = d.tcode.status.lock().unwrap();
+                    s.commands += 1;
+                    s.bytes += f.len() as u64;
+                    s.last_send = Some(now_ms());
+                    drop(s);
+                    d.telem.lock().unwrap().command(&f);
+                }
             }
             if d.connected("buttplug") {
                 let (mode, main) = (
                     player["smoothing"].as_str().unwrap_or("linear"),
                     &p.axes[0].1,
                 );
-                let t = t + bp_off;
+                let t = t + s["buttplug"]["defaultOffset"].as_f64().unwrap_or(0.0);
                 let f = buttplug::Frame {
                     pos: interp::position(mode, main, t).unwrap_or(0.0).round(),
                     speed: interp::speed(main, t).round(),
@@ -260,7 +347,7 @@ async fn device_status(st: &AppState) -> Value {
     let off = |k: &str| s[k]["defaultOffset"].as_i64().unwrap_or(0);
     let mut devices = Vec::new();
     if st.devices.connected("tcode") {
-        let label = format!("TCode ({})", s["tcode"]["transport"].as_str().unwrap_or(""));
+        let label = dashboard::label(&s["tcode"]);
         devices.push(json!({"kind": "tcode", "label": label, "offsetMs": off("tcode")}));
     }
     if st.devices.connected("buttplug") {
@@ -279,43 +366,102 @@ struct SyncQuery {
 
 async fn sync(
     ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(q): Query<SyncQuery>,
     State(st): State<Arc<AppState>>,
 ) -> Response {
-    ws.on_upgrade(move |sock| sync_session(st, q.video_id, sock))
+    ws.on_upgrade(move |sock| sync_session(st, q.video_id, addr.ip().to_string(), sock))
 }
 
 async fn send(sock: &mut WebSocket, v: Value) {
     let _ = sock.send(Message::text(v.to_string())).await;
 }
 
-/// One phone playing one video; the newest phone drives the devices.
-async fn sync_session(st: Arc<AppState>, id: String, mut sock: WebSocket) {
-    ensure_ticker(&st);
-    let n = st.devices.sessions.fetch_add(1, Ordering::SeqCst) + 1;
-    let axes = match st.video(&id).await {
-        Some(v) => tokio::task::spawn_blocking(move || script::load(&v))
-            .await
-            .ok()
-            .flatten(),
+/// Load the video's script (or variant) and make it what the engine plays,
+/// keeping the playback state; tells the phone `script-ready` / `-missing`.
+async fn load_script(
+    st: &AppState,
+    n: u64,
+    video: Option<&crate::scan::Video>,
+    variant: Option<&str>,
+    sock: &mut WebSocket,
+) {
+    let axes = match video {
+        Some(v) => {
+            let (v, variant) = (v.clone(), variant.map(String::from));
+            tokio::task::spawn_blocking(move || script::load(&v, variant.as_deref()))
+                .await
+                .ok()
+                .flatten()
+        }
         None => None,
     };
-    let kind = if axes.is_some() {
+    let ready = axes.is_some();
+    if let (Some(v), Some(a)) = (video, &axes) {
+        let ids: Vec<&str> = a.iter().map(|x| x.0.as_str()).collect();
+        let what = variant.map_or(String::new(), |l| format!(" ({l})"));
+        st.devices.event(
+            "script",
+            "info",
+            format!("{}{what}: axes {}", v.name, ids.join(" ")),
+        );
+    }
+    {
+        let mut play = st.devices.play.lock().unwrap();
+        let prev = play.take().filter(|p| p.session == n);
+        *play = axes.map(|a| {
+            let mut p = prev.unwrap_or(Play {
+                session: n,
+                video_id: video.map_or(String::new(), |v| v.id.clone()),
+                name: video.map_or(String::new(), |v| v.name.clone()),
+                axes: Arc::default(),
+                at: 0.0,
+                paused: true,
+                rate: 1.0,
+                stamp: Instant::now(),
+            });
+            p.axes = Arc::new(a);
+            p
+        });
+    }
+    let kind = if ready {
         "script-ready"
     } else {
         "script-missing"
     };
-    *st.devices.play.lock().unwrap() = axes.map(|a| Play {
-        session: n,
-        axes: Arc::new(a),
-        at: 0.0,
-        paused: true,
-        rate: 1.0,
-        stamp: Instant::now(),
-    });
-    send(&mut sock, json!({"type": kind})).await;
+    send(sock, json!({"type": kind})).await;
+}
+
+/// One phone playing one video; the newest phone drives the devices and
+/// the older one is sent `kicked`.
+async fn sync_session(st: Arc<AppState>, id: String, ip: String, mut sock: WebSocket) {
+    let d = &st.devices;
+    ensure_ticker(&st);
+    let n = d.sessions.fetch_add(1, Ordering::SeqCst) + 1;
+    d.active.store(n, Ordering::SeqCst);
+    d.kick.notify_waiters();
+    *d.phone.lock().unwrap() = Some((ip, id.clone()));
+    let video = st.video(&id).await;
+    load_script(&st, n, video.as_ref(), None, &mut sock).await;
     send(&mut sock, device_status(&st).await).await;
-    while let Some(Ok(msg)) = sock.recv().await {
+    loop {
+        let kicked = d.kick.notified();
+        tokio::pin!(kicked);
+        kicked.as_mut().enable();
+        if d.active.load(Ordering::SeqCst) != n {
+            send(
+                &mut sock,
+                json!({"type": "kicked", "reason": KICK_REPLACED}),
+            )
+            .await;
+            d.event("phone", "info", "a newer phone took over".into());
+            return;
+        }
+        let msg = tokio::select! {
+            m = sock.recv() => m,
+            _ = kicked => continue,
+        };
+        let Some(Ok(msg)) = msg else { break };
         let Message::Text(text) = msg else { continue };
         let Ok(m) = serde_json::from_str::<Value>(&text) else {
             continue;
@@ -335,23 +481,37 @@ async fn sync_session(st: Arc<AppState>, id: String, mut sock: WebSocket) {
                 }
                 send(&mut sock, device_status(&st).await).await;
             }
+            Some("switch-variant") => {
+                let label = m["label"].as_str().unwrap_or("");
+                // The variant that is the main script plays as the main script.
+                let variant = video
+                    .as_ref()
+                    .and_then(|v| {
+                        v.variants.iter().find(|x| {
+                            x.label == label && Some(&x.path) != v.funscript_path.as_ref()
+                        })
+                    })
+                    .map(|x| x.label.as_str());
+                load_script(&st, n, video.as_ref(), variant, &mut sock).await;
+                send(
+                    &mut sock,
+                    json!({"type": "variant-changed", "label": label}),
+                )
+                .await;
+            }
             _ => {
-                if let Some(p) = st
-                    .devices
-                    .play
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .filter(|p| p.session == n)
-                {
+                if let Some(p) = d.play.lock().unwrap().as_mut().filter(|p| p.session == n) {
                     p.apply(&m);
                 }
             }
         }
     }
-    let mut play = st.devices.play.lock().unwrap();
+    let mut play = d.play.lock().unwrap();
     if play.as_ref().is_some_and(|p| p.session == n) {
         *play = None;
+    }
+    if d.active.load(Ordering::SeqCst) == n {
+        *d.phone.lock().unwrap() = None;
     }
 }
 
@@ -359,11 +519,12 @@ async fn devices_json(st: &AppState) -> Value {
     let mut s = device_settings(st).await;
     let status = |k: &str| {
         let s = st.devices.status(k).lock().unwrap();
-        json!({"connected": s.connected, "error": s.error})
+        json!({"connected": s.connected, "error": s.error.as_ref().map(|e| &e.0)})
     };
     let mut bp = status("buttplug");
     bp["devices"] = json!(*st.devices.buttplug_names.lock().unwrap());
     s["status"] = json!({"tcode": status("tcode"), "buttplug": bp});
+    s["profile"] = json!(profiles::active(&s["tcode"]));
     s
 }
 
@@ -371,7 +532,10 @@ async fn get_devices(State(st): State<Arc<AppState>>) -> Json<Value> {
     Json(devices_json(&st).await)
 }
 
-/// `{kind: tcode|buttplug|player, settings?: {…merged…}, action?: connect|disconnect}`.
+/// `{kind: tcode|buttplug|player, settings?: {…merged…}, action?:
+/// connect|disconnect, profile?: mirabot|funsr-mini|custom}`. Picking another
+/// TCode profile disconnects, swaps the settings and connects the new one
+/// (unless it was disconnected last time).
 async fn post_devices(State(st): State<Arc<AppState>>, Json(b): Json<Value>) -> Response {
     let Some(kind) = ["tcode", "buttplug", "player"]
         .into_iter()
@@ -379,24 +543,36 @@ async fn post_devices(State(st): State<Arc<AppState>>, Json(b): Json<Value>) -> 
     else {
         return (StatusCode::BAD_REQUEST, "kind: tcode, buttplug or player").into_response();
     };
-    let action = b["action"].as_str();
-    {
+    let mut action = b["action"].as_str();
+    let (switched, tc) = {
         let mut lib = st.library.write().await;
         let sec = lib.section_mut(kind);
+        let switched = kind == "tcode"
+            && b["profile"]
+                .as_str()
+                .is_some_and(|p| profiles::switch(sec, p));
         for (k, v) in b["settings"].as_object().into_iter().flatten() {
             sec.insert(k.clone(), v.clone());
+        }
+        if switched && action.is_none() && sec.get("autoConnect") != Some(&json!(false)) {
+            action = Some("connect");
         }
         if kind != "player" && action.is_some() {
             sec.insert("autoConnect".into(), json!(action == Some("connect")));
         }
-    }
+        (switched, Value::Object(sec.clone()))
+    };
     if let Err(e) = st.save().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    if switched {
+        disconnect(&st, "tcode");
     }
     let kind = KINDS.into_iter().find(|k| *k == kind);
     match (kind, action) {
         (Some(k), Some("connect")) => connect(&st, k),
         (Some(k), Some("disconnect")) => disconnect(&st, k),
+        (Some("tcode"), None) if b["settings"].get("funsr").is_some() => send_funsr(&st, &tc),
         _ => {}
     }
     Json(devices_json(&st).await).into_response()

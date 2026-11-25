@@ -13,8 +13,8 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Own data folder, `library.json` | done | `--data-dir`, `$FUNSYNC_RUST_DATA` |
 | Import from the old app (read-only) | done | sources, playlists, categories, `videoCategories`, the old `settings.library` (ratings, associations, scores, tag scores …) kept verbatim; the EroScripts session is not copied. `video-tags.json` / `pornstar-tags.json` are read live in phase 3 |
 | Health / status endpoint | done | `GET /health`, `GET /api/status` (sources present, videos, scan time, unreadable sources) |
-| Status API with devices, issues (`/api/status` of the old backend) | not started | phase 5 (devices on the server) |
-| Device dashboard (`/device`) | not started | |
+| Status API with devices, issues (`/api/status` of the old backend) | done | `/api/status` adds `issues` (TCode link waiting / reconnecting with attempts and last failure, no device connected), `devices` (TCode link: state, URL, since, attempts, retry, last error, commands and bytes; Buttplug devices), `session`, `phone`, `backend`, `desktop` (the server's engine, always connected); no VR bridge / headset parts |
+| Device dashboard (`/device`) | done | `backend/device-dashboard/` served unchanged (this computer only; 403 otherwise), fed by `GET /api/device/telemetry` from the server's engine: 1 s samples for 15 minutes, the last ~100 s of commands, 500 events (link connects, drops, failures, scripts loaded, phone take-overs); the web remote's newest phone is the playback source |
 | Access PIN, LAN mode | partial | `--lan` listens on every interface; the swipe deck's gate (`scout_report::gate`) with the old app's `access-pin.json`, so one login covers both apps (login page, cookie / `?k=`, lockout). Missing: headset body login and thumbnail-only keys (VR slice), WebSocket close 4401 (a refused socket gets 401) |
 | One port + nav bar for the Rust sites (swipe deck, Downloads, creators, status) | done | `src/sites.rs`: `deploy/sites.json` relayed under their prefixes (base href + nav injected, `Location` mapped, bare page paths redirect), nav from the same file plus Parity |
 | Log file | not started | stderr only |
@@ -100,9 +100,9 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| Script loading (main, variant, axis) | partial | `GET /api/media/script/{id}?variant=&axis=` serves the files (hand-made axis beats generated); the server plays the main script and its axes on the devices; variants are not played yet |
+| Script loading (main, variant, axis) | done | `GET /api/media/script/{id}?variant=&axis=` serves the files (hand-made axis beats generated); the server plays the main script or the chosen variant with their axes on the devices |
 | Heatmap and gap indicators on the seek bar | done | web remote |
-| Script variants switch (V key) | not started | |
+| Script variants switch (V key) | partial | from the web remote's player (`switch-variant` → `variant-changed`): the server plays the variant with its own axis files, the video's hand-made axes fill in and beat generated ones; no V key (no desktop player) |
 | Multi-axis (TCode 10 axes, embedded axes) | done | server engine (`src/devices/`): companion axes L1/L2/R0/R1/R2/V0/V1/V2/A0 and axes embedded in the main script (`additional_axes`, `raw`, `axes`, `channels`, sibling keys, inline TCode) |
 | Custom routing per device | not started | |
 | Speed stats | partial | from the imported `speedStatsCache`; not computed for new scripts |
@@ -123,7 +123,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | TCode USB serial from the server | done | raw tty set up with `stty` (no serial crate), `settings.tcode.port` / `baudRate` |
 | TCode UDP from the server | done | `udpHost` / `udpPort` |
 | Browser serial relay | not planned | the server drives USB serial itself (decision 3); revisit if a device sits on another computer |
-| TCode device profiles (MiraBot, FUNSR MINI, Custom) | not started | |
+| TCode device profiles (MiraBot, FUNSR MINI, Custom) | done | `POST /api/devices {kind:"tcode", profile}` and the Devices page: saves the current profile under `tcode.profiles.saved`, loads the next one's (or its defaults) and connects it unless it was disconnected; FUNSR MINI stroke length / speed / start position (`DAG` / `DKP` / `DSP`) sent at once and 2.5 s after each connect; the device pill names the profile. No floor / ceiling, generated motion or browser relay |
 | Auto-connect, WebSocket reconnect | done | `autoConnect` set by Connect / Disconnect; at start the server reconnects what was connected; retries every 5 s for a minute, then every minute |
 | Per-device offsets, Sync tab | partial | `tcode.defaultOffset` / `buttplug.defaultOffset` from the Devices page and the player's device pill (`set-offset`); no Sync tab |
 | Generated axes playback, hand-made axes win | done | generated companions play only when the script has no hand-made axis (companion or embedded) |
