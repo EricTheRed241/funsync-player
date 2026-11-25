@@ -132,6 +132,11 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
+    /// Every library edit ends here: saves (score recomputation joins later).
+    pub async fn library_changed(&self) -> Result<(), String> {
+        self.save().await
+    }
+
     /// ffprobe every video without a cached duration (`durationCache`, as
     /// in the old app), one at a time, saving every 25.
     async fn probe_durations(self: &Arc<Self>) {
@@ -204,6 +209,8 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::settings::routes())
         .merge(crate::heresphere::routes())
         .merge(crate::devices::routes())
+        .merge(crate::edits::routes())
+        .merge(crate::queue::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)

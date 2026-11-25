@@ -16,10 +16,16 @@ impl Drop for Kill {
 }
 
 fn post(port: u16, path: &str) -> Value {
+    post_json(port, path, json!({}))
+}
+
+fn post_json(port: u16, path: &str, body: Value) -> Value {
+    let body = body.to_string();
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     write!(
         s,
-        "POST {path} HTTP/1.1\r\nHost: hs.local:9\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{{}}"
+        "POST {path} HTTP/1.1\r\nHost: hs.local:9\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
     )
     .unwrap();
     let mut buf = Vec::new();
@@ -99,6 +105,8 @@ fn heresphere_listing_and_scene() {
     assert_eq!(
         sections,
         [
+            // the scripted VR video is auto-filled into the queue
+            ("Queue", 1),
             ("Score 20+", 1),
             ("VR", 1),
             ("Flat", 1),
@@ -140,12 +148,47 @@ fn heresphere_listing_and_scene() {
             "Feature:Is scripted",
             "Format:VR",
             "Length:Medium (5-15m)",
+            "Queue:Up next",
             "Playlist:Picks",
             "Score:21.0",
             "5 min",
             "10 min"
         ]
     );
+    assert_eq!(scene["writeRating"], true);
+    assert_eq!(
+        scene["eventServer"],
+        format!("http://hs.local:9/heresphere/events/{id}")
+    );
+
+    // Headset edits: rating, heart, a new playlist tag; Picks kept.
+    let edit = json!({"rating": 3, "isFavorite": true, "tags": [
+        {"name": "Playlist:Picks"}, {"name": "Playlist:Headset"}, {"name": "Queue:Up next"}]});
+    let scene = post_json(port, path, edit);
+    assert_eq!(
+        (scene["rating"].clone(), scene["isFavorite"].clone()),
+        (json!(3.0), json!(true))
+    );
+    let has = |s: &Value, t: &str| s["tags"].as_array().unwrap().iter().any(|x| x["name"] == t);
+    assert!(has(&scene, "Playlist:Headset") && has(&scene, "Playlist:Picks"));
+    // A play event answers `{}`; a close at the end of a rated video files
+    // nothing under Needs review.
+    assert_eq!(
+        post_json(
+            port,
+            &format!("/heresphere/events/{id}"),
+            json!({"event": 1, "time": 0})
+        ),
+        json!({})
+    );
+    post_json(
+        port,
+        &format!("/heresphere/events/{id}"),
+        json!({"event": 3, "time": 699_000}),
+    );
+    let scene = post(port, path);
+    assert!(!has(&scene, "Review:Needed"));
+
     let missing = post(port, "/heresphere/nope");
     assert_eq!(missing["detail"], "Scene not found");
 }

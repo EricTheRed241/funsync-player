@@ -1,19 +1,22 @@
 //! The headset players' library (`backend/routes/vr_api.py`): HereSphere
 //! (`/heresphere`, `/heresphere/<id>`) and DeoVR (`/deovr`, `/deovr/<id>`),
-//! both sectioned by `backend/services/vr_sections.py`'s rules. Read-only
-//! for now: no rating / favourite / playlist / queue edits from the
-//! headset, no playback events, no access PIN.
+//! both sectioned by `backend/services/vr_sections.py`'s rules. HereSphere
+//! is two-way: a scene POST sets the rating, the heart, `Playlist:<name>`
+//! and `Queue:Up next` tags (only tags changed since the scene was served
+//! count), and `/heresphere/events/<id>` takes plays out of the queue and
+//! files unrated videos watched to the end under Needs review. No access PIN.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -164,23 +167,14 @@ fn is_needs_review(p: &Value) -> bool {
     pl_name(p).to_lowercase() == NEEDS_REVIEW
 }
 
-/// The play queue: the user's queue (`player.userQueue`). The desktop's
-/// auto-fill isn't stored, so it isn't here.
-fn queue(lib: &Library) -> Vec<&str> {
-    lib.config["settings"]["player"]["userQueue"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect()
-}
-
-/// `[(name, items)]` (`build_sections`): `Playlist: Needs review`, Queue,
-/// SECTION_ORDER, the triage sections, then one per playlist; empty ones
-/// left out. `entries` come in title order.
+/// `[(name, items)]` (`build_sections`): `Playlist: Needs review`, Queue
+/// (`queued`: the user's queue then auto-fill), SECTION_ORDER, the triage
+/// sections, then one per playlist; empty ones left out. `entries` come in
+/// title order.
 pub fn build_sections<T: Clone>(
     lib: &Library,
     entries: &[(T, Facts)],
+    queued: &[String],
     now: f64,
 ) -> Vec<(String, Vec<T>)> {
     let mut grouped: HashMap<&str, Vec<usize>> = HashMap::new();
@@ -241,9 +235,9 @@ pub fn build_sections<T: Clone>(
         .find_map(playlist_section)
         .into_iter()
         .collect();
-    let queued: Vec<usize> = queue(lib)
+    let queued: Vec<usize> = queued
         .iter()
-        .filter_map(|p| by_path.get(p).copied())
+        .filter_map(|p| by_path.get(p.as_str()).copied())
         .collect();
     if !queued.is_empty() {
         out.push(("Queue".into(), finish(queued, false)));
@@ -263,7 +257,7 @@ pub fn build_sections<T: Clone>(
 }
 
 /// Scene tags shared by HereSphere and DeoVR (`_scene_tag_names`).
-pub fn scene_tags(lib: &Library, v: &Video, f: &Facts) -> Vec<String> {
+pub fn scene_tags(lib: &Library, v: &Video, f: &Facts, queued: &[String]) -> Vec<String> {
     let l = lib.lib();
     let mut t = Vec::new();
     let studio = if v.source_name.is_empty() {
@@ -282,7 +276,7 @@ pub fn scene_tags(lib: &Library, v: &Video, f: &Facts) -> Vec<String> {
         t.push("Feature:Is scripted".into());
     }
     t.extend(f.filter_tags());
-    if queue(lib).contains(&v.path.as_str()) {
+    if queued.contains(&v.path) {
         t.push("Queue:Up next".into());
     }
     for p in playlists(lib) {
@@ -315,6 +309,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/heresphere", get(hs_library).post(hs_library))
         .route("/heresphere/{id}", get(hs_scene).post(hs_scene))
+        .route("/heresphere/events/{id}", post(hs_event))
         .route("/deovr", get(deovr_library).post(deovr_library))
         .route("/deovr/{id}", get(deovr_scene).post(deovr_scene))
 }
@@ -374,11 +369,17 @@ fn cors(body: Value, heresphere: bool) -> Response {
 async fn sections_for<T: Clone>(
     st: &AppState,
     filter: &str,
-    item: impl Fn(&Video, &Facts) -> T,
+    item: impl Fn(&Library, &Video, &Facts) -> T,
 ) -> Vec<(String, Vec<T>)> {
     let (videos, now) = listing(st, filter).await;
-    let entries: Vec<(T, Facts)> = videos.into_iter().map(|(v, f)| (item(&v, &f), f)).collect();
-    build_sections(&*st.library.read().await, &entries, now)
+    let snap = st.snapshot.read().await.clone();
+    let lib = st.library.read().await;
+    let entries: Vec<(T, Facts)> = videos
+        .into_iter()
+        .map(|(v, f)| (item(&lib, &v, &f), f))
+        .collect();
+    let queued = crate::queue::queued_paths(&lib, &snap.videos, now);
+    build_sections(&lib, &entries, &queued, now)
 }
 
 async fn hs_library(
@@ -387,12 +388,13 @@ async fn hs_library(
     headers: HeaderMap,
 ) -> Response {
     let base = base_url(&headers);
-    let library: Vec<Value> =
-        sections_for(&st, &q.filter, |v, _| format!("{base}/heresphere/{}", v.id))
-            .await
-            .into_iter()
-            .map(|(name, list)| json!({"name": name, "list": list}))
-            .collect();
+    let library: Vec<Value> = sections_for(&st, &q.filter, |_, v, _| {
+        format!("{base}/heresphere/{}", v.id)
+    })
+    .await
+    .into_iter()
+    .map(|(name, list)| json!({"name": name, "list": list}))
+    .collect();
     cors(json!({"access": 1, "library": library}), true)
 }
 
@@ -402,11 +404,11 @@ async fn deovr_library(
     headers: HeaderMap,
 ) -> Response {
     let base = base_url(&headers);
-    let scenes: Vec<Value> = sections_for(&st, &q.filter, |v, f| {
+    let scenes: Vec<Value> = sections_for(&st, &q.filter, |lib, v, f| {
         json!({
             "title": stem(v),
             "videoLength": f.duration as u64,
-            "thumbnailUrl": format!("{base}/api/media/thumb/{}", v.id),
+            "thumbnailUrl": format!("{base}{}", crate::remote::thumb_url(lib, v)),
             "video_url": format!("{base}/deovr/{}", v.id),
         })
     })
@@ -427,6 +429,8 @@ struct Scene {
     tags: Vec<String>,
     rating: f64,
     favorite: bool,
+    queued: bool,
+    thumb: String,
 }
 
 async fn scene(st: &AppState, id: &str) -> Option<Scene> {
@@ -436,7 +440,9 @@ async fn scene(st: &AppState, id: &str) -> Option<Scene> {
         Ok(m) if m.width > 0 && m.height > 0 => (m.width, m.height),
         _ => (1920, 1080),
     };
+    let snap = st.snapshot.read().await.clone();
     let lib = st.library.read().await;
+    let queued = crate::queue::queued_paths(&lib, &snap.videos, now_ms() as f64);
     let fmt = vr::detect(&lib, &v, Some((width, height)));
     let facts = Facts::of(&lib, &v, fmt);
     let (rating, favorite) = rating_entry(&lib, &v.path);
@@ -445,9 +451,11 @@ async fn scene(st: &AppState, id: &str) -> Option<Scene> {
         height,
         fmt,
         duration: facts.duration as u64,
-        tags: scene_tags(&lib, &v, &facts),
+        tags: scene_tags(&lib, &v, &facts, &queued),
         rating,
         favorite,
+        queued: queued.contains(&v.path),
+        thumb: crate::remote::thumb_url(&lib, &v),
         v,
     })
 }
@@ -479,10 +487,34 @@ async fn hs_scene(
     State(st): State<Arc<AppState>>,
     UrlPath(id): UrlPath<String>,
     headers: HeaderMap,
+    body: Bytes,
 ) -> Response {
+    // HereSphere POSTs the scene both to load it and to save edits.
+    if let Some(v) = st.video(&id).await {
+        let served = SERVED.lock().unwrap().get(&v.path).cloned();
+        let changed = apply_scene_update(
+            &mut *st.library.write().await,
+            &v.path,
+            &crate::edits::body(&body),
+            served.as_ref(),
+        );
+        if changed {
+            let _ = st.library_changed().await;
+        }
+    }
     let Some(s) = scene(&st, &id).await else {
         return not_found();
     };
+    let playlists_served = s
+        .tags
+        .iter()
+        .filter_map(|t| t.strip_prefix("Playlist:"))
+        .map(fold)
+        .collect();
+    SERVED
+        .lock()
+        .unwrap()
+        .insert(s.v.path.clone(), (s.queued, playlists_served));
     let base = base_url(&headers);
     let screen = s.fmt.screen;
     let projection = match screen {
@@ -531,7 +563,7 @@ async fn hs_scene(
             "access": 1,
             "title": stem(&s.v),
             "description": "",
-            "thumbnailImage": format!("{base}/api/media/thumb/{id}"),
+            "thumbnailImage": format!("{base}{}", s.thumb),
             "dateReleased": "",
             "dateAdded": "",
             "duration": s.duration * 1000,
@@ -547,11 +579,11 @@ async fn hs_scene(
             "media": [{"name": format!("{}p - {label}", s.height), "sources": [{
                 "resolution": s.height.to_string(), "height": s.height, "width": s.width,
                 "size": s.v.size, "url": format!("{base}/api/media/stream/{id}")}]}],
-            // Headset edits and playback events aren't taken yet.
-            "writeFavorite": false,
-            "writeRating": false,
-            "writeTags": false,
+            "writeFavorite": true,
+            "writeRating": true,
+            "writeTags": true,
             "writeHSP": false,
+            "eventServer": format!("{base}/heresphere/events/{id}"),
         }),
         true,
     )
@@ -593,7 +625,7 @@ async fn deovr_scene(
             "screenType": s.fmt.screen,
             "stereoMode": s.fmt.stereo,
             "videoLength": s.duration,
-            "thumbnailUrl": format!("{base}/api/media/thumb/{id}"),
+            "thumbnailUrl": format!("{base}{}", s.thumb),
             "encodings": [{"name": "h264", "videoSources": [{
                 "resolution": s.height, "height": s.height, "width": s.width,
                 "size": s.v.size, "url": format!("{base}/api/media/stream/{id}")}]}],
@@ -607,6 +639,138 @@ async fn deovr_scene(
         }),
         false,
     )
+}
+
+/// path → (served with `Queue:Up next`, case-folded `Playlist:` names) of
+/// the scene detail last served, so only the user's tag changes count.
+type Served = (bool, HashSet<String>);
+static SERVED: LazyLock<Mutex<HashMap<String, Served>>> = LazyLock::new(Default::default);
+/// The video HereSphere last reported playing: a play after a pause isn't
+/// another queue `played`.
+static LAST_PLAYED: Mutex<Option<String>> = Mutex::new(None);
+const QUEUE_TAG: &str = "queue:up next";
+const REVIEW_AT_FRACTION: f64 = 0.9;
+
+fn fold(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+/// Apply a HereSphere scene POST body (`parse_heresphere_update`): a
+/// changed `rating` / `isFavorite`; with `tags`, `Playlist:<name>` tags
+/// added or removed relative to `served` (without a served record, relative
+/// to the playlists the video is in) and `Queue:Up next` (only with a served
+/// record). A plain load changes nothing. True when something changed.
+pub fn apply_scene_update(
+    lib: &mut Library,
+    path: &str,
+    b: &Value,
+    served: Option<&Served>,
+) -> bool {
+    let (cur_rating, cur_fav) = rating_entry(lib, path);
+    let rating = crate::edits::normalize_rating(&b["rating"]).filter(|r| *r != cur_rating);
+    let fav = b["isFavorite"].as_bool().filter(|f| *f != cur_fav);
+    let mut changed = rating.is_some() || fav.is_some();
+    if changed {
+        crate::edits::set_rating(lib, path, rating, fav);
+    }
+    let Some(tags) = b["tags"].as_array() else {
+        return changed;
+    };
+    let names: Vec<&str> = tags.iter().filter_map(|t| t["name"].as_str()).collect();
+    let mut wanted: Vec<String> = Vec::new();
+    for n in &names {
+        if n.len() >= 9 && n.is_char_boundary(9) && n[..9].eq_ignore_ascii_case("playlist:") {
+            let n = n[9..].trim().to_string();
+            if !n.is_empty() && !wanted.iter().any(|w| fold(w) == fold(&n)) {
+                wanted.push(n);
+            }
+        }
+    }
+    let member: Vec<String> = playlists(lib)
+        .iter()
+        .filter(|p| holds(p, path) && !pl_name(p).is_empty())
+        .map(|p| pl_name(p).to_string())
+        .collect();
+    let was_served = |k: &str| served.is_some_and(|s| s.1.contains(k));
+    for n in &wanted {
+        let k = fold(n);
+        if !member.iter().any(|m| fold(m) == k) && !was_served(&k) {
+            changed |= crate::edits::edit_playlist(lib, path, None, Some(n), true);
+        }
+    }
+    for m in &member {
+        let k = fold(m);
+        if !wanted.iter().any(|w| fold(w) == k) && (served.is_none() || was_served(&k)) {
+            changed |= crate::edits::edit_playlist(lib, path, None, Some(m), false);
+        }
+    }
+    if let Some((was_queued, _)) = served {
+        let tagged = names.iter().any(|n| fold(n) == QUEUE_TAG);
+        let change = match (tagged, *was_queued) {
+            (true, false) => Some(crate::queue::Change::Add(path, false)),
+            (false, true) => Some(crate::queue::Change::Remove(path)),
+            _ => None,
+        };
+        if let Some(c) = change {
+            crate::queue::apply(lib, c, now_ms() as f64);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// A HereSphere playback event (`{event, time}`: 0 open, 1 play, 2 pause,
+/// 3 close; time in ms): a play takes the video out of the queue once; a
+/// pause / close at ≥ 90 % of an unrated video puts it in Needs review.
+/// True when something changed.
+pub fn apply_event(lib: &mut Library, path: &str, b: &Value, last: &mut Option<String>) -> bool {
+    let event = b["event"].as_i64();
+    let mut changed = false;
+    if event == Some(1) && last.as_deref() != Some(path) {
+        crate::queue::apply(lib, crate::queue::Change::Played(path), now_ms() as f64);
+        *last = Some(path.to_string());
+        changed = true;
+    }
+    let dur = duration(lib, path);
+    let at = b["time"].as_f64().unwrap_or(-1.0) / 1000.0;
+    if matches!(event, Some(2 | 3))
+        && dur > 0.0
+        && at >= REVIEW_AT_FRACTION * dur
+        && rating_entry(lib, path).0 == 0.0
+        && !playlists(lib)
+            .iter()
+            .any(|p| is_needs_review(p) && holds(p, path))
+    {
+        changed |= crate::edits::edit_playlist(
+            lib,
+            path,
+            None,
+            Some(crate::edits::NEEDS_REVIEW_PLAYLIST),
+            true,
+        );
+    }
+    changed
+}
+
+async fn hs_event(
+    State(st): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    body: Bytes,
+) -> Response {
+    if let Some(v) = st.video(&id).await {
+        let mut last = LAST_PLAYED.lock().unwrap().clone();
+        let changed = apply_event(
+            &mut *st.library.write().await,
+            &v.path,
+            &crate::edits::body(&body),
+            &mut last,
+        );
+        *LAST_PLAYED.lock().unwrap() = last;
+        if changed {
+            let _ = st.library_changed().await;
+        }
+    }
+    cors(json!({}), false)
 }
 
 #[cfg(test)]
@@ -650,7 +814,8 @@ mod tests {
             ("c", facts("/c", Some(13.0), now - 2.0)),
             ("d", facts("/d", None, 0.0)),
         ];
-        let got = build_sections(&lib, &entries, now);
+        let queued: Vec<String> = ["/c", "/gone", "/a"].map(String::from).to_vec();
+        let got = build_sections(&lib, &entries, &queued, now);
         let names: Vec<(&str, Vec<&str>)> =
             got.iter().map(|(n, l)| (n.as_str(), l.clone())).collect();
         assert_eq!(
@@ -676,5 +841,82 @@ mod tests {
         );
         assert_eq!(chapters(301), vec![300]);
         assert!(chapters(300).is_empty());
+    }
+
+    #[test]
+    fn scene_updates() {
+        let mut lib = Library::default();
+        crate::edits::edit_playlist(&mut lib, "/a", None, Some("Old"), true);
+        // A plain load (credentials only) changes nothing.
+        assert!(!apply_scene_update(
+            &mut lib,
+            "/a",
+            &json!({"username": "x"}),
+            None
+        ));
+        let served: Served = (false, HashSet::from(["old".to_string()]));
+        let body = json!({"rating": 4.5, "isFavorite": true, "tags": [
+            {"name": "Playlist:New"}, {"name": "Queue:Up next"}, {"name": "Status:Watched"}]});
+        assert!(apply_scene_update(&mut lib, "/a", &body, Some(&served)));
+        assert_eq!(rating_entry(&lib, "/a"), (4.5, true));
+        let names: Vec<(&str, bool)> = playlists(&lib)
+            .iter()
+            .map(|p| (pl_name(p), holds(p, "/a")))
+            .collect();
+        assert_eq!(names, [("Old", false), ("New", true)]);
+        assert_eq!(crate::queue::manual(&lib), ["/a"]);
+        // Same body again, now served with those tags: nothing changes.
+        let served: Served = (true, HashSet::from(["new".to_string()]));
+        assert!(!apply_scene_update(&mut lib, "/a", &body, Some(&served)));
+        // Queue tag removed → unqueued; a playlist tag the scene wasn't served with stays.
+        crate::edits::edit_playlist(&mut lib, "/a", None, Some("Elsewhere"), true);
+        let body = json!({"tags": [{"name": "Playlist:New"}]});
+        assert!(apply_scene_update(&mut lib, "/a", &body, Some(&served)));
+        assert!(crate::queue::manual(&lib).is_empty());
+        assert!(holds(&playlists(&lib)[2], "/a"));
+    }
+
+    #[test]
+    fn events() {
+        let mut lib = Library::default();
+        *lib.lib_mut("durationCache") = json!({"/a": 100.0});
+        crate::queue::apply(&mut lib, crate::queue::Change::Add("/a", false), 0.0);
+        let mut last = None;
+        assert!(apply_event(
+            &mut lib,
+            "/a",
+            &json!({"event": 1, "time": 0}),
+            &mut last
+        ));
+        assert!(crate::queue::manual(&lib).is_empty());
+        assert!(!apply_event(
+            &mut lib,
+            "/a",
+            &json!({"event": 1, "time": 5}),
+            &mut last
+        ));
+        assert!(!apply_event(
+            &mut lib,
+            "/a",
+            &json!({"event": 2, "time": 89_000}),
+            &mut last
+        ));
+        assert!(apply_event(
+            &mut lib,
+            "/a",
+            &json!({"event": 3, "time": 90_000}),
+            &mut last
+        ));
+        assert!(
+            playlists(&lib)
+                .iter()
+                .any(|p| is_needs_review(p) && holds(p, "/a"))
+        );
+        assert!(!apply_event(
+            &mut lib,
+            "/a",
+            &json!({"event": 3, "time": 99_000}),
+            &mut last
+        ));
     }
 }

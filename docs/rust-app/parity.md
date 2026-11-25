@@ -36,9 +36,9 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| One queue (user additions + auto-fill to 10) | not started | phase 2 |
-| Queue on every client (page, headset section, `Queue:Up next` tag) | not started | phase 2 / 4 |
-| Queue API (`/api/remote/queue*`) | not started | |
+| One queue (user additions + auto-fill to 10) | done | `src/queue.rs`, port of `play-queue.js` (`player.userQueue` / `queuePlayed` / `queueAutoFill`, auto-fill from `preferenceScores`, review playlists and the delete rating skipped) |
+| Queue on every client (page, headset section, `Queue:Up next` tag) | done | the web remote's Queue tab and queue buttons; the HereSphere / DeoVR Queue section (your queue + auto-fill) and the `Queue:Up next` tag, editable in HereSphere |
+| Queue API (`/api/remote/queue*`) | done | `GET /queue`, `add` / `remove` / `played` / `clear` / `auto-fill`, applied at once |
 
 ## Library
 
@@ -52,14 +52,14 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Manual script association | not started | |
 | Fuzzy search with exact-title precedence | done | the web remote's search (`library-search.js`) |
 | Sort (preference score default, name, date, duration, speed, rating) | partial | the web remote's sorts; scores are the imported snapshot until the server computes them |
-| Playlists | partial | listed and played (`/api/remote/playlists`); no edits yet |
+| Playlists | partial | listed and played; add / remove a video and create by name from the phone (`/api/remote/playlists/add-video`, `remove-video`); no rename / delete / reorder |
 | Categories from EroScripts tags, VR, axis categories | partial | the imported categories are listed (`/api/remote/categories`); not computed by the server yet |
 | Artist playlists, aliases, playlist cleanup | not started | phase 3 |
 | Auto collections, score lists | partial | the imported collections are listed; not computed by the server yet |
 | Smart playlists (VR picks, Quick ones, Favorites) | not started | phase 3 |
 | Preference score and tag scores | not started | phase 3 (Rust `candidateScore` exists in `crates/slr-scout/src/score.rs`) |
 | Multi-select bulk assignment | not started | |
-| Ratings and favourites | partial | imported and shown; no edits yet |
+| Ratings and favourites | done | `POST /api/remote/rating` (half stars, heart) saved to `library.ratings`; ≤ 2★ deletes nothing (read-only library) |
 | Watched videos last, Watched collection | done | from the ratings (`watched`, `watchedLast`, the `:watched` collection) |
 | Overview (capacity, ratings, artists, tag scores) | not started | |
 | Triage deletes (≤ 2★), duplicate deletes | not planned | read-only library until the user says the Rust app takes over |
@@ -77,9 +77,9 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | One web UI everywhere (phone first, desktop layout) | partial | the web remote (`backend/web-remote/`, unchanged, with `crates/funsync-server/web/remote/` overriding files when needed) at `/remote/`; desktop-only views (Overview, settings, devices) missing |
-| Triage from the phone (rating, heart, add to playlist) | not started | |
-| Review on end | not started | |
-| Tags / Artists views, tag scores, favourite artists | not started | |
+| Triage from the phone (rating, heart, add to playlist) | done | `src/edits.rs`, applied to the library at once (no desktop edit queue) |
+| Review on end | done | the phone's flow (add to *Needs review* by name; a rating takes the video out) |
+| Tags / Artists views, tag scores, favourite artists | partial | views, tag scores, favourite artists and bonus are stored; Recalculate only saves until the server computes scores |
 | Player controls: own or browser | done | web remote |
 | PWA install | done | the web remote's manifest and service worker |
 | Local-only mode | done | loopback is the default; `--lan` opts in |
@@ -88,10 +88,10 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header. Read-only (`write*` false, no event server); Queue is `player.userQueue` only (no auto-fill); Hand-made from companion files only (no embedded axes); no access PIN; no `?v=` thumb versions |
+| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue with auto-fill, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header; writable rating / heart / tags and `eventServer`. Hand-made from companion files only (no embedded axes); versioned thumbnail URLs (`?v=`); no access PIN |
 | DeoVR API | partial | `/deovr` and `/deovr/<id>` with the same sections and tags; encoding name always `h264`; no access PIN |
-| Rate / favourite / playlist / queue edits from the headset | not started | phase 4 |
-| Review on end from the headset | not started | phase 4 |
+| Rate / favourite / playlist / queue edits from the headset | done | HereSphere scene POST: rating, `isFavorite`, `Playlist:<name>` and `Queue:Up next` tags (only tags changed since the scene was served count); DeoVR is read-only, as before |
+| Review on end from the headset | done | `POST /heresphere/events/<id>`: a play takes the video out of the queue (once per video); a pause / close at ≥ 90 % of an unrated video files it under Needs review |
 | VR decision (projection, filename, frames, shape) | partial | VR Format projection, Mark as VR / Flat, filename rules (patterns, studio codes, `XXVR-123`, `VR180`, bare `VR`), ~2:1 ≥ 3200 wide fallback from probed dimensions (in memory, so a listing only sees videos probed since start); frame-based stereo detection (`stereo_detect.py`) not ported |
 | PCVR companion bridge (HereSphere timestamp API) | not started | |
 | Session status card, VR ↔ web remote mutex | not started | |
