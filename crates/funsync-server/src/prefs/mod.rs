@@ -251,7 +251,8 @@ pub(crate) fn new_id() -> String {
 }
 
 /// An approximation of `localeCompare` (ICU root collation): case-blind,
-/// with `numeric` comparing digit runs by value.
+/// spaces, punctuation and symbols before digits before letters, with
+/// `numeric` comparing digit runs by value.
 pub(crate) fn locale_cmp(a: &str, b: &str, numeric: bool) -> Ordering {
     let (a, b) = (a.to_lowercase(), b.to_lowercase());
     let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
@@ -276,7 +277,8 @@ pub(crate) fn locale_cmp(a: &str, b: &str, numeric: bool) -> Ordering {
             }
             (Some(c), Some(d)) => {
                 if c != d {
-                    return c.cmp(&d);
+                    let class = |c: char| (c.is_alphanumeric() as u8) + (c.is_alphabetic() as u8);
+                    return (class(c), c).cmp(&(class(d), d));
                 }
                 x.next();
                 y.next();
@@ -487,6 +489,12 @@ mod tests {
         assert_eq!(locale_cmp("Scene 9", "scene 10", true), Ordering::Less);
         assert_eq!(locale_cmp("Scene 9", "scene 10", false), Ordering::Greater);
         assert_eq!(locale_cmp("ABC", "abc", false), Ordering::Equal);
+        assert_eq!(
+            locale_cmp("A - ✨B", "a - victim", false),
+            Ordering::Less,
+            "symbols first"
+        );
+        assert_eq!(locale_cmp("a_1", "a1", false), Ordering::Less);
     }
 
     #[test]

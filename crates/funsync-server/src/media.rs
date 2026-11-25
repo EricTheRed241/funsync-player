@@ -7,14 +7,14 @@
 //! 25 s budget. Cache names match the old `thumb-cache` so the two caches
 //! could be shared later.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
@@ -30,11 +30,19 @@ const THUMB_TIMEOUT: Duration = Duration::from_secs(25);
 pub const THUMB_WIDTH: u32 = 320;
 const THUMB_SEEK_PCT: f64 = 0.1;
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Metadata {
     pub duration: f64,
     pub width: u32,
     pub height: u32,
+    /// The video stream's codec as the headsets name it (`video_info.py`):
+    /// `h265`, `h264`, else ffprobe's name.
+    #[serde(default = "h264")]
+    pub codec: String,
+}
+
+fn h264() -> String {
+    "h264".into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,10 +145,18 @@ fn crop_filters(crop: Option<&str>) -> &'static str {
     }
 }
 
+/// A generated thumbnail's name (`_THUMB_FILE_RE`): video id first.
+static THUMB_NAME: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"^([0-9a-f]{12})_([0-9a-f]{8})_single_(v\d+)e?_\d{4}_\d+(?:_[a-z]+)?\.jpg$")
+        .unwrap()
+});
+
 pub struct Media {
     thumb_dir: PathBuf,
     /// path → (stat key, metadata): a replaced file is probed again.
     meta: Mutex<HashMap<String, (String, Metadata)>>,
+    /// Where `meta` is kept between runs (`with_cache`).
+    cache_file: Option<PathBuf>,
     slots: Semaphore,
     ffmpeg: String,
     ffprobe: String,
@@ -151,10 +167,93 @@ impl Media {
         Self {
             thumb_dir,
             meta: Mutex::new(HashMap::new()),
+            cache_file: None,
             slots: Semaphore::new(4),
             ffmpeg: find_binary("ffmpeg"),
             ffprobe: find_binary("ffprobe"),
         }
+    }
+
+    /// Keep the probed metadata in `file` (read now, written by
+    /// `save_cache`), so frame sizes survive restarts.
+    pub fn with_cache(mut self, file: PathBuf) -> Self {
+        if let Some(m) = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+        {
+            self.meta = Mutex::new(m);
+        }
+        self.cache_file = Some(file);
+        self
+    }
+
+    pub fn save_cache(&self) {
+        if let Some(file) = &self.cache_file {
+            let body = serde_json::to_vec(&*self.meta.lock().unwrap()).unwrap_or_default();
+            let _ = crate::data::write_atomic(file, &body);
+        }
+    }
+
+    /// Run ffmpeg with `args`, blocking: its output when it exits 0 within
+    /// `timeout` (killed after that).
+    pub fn ffmpeg_blocking<I, S>(&self, args: I, timeout: Duration) -> Option<Vec<u8>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        let mut child = std::process::Command::new(&self.ffmpeg)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut out = child.stdout.take()?;
+        let reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut out, &mut buf).map(|_| buf)
+        });
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            if let Some(s) = child.try_wait().ok()? {
+                break s;
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let bytes = reader.join().ok()?.ok()?;
+        status.success().then_some(bytes)
+    }
+
+    /// Delete generated thumbnails no video uses (`prune_thumb_cache`):
+    /// `keep` maps every video id to the file names it uses now, or to none
+    /// when its file can't be read right now (it keeps whatever it has).
+    /// Any other JPEG in the cache goes. Returns how many were deleted.
+    pub fn prune(&self, keep: &HashMap<String, Option<HashSet<String>>>) -> usize {
+        let Ok(dir) = std::fs::read_dir(&self.thumb_dir) else {
+            return 0;
+        };
+        let mut removed = 0;
+        for name in dir
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+        {
+            if !name.ends_with(".jpg") {
+                continue;
+            }
+            let kept = THUMB_NAME
+                .captures(&name)
+                .and_then(|c| keep.get(&c[1]))
+                .is_some_and(|used| used.as_ref().is_none_or(|u| u.contains(&name)));
+            if !kept && std::fs::remove_file(self.thumb_dir.join(&name)).is_ok() {
+                removed += 1;
+            }
+        }
+        removed
     }
 
     pub async fn metadata(&self, path: &Path) -> Result<Metadata, String> {
@@ -163,7 +262,7 @@ impl Media {
         if let Some((k, m)) = self.meta.lock().unwrap().get(&p)
             && *k == key
         {
-            return Ok(*m);
+            return Ok(m.clone());
         }
         let out = tokio::time::timeout(
             THUMB_TIMEOUT,
@@ -191,13 +290,13 @@ impl Media {
             ));
         }
         let m = parse_probe(&out.stdout)?;
-        self.meta.lock().unwrap().insert(p, (key, m));
+        self.meta.lock().unwrap().insert(p, (key, m.clone()));
         Ok(m)
     }
 
     /// Metadata probed earlier, without probing or statting the file.
     pub fn cached(&self, path: &str) -> Option<Metadata> {
-        self.meta.lock().unwrap().get(path).map(|(_, m)| *m)
+        self.meta.lock().unwrap().get(path).map(|(_, m)| m.clone())
     }
 
     /// The cached thumbnail of a video, generated when missing; `crop` is a
@@ -350,7 +449,16 @@ fn parse_probe(json: &[u8]) -> Result<Metadata, String> {
     if duration <= 0.0 {
         duration = num(video.and_then(|s| s.get("duration")));
     }
+    let codec = match video
+        .and_then(|s| s["codec_name"].as_str())
+        .unwrap_or("h264")
+    {
+        "hevc" | "h265" => "h265",
+        "h264" | "avc" | "avc1" => "h264",
+        c => c,
+    };
     Ok(Metadata {
+        codec: codec.into(),
         duration,
         width: video.and_then(|s| s["width"].as_u64()).unwrap_or(0) as u32,
         height: video.and_then(|s| s["height"].as_u64()).unwrap_or(0) as u32,
@@ -371,6 +479,7 @@ fn find_binary(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn frame_checks() {
@@ -397,17 +506,86 @@ mod tests {
     #[test]
     fn probe_parse() {
         let m = parse_probe(
-            br#"{"streams":[{"codec_type":"audio"},{"codec_type":"video","width":3840,"height":1920}],
+            br#"{"streams":[{"codec_type":"audio"},{"codec_type":"video","codec_name":"hevc","width":3840,"height":1920}],
                 "format":{"duration":"125.5"}}"#,
         )
         .unwrap();
+        let want = Metadata {
+            duration: 125.5,
+            width: 3840,
+            height: 1920,
+            codec: "h265".into(),
+        };
+        assert_eq!(m, want);
+        let codec = |c: &str| {
+            let json = format!(r#"{{"streams":[{{"codec_type":"video","codec_name":"{c}"}}]}}"#);
+            parse_probe(json.as_bytes()).unwrap().codec
+        };
+        assert_eq!((codec("avc1"), codec("vp9")), ("h264".into(), "vp9".into()));
+    }
+
+    #[test]
+    fn prune_keeps_what_videos_use() {
+        let d = tempfile::tempdir().unwrap();
+        let media = Media::new(d.path().to_path_buf());
+        let name = |id: &str, key: &str, crop| thumb_file_name(id, key, crop);
+        let files = [
+            name("aaaaaaaaaaaa", "11111111", None),
+            name("aaaaaaaaaaaa", "22222222", None),
+            name("aaaaaaaaaaaa", "11111111", Some("sbs")),
+            name("bbbbbbbbbbbb", "33333333", None),
+            name("cccccccccccc", "44444444", None),
+            "aaaaaaaaaaaa.jpg".into(),
+            "notes.txt".into(),
+        ];
+        for f in &files {
+            std::fs::write(d.path().join(f), b"x").unwrap();
+        }
+        let keep = HashMap::from([
+            (
+                "aaaaaaaaaaaa".to_string(),
+                Some(HashSet::from([files[0].clone()])),
+            ),
+            ("bbbbbbbbbbbb".to_string(), None),
+        ]);
+        assert_eq!(media.prune(&keep), 4);
+        let left: HashSet<String> = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        let want: HashSet<String> = [&files[0], &files[3], &files[6]]
+            .into_iter()
+            .cloned()
+            .collect();
         assert_eq!(
-            m,
-            Metadata {
-                duration: 125.5,
-                width: 3840,
-                height: 1920
-            }
+            left, want,
+            "an older file, crop or name, and unknown videos go"
+        );
+    }
+
+    #[test]
+    fn probed_metadata_survives_a_restart() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("media-cache.json");
+        // A cache written before codecs were kept: h264.
+        let m = Metadata {
+            duration: 12.5,
+            width: 3840,
+            height: 1920,
+            codec: "h264".into(),
+        };
+        let old =
+            json!({"/v.mp4": ["abcd1234", {"duration": 12.5, "width": 3840, "height": 1920}]});
+        std::fs::write(&file, serde_json::to_vec(&old).unwrap()).unwrap();
+        let media = Media::new(d.path().join("t")).with_cache(file.clone());
+        assert_eq!(media.cached("/v.mp4"), Some(m.clone()));
+        std::fs::remove_file(&file).unwrap();
+        media.save_cache();
+        assert_eq!(
+            Media::new(d.path().join("t"))
+                .with_cache(file)
+                .cached("/v.mp4"),
+            Some(m)
         );
     }
 }
