@@ -9,12 +9,15 @@ pub const USAGE: &str = "\
 funsync-server: FunSync in Rust (library server + web UI)
 
 Usage:
-  funsync-server [serve] [--port N] [--lan] [--data-dir <dir>]
+  funsync-server [serve] [--port N] [--lan] [--supervise] [--data-dir <dir>]
   funsync-server import [--from <old userData>] [--force] [--data-dir <dir>]
 
 serve    Serve http://127.0.0.1:<port>/ (default 5300) and scan the library
          at start. --lan listens on every interface; other devices then need
          the access PIN when the old app's access-pin.json sets one.
+         --supervise also runs the local sites of deploy/sites.json and the
+         job runner, as the desktop app does (a site already running is left
+         alone).
 import   Copy library sources, playlists, categories and ratings from the old
          app's config.json (read-only) into <data-dir>/library.json.
          Refuses to replace an earlier import without --force.
@@ -32,6 +35,7 @@ pub enum Command {
     Serve {
         addr: SocketAddr,
         data_dir: PathBuf,
+        supervise: bool,
     },
     Import {
         from: PathBuf,
@@ -51,12 +55,14 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let mut data_dir = None;
     let mut from = None;
     let mut force = false;
+    let mut supervise = false;
     while let Some(a) = it.next() {
         let mut val = |name: &str| it.next().cloned().ok_or(format!("{name} needs a value"));
         match a.as_str() {
             "-h" | "--help" => return Ok(Command::Help),
             "--port" => port = val("--port")?.parse().map_err(|_| "--port: not a port")?,
             "--lan" if sub.as_deref() != Some("import") => lan = true,
+            "--supervise" if sub.as_deref() != Some("import") => supervise = true,
             "--data-dir" => data_dir = Some(PathBuf::from(val("--data-dir")?)),
             "--from" if sub.as_deref() == Some("import") => {
                 from = Some(PathBuf::from(val("--from")?))
@@ -88,6 +94,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             port,
         )),
         data_dir,
+        supervise,
     })
 }
 
@@ -105,7 +112,8 @@ mod tests {
             parse(&s(&["--port", "5301", "--data-dir", "/d"])).unwrap(),
             Command::Serve {
                 addr: "127.0.0.1:5301".parse().unwrap(),
-                data_dir: "/d".into()
+                data_dir: "/d".into(),
+                supervise: false,
             }
         );
         assert_eq!(

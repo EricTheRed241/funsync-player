@@ -4,7 +4,7 @@ The Rust app (`crates/funsync-server`, http://127.0.0.1:5300/) is built beside t
 
 Ground rules while both run: the Rust app has its own data folder (`~/Library/Application Support/funsync-rust/`, seeded by `funsync-server import`, which only reads the old `config.json`) and treats the library as read-only (no deletes, renames, rating deletes or sidecar writes). Downloads, scouts and jobs stay with the Electron app.
 
-The **status dashboard** at http://127.0.0.1:5300/status shows the counts, a progress bar and these tables (the server reads this file at build time), plus the server's own state.
+The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows the counts, a progress bar and these tables (the server reads this file at build time), plus the server's own state.
 
 ## Server and data
 
@@ -16,7 +16,7 @@ The **status dashboard** at http://127.0.0.1:5300/status shows the counts, a pro
 | Status API with devices, issues (`/api/status` of the old backend) | not started | phase 5 (devices on the server) |
 | Device dashboard (`/device`) | not started | |
 | Access PIN, LAN mode | partial | `--lan` listens on every interface; the swipe deck's gate (`scout_report::gate`) with the old app's `access-pin.json`, so one login covers both apps (login page, cookie / `?k=`, lockout). Missing: headset body login and thumbnail-only keys (VR slice), WebSocket close 4401 (a refused socket gets 401) |
-| Nav bar | partial | `/site-nav.js` (the old nav script) links Remote and Status; the swipe deck, Downloads and Creators sites aren't proxied yet |
+| One port + nav bar for the Rust sites (swipe deck, Downloads, creators, status) | done | `src/sites.rs`: `deploy/sites.json` relayed under their prefixes (base href + nav injected, `Location` mapped, bare page paths redirect), nav from the same file plus Parity |
 | Log file | not started | stderr only |
 
 ## Video Player
@@ -134,7 +134,7 @@ The **status dashboard** at http://127.0.0.1:5300/status shows the counts, a pro
 |---|---|---|
 | EroScripts search / download in the app, login | not started | |
 | Post previews as thumbnails | not started | |
-| Scouts, swipe deck, downloads, creators, job runner | not planned | stay with the current setup (Rust crates on their own ports); the Rust app links to them later |
+| Scouts, swipe deck, downloads, creators, job runner | done | the sites are relayed on 5300; `--supervise` builds and runs them and `job-runner serve` like the desktop app (a site whose port already answers is left alone). The scouts and jobs themselves stay their own crates |
 | `eroscripts:sync`, dedupe, reorganize, `upgrade:axes` CLIs | not planned | CLIs, unchanged; they keep writing side files both apps can read |
 
 ## Data
