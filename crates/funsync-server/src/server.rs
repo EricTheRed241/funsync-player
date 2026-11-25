@@ -167,9 +167,14 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    /// Every library edit ends here: the library rules again (scores,
-    /// lists; tag merges and the playlist cleanup are for scans), then saved.
+    /// Every library edit ends here: when this server owns the library,
+    /// triage deletes videos rated at or below the delete rating first; then
+    /// the library rules again (scores, lists; tag merges and the playlist
+    /// cleanup are for scans), then saved.
     pub async fn library_changed(&self) -> Result<(), String> {
+        if data::owns_library() {
+            self.sweep_rejected().await;
+        }
         let snap = self.snapshot.read().await.clone();
         {
             let mut lib = self.library.write().await;
@@ -177,6 +182,52 @@ impl AppState {
             crate::prefs::refresh_with(&mut lib, &snap, None, now_ms(), dims);
         }
         self.save().await
+    }
+
+    /// `sweepRejected`: delete every rejected video (see `delete.rs`).
+    async fn sweep_rejected(&self) {
+        let (targets, sources): (Vec<String>, Vec<String>) = {
+            let lib = self.library.read().await;
+            let targets = lib.lib()["ratings"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(p, _)| p.clone())
+                .filter(|p| crate::delete::rejected(&lib, p))
+                .collect();
+            (targets, lib.sources().into_iter().map(|s| s.path).collect())
+        };
+        let user_data = data::default_old_user_data().unwrap_or_else(|| self.data_dir.clone());
+        let mut gone = Vec::new();
+        for p in targets {
+            match crate::delete::delete_video(&p, &sources, &user_data, now_ms(), "low-rating") {
+                Ok(_) => gone.push(p),
+                Err(e) => eprintln!("funsync-server: triage delete of {p} failed: {e}"),
+            }
+        }
+        self.forget_deleted(&gone).await;
+    }
+
+    /// Drop deleted videos from the library and the listing.
+    pub async fn forget_deleted(&self, paths: &[String]) {
+        if paths.is_empty() {
+            return;
+        }
+        let mut lib = self.library.write().await;
+        for p in paths {
+            crate::delete::forget(&mut lib, p);
+        }
+        let mut snap = self.snapshot.write().await;
+        let mut next = Snapshot {
+            videos: snap.videos.clone(),
+            ..Default::default()
+        };
+        next.videos.retain(|v| !paths.contains(&v.path));
+        next.scanned_at = snap.scanned_at;
+        next.scan_ms = snap.scan_ms;
+        next.unmatched_funscripts = snap.unmatched_funscripts;
+        next.failed_paths = snap.failed_paths.clone();
+        *snap = Arc::new(next);
     }
 
     /// ffprobe every video without a cached duration (`durationCache`, as

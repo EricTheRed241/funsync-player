@@ -6,6 +6,7 @@
 pub mod access;
 pub mod cli;
 pub mod data;
+pub mod delete;
 pub mod devices;
 pub mod edits;
 pub mod eroscripts;

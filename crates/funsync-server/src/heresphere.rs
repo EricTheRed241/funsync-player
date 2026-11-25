@@ -13,13 +13,14 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path as UrlPath, Query, State};
+use axum::extract::{Extension, Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::access::HeadsetKeys;
 use crate::data::{Library, now_ms};
 use crate::remote::{category_names, chip_tags, duration, is_watched, rating_entry, watched_last};
 use crate::scan::Video;
@@ -402,13 +403,15 @@ async fn deovr_library(
     State(st): State<Arc<AppState>>,
     Query(q): Query<Filter>,
     headers: HeaderMap,
+    keys: Option<Extension<HeadsetKeys>>,
 ) -> Response {
+    let keys = keys.map(|e| e.0).unwrap_or_default();
     let base = base_url(&headers);
     let scenes: Vec<Value> = sections_for(&st, &q.filter, |lib, v, f| {
         json!({
             "title": stem(v),
             "videoLength": f.duration as u64,
-            "thumbnailUrl": format!("{base}{}", crate::remote::thumb_url(lib, v)),
+            "thumbnailUrl": key(format!("{base}{}", crate::remote::thumb_url(lib, v)), &keys.thumb),
             "video_url": format!("{base}/deovr/{}", v.id),
         })
     })
@@ -416,7 +419,10 @@ async fn deovr_library(
     .into_iter()
     .map(|(name, list)| json!({"name": name, "list": list}))
     .collect();
-    cors(json!({"scenes": scenes, "authorized": "0"}), false)
+    cors(
+        json!({"scenes": scenes, "authorized": if keys.media.is_some() { "1" } else { "0" }}),
+        false,
+    )
 }
 
 /// What both scene details need: the video, its probed size, layout, tags.
@@ -460,6 +466,10 @@ async fn scene(st: &AppState, id: &str) -> Option<Scene> {
     })
 }
 
+fn key(url: String, k: &Option<String>) -> String {
+    video_tags::access::with_key(&url, k.as_deref())
+}
+
 fn not_found() -> Response {
     (
         StatusCode::NOT_FOUND,
@@ -487,8 +497,10 @@ async fn hs_scene(
     State(st): State<Arc<AppState>>,
     UrlPath(id): UrlPath<String>,
     headers: HeaderMap,
+    keys: Option<Extension<HeadsetKeys>>,
     body: Bytes,
 ) -> Response {
+    let keys = keys.map(|e| e.0).unwrap_or_default();
     // HereSphere POSTs the scene both to load it and to save edits.
     if let Some(v) = st.video(&id).await {
         let served = SERVED.lock().unwrap().get(&v.path).cloned();
@@ -549,10 +561,10 @@ async fn hs_scene(
     let scripts: Vec<Value> =
         s.v.funscript_path
             .iter()
-            .map(|p| json!({"name": file_name(p), "url": format!("{base}/api/media/script/{id}")}))
+            .map(|p| json!({"name": file_name(p), "url": key(format!("{base}/api/media/script/{id}"), &keys.media)}))
             .collect();
     let subtitles: Vec<Value> = s.v.subtitle_path.iter().map(|p| {
-        json!({"name": file_name(p), "language": "English", "url": format!("{base}/api/media/subtitle/{id}")})
+        json!({"name": file_name(p), "language": "English", "url": key(format!("{base}/api/media/subtitle/{id}"), &keys.media)})
     }).collect();
     let stereo = match s.fmt.stereo {
         "sbs" | "tb" => s.fmt.stereo,
@@ -563,7 +575,7 @@ async fn hs_scene(
             "access": 1,
             "title": stem(&s.v),
             "description": "",
-            "thumbnailImage": format!("{base}{}", s.thumb),
+            "thumbnailImage": key(format!("{base}{}", s.thumb), &keys.thumb),
             "dateReleased": "",
             "dateAdded": "",
             "duration": s.duration * 1000,
@@ -578,12 +590,12 @@ async fn hs_scene(
             "tags": tags,
             "media": [{"name": format!("{}p - {label}", s.height), "sources": [{
                 "resolution": s.height.to_string(), "height": s.height, "width": s.width,
-                "size": s.v.size, "url": format!("{base}/api/media/stream/{id}")}]}],
+                "size": s.v.size, "url": key(format!("{base}/api/media/stream/{id}"), &keys.media)}]}],
             "writeFavorite": true,
             "writeRating": true,
             "writeTags": true,
             "writeHSP": false,
-            "eventServer": format!("{base}/heresphere/events/{id}"),
+            "eventServer": key(format!("{base}/heresphere/events/{id}"), &keys.media),
         }),
         true,
     )
@@ -593,7 +605,9 @@ async fn deovr_scene(
     State(st): State<Arc<AppState>>,
     UrlPath(id): UrlPath<String>,
     headers: HeaderMap,
+    keys: Option<Extension<HeadsetKeys>>,
 ) -> Response {
+    let keys = keys.map(|e| e.0).unwrap_or_default();
     let Some(s) = scene(&st, &id).await else {
         return not_found();
     };
@@ -602,7 +616,7 @@ async fn deovr_scene(
     let fleshlight: Vec<Value> =
         s.v.funscript_path
             .iter()
-            .map(|p| json!({"title": file_name(p), "url": format!("{base}/api/media/script/{id}")}))
+            .map(|p| json!({"title": file_name(p), "url": key(format!("{base}/api/media/script/{id}"), &keys.media)}))
             .collect();
     let timestamps: Vec<Value> = chapters(s.duration)
         .into_iter()
@@ -625,10 +639,10 @@ async fn deovr_scene(
             "screenType": s.fmt.screen,
             "stereoMode": s.fmt.stereo,
             "videoLength": s.duration,
-            "thumbnailUrl": format!("{base}{}", s.thumb),
+            "thumbnailUrl": key(format!("{base}{}", s.thumb), &keys.thumb),
             "encodings": [{"name": "h264", "videoSources": [{
                 "resolution": s.height, "height": s.height, "width": s.width,
-                "size": s.v.size, "url": format!("{base}/api/media/stream/{id}")}]}],
+                "size": s.v.size, "url": key(format!("{base}/api/media/stream/{id}"), &keys.media)}]}],
             "fleshlight": fleshlight,
             "timeStamps": timestamps,
             "isScripted": s.v.funscript_path.is_some(),

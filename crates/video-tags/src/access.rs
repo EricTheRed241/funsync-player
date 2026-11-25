@@ -235,6 +235,65 @@ fn unhex<const N: usize>(s: &str) -> Option<[u8; N]> {
     }
     Some(out)
 }
+/// The path prefix a thumbnail token opens.
+pub const THUMB_PATH_PREFIX: &str = "/api/media/thumb/";
+
+/// Headset keys (`access_pin.py` make_media_token / make_thumb_token).
+impl AccessPin {
+    /// The `k` for media URLs handed to headsets: a login token whose expiry
+    /// is rounded down to a whole UTC day, so the URLs stay the same all day.
+    pub fn media_token(&self, now: u64) -> String {
+        let payload = format!("v1.{}", (now + TOKEN_LIFETIME_SECS) / 86_400 * 86_400);
+        let sig = self.mac(&payload).finalize().into_bytes();
+        format!("{payload}.{}", hex(&sig))
+    }
+
+    /// The `k` for thumbnail URLs: `t1.<hex HMAC(secret, "t1.thumbs")>`, no
+    /// expiry, opens thumbnails only; changes with the PIN.
+    pub fn thumb_token(&self) -> String {
+        format!("t1.{}", hex(&self.mac("t1.thumbs").finalize().into_bytes()))
+    }
+
+    pub fn verify_thumb(&self, token: &str) -> bool {
+        token
+            .strip_prefix("t1.")
+            .and_then(unhex::<32>)
+            .is_some_and(|sig| self.mac("t1.thumbs").verify_slice(&sig).is_ok())
+    }
+}
+
+/// `url` with `k=<token>` appended; unchanged without a token.
+pub fn with_key(url: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!(
+            "{url}{}{QUERY_KEY}={t}",
+            if url.contains('?') { '&' } else { '?' }
+        ),
+        None => url.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod headset_tests {
+    use super::*;
+
+    #[test]
+    fn headset_tokens_match_python() {
+        let p = AccessPin::new("1234", std::array::from_fn(|i| i as u8), "x").unwrap();
+        let thumb = "t1.aafb8a04d98f10cfdb7f69c0bc3b7f5712e79b1b3112bc00a40a428198386275";
+        assert_eq!(p.thumb_token(), thumb);
+        assert!(p.verify_thumb(thumb) && !p.verify_thumb(&thumb.replace("aa", "ab")));
+        assert!(!p.verify_thumb("v1.1.x"));
+        let media = p.media_token(1_700_000_000);
+        assert_eq!(
+            media,
+            "v1.1702512000.0f8082e2c582d041964126ba66d7650409deb6cfbdd6e385cea4aaa7ff1594a8"
+        );
+        assert!(p.verify(&media, 1_700_000_000) && !p.verify_thumb(&media));
+        assert_eq!(with_key("/a?v=1", Some("t")), "/a?v=1&k=t");
+        assert_eq!(with_key("/a", None), "/a");
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -123,6 +123,13 @@ impl Gate {
         if tokens.any(|t| pin.verify(t, now)) {
             return None;
         }
+        // A headset's thumbnail key opens thumbnails and nothing else.
+        if matches!(req.method, "GET" | "HEAD")
+            && path.starts_with(access::THUMB_PATH_PREFIX)
+            && access::query_values(query, access::QUERY_KEY).any(|t| pin.verify_thumb(t))
+        {
+            return None;
+        }
         Some(if page {
             redirect(&format!("/login?next={}", encode(target)))
         } else {
@@ -164,6 +171,34 @@ impl Gate {
         }
         self.failures.entry(req.client).or_default().push(now);
         login_form(401, next, Some("Wrong PIN"))
+    }
+
+    /// The PIN file for a login outside the form (headsets): `Err` when it's
+    /// unusable.
+    #[allow(clippy::result_unit_err)]
+    pub fn pin(&mut self, user_data: &Path, err: &mut dyn Write) -> Result<Option<AccessPin>, ()> {
+        self.load(user_data, err)
+    }
+
+    /// Check a headset's password against `pin`, sharing the form's lockout:
+    /// `None` while `client` is locked out, else whether it was right.
+    pub fn try_pin(
+        &mut self,
+        pin: &AccessPin,
+        client: IpAddr,
+        password: &str,
+        now: u64,
+    ) -> Option<bool> {
+        if self.locked_for(client, now).is_some() {
+            return None;
+        }
+        let ok = pin.check_pin(password.trim());
+        if ok {
+            self.failures.remove(&client);
+        } else {
+            self.failures.entry(client).or_default().push(now);
+        }
+        Some(ok)
     }
 
     /// Seconds until `client` may try a PIN again, if it's locked out. Forgets

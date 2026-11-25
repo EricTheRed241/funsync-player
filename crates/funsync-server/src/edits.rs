@@ -2,8 +2,8 @@
 //! `backend/services/library_edits.py`): ratings, playlists, tag scores and
 //! favourite artists, applied straight to `Library.config` (the old app
 //! queued them for the desktop). Every edit goes through
-//! `AppState::library_changed`. Nothing here deletes a file: a rating
-//! ≤ 2★ only stores the rating.
+//! `AppState::library_changed`. A rating ≤ 2★ is deleted from disk only
+//! there, and only when this server owns the library (`delete.rs`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -233,6 +233,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/remote/artists", get(artists))
         .route("/api/remote/favourite-artist", post(favourite_artist))
         .route("/api/remote/favourite-score", post(favourite_score))
+        .route("/api/remote/delete-duplicate", post(delete_duplicate))
 }
 
 async fn rating(State(st): State<Arc<AppState>>, b: Bytes) -> HttpResult {
@@ -286,6 +287,53 @@ async fn playlist_add(State(st): State<Arc<AppState>>, b: Bytes) -> HttpResult {
 
 async fn playlist_remove(State(st): State<Arc<AppState>>, b: Bytes) -> HttpResult {
     playlist_edit(&st, b, false).await
+}
+
+/// The swipe deck's Duplicates tab: `{videoId, keepId}` deletes `videoId`
+/// from disk (favourite or not) while the kept copy is on disk. Only when
+/// this server owns the library; else 409.
+async fn delete_duplicate(State(st): State<Arc<AppState>>, b: Bytes) -> HttpResult {
+    let b = body(&b);
+    let (id, keep) = (
+        b["videoId"].as_str().unwrap_or(""),
+        b["keepId"].as_str().unwrap_or(""),
+    );
+    if id.is_empty() || keep.is_empty() {
+        return Err(bad(StatusCode::BAD_REQUEST, "videoId and keepId required"));
+    }
+    if id == keep {
+        return Err(bad(
+            StatusCode::BAD_REQUEST,
+            "videoId and keepId are the same video",
+        ));
+    }
+    let path = video_path(&st, &json!({"videoId": id})).await?;
+    let keep_path = video_path(&st, &json!({"videoId": keep})).await?;
+    if !crate::data::owns_library() {
+        return Err(bad(
+            StatusCode::CONFLICT,
+            "the Electron app owns the library",
+        ));
+    }
+    if !std::path::Path::new(&keep_path).exists() {
+        return Err(bad(
+            StatusCode::CONFLICT,
+            format!("kept copy {keep_path} is not on disk, {path} stays"),
+        ));
+    }
+    let sources: Vec<String> = st
+        .library
+        .read()
+        .await
+        .sources()
+        .into_iter()
+        .map(|s| s.path)
+        .collect();
+    let user_data = crate::data::default_old_user_data().unwrap_or_else(|| st.data_dir.clone());
+    let deleted = crate::delete::delete_video(&path, &sources, &user_data, now_ms(), "duplicate")
+        .map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    st.forget_deleted(std::slice::from_ref(&path)).await;
+    applied(&st, json!({"deleted": deleted})).await
 }
 
 async fn tag_scores(State(st): State<Arc<AppState>>) -> Json<Value> {
