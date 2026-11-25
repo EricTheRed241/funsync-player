@@ -45,7 +45,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | Library scan (pairing, variants, axis companions, subtitles, sidecars, fuzzy pass, AppleDouble skip, on-disk spelling) | done | port of `electron/library-scan.js`; on the real library (999 videos) every pairing, variant, subtitle, source and sidecar matches the JS scan |
-| Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | flat rule ported, `thumb-cache/` with the old names; VR one-eye crops wait for the VR decision; no versioned URLs / immutable caching, no pinned frames, no cache pruning |
+| Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | rule ported, `thumb-cache/` with the old names, VR one-eye / centre crops (`_sbs`, `_sbsc`, `_tb`, `_tbc`) from the VR decision; no versioned URLs / immutable caching, no pinned frames, no cache pruning |
 | Posters and custom thumbnails (EroScripts, FapTap, rule34video) | not started | |
 | Grid / list / folder views, hover preview | partial | the web remote's grid, list and folder views; no hover preview |
 | Sources: reorder, enable/disable, overlap, hot-plug | done | Settings page (`/remote/settings.html`, `src/settings.rs`): add, remove, enable, reorder, overlap warning; a source folder appearing or disappearing triggers a rescan (checked every 10 s) |
@@ -88,11 +88,11 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| HereSphere API (sections, scene tags, scripts) | not started | phase 4 |
-| DeoVR API | not started | phase 4 |
+| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header. Read-only (`write*` false, no event server); Queue is `player.userQueue` only (no auto-fill); Hand-made from companion files only (no embedded axes); no access PIN; no `?v=` thumb versions |
+| DeoVR API | partial | `/deovr` and `/deovr/<id>` with the same sections and tags; encoding name always `h264`; no access PIN |
 | Rate / favourite / playlist / queue edits from the headset | not started | phase 4 |
 | Review on end from the headset | not started | phase 4 |
-| VR decision (projection, filename, frames, shape) | not started | phase 3 / 4 |
+| VR decision (projection, filename, frames, shape) | partial | VR Format projection, Mark as VR / Flat, filename rules (patterns, studio codes, `XXVR-123`, `VR180`, bare `VR`), ~2:1 ≥ 3200 wide fallback from probed dimensions (in memory, so a listing only sees videos probed since start); frame-based stereo detection (`stereo_detect.py`) not ported |
 | PCVR companion bridge (HereSphere timestamp API) | not started | |
 | Session status card, VR ↔ web remote mutex | not started | |
 

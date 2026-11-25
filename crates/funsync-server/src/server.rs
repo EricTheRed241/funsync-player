@@ -200,6 +200,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::remote::routes())
         .merge(crate::sites::routes())
         .merge(crate::settings::routes())
+        .merge(crate::heresphere::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)
@@ -389,7 +390,15 @@ async fn thumb(
     let Some(v) = st.video(&id).await else {
         return err(StatusCode::NOT_FOUND, "no such video");
     };
-    match st.media.thumbnail(&v.id, Path::new(&v.path)).await {
+    // The VR crop needs the frame size; the thumbnail probes it anyway.
+    let dims = st
+        .media
+        .metadata(Path::new(&v.path))
+        .await
+        .ok()
+        .map(|m| (m.width, m.height));
+    let crop = crate::vr::thumb_crop(crate::vr::detect(&*st.library.read().await, &v, dims));
+    match st.media.thumbnail(&v.id, Path::new(&v.path), crop).await {
         Ok(p) => {
             let mut r = send_file(&p.to_string_lossy(), req, Some("image/jpeg")).await;
             r.headers_mut().insert(
