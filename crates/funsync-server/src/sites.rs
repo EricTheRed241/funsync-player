@@ -69,6 +69,7 @@ pub fn nav_links() -> serde_json::Value {
             );
         }
     }
+    links.push(serde_json::json!({"name": "Settings", "href": "/remote/settings.html"}));
     links.push(serde_json::json!({"name": "Parity", "href": "/parity"}));
     serde_json::Value::Array(links)
 }

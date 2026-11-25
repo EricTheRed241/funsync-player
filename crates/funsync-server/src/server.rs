@@ -199,6 +199,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .route("/api/media/subtitle/{id}", get(subtitle))
         .merge(crate::remote::routes())
         .merge(crate::sites::routes())
+        .merge(crate::settings::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)
@@ -219,6 +220,7 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> R
         "funsync-server: http://{addr}/ (data {})",
         state.data_dir.display()
     );
+    crate::settings::watch_drives(state.clone());
     let s = state.clone();
     tokio::spawn(async move {
         if let Err(e) = s.rescan().await {

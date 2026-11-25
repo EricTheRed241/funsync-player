@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FunSync · Settings</title>
+<script src="/site-nav.js" defer></script>
+<style>
+  :root { color-scheme: dark; font: 14px/1.4 system-ui, sans-serif; }
+  body { margin: 0; background: #111216; color: #ddd; }
+  main { padding: 12px 16px; max-width: 900px; }
+  h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 24px; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border-top: 1px solid #2a2b31; padding: 6px; vertical-align: middle; }
+  input[type=text] { background: #1b1c22; color: #ddd; border: 1px solid #3a3b42; border-radius: 4px; padding: 5px 7px; }
+  button { background: #2a2b33; color: #ddd; border: 1px solid #44454d; border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+  .muted { color: #888; font-size: 12px; } .warn { color: #db5; } .missing { color: #c66; }
+  form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Settings</h1>
+  <h2>Library sources</h2>
+  <table id="sources"></table>
+  <p id="overlaps" class="warn"></p>
+  <form id="add"><input type="text" name="name" placeholder="Name"><input type="text" name="path" placeholder="/Volumes/…/Folder" size="40" required><button>Add source</button></form>
+  <h2>Library</h2>
+  <label><input type="checkbox" id="watchedLast"> Watched videos last</label>
+  <h2>Backup</h2>
+  <p><a href="/api/backup" download="funsync-backup.zip"><button type="button">Export backup</button></a></p>
+  <form id="import"><input type="file" name="file" accept=".zip,.funsync-backup" required>
+    <label><input type="checkbox" name="overwrite"> Overwrite (instead of merge)</label><button>Import backup</button></form>
+  <p id="msg" class="muted"></p>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let state = { sources: [] };
+async function call(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+function render(s) {
+  state = s;
+  $('sources').innerHTML = s.sources.map((x, i) => `<tr>
+    <td><input type="checkbox" data-i="${i}" data-act="toggle" ${x.enabled ? 'checked' : ''}></td>
+    <td><b>${esc(x.name)}</b><div class="muted">${esc(x.path)}</div></td>
+    <td>${x.present ? `${x.videos} videos` : '<span class="missing">not connected</span>'}</td>
+    <td><button data-i="${i}" data-act="up">↑</button> <button data-i="${i}" data-act="down">↓</button> <button data-i="${i}" data-act="remove">Remove</button></td></tr>`).join('');
+  $('overlaps').textContent = s.overlaps.map(([a, b]) => `${a} and ${b} overlap: their shared videos are listed once.`).join(' ');
+  $('watchedLast').checked = s.watchedLast;
+}
+const save = async (sources) => render(await call('/api/settings/sources', { sources }));
+$('sources').onclick = async (e) => {
+  const i = Number(e.target.dataset.i);
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const list = state.sources.map(({ id, name, path, enabled }) => ({ id, name, path, enabled }));
+  if (act === 'toggle') list[i].enabled = e.target.checked;
+  if (act === 'remove' && !confirm(`Remove ${list[i].name}? The files stay where they are.`)) return;
+  if (act === 'remove') list.splice(i, 1);
+  const j = act === 'up' ? i - 1 : act === 'down' ? i + 1 : -1;
+  if (j >= 0 && j < list.length) [list[i], list[j]] = [list[j], list[i]];
+  await save(list);
+};
+$('add').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await save([...state.sources, { id: '', name: f.get('name'), path: f.get('path'), enabled: true }]);
+    e.target.reset();
+  } catch (err) { $('msg').textContent = err.message; }
+};
+$('watchedLast').onchange = async (e) => render(await call('/api/settings/library', { watchedLast: e.target.checked }));
+$('import').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const mode = f.get('overwrite') ? 'overwrite' : 'merge';
+  const r = await fetch(`/api/backup?mode=${mode}`, { method: 'POST', body: f.get('file') });
+  const j = await r.json();
+  $('msg').textContent = r.ok ? 'Backup imported; the library is being scanned again.' : j.error;
+};
+render(await (await fetch('/api/settings')).json());
+</script>
+</body>
+</html>
