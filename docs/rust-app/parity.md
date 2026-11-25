@@ -45,8 +45,8 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | Library scan (pairing, variants, axis companions, subtitles, sidecars, fuzzy pass, AppleDouble skip, on-disk spelling) | done | port of `electron/library-scan.js`; on the real library (999 videos) every pairing, variant, subtitle, source and sidecar matches the JS scan |
-| Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | rule ported, `thumb-cache/` with the old names, VR one-eye / centre crops (`_sbs`, `_sbsc`, `_tb`, `_tbc`) from the VR decision; no versioned URLs / immutable caching, no pinned frames, no cache pruning |
-| Posters and custom thumbnails (EroScripts, FapTap, rule34video) | not started | |
+| Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | rule ported, `thumb-cache/` with the old names, VR one-eye / centre crops (`_sbs`, `_sbsc`, `_tb`, `_tbc`) from the VR decision; versioned URLs (`?v=`, immutable caching) in the web remote listing; no pinned frames, no cache pruning; headset URLs not versioned yet |
+| Posters and custom thumbnails (EroScripts, FapTap, rule34video) | partial | posters the old app saved (`customThumbnails`, files in its `custom-thumbs/`, read-only) are served; fetching new ones (EroScripts previews, FapTap, rule34video) is not ported |
 | Grid / list / folder views, hover preview | partial | the web remote's grid, list and folder views; no hover preview |
 | Sources: reorder, enable/disable, overlap, hot-plug | done | Settings page (`/remote/settings.html`, `src/settings.rs`): add, remove, enable, reorder, overlap warning; a source folder appearing or disappearing triggers a rescan (checked every 10 s) |
 | Manual script association | not started | |
