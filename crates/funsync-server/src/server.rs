@@ -158,6 +158,10 @@ impl AppState {
         tokio::task::spawn_blocking(move || {
             let mut lib = st.library.blocking_write();
             let side = crate::prefs::SideFiles::load(crate::prefs::side_dir(&lib).as_deref());
+            // Moved / deleted videos: only after a complete scan, like the rules.
+            if snap.failed_paths.is_empty() && !snap.videos.is_empty() {
+                crate::assoc::upkeep(&mut lib, &snap.videos, crate::assoc::path_state);
+            }
             let dims = |p: &str| st.media.cached(p).map(|m| (m.width, m.height));
             crate::prefs::refresh_with(&mut lib, &snap, Some(&side), now_ms(), dims)
         })

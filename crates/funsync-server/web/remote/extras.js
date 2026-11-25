@@ -1,6 +1,7 @@
 // Desktop extras for the web remote (the Rust app's UI): the Electron
 // player's keyboard shortcuts (README "Keyboard Shortcuts"), screenshot,
-// picture-in-picture, aspect ratio cycling and a replay button. The server
+// picture-in-picture, aspect ratio cycling, a replay button, the seek bar's
+// frame preview and the library cards' hover preview (mouse only). The server
 // adds this script to the web remote's index.html; nothing else changes.
 (() => {
   const FITS = ['contain', 'cover', 'fill'];
@@ -89,4 +90,74 @@
   document.addEventListener('keyup', (e) => {
     if ((e.key === 'z' || e.key === 'Z') && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) edge(false);
   });
+  // Seek bar preview: a hidden second <video> of the same stream seeks to the
+  // hovered time; its frame is drawn above the cursor with the time.
+  const hoverable = matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const tip = document.createElement('div');
+  tip.style.cssText = 'position:fixed;z-index:2001;display:none;pointer-events:none;background:#000;'
+    + 'border:1px solid #fff4;border-radius:6px;overflow:hidden;font:600 12px system-ui;color:#fff;text-align:center';
+  const canvas = document.createElement('canvas');
+  canvas.width = 160;
+  canvas.height = 90;
+  canvas.style.display = 'block';
+  const label = document.createElement('div');
+  tip.append(canvas, label);
+  const probe = document.createElement('video');
+  probe.muted = true;
+  probe.preload = 'auto';
+  let want = null;
+  probe.addEventListener('seeked', () => {
+    canvas.height = Math.round(160 * (probe.videoHeight / probe.videoWidth || 9 / 16));
+    canvas.getContext('2d').drawImage(probe, 0, 0, canvas.width, canvas.height);
+    if (want !== null && Math.abs(want - probe.currentTime) > 0.5) { probe.currentTime = want; }
+    want = null;
+  });
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  document.addEventListener('DOMContentLoaded', () => document.body.append(tip));
+  document.addEventListener('pointermove', (e) => {
+    const bar = hoverable && e.target.closest?.('.pcx__seek');
+    const v = bar && video();
+    if (!v || !v.duration || !v.currentSrc) { tip.style.display = 'none'; return; }
+    if (probe.src !== v.currentSrc) probe.src = v.currentSrc;
+    const r = bar.getBoundingClientRect();
+    const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * v.duration;
+    label.textContent = fmt(t);
+    if (probe.seeking) want = t; else probe.currentTime = t;
+    tip.style.display = 'block';
+    tip.style.left = `${Math.max(4, Math.min(innerWidth - 168, e.clientX - 80))}px`;
+    tip.style.top = `${r.top - canvas.height - 28}px`;
+  });
+
+  // Card hover preview: after a short hover a library card plays its video
+  // muted over the thumbnail, from 10 % in.
+  let hover = null;
+  const stopHover = () => {
+    if (!hover) return;
+    clearTimeout(hover.timer);
+    hover.video?.remove();
+    hover = null;
+  };
+  document.addEventListener('mouseover', (e) => {
+    const card = hoverable && e.target.closest?.('.card');
+    if (!card || hover?.card === card) return;
+    stopHover();
+    const img = card.querySelector('img.card__thumb');
+    const id = (img?.src.match(/\/api\/media\/thumb\/([0-9a-f]+)/) || [])[1];
+    if (!id) return;
+    hover = { card };
+    hover.timer = setTimeout(() => {
+      const p = document.createElement('video');
+      Object.assign(p, { muted: true, loop: true, autoplay: true, playsInline: true, src: `/api/media/stream/${id}` });
+      p.style.cssText = `position:absolute;left:${img.offsetLeft}px;top:${img.offsetTop}px;width:${img.offsetWidth}px;`
+        + `height:${img.offsetHeight}px;object-fit:cover;pointer-events:none;border-radius:inherit`;
+      p.addEventListener('loadedmetadata', () => { p.currentTime = p.duration * 0.1 || 0; }, { once: true });
+      if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+      card.append(p);
+      hover.video = p;
+    }, 400);
+  });
+  document.addEventListener('mouseout', (e) => {
+    if (hover && !hover.card.contains(e.relatedTarget)) stopHover();
+  });
+  addEventListener('hashchange', stopHover);
 })();
