@@ -22,7 +22,7 @@ Seen on EroScripts:
   - 293155 `https://terabox.com/s/1yFN_3Zep0E6N-E84xhTtJA` (2.26 GB .mp4; reply also links pan.baidu.com)
   - 6888 (reply #3, `terabox.com/s/1AdgN76ZCN1FVhDl6CDgOUQ`, 3.8 GB `Num.zip`)
 - In the candidate list, only 200233 has TeraBox (as `hosts: ["pixeldrain","TeraBox"]`).
-- **Detection gap:** `EXTERNAL_HOSTS` in `electron/eroscripts-api.js` only knows `terabox.com`. Links on `1024terabox.com` / `1024tera.com` / `terabox.app` (163130, 176600, 178077, 179270, 327994) aren't recognised as TeraBox. [INFERENCE] Some of the 1,038 `no-video` verdicts may be posts like these.
+- **Detection gap:** `EXTERNAL_HOSTS` in `shared/eroscripts-api.js` only knows `terabox.com`. Links on `1024terabox.com` / `1024tera.com` / `terabox.app` (163130, 176600, 178077, 179270, 327994) aren't recognised as TeraBox. [INFERENCE] Some of the 1,038 `no-video` verdicts may be posts like these.
 - URL shapes:
   - `https://[www.]<domain>/s/1<surl>`: the short URL is `1` followed by the surl.
   - `https://[www.]<domain>/sharing/link?surl=<surl>`

@@ -1,5 +1,5 @@
 //! A scene's score, the same way the EroScripts deck scores its candidates
-//! (`candidateScore` in renderer/js/preference-score.js), plus the SLR-only
+//! (`candidateScore` in shared/preference-score.js), plus the SLR-only
 //! extras of `slrScout`:
 //!
 //! - **Tags**: every tag at its score (TAG_SCORE_GROUPS defaults with the
@@ -38,7 +38,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Tag scores run from -TAG_SCORE_MAX to +TAG_SCORE_MAX in TAG_SCORE_STEP
-/// steps (renderer/js/preference-score.js).
+/// steps (shared/preference-score.js).
 pub const TAG_SCORE_MAX: f64 = 10.0;
 pub const TAG_SCORE_STEP: f64 = 0.5;
 
@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(scene_tags(&strings(&["Creampie"]), true), ["creampie"]);
     }
 
-    // Parity with candidateScore (renderer/js/preference-score.js): the
+    // Parity with candidateScore (shared/preference-score.js): the
     // expected numbers were computed by running the JS function on the same
     // candidates (node, 2026-11-13).
     #[test]

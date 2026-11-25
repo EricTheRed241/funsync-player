@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { underscoreVariant } = require('../../electron/script-variant.js');
+const { underscoreVariant } = require('../../shared/script-variant.js');
 
 describe('underscoreVariant', () => {
   it('labels Title_hardcore as a variant of Title', () => {

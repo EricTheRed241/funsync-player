@@ -2,7 +2,7 @@
 //! is screened once (again when its file size changes): a contact sheet of
 //! 12 frames goes to a judge (an omp run, one vision subagent per batch of
 //! 15) that gives `p_minor`, the probability the video depicts someone under
-//! 18. The thresholds (`ageScreen` in renderer/js/content-preferences.json)
+//! 18. The thresholds (`ageScreen` in shared/content-preferences.json)
 //! decide: purge (1★ through the running app, which deletes it), the review
 //! playlist, or clear. Every judged video goes into
 //! `<userData>/age-screen.json`, so a video the user keeps is never flagged

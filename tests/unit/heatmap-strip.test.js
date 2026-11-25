@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeBins, renderBins } from '../../renderer/js/heatmap-strip.js';
+import { computeBins, renderBins } from '../../shared/heatmap-strip.js';
 
 describe('computeBins', () => {
   it('returns empty array when actions are missing', () => {

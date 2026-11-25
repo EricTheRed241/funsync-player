@@ -27,8 +27,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { canonicalArtist } from '../renderer/js/artist-playlists.js';
-import { FLAT_MAX_HEIGHT, VR_MAX_FPS, VR_MAX_HEIGHT } from '../renderer/js/content-preferences.js';
+import { canonicalArtist } from '../shared/artist-playlists.js';
+import { FLAT_MAX_HEIGHT, VR_MAX_FPS, VR_MAX_HEIGHT } from '../shared/content-preferences.js';
 import { capBytes, downloadFits, durationMatches, pacedFetch, safeName, STEM_BYTES, wholeDownload } from './stream-hosts.mjs';
 
 export const SLR_HOST = 'slr';

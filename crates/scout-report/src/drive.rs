@@ -1,6 +1,6 @@
 //! The library drive's free space. A right swipe queues a download, so the download tabs stop
 //! swiping while the drive holding the library sources (config.json) has less than
-//! `swipeDeck.minFreeGb` free (the shared preferences, `renderer/js/content-preferences.json`,
+//! `swipeDeck.minFreeGb` free (the shared preferences, `shared/content-preferences.json`,
 //! embedded at compile time). Measured with `df` (crate::free_space::drives) on every request;
 //! with sources on several drives, the one with the least free space counts. The Free space
 //! tab's marks are never refused: deleting is how the drive gets room again. GB here are 10^9
@@ -10,7 +10,7 @@ use crate::free_space::{self, Drive};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub(crate) const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+pub(crate) const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +27,7 @@ struct SwipeDeck {
 /// `swipeDeck.minFreeGb` in bytes.
 pub fn min_free_bytes() -> Result<u64, String> {
     let shared: Shared = serde_json::from_str(SHARED)
-        .map_err(|e| format!("renderer/js/content-preferences.json: {e}"))?;
+        .map_err(|e| format!("shared/content-preferences.json: {e}"))?;
     let gb = shared.swipe_deck.min_free_gb;
     if !(gb.is_finite() && gb >= 0.0) {
         return Err("content-preferences.json: swipeDeck.minFreeGb must be 0 or more".into());

@@ -1,5 +1,5 @@
 //! Buttplug v3 client for Intiface Central (`ws://127.0.0.1:<port>`) with
-//! the renderer's per-device output (`renderer/js/buttplug-sync.js`):
+//! a per-device output (ported from the old Electron app):
 //! strokers follow the position (`LinearCmd`); vibrators, oscillating
 //! machines, constrict / inflate devices (`ScalarCmd`) and rotators
 //! (`RotateCmd`) get an intensity from the position or the speed per their

@@ -28,7 +28,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-// renderer/*.js is ESM inside a CommonJS package. Re-exec once so Node does
+// shared/*.js is ESM inside a CommonJS package. Re-exec once so Node does
 // not print MODULE_TYPELESS_PACKAGE_JSON on every run.
 if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')) {
   const relaunch = spawnSync(process.execPath, [
@@ -46,10 +46,10 @@ const { libraryVideos, readProbeCache, readStereoCache, writeProbeCache } = awai
 const { createPacer, parseInterval } = await import('./eroscripts-sync-lib.mjs');
 const { defaultUserDataDir } = await import('./host-env.mjs');
 const live = await import('./scout-live.mjs');
-const prefs = await import('../renderer/js/content-preferences.js');
+const prefs = await import('../shared/content-preferences.js');
 const disk = await import('./disk-space.mjs');
 const require = createRequire(import.meta.url);
-const rejectedVideos = require('../electron/rejected-videos.js');
+const rejectedVideos = require('../shared/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const FOLDER = 'FapTap';
 
@@ -230,7 +230,7 @@ async function screenContext(config, userData, incoming) {
   const roots = [...librarySources(config, incoming).map((s) => s.path), incoming].filter((p) => fs.existsSync(p));
   const library = libraryState(roots);
   try {
-    const links = require('../electron/eroscripts-links.js').readLinksFile(userData);
+    const links = require('../shared/eroscripts-links.js').readLinksFile(userData);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(scout.canonicalArtist(l.creator).toLowerCase());
   } catch { /* no links file yet */ }
   return {

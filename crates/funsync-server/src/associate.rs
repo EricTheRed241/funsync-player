@@ -1,23 +1,13 @@
-//! Manual script association (`library.associations[videoPath]`, the
-//! renderer's association-shape.js): `{active: single|multi|custom, single,
-//! multi: {main, axes}, custom}`. An active `single` / `multi` entry whose
-//! files exist replaces the scan's pairing; `custom` is device routing
-//! (devices::routing). The Associate page sets entries; suggestions are
-//! ranked by the scan's fuzzy title score.
+//! Manual script association (`library.associations[videoPath]`, the old
+//! app's shape): `{active: single|multi|custom, single, multi: {main, axes},
+//! custom}`. An active `single` / `multi` entry whose files exist replaces
+//! the scan's pairing; `custom` is device routing (devices::routing).
 
 use std::path::Path;
-use std::sync::Arc;
 
-use axum::Router;
-use axum::extract::{Path as UrlPath, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
-use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::scan::{AXIS_SUFFIXES, Axis, Video, fuzzy_score};
-use crate::server::AppState;
+use crate::scan::{Axis, Video};
 
 /// Apply every active `single` / `multi` association to the scanned videos.
 pub fn apply(associations: &Value, videos: &mut [Video]) {
@@ -94,111 +84,6 @@ pub fn entry(
     }
     Value::Object(e)
 }
-
-pub fn routes() -> Router<Arc<AppState>> {
-    Router::new().route("/api/associate/{id}", get(show).post(set))
-}
-
-fn stem(p: &str) -> &str {
-    let name = p.rsplit('/').next().unwrap_or(p);
-    name.strip_suffix(".funscript").unwrap_or(name)
-}
-
-async fn show(State(st): State<Arc<AppState>>, UrlPath(id): UrlPath<String>) -> Response {
-    let Some(v) = st.video(&id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "no such video"})),
-        )
-            .into_response();
-    };
-    let snap = st.snapshot.read().await.clone();
-    let vstem = v.name.strip_suffix(&v.ext).unwrap_or(&v.name).to_string();
-    let dir = Path::new(&v.path)
-        .parent()
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut ranked: Vec<(u32, bool, &String)> = snap
-        .funscripts
-        .iter()
-        .map(|p| {
-            (
-                fuzzy_score(&vstem, stem(p)),
-                p.starts_with(&format!("{dir}/")),
-                p,
-            )
-        })
-        .collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)).then(a.2.cmp(b.2)));
-    let suggestions: Vec<Value> = ranked
-        .iter()
-        .filter(|(s, local, _)| *local || *s > 0)
-        .take(30)
-        .map(|(s, local, p)| json!({"path": p, "score": s, "sameFolder": local}))
-        .collect();
-    let entry = st.library.read().await.lib()["associations"][&v.path].clone();
-    Json(json!({
-        "video": {"id": v.id, "name": v.name, "path": v.path},
-        "current": {"funscriptPath": v.funscript_path,
-            "axes": if v.manual_axes.is_empty() { &v.axes } else { &v.manual_axes }},
-        "entry": entry,
-        "axisNames": AXIS_SUFFIXES,
-        "suggestions": suggestions,
-    }))
-    .into_response()
-}
-
-#[derive(Deserialize)]
-struct SetBody {
-    /// `single`, `multi`, or null to clear (back to the scan's pairing).
-    active: Option<String>,
-    single: Option<String>,
-    main: Option<String>,
-    #[serde(default)]
-    axes: Map<String, Value>,
-}
-
-async fn set(
-    State(st): State<Arc<AppState>>,
-    UrlPath(id): UrlPath<String>,
-    Json(b): Json<SetBody>,
-) -> Response {
-    let Some(v) = st.video(&id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "no such video"})),
-        )
-            .into_response();
-    };
-    let known: Vec<String> = st.snapshot.read().await.funscripts.clone();
-    let ok = |p: &Option<String>| p.as_ref().is_none_or(|p| known.contains(p));
-    let axes_ok = b
-        .axes
-        .values()
-        .all(|p| p.as_str().is_some_and(|p| known.contains(&p.to_string())));
-    if !ok(&b.single) || !ok(&b.main) || !axes_ok {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "not a funscript of the library"})),
-        )
-            .into_response();
-    }
-    {
-        let mut lib = st.library.write().await;
-        let old = lib.lib()["associations"][&v.path].clone();
-        let multi = (b.active.as_deref() == Some("multi"))
-            .then(|| json!({"main": b.main, "axes": b.axes, "buttplugVib": false}));
-        let e = entry(&old, b.active.as_deref(), b.single.as_deref(), multi);
-        lib.lib_mut("associations")[&v.path] = e;
-    }
-    if let Err(e) = st.library_changed().await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
-    }
-    let s = st.clone();
-    tokio::spawn(async move { s.rescan().await });
-    Json(json!({"ok": true})).into_response()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

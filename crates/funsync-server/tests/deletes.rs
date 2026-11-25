@@ -102,7 +102,10 @@ fn deletes_only_when_owning_the_library() {
     );
     assert_eq!(
         (code, v["detail"].as_str()),
-        (409, Some("the Electron app owns the library"))
+        (
+            409,
+            Some("library changes are turned off (FUNSYNC_OWNS_LIBRARY=0)")
+        )
     );
     drop(srv);
 

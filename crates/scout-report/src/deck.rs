@@ -255,7 +255,7 @@ pub struct Card {
     /// else the host's listed video length.
     pub runtime_ms: Option<u64>,
     /// The first video's main-script speed per time bin, in position units per second
-    /// (`heat`, set by the scout from renderer/js/heatmap-strip.js computeBins); empty = unknown.
+    /// (`heat`, set by the scout from shared/heatmap-strip.js computeBins); empty = unknown.
     pub heat: Vec<u32>,
     pub likes: Option<i64>,
     /// Hosts of the post's videos.

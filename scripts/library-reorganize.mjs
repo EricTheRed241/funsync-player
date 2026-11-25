@@ -24,7 +24,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 
-// renderer/*.js (via eroscripts-scout-lib) is ESM inside a CommonJS package.
+// shared/*.js (via eroscripts-scout-lib) is ESM inside a CommonJS package.
 // Re-exec once so Node does not print MODULE_TYPELESS_PACKAGE_JSON.
 if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')) {
   const relaunch = spawnSync(process.execPath, [
@@ -39,8 +39,8 @@ const { remapPaths } = await import('./eroscripts-scout-lib.mjs');
 const { appRunning, onDiskPath, readConfig, removeIfEmpty, renameWithSidecar } = await import('./discovery-io.mjs');
 const { assertConfigWritable, defaultUserDataDir } = await import('./host-env.mjs');
 const require = createRequire(import.meta.url);
-const { VIDEO_EXTS, isAppleDoubleSidecar } = require('../electron/library-scan.js');
-const { readLinksFile } = require('../electron/eroscripts-links.js');
+const { VIDEO_EXTS, isAppleDoubleSidecar } = require('../shared/library-scan.js');
+const { readLinksFile } = require('../shared/eroscripts-links.js');
 
 const USAGE = `Usage: npm run library:reorganize -- [options]
 

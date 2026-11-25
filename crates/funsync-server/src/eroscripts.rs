@@ -1,4 +1,4 @@
-//! EroScripts in the app (`electron/eroscripts-api.js`): Discourse login
+//! EroScripts in the app (ported from `shared/eroscripts-api.js`): Discourse login
 //! (with 2FA, or a pasted `_t` cookie), topic search with thumbnails and the
 //! Paid badge, a topic's every script across the post and its replies
 //! (labelled by poster), pixeldrain listings, other hosts named, and saving
@@ -70,15 +70,46 @@ pub struct Session {
     pub username: String,
 }
 
-pub fn load_session(dir: &Path) -> Option<Session> {
-    let s: Session = serde_json::from_slice(&std::fs::read(dir.join(SESSION_FILE)).ok()?).ok()?;
-    (!s.cookie.is_empty()).then_some(s)
+/// The CLIs' copy of the login (`settings.eroscripts.session` in the shared
+/// config.json, `{cookie, username}`, the same shape).
+fn config_json() -> Option<std::path::PathBuf> {
+    // Unit tests never touch the user's config.json.
+    if cfg!(test) {
+        return None;
+    }
+    Some(crate::data::default_old_user_data()?.join("config.json"))
 }
 
-/// Written owner-only (0600): the cookie is a login.
+pub fn load_session(dir: &Path) -> Option<Session> {
+    let own = std::fs::read(dir.join(SESSION_FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Session>(&b).ok());
+    let shared = || {
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(config_json()?).ok()?).ok()?;
+        serde_json::from_value::<Session>(cfg["settings"]["eroscripts"]["session"].clone()).ok()
+    };
+    own.or_else(shared).filter(|s| !s.cookie.is_empty())
+}
+
+/// Written owner-only (0600): the cookie is a login. Also kept in config.json
+/// (when it exists) so `eroscripts:sync` and the scouts use the same login.
 pub fn save_session(dir: &Path, s: Option<&Session>) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    if let Some(cfg_path) = config_json().filter(|p| p.is_file()) {
+        let mut cfg: serde_json::Value = serde_json::from_slice(&std::fs::read(&cfg_path)?)?;
+        if cfg["settings"].is_object() {
+            if !cfg["settings"]["eroscripts"].is_object() {
+                cfg["settings"]["eroscripts"] = serde_json::json!({});
+            }
+            cfg["settings"]["eroscripts"]["session"] = match s {
+                Some(s) => serde_json::to_value(s)?,
+                None => serde_json::Value::Null,
+            };
+            crate::data::write_atomic(&cfg_path, &serde_json::to_vec_pretty(&cfg)?)?;
+        }
+    }
     let path = dir.join(SESSION_FILE);
     let Some(s) = s else {
         return std::fs::remove_file(&path).or_else(|e| match e.kind() {
@@ -1078,7 +1109,7 @@ async fn download(State(st): State<Arc<AppState>>, Json(b): Json<DownloadBody>) 
     if !crate::data::owns_library() {
         return bad(
             StatusCode::CONFLICT,
-            "The library belongs to the old app for now: scripts are saved only when FunSync in Rust owns the library (FUNSYNC_OWNS_LIBRARY=1).",
+            "Library changes are turned off (FUNSYNC_OWNS_LIBRARY=0): scripts aren't saved.",
         );
     }
     let Some(v) = st.video(&b.video_id).await else {

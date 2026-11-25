@@ -3,15 +3,15 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Favourite artists (renderer/js/favourite-artists.js): FAVOURITES with the
+// Favourite artists (shared/favourite-artists.js): FAVOURITES with the
 // user's changes, the favourite artist bonus, storing both, and what the
 // backend registration carries.
 import { describe, it, expect, vi } from 'vitest';
 import {
   artistRegistration, effectiveFavourites, favouriteScore, favouriteScoreOf, favouritesOf, setFavouriteArtist, setFavouriteScore,
   FAVOURITE_ARTISTS_KEY, FAVOURITE_SCORE_KEY,
-} from '../../renderer/js/favourite-artists.js';
-import { FAVOURITES, RANKING } from '../../renderer/js/content-preferences.js';
+} from '../../shared/favourite-artists.js';
+import { FAVOURITES, RANKING } from '../../shared/content-preferences.js';
 import { scoutPreferences } from '../../scripts/scout-live.mjs';
 
 const fakeData = (init = {}) => {

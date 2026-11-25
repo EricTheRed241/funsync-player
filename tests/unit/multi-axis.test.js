@@ -9,7 +9,7 @@ import {
   buildCompanionPath, getAxisBadges, tcodeToFeature,
   getAxisBySuffix, axisSuffixVariants, variantAxes,
   isGeneratedCompanion, listCompanionFiles,
-} from '../../renderer/js/multi-axis.js';
+} from '../../shared/multi-axis.js';
 
 describe('multi-axis', () => {
   describe('parseAxisSuffix', () => {

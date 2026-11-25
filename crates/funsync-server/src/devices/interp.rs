@@ -1,4 +1,4 @@
-//! Funscript interpolation (`renderer/js/interpolation.js`): linear, PCHIP
+//! Funscript interpolation (ported from the old Electron app): linear, PCHIP
 //! (Fritsch-Carlson, monotone) and Makima, plus the speed limit.
 
 #[derive(Debug, Clone, Copy, PartialEq)]

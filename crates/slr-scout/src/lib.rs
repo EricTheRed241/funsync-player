@@ -1,5 +1,5 @@
 //! `npm run slr:scout`: find SexLikeReal VR scenes of the wanted performers
-//! (`slrScout` in renderer/js/content-preferences.json: its actors, the
+//! (`slrScout` in shared/content-preferences.json: its actors, the
 //! favourite artists and the listed pornstars), score them the way the
 //! EroScripts deck scores its candidates plus SLR-only extras, mark where a
 //! download would take each script from, and record the account's remaining

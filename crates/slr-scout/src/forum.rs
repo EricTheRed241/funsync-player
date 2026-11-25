@@ -165,7 +165,7 @@ pub struct Attachment {
 }
 
 /// Axis suffixes of companion scripts (`<stem>.<axis>.funscript`;
-/// AXIS_SUFFIXES in electron/library-scan.js), with the TCode channel names
+/// AXIS_SUFFIXES in shared/library-scan.js), with the TCode channel names
 /// some posts use. `L0` is the stroke itself.
 const AXES: &[(&str, &str)] = &[
     ("surge", "surge"),

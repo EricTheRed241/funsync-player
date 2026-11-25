@@ -1,12 +1,11 @@
 //! The local Rust sites of `deploy/sites.json` (swipe deck, Creators, Status)
-//! on this port, as the old backend serves them (`backend/routes/sites.py`):
-//! `<prefix>` → `<prefix>/`, `<prefix>/<rest>` relayed to the site's
-//! `127.0.0.1:<port>/<rest>` (`<prefix>/` = its home), `Location` answers
-//! mapped back under the prefix, HTML pages given `<base href="<prefix>/">`
-//! and the nav bar; each site page's bare `<path>` redirects to
-//! `<prefix><path>`. With `--supervise` the server also runs the sites and
-//! the job runner (`electron/sites.js`, `electron/job-runner.js`): built
-//! from the checkout and restarted after they exit.
+//! on this port: `<prefix>` → `<prefix>/`, `<prefix>/<rest>` relayed to the
+//! site's `127.0.0.1:<port>/<rest>` (`<prefix>/` = its home), `Location`
+//! answers mapped back under the prefix, HTML pages given
+//! `<base href="<prefix>/">` and the nav bar; each site page's bare `<path>`
+//! redirects to `<prefix><path>`. With `--supervise` the server also runs the
+//! sites and the job runner: built from the checkout and restarted after
+//! they exit.
 
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
@@ -70,12 +69,9 @@ pub fn nav_links() -> serde_json::Value {
         }
     }
     links.push(serde_json::json!({"name": "Devices", "href": "/remote/devices.html"}));
-    links.push(serde_json::json!({"name": "Lists", "href": "/remote/manage.html"}));
-    links.push(serde_json::json!({"name": "Associate", "href": "/remote/associate.html"}));
     links.push(serde_json::json!({"name": "Overview", "href": "/remote/overview.html"}));
     links.push(serde_json::json!({"name": "EroScripts", "href": "/remote/eroscripts.html"}));
     links.push(serde_json::json!({"name": "Settings", "href": "/remote/settings.html"}));
-    links.push(serde_json::json!({"name": "Parity", "href": "/parity"}));
     serde_json::Value::Array(links)
 }
 

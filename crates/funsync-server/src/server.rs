@@ -1,5 +1,5 @@
 //! HTTP: health, status, library listing, scan, media (stream, thumbnail,
-//! script, subtitle), the web UI and the parity dashboard.
+//! script, subtitle) and the web UI.
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -23,15 +23,11 @@ use crate::data::{self, Library, SCAN_FILE, now_ms};
 use crate::media::Media;
 use crate::scan::{self, Source, Video};
 
-/// The UI is the web remote (`backend/web-remote/`, served unchanged), with
-/// this crate's `web/remote/` files taking precedence where a page needs
-/// to differ.
-const WEB_OVERLAY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/remote");
-const WEB_REMOTE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../backend/web-remote");
-const LOCALES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../renderer/locales");
-const PARITY_HTML: &str = include_str!("../web/parity.html");
-const PARITY_MD: &str = include_str!("../../../docs/rust-app/parity.md");
-const NAV_JS: &str = include_str!("../../../backend/site-nav.js");
+/// The UI: the web remote and this app's pages (`web/remote/`), its locale
+/// bundles (`web/locales/`) and the nav bar script (`web/site-nav.js`).
+const WEB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/remote");
+const LOCALES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/locales");
+const NAV_JS: &str = include_str!("../web/site-nav.js");
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,9 +40,6 @@ pub struct Snapshot {
     /// Videos whose main script carries axes of its own (read once per scan).
     #[serde(default)]
     pub embedded_axes: HashSet<String>,
-    /// Every funscript the scan found (the Associate page's choices).
-    #[serde(default)]
-    pub funscripts: Vec<String>,
 }
 
 impl Snapshot {
@@ -75,7 +68,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn load(data_dir: PathBuf) -> Result<Arc<Self>, String> {
-        let library = data::load_library(&data_dir)?;
+        let mut library = data::load_library(&data_dir)?;
+        // config.json changed while this server was down (a CLI wrote it).
+        if let Some(config) = crate::import::newer_config(&library, &data_dir) {
+            library.config = config;
+        }
         // A missing or unreadable snapshot only means a scan is needed.
         let snapshot: Snapshot = std::fs::read(data_dir.join(SCAN_FILE))
             .ok()
@@ -131,7 +128,6 @@ impl AppState {
                     failed_paths: r.failed_paths,
                     videos: r.videos,
                     embedded_axes,
-                    funscripts: r.all_funscripts.into_iter().map(|f| f.path).collect(),
                 };
                 let bytes = serde_json::to_vec(&snap).map_err(|e| e.to_string());
                 *self.snapshot.write().await = Arc::new(snap);
@@ -177,14 +173,22 @@ impl AppState {
         self.save().await
     }
 
-    /// Write `library.json` (after an edit). One save at a time: two
+    /// Write `library.json` (after an edit), and the same state into the
+    /// shared `config.json` the CLIs read. One save at a time: two
     /// concurrent saves could otherwise land an older snapshot last.
     pub async fn save(&self) -> Result<(), String> {
         static SAVING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
         let _one = SAVING.lock().await;
-        let bytes = serde_json::to_vec(&*self.library.read().await).map_err(|e| e.to_string())?;
+        let lib = self.library.read().await;
+        let bytes = serde_json::to_vec(&*lib).map_err(|e| e.to_string())?;
         data::write_atomic(&self.data_dir.join(data::LIBRARY_FILE), &bytes)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        match (lib.imported_from.as_deref(), PORT.get()) {
+            (Some(cfg), Some(port)) => {
+                crate::import::write_through(&lib.config, Path::new(cfg), *port)
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Every library edit ends here: when this server owns the library,
@@ -363,7 +367,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// The app with the access PIN read from `pin_dir` (the old app's folder).
 pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
     let remote_files = Router::new()
-        .fallback_service(ServeDir::new(WEB_OVERLAY).fallback(ServeDir::new(WEB_REMOTE)))
+        .fallback_service(ServeDir::new(WEB))
         .layer(axum::middleware::map_response(with_extras));
     Router::new()
         .route(
@@ -375,8 +379,6 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
             get(|| async { axum::response::Redirect::to("/remote/") }),
         )
         .route("/site-nav.js", get(nav))
-        .route("/parity", get(parity_page))
-        .route("/api/parity", get(parity))
         .route("/health", get(health))
         .route("/api/status", get(status))
         .route("/api/videos", get(videos))
@@ -394,8 +396,6 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::devices::routes())
         .merge(crate::edits::routes())
         .merge(crate::queue::routes())
-        .merge(crate::groupings::routes())
-        .merge(crate::associate::routes())
         .merge(crate::eroscripts::routes())
         .merge(crate::prefs::routes())
         .nest_service("/remote/", remote_files)
@@ -432,7 +432,39 @@ async fn with_extras(resp: Response) -> Response {
     Response::from_parts(parts, Body::from(page))
 }
 
+/// The port this server listens on (written into config.json for the CLIs).
+static PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+
+/// Hold `<userData>/SingletonLock` (`<host>-<pid>`), the lock the CLIs check
+/// before writing `config.json` themselves (`appRunning`).
+fn hold_singleton_lock(dir: &Path) {
+    let lock = dir.join("SingletonLock");
+    if let Ok(target) = std::fs::read_link(&lock) {
+        let pid = target
+            .to_string_lossy()
+            .rsplit('-')
+            .next()
+            .and_then(|p| p.parse::<u32>().ok());
+        if pid.is_some_and(|p| p != std::process::id() && video_tags::host::pid_alive(p)) {
+            return;
+        }
+        let _ = std::fs::remove_file(&lock);
+    }
+    let _ = std::os::unix::fs::symlink(format!("funsync-server-{}", std::process::id()), &lock);
+}
+
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> Result<(), String> {
+    let _ = PORT.set(addr.port());
+    if let Some(dir) = state
+        .library
+        .read()
+        .await
+        .imported_from
+        .as_deref()
+        .and_then(|c| Path::new(c).parent())
+    {
+        hold_singleton_lock(dir);
+    }
     if supervise {
         crate::sites::supervise(&data::default_old_user_data().unwrap_or_default());
     }
@@ -476,51 +508,6 @@ async fn nav() -> impl IntoResponse {
             crate::sites::nav_links()
         ),
     )
-}
-
-async fn parity_page() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        PARITY_HTML,
-    )
-}
-
-/// `docs/rust-app/parity.md` as `{counts, sections: [{name, rows}]}`.
-pub fn parse_parity(md: &str) -> serde_json::Value {
-    let mut sections: Vec<serde_json::Value> = Vec::new();
-    let mut counts = serde_json::Map::new();
-    for line in md.lines() {
-        if let Some(h) = line.strip_prefix("## ") {
-            sections.push(json!({"name": h, "rows": []}));
-            continue;
-        }
-        let cells: Vec<&str> = line
-            .trim()
-            .trim_matches('|')
-            .split(" | ")
-            .map(str::trim)
-            .collect();
-        let [feature, status, notes] = cells[..] else {
-            continue;
-        };
-        if !["done", "partial", "not started", "not planned"].contains(&status) {
-            continue;
-        }
-        if let Some(s) = sections.last_mut() {
-            s["rows"]
-                .as_array_mut()
-                .unwrap()
-                .push(json!({"feature": feature, "status": status, "notes": notes}));
-            let n = counts.get(status).and_then(|c| c.as_u64()).unwrap_or(0);
-            counts.insert(status.to_string(), json!(n + 1));
-        }
-    }
-    sections.retain(|s| !s["rows"].as_array().unwrap().is_empty());
-    json!({"counts": counts, "sections": sections})
-}
-
-async fn parity() -> impl IntoResponse {
-    Json(parse_parity(PARITY_MD))
 }
 
 async fn health() -> impl IntoResponse {

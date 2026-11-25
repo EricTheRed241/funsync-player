@@ -1,6 +1,6 @@
 //! EroScripts post previews as thumbnails (README "Post previews as
-//! thumbnails"; renderer/js/eroscripts-preview.js, electron/preview-match.js
-//! `collectPreviewCandidates`, eroscripts-api.js `downloadPreviewImage`):
+//! thumbnails"; ported from the old Electron app: `shared/preview-match.js`
+//! `collectPreviewCandidates`, `shared/eroscripts-api.js` `downloadPreviewImage`):
 //!
 //! - every image of the post's first post (and the topic thumbnail) that
 //!   can be a picture of the video is a candidate: not avatars, emoji,

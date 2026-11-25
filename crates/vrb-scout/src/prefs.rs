@@ -1,12 +1,12 @@
 //! This scout's part of the shared preferences (`vrbScout` in
-//! renderer/js/content-preferences.json); everything else it scores and
+//! shared/content-preferences.json); everything else it scores and
 //! screens with comes through `slr_scout::prefs`.
 
 use crate::sites::SITES;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,7 +35,7 @@ pub fn load() -> Result<VrbScout, String> {
 
 pub fn parse(raw: &str) -> Result<VrbScout, String> {
     let shared = serde_json::from_str::<Shared>(raw)
-        .map_err(|e| format!("renderer/js/content-preferences.json: {e}"))?;
+        .map_err(|e| format!("shared/content-preferences.json: {e}"))?;
     let p = shared.vrb_scout;
     for site in SITES {
         match p.popularity_per.get(site.key) {

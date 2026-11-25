@@ -76,7 +76,7 @@ pub fn from_json(config: &Value) -> UserConfig {
 }
 
 /// How names compare as artists: NFC, trimmed, lower case
-/// (renderer/js/favourite-artists.js; ARTIST_ALIASES aren't shared with
+/// (shared/favourite-artists.js; ARTIST_ALIASES aren't shared with
 /// Rust, so an alias counts under its own spelling).
 pub fn fold(name: &str) -> String {
     name.trim().nfc().collect::<String>().to_lowercase()

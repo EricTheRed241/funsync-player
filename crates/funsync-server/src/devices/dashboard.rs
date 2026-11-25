@@ -1,8 +1,8 @@
-//! Diagnostics: the old backend's `/api/status` device part (`issues`,
-//! `devices`, `session`, `phone`, `backend`, `desktop`) and the device
-//! dashboard (`/device`, `backend/device-dashboard/` served unchanged, and
-//! `GET /api/device/telemetry`), both fed by the server's own engine. The
-//! dashboard's "desktop app" is this server: it is always connected.
+//! Diagnostics: the `/api/status` device part (`issues`, `devices`,
+//! `session`, `phone`, `backend`, `desktop`) and the device dashboard
+//! (`/device`: `web/device-dashboard/`, fed by `GET /api/device/telemetry`
+//! from the server's own engine; its "desktop app" is this server, always
+//! connected).
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -20,10 +20,7 @@ use super::{Play, Status, profiles};
 use crate::data::now_ms;
 use crate::server::AppState;
 
-const PAGE_DIR: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../backend/device-dashboard"
-);
+const PAGE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/device-dashboard");
 /// 15 minutes of 1 s samples, ~100 s of commands, 500 events (as the old backend).
 const SAMPLES: usize = 900;
 const COMMANDS_MS: u64 = 100_000;
@@ -140,7 +137,7 @@ pub fn link(s: &Status, tc: &Value) -> Value {
     })
 }
 
-/// One dashboard sample (the shape `renderer/js/device-telemetry.js` sent).
+/// One dashboard sample (the shape the old Electron app's telemetry sent).
 pub fn sample(st: &AppState, play: Option<&Play>, s: &Value) -> Value {
     let tc = &s["tcode"];
     let d = &st.devices;

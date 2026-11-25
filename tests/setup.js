@@ -1,28 +1,11 @@
-// Global test setup — mocks for Electron IPC, DOM APIs, and browser globals.
+// Global test setup: browser globals some shared modules expect.
 //
 // This file runs for EVERY test file, including the ones that opt into the
-// `node` environment (see the `@vitest-environment` docblock convention in
-// notes/CLAUDE.md). So it must not assume a DOM exists at module scope.
-//
-// `globalThis` is used instead of `window` throughout: under jsdom the two are
-// the same object, so jsdom behaviour is byte-identical, while node files get
-// the IPC/browser stubs without a ReferenceError killing the whole file.
-// Genuinely DOM-only patches (HTMLCanvasElement) are explicitly guarded.
+// `node` environment (see the `@vitest-environment` docblock convention), so
+// it must not assume a DOM exists at module scope. `globalThis` is used
+// instead of `window`: under jsdom they are the same object. Genuinely
+// DOM-only patches (HTMLCanvasElement) are explicitly guarded.
 import { vi } from 'vitest';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-// --- electron-log: keep tests out of the real log ---
-// Outside Electron, electron-log resolves its file to the app's real log
-// (~/Library/Logs/funsync-player/main.log on macOS, %APPDATA%/funsync-player/
-// logs/main.log on Windows), so any test that loads electron/logger.js, or a
-// module that requires it, would append there. Point the file transport at a
-// temp file before any test file runs. CommonJS `require` and Vitest's
-// `import` of electron-log both resolve through Node's module cache, so this
-// is the same instance electron/logger.js configures.
-createRequire(import.meta.url)('electron-log/main').transports.file.resolvePathFn = () =>
-  join(tmpdir(), 'funsync-player-vitest', 'main.log');
 
 // --- localStorage on Node 25+ ---
 // Node 25+ defines its own global `localStorage`, which is undefined unless
@@ -36,132 +19,6 @@ if (globalThis.jsdom && globalThis.localStorage === undefined) {
     writable: true,
   });
 }
-
-// --- window.funsync IPC mock (matches electron/preload.js) ---
-globalThis.funsync = {
-  openFileDialog: vi.fn().mockResolvedValue([]),
-  readFunscript: vi.fn().mockResolvedValue(null),
-  writeFunscript: vi.fn().mockResolvedValue(null),
-  saveFunscript: vi.fn().mockResolvedValue(null),
-  generateThumbnails: vi.fn().mockResolvedValue({ thumbnails: [], interval: 10, count: 0 }),
-  fetchMetadata: vi.fn().mockResolvedValue(null),
-  selectDirectory: vi.fn().mockResolvedValue(null),
-  scanDirectory: vi.fn().mockResolvedValue({ videos: [], unmatchedFunscripts: [] }),
-  selectFunscript: vi.fn().mockResolvedValue(null),
-  selectSubtitle: vi.fn().mockResolvedValue(null),
-  getBackendPort: vi.fn().mockResolvedValue(5123),
-  getAppVersion: vi.fn().mockResolvedValue('0.1.0'),
-
-  // File utilities
-  fileExists: vi.fn().mockResolvedValue(true),
-  filesExist: vi.fn(async (paths) => paths.map(() => false)),
-  pathState: vi.fn().mockResolvedValue('unknown'),
-
-  // Data export/import
-  exportData: vi.fn().mockResolvedValue({ success: true, path: '/tmp/backup.zip' }),
-  importData: vi.fn().mockResolvedValue({ success: true, funscriptCount: 0 }),
-
-  // Shell
-  openExternal: vi.fn().mockResolvedValue(undefined),
-  showInFolder: vi.fn().mockResolvedValue(undefined),
-  // i18n — system locale lookup
-  getSystemLocale: vi.fn().mockResolvedValue('en-US'),
-
-  // VR Bridge
-  vrConnect: vi.fn().mockResolvedValue({ success: true }),
-  vrDisconnect: vi.fn().mockResolvedValue({ success: true }),
-  vrSend: vi.fn().mockResolvedValue(true),
-  onVrState: vi.fn().mockReturnValue(() => {}),
-  onVrDisconnected: vi.fn().mockReturnValue(() => {}),
-
-  // TCode Serial
-  tcodeListPorts: vi.fn().mockResolvedValue([]),
-  tcodeConnect: vi.fn().mockResolvedValue({ success: true }),
-  tcodeDisconnect: vi.fn().mockResolvedValue({ success: true }),
-  tcodeSend: vi.fn().mockResolvedValue(true),
-  tcodeStatus: vi.fn().mockResolvedValue({ connected: false }),
-  onTcodeDisconnected: vi.fn().mockReturnValue(() => {}),
-
-  // EroScripts
-  eroscriptsLogin: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
-  eroscriptsVerify2FA: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
-  eroscriptsLogout: vi.fn().mockResolvedValue({ success: true }),
-  eroscriptsRestoreSession: vi.fn().mockResolvedValue({ success: true }),
-  eroscriptsStatus: vi.fn().mockResolvedValue({ loggedIn: false }),
-  eroscriptsValidate: vi.fn().mockResolvedValue({ valid: false }),
-  eroscriptsSearch: vi.fn().mockResolvedValue({ results: [] }),
-  eroscriptsTopic: vi.fn().mockResolvedValue({ attachments: [] }),
-  eroscriptsTopicImage: vi.fn().mockResolvedValue(null),
-  eroscriptsDownload: vi.fn().mockResolvedValue({ success: true }),
-  eroscriptsImportPreview: vi.fn().mockResolvedValue(null),
-  eroscriptsPreviewCandidates: vi.fn().mockResolvedValue({ status: 'no-image' }),
-  eroscriptsMatchPreview: vi.fn().mockResolvedValue({ status: 'no-image' }),
-  eroscriptsValidatePoster: vi.fn().mockResolvedValue({ error: 'unavailable' }),
-  deleteEroScriptsThumbnail: vi.fn().mockResolvedValue(true),
-
-  // Data store IPC methods
-  getAllData: vi.fn().mockResolvedValue({
-    settings: {
-      player: {
-        volume: 80,
-        theme: 'dark',
-        recentFiles: [],
-        gapSkip: {
-          mode: 'off',
-          threshold: 10000,
-        },
-        smoothing: 'linear',
-        speedLimit: 0,
-      },
-      backend: {
-        port: 5123,
-        localIp: 'auto',
-      },
-      library: {
-        sources: [],
-        associations: {},
-        manualVariants: {},
-        collections: [],
-        activeCollectionId: null,
-      },
-      knownDevices: [],
-      buttplug: {
-        port: 12345,
-      },
-      tcode: {
-        port: '',
-        baudRate: 115200,
-        axisRanges: {},
-        axisEnabled: {},
-      },
-    },
-    playlists: [],
-    categories: [],
-    videoCategories: {},
-  }),
-  getSetting: vi.fn().mockResolvedValue(undefined),
-  setSetting: vi.fn().mockResolvedValue(undefined),
-  addRecentFile: vi.fn().mockResolvedValue(undefined),
-  getPlaylists: vi.fn().mockResolvedValue([]),
-  getPlaylist: vi.fn().mockResolvedValue(null),
-  addPlaylist: vi.fn().mockImplementation((name) =>
-    Promise.resolve({ id: crypto.randomUUID(), name, createdAt: Date.now(), videoPaths: [] })
-  ),
-  renamePlaylist: vi.fn().mockResolvedValue(undefined),
-  deletePlaylist: vi.fn().mockResolvedValue(undefined),
-  addVideoToPlaylist: vi.fn().mockResolvedValue(undefined),
-  removeVideoFromPlaylist: vi.fn().mockResolvedValue(undefined),
-  getCategories: vi.fn().mockResolvedValue([]),
-  addCategory: vi.fn().mockImplementation((name, color) =>
-    Promise.resolve({ id: crypto.randomUUID(), name, color })
-  ),
-  renameCategory: vi.fn().mockResolvedValue(undefined),
-  deleteCategory: vi.fn().mockResolvedValue(undefined),
-  assignCategory: vi.fn().mockResolvedValue(undefined),
-  unassignCategory: vi.fn().mockResolvedValue(undefined),
-  getVideoCategories: vi.fn().mockResolvedValue([]),
-  getVideosByCategory: vi.fn().mockResolvedValue([]),
-};
 
 // --- Canvas 2D context mock ---
 const mockCtx = {
@@ -253,21 +110,4 @@ if (!crypto.randomUUID) {
       return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
     });
   };
-}
-
-// --- i18n preload ---
-// Components using `t()` need a baseline English bundle so the lookup
-// returns the expected string instead of the raw key. Inject synchronously
-// from the JSON file before any component renders.
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { _setBundlesForTests } from '../renderer/js/i18n.js';
-try {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const enPath = resolve(__dirname, '../renderer/locales/en.json');
-  const enBundle = JSON.parse(readFileSync(enPath, 'utf8'));
-  _setBundlesForTests('en', enBundle, enBundle);
-} catch {
-  // Tests that don't use t() still pass without the bundle; ignore.
 }

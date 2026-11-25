@@ -1,6 +1,6 @@
-//! TCode browser serial relay (`backend/routes/tcode_relay.py`): a USB
+//! TCode browser serial relay (ported from the old backend): a USB
 //! serial TCode device on another computer is driven through the web remote
-//! open there. Its tab (`backend/web-remote/serial-relay.js`, unchanged)
+//! open there. Its tab (`web/remote/serial-relay.js`)
 //! opens the device with Web Serial and attaches to
 //! `/api/remote/tcode-relay?role=sink`; the `remote-serial` TCode transport
 //! sends the engine's frames to it. Only from loopback / private-network

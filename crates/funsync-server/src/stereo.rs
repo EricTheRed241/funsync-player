@@ -1,4 +1,4 @@
-//! The frame check of the VR decision (`backend/services/stereo_detect.py`):
+//! The frame check of the VR decision (ported from the old backend):
 //! for videos neither the user nor the file name decides, four grey
 //! 128×128 frames (20 / 40 / 60 / 80 %) are compared half against half.
 //! Per frame, the left half's horizontal detail (|Δx|) is correlated with

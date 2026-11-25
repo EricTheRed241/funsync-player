@@ -75,7 +75,7 @@ fn serves_the_page_and_every_sites_status() {
     assert_eq!(
         names,
         [
-            "Backend",
+            "Server",
             "Web remote",
             "Swipe deck",
             "Downloads",

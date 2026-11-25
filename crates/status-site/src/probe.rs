@@ -1,9 +1,9 @@
 //! The sites and how one is probed: an HTTP GET from this Mac to `127.0.0.1:<port><probe>`
 //! (loopback passes the access PIN), up when it answers 2xx in time; and a TCP connect to
 //! the Mac's network address, which tells whether other devices can reach the port. Every
-//! site is on the desktop app's one port: the backend serves the web remote and proxies the
-//! swipe deck (`/swipe/`, its Downloads page `/swipe/downloads`) and the Creators site
-//! (`/creators/`), which it starts itself.
+//! site is on the FunSync server's one port (crates/funsync-server, 5300): it serves the web
+//! remote and relays the swipe deck (`/swipe/`, its Downloads page `/swipe/downloads`) and the
+//! Creators site (`/creators/`), which it starts with `--supervise`.
 
 use serde::Serialize;
 use std::io::{Read, Write};
@@ -28,47 +28,50 @@ pub struct Site {
     pub start: &'static str,
 }
 
-const APP: &str = "the desktop app (it runs the sites; restart it)";
+const APP: &str =
+    "funsync-server --lan --supervise (it runs the sites; `funsync-server autostart status`)";
+/// The FunSync server's port (crates/funsync-server).
+const PORT: u16 = 5300;
 
 pub const SITES: &[Site] = &[
     Site {
-        name: "Backend",
-        port: 5123,
+        name: "Server",
+        port: PORT,
         probe: "/health",
         open: "/health",
         start: APP,
     },
     Site {
         name: "Web remote",
-        port: 5123,
+        port: PORT,
         probe: "/remote/",
         open: "/remote/",
         start: APP,
     },
     Site {
         name: "Swipe deck",
-        port: 5123,
+        port: PORT,
         probe: "/swipe/api/deck?limit=1",
         open: "/swipe/",
         start: APP,
     },
     Site {
         name: "Downloads",
-        port: 5123,
+        port: PORT,
         probe: "/swipe/api/downloads",
         open: "/swipe/downloads",
         start: APP,
     },
     Site {
         name: "Creators",
-        port: 5123,
+        port: PORT,
         probe: "/creators/api/creators/deck?limit=1",
         open: "/creators/",
         start: APP,
     },
     Site {
         name: "Collection",
-        port: 5123,
+        port: PORT,
         probe: "/creators/api/creators/collection",
         open: "/creators/collection",
         start: APP,

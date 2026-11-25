@@ -1,5 +1,5 @@
-//! The web remote's write API (`backend/routes/remote.py` +
-//! `backend/services/library_edits.py`): ratings, playlists, tag scores and
+//! The web remote's write API (ported from the old backend's library
+//! edits): ratings, playlists, tag scores and
 //! favourite artists, applied straight to `Library.config` (the old app
 //! queued them for the desktop). Every edit goes through
 //! `AppState::library_changed`. A rating ≤ 2★ is deleted from disk only
@@ -312,7 +312,7 @@ async fn delete_duplicate(State(st): State<Arc<AppState>>, b: Bytes) -> HttpResu
     if !crate::data::owns_library() {
         return Err(bad(
             StatusCode::CONFLICT,
-            "the Electron app owns the library",
+            "library changes are turned off (FUNSYNC_OWNS_LIBRARY=0)",
         ));
     }
     if !std::path::Path::new(&keep_path).exists() {

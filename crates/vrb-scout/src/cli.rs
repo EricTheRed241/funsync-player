@@ -32,7 +32,7 @@ Options:
 A scan walks each site's video listing (content.<site>/api/content/v1, public, 1 s
 between requests to a host), keeps the scenes with a toy script and reads the details
 (categories, gallery, fps) of new or changed ones only; the rest come from the previous
-file. Scenes are screened (screening in renderer/js/content-preferences.json: excluded
+file. Scenes are screened (screening in shared/content-preferences.json: excluded
 words, blocked creators / tags / title words, furry and SFW tags, minimum length) and
 scored like the EroScripts deck (candidateScore: tag scores from the categories with the
 Tags view's changes, VR, performer in the library, favourite bonus, likes from the

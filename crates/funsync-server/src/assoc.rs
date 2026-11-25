@@ -1,11 +1,9 @@
-//! Upkeep of the per-video maps after a complete scan, as the old app's
-//! library does: entries of a video that MOVED follow it
-//! (`renderer/js/association-rehome.js`: only an unambiguous 1:1 file-name
-//! match, never robbing a live video, never touching an offline source),
-//! and an association whose video is provably gone is dropped
-//! (`renderer/js/association-dead.js`: only when a folder above it answers
-//! and the OS says the video and its folder don't exist; an unplugged drive
-//! never qualifies).
+//! Upkeep of the per-video maps after a complete scan (ported from the old
+//! Electron app): entries of a video that MOVED follow it (only an
+//! unambiguous 1:1 file-name match, never robbing a live video, never
+//! touching an offline source), and an association whose video is provably
+//! gone is dropped (only when a folder above it answers and the OS says the
+//! video and its folder don't exist; an unplugged drive never qualifies).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -21,7 +19,7 @@ pub enum PathState {
 }
 
 /// Only ENOENT / ENOTDIR prove a path isn't there; any other error says
-/// nothing (`electron/path-state.js`).
+/// nothing.
 pub fn path_state(p: &str) -> PathState {
     match std::fs::symlink_metadata(p) {
         Ok(_) => PathState::Present,

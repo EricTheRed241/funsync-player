@@ -24,8 +24,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 //
 // Instead, grab the SAME logger instance the module under test holds and use
 // electron-log's own switch: a transport level of `false` disables it.
-const log = (await import('../../electron/logger.js')).default;
-const { EroScriptsAPI } = await import('../../electron/eroscripts-api.js');
+const log = (await import('../../shared/logger.js')).default;
+const { EroScriptsAPI } = await import('../../shared/eroscripts-api.js');
 
 let prevFileLevel;
 let prevConsoleLevel;

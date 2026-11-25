@@ -51,6 +51,10 @@ pub fn start(data: &Path, env: &[(&str, &str)]) -> (Kill, u16) {
                 .arg(data)
                 // Never the user's ~/Library/Logs/funsync-rust/server.log.
                 .env("FUNSYNC_RUST_LOG", data.join("server.log"))
+                // Library changes only where a test asks for them (`env`).
+                .env("FUNSYNC_OWNS_LIBRARY", "0")
+                // Never the user's userData (config.json, access PIN, sites).
+                .env("FUNSYNC_USER_DATA", data)
                 .envs(env.iter().copied())
                 .spawn()
                 .unwrap(),

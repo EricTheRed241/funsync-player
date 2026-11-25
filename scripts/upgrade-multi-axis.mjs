@@ -2,7 +2,7 @@
 // One-shot: stroke funscript (+ optional video) → twist / roll / pitch companions.
 //
 // Twist and roll are guided by the stroke and shaped like the hand-made axis
-// of the scenes you like, with seeded randomness (renderer/js/guided-axis.js;
+// of the scenes you like, with seeded randomness (shared/guided-axis.js;
 // VR and flat have their own settings). VR is decided as in `dedupe:scenes`:
 // the backend's stereo check when it has looked at the file, else the
 // filename or a VR-shaped frame (ffprobe). Each scene gets its own seed (from
@@ -36,7 +36,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-// renderer/*.js is ESM inside a CommonJS package. Re-exec once so Node does
+// shared/*.js is ESM inside a CommonJS package. Re-exec once so Node does
 // not print MODULE_TYPELESS_PACKAGE_JSON on every run.
 if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')) {
   const relaunch = spawnSync(process.execPath, [
@@ -45,15 +45,15 @@ if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')
   ], { stdio: 'inherit' });
   process.exit(relaunch.status ?? 1);
 }
-const { createNoise1D } = await import('../renderer/js/motion-source.js');
-const { parseAxisSuffix, getBaseName } = await import('../renderer/js/multi-axis.js');
-const { handmadeAxisSuffixes } = await import('../renderer/js/handmade-axes.js');
+const { createNoise1D } = await import('../shared/motion-source.js');
+const { parseAxisSuffix, getBaseName } = await import('../shared/multi-axis.js');
+const { handmadeAxisSuffixes } = await import('../shared/handmade-axes.js');
 const {
   planUpgrade,
   serialiseUpgradeWrites,
   companionPathForScript,
   resolveUpgradeAxes,
-} = await import('../renderer/js/upgrade-multi-axis.js');
+} = await import('../shared/upgrade-multi-axis.js');
 const { pairUpgradeJobs } = await import('./upgrade-pairing.mjs');
 const { VIDEO_EXTS, groupScenes, folderStrokeScripts, readStrokeScript, sceneHandmadeAxes } = await import('./handmade-scenes.mjs');
 const { readProbeCache, readStereoCache, stereoVr, probeVideo } = await import('./scene-probe.mjs');

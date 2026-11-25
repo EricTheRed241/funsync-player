@@ -72,7 +72,7 @@ const SWAP_CAP: f64 = 60.0;
 /// by this much at most anywhere (scene-dedupe-lib.mjs SWAP_CELL_MAX).
 const SWAP_CELL_MAX: f64 = 12.0;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 // ── Shared preferences ───────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ struct Shared {
 
 static SHARED_PREFS: LazyLock<Shared> = LazyLock::new(|| {
     serde_json::from_str(SHARED)
-        .expect("renderer/js/content-preferences.json: swipeDeck.duplicates, names")
+        .expect("shared/content-preferences.json: swipeDeck.duplicates, names")
 });
 
 /// The embedded `swipeDeck.duplicates` thresholds.

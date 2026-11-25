@@ -18,9 +18,9 @@ Options:
   -h, --help           This text
 
 The page is http://127.0.0.1:<port>/; with --lan it also answers on the Mac's network
-address, which the banner prints. It lists the backend (5123 /health), the web remote
-(5123 /remote/), the swipe deck (5123 /swipe/), the Creators deck and the Collection
-(5123 /creators/), all served on the desktop app's port, each up or down with its HTTP
+address, which the banner prints. It lists the FunSync server (5300 /health), the web
+remote (5300 /remote/), the swipe deck (5300 /swipe/), the Creators deck and the Collection
+(5300 /creators/), all served on the FunSync server's port, each up or down with its HTTP
 status and response time, and whether the port answers on the network address too (an
 app without network access answers on this Mac only). Every load of /api/status probes them again
 from this Mac; the page reloads it every 15 s. With an access PIN set (npm run

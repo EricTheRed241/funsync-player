@@ -28,7 +28,7 @@ Options:
                        pending, and the tagged videos
   -h, --help           This text
 
-The list and the threshold are pornstarTags in renderer/js/content-preferences.json:
+The list and the threshold are pornstarTags in shared/content-preferences.json:
 each performer's name, aliases and scene phrases are matched as whole words
 (case, full-width letters and punctuation don't matter) against each video's path
 below its library source (artist, scene folder, file name), its eroscripts.json

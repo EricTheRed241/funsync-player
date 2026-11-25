@@ -5,7 +5,7 @@
 // apart from the CLI so it can be tested without a forum, MEGA or pixeldrain.
 //
 // Rules (the tags, words, lengths, caps and weights are in
-// renderer/js/content-preferences.js; this module applies them)
+// shared/content-preferences.js; this module applies them)
 //   • Free Scripts only (the CLI lists that category).
 //   • Never excluded content (tags, title or first post). Scenes already in
 //     the library stay.
@@ -52,22 +52,22 @@ import { fold as foldName, isDistinctive, isNoiseWord, titleWords, titlesMatch }
 import {
   ANIMATION_TAGS, BLOCKED_CREATORS, BLOCKED_TAGS, BLOCKED_TITLE, COMPILATION_TITLE, EXCLUDED_TEXT, FEED_TAGS, FLAT_MAX_HEIGHT,
   MIN_VIDEO_MS, MUSIC_TAGS, NON_POV_TAGS, PMV_TAGS, PMV_TITLE, POV_TAGS, POV_TITLE, SEARCH_FEEDS, SFW_TAGS, VR_MAX_FPS, VR_MAX_HEIGHT,
-} from '../renderer/js/content-preferences.js';
-import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../renderer/js/preference-score.js';
-import { canonicalArtist } from '../renderer/js/artist-playlists.js';
-import { computeBins } from '../renderer/js/heatmap-strip.js';
+} from '../shared/content-preferences.js';
+import { isHentaiOnly, lessPreferred, candidateScore, inTagGroup, postTagScores } from '../shared/preference-score.js';
+import { canonicalArtist } from '../shared/artist-playlists.js';
+import { computeBins } from '../shared/heatmap-strip.js';
 import { capBytes, durationMatches, PMVHAVEN_HOST, RULE34VIDEO_HOST, rule34videoPosterUrl, safeName, STEM_BYTES } from './stream-hosts.mjs';
 import { VRBANGERS_HOST } from './vrbangers-host.mjs';
 import { SLR_ACCOUNT_DOWNLOAD, SLR_HOST, slrSceneName } from './slr-host.mjs';
 import { PORNHUB_HOST } from './pornhub-host.mjs';
 import { createPacer, RateLimitedError, SessionExpiredError, SEARCH_INTERVAL_MS } from './eroscripts-sync-lib.mjs';
 
-const { postImages } = createRequire(import.meta.url)('../electron/eroscripts-api.js');
+const { postImages } = createRequire(import.meta.url)('../shared/eroscripts-api.js');
 
-// The ranking (renderer/js/preference-score.js, shared with the app's library
+// The ranking (shared/preference-score.js, shared with the app's library
 // score) is part of this module's API for the scouts.
-export { candidateScore, effectiveTagScores, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../renderer/js/preference-score.js';
-// So are artist aliases (renderer/js/artist-playlists.js, ARTIST_ALIASES).
+export { candidateScore, effectiveTagScores, hasFeet, hasMonster, isHentaiOnly, lessPreferred, scoreCandidate } from '../shared/preference-score.js';
+// So are artist aliases (shared/artist-playlists.js, ARTIST_ALIASES).
 export { canonicalArtist };
 
 /** The minimum as words for messages: `1:50`. */
@@ -925,7 +925,7 @@ export function needsJudging(state, topic, rules = RULES_VERSION) {
 export const POST_INFO_KEYS = ['title', 'author', 'created', 'bumped', 'image', 'images', 'imagesVersion'];
 
 /**
- * How post images are picked (postImages in electron/eroscripts-api.js): records with
+ * How post images are picked (postImages in shared/eroscripts-api.js): records with
  * another `imagesVersion` are read again by `--titles`. 2 (2026-11-13): no linked
  * buttons, banners, heatmaps or stickers; replies' images too; up to GALLERY_KEEP kept.
  */
@@ -971,7 +971,7 @@ export function markTopic(state, id, verdict, now = Date.now(), rules = RULES_VE
  * A post's title, author (the first post's), creation and last-activity dates and
  * image (absolute URL), from what a feed lists (`t`) and its topic payload (`data`,
  * api.getTopicData), whichever has each; `images` (up to GALLERY_KEEP absolute URLs:
- * postImages in electron/eroscripts-api.js) and `imagesVersion` only from the payload,
+ * postImages in shared/eroscripts-api.js) and `imagesVersion` only from the payload,
  * `images` `[]` when it has none worth showing, both null without a payload.
  */
 export function postInfo(t, data = null) {

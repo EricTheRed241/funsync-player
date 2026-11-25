@@ -5,19 +5,19 @@
  */
 // One playlist per artist with at least ARTIST_PLAYLIST_MIN videos, per favourite from one
 // video, and the combined Favourite artists playlist
-// (renderer/js/artist-playlists.js): who counts, when a playlist is made,
+// (shared/artist-playlists.js): who counts, when a playlist is made,
 // and that the user's own edits stick.
 import { describe, it, expect, vi } from 'vitest';
 import {
   artistOf, canonicalArtist, planArtistPlaylists, applyArtistPlaylists, ARTIST_PLAYLISTS_KEY, FAVOURITES_STATE_KEY,
-} from '../../renderer/js/artist-playlists.js';
-import { ARTIST_ALIASES, ARTIST_PLAYLIST_MIN, FAVOURITES_PLAYLIST } from '../../renderer/js/content-preferences.js';
+} from '../../shared/artist-playlists.js';
+import { ARTIST_ALIASES, ARTIST_PLAYLIST_MIN, FAVOURITES_PLAYLIST } from '../../shared/content-preferences.js';
 
 const SOURCES = ['/GVP/Multi-Axis', '/GVP/Multi Generated/', '/GVP/_incoming'];
 const vids = (root, artist, n, from = 1) => Array.from({ length: n }, (_, i) => `${root}/${artist}/Scene ${i + from}/Scene ${i + from}.mp4`);
 
 // One extra alias with an accent, to show NFC / NFD spellings compare alike (the real ones are ASCII).
-vi.mock('../../renderer/js/content-preferences.js', async (importOriginal) => {
+vi.mock('../../shared/content-preferences.js', async (importOriginal) => {
   const prefs = await importOriginal();
   return { ...prefs, ARTIST_ALIASES: { ...prefs.ARTIST_ALIASES, 'Caf\u00e9 Studio': 'Caf\u00e9' } };
 });

@@ -12,7 +12,7 @@ import {
   guidedTrack,
   strokeSeries,
   strokeTemplates,
-} from '../../renderer/js/guided-axis.js';
+} from '../../shared/guided-axis.js';
 
 const TWIST_MODEL = AXIS_MODELS.twist;
 

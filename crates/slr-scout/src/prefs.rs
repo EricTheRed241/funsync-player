@@ -1,5 +1,5 @@
 //! What to look for and how to score it, from the shared part of the
-//! content preferences (`renderer/js/content-preferences.json`): `slrScout`
+//! content preferences (`shared/content-preferences.json`): `slrScout`
 //! (who to scout, the SLR-only extras), and the values the EroScripts deck
 //! scores with too (`ranking`, `tagScoreGroups`, `favourites`), the library
 //! cap (`libraryMaxVideos`), the video caps (`videoCaps`) and the pornstar
@@ -8,7 +8,7 @@
 
 use serde::Deserialize;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,7 +120,7 @@ pub fn load() -> Result<Prefs, String> {
 
 pub fn parse(raw: &str) -> Result<Prefs, String> {
     let prefs = serde_json::from_str::<Prefs>(raw)
-        .map_err(|e| format!("renderer/js/content-preferences.json: {e}"))?;
+        .map_err(|e| format!("shared/content-preferences.json: {e}"))?;
     let bad = |what: &str| Err(format!("content-preferences.json: {what}"));
     let s = &prefs.slr_scout;
     if s.actors.iter().all(|a| a.trim().is_empty()) && !s.include_favourites && !s.include_pornstars

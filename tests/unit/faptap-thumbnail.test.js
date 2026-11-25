@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Main-process half of FapTap thumbnails (electron/faptap-thumbnail.js):
+// Main-process half of FapTap thumbnails (shared/faptap-thumbnail.js):
 // only FapTap's hosts are fetched (no cookies, every redirect hop checked,
 // size capped), and the image is imported only when the preview validator
 // says it shows the video.
@@ -11,8 +11,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 const {
   isFaptapThumbnailUrl, downloadFaptapThumbnail, matchFaptapThumbnail,
-} = await import('../../electron/faptap-thumbnail.js');
-const { MAX_BYTES } = await import('../../electron/thumbnail-download.js');
+} = await import('../../shared/faptap-thumbnail.js');
+const { MAX_BYTES } = await import('../../shared/thumbnail-download.js');
 
 const WEBP = 'https://faptap.net/api/assets/thumbnails/2114528228239478785.webp';
 const BUNNY = 'https://vz-5d2e7f1a-b3c.b-cdn.net/0a1b2c3d-4e5f/thumbnail.jpg';

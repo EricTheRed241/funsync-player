@@ -1,6 +1,6 @@
 //! Device output, driven by the server. Playback comes from the web remote
-//! (its playback state over `/api/remote/sync`, the phone side of
-//! `backend/web-remote/remote-sync.js`) or from the PCVR companion bridge
+//! (its playback state over `/api/remote/sync`, sent by
+//! `web/remote/remote-sync.js`) or from the PCVR companion bridge
 //! (HereSphere's timestamp server); the newest source owns the session. A
 //! 60 Hz engine plays the video's scripts and sends TCode (WebSocket, UDP,
 //! USB serial) and Buttplug (Intiface) commands. Settings: `settings.tcode`

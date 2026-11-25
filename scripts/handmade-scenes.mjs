@@ -4,7 +4,7 @@
 // belongs to no video is a scene of its own.
 //
 // Hand-made axis scripts always win, per folder: when any script in a
-// folder has hand-made axes (renderer/js/handmade-axes.js), none of the
+// folder has hand-made axes (shared/handmade-axes.js), none of the
 // folder's scripts gets or keeps generated companions. Sibling videos (other
 // versions of the scene: `_4k`, `_hard`, VR / flat) get a copy of the
 // hand-made axes only when their stroke script's timing matches
@@ -13,8 +13,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseAxisSuffix } from '../renderer/js/multi-axis.js';
-import { handmadeAxisSuffixes } from '../renderer/js/handmade-axes.js';
+import { parseAxisSuffix } from '../shared/multi-axis.js';
+import { handmadeAxisSuffixes } from '../shared/handmade-axes.js';
 import { sceneVideoStem } from './upgrade-pairing.mjs';
 
 export const VIDEO_EXTS = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov']);

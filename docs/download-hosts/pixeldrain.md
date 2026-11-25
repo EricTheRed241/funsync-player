@@ -28,7 +28,7 @@ Verdict: auto-with-limits
   - The same on `pixeldrain.net`, which serves the same API.
   - `/u/<id1>,<id2>` is legal: the viewer splits on commas.
   - `/api/file/<id>` direct links are possible.
-  - IDs are 8 chars `[A-Za-z0-9]`. The current regex in `scripts/eroscripts-scout.mjs:176` and `electron/eroscripts-api.js:44` misses comma lists and `/api/file/` links.
+  - IDs are 8 chars `[A-Za-z0-9]`. The current regex in `scripts/eroscripts-scout.mjs:176` and `shared/eroscripts-api.js:44` misses comma lists and `/api/file/` links.
 
 ## How downloads work
 - **Info:**
@@ -167,7 +167,7 @@ async function pdZip(ids, listId, zipPath, outDir, names) {   // protected files
 // caller: verify size + sha256 against pdInfo(); on CAPTCHA-class 403 or zip failure → manual list
 ```
 - **Resume and retry:** resume direct downloads with Range. ZIPs cannot resume, so restart them, and keep ZIPs to script-sized payloads. A ZIP must not be the way protected *videos* are fetched unless the user accepts restarting multi-GB transfers.
-- **Electron side:** `electron/eroscripts-api.js` `_resolvePixeldrain` could likewise fetch protected funscripts through the ZIP route instead of opening the page.
+- **Shared module:** `shared/eroscripts-api.js` `_resolvePixeldrain` could likewise fetch protected funscripts through the ZIP route instead of opening the page.
 
 ## Manual (browser) instructions if needed
 Only for files the scout reports as protected (CAPTCHA-class 403) and could not fetch:

@@ -7,9 +7,9 @@
 // library scanner already round-trips. Original stroke file is never a write.
 
 import { describe, it, expect } from 'vitest';
-import { createNoise1D } from '../../renderer/js/motion-source.js';
-import { detectCompanionFiles } from '../../renderer/js/multi-axis.js';
-import { extractEmbeddedAxes } from '../../renderer/js/embedded-multi-axis.js';
+import { createNoise1D } from '../../shared/motion-source.js';
+import { detectCompanionFiles } from '../../shared/multi-axis.js';
+import { extractEmbeddedAxes } from '../../shared/embedded-multi-axis.js';
 import {
   planUpgrade,
   serialiseUpgradeWrites,
@@ -19,7 +19,7 @@ import {
   depthWeights,
   depthSchedule,
   REST_LIMIT_MS,
-} from '../../renderer/js/upgrade-multi-axis.js';
+} from '../../shared/upgrade-multi-axis.js';
 
 const STROKE = Object.freeze([
   { at: 0, pos: 5 },

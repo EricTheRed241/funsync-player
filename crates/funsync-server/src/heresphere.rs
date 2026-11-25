@@ -1,6 +1,6 @@
-//! The headset players' library (`backend/routes/vr_api.py`): HereSphere
+//! The headset players' library (ported from the old backend): HereSphere
 //! (`/heresphere`, `/heresphere/<id>`) and DeoVR (`/deovr`, `/deovr/<id>`),
-//! both sectioned by `backend/services/vr_sections.py`'s rules. HereSphere
+//! both sectioned by the same rules. HereSphere
 //! is two-way: a scene POST sets the rating, the heart, `Playlist:<name>`
 //! and `Queue:Up next` tags (only tags changed since the scene was served
 //! count), and `/heresphere/events/<id>` takes plays out of the queue and

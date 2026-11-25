@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// electron/library-scan.js is the scan-directory pairing, shared with CLI
+// shared/library-scan.js is the scan-directory pairing, shared with CLI
 // tools (npm run eroscripts:sync). Pins that it runs outside Electron on a
 // real folder tree and pairs the way the app does.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const { scanLibrary } = await import('../../electron/library-scan.js');
+const { scanLibrary } = await import('../../shared/library-scan.js');
 
 let tmp;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lib-scan-')); });

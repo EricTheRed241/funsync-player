@@ -21,7 +21,7 @@ import {
   axisPhase,
   normaliseMotionConfig,
   generateAxisActions,
-} from '../../renderer/js/motion-source.js';
+} from '../../shared/motion-source.js';
 
 describe('createNoise1D', () => {
   it('is deterministic for a given seed (a bug report must reproduce)', () => {

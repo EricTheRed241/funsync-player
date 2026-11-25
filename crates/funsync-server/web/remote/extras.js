@@ -1,8 +1,7 @@
-// Desktop extras for the web remote (the Rust app's UI): the Electron
-// player's keyboard shortcuts (README "Keyboard Shortcuts"), screenshot,
-// picture-in-picture, aspect ratio cycling, a replay button, the seek bar's
-// frame preview and the library cards' hover preview (mouse only). The server
-// adds this script to the web remote's index.html; nothing else changes.
+// Desktop extras for the web remote: keyboard shortcuts (README "Keyboard
+// Shortcuts"), screenshot, picture-in-picture, aspect ratio cycling, a replay
+// button, the A-B loop, the seek bar's frame preview and the library cards'
+// hover preview (mouse only). The server adds this script to the pages.
 (() => {
   const FITS = ['contain', 'cover', 'fill'];
   const video = () => [...document.querySelectorAll('video')].find((v) => v.offsetParent !== null || v.currentSrc);

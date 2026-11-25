@@ -6,7 +6,8 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_BACKEND_PORT: u16 = 5123;
+/// The FunSync server's port (crates/funsync-server), when config.json names none.
+pub const DEFAULT_BACKEND_PORT: u16 = 5300;
 
 #[derive(Debug, PartialEq)]
 pub struct AppConfig {

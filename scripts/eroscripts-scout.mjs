@@ -44,7 +44,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
-// renderer/*.js is ESM inside a CommonJS package. Re-exec once so Node does
+// shared/*.js is ESM inside a CommonJS package. Re-exec once so Node does
 // not print MODULE_TYPELESS_PACKAGE_JSON on every run.
 if (!process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')) {
   const relaunch = spawnSync(process.execPath, [
@@ -65,10 +65,10 @@ const { DEFAULT_CREDENTIALS: VRB_CREDENTIALS, LoginError } = await import('./vrb
 const { redactUrl } = await import('./vrbangers-lib.mjs');
 const slrHost = await import('./slr-host.mjs');
 const frames = await import('./scout-frames.mjs');
-const prefs = await import('../renderer/js/content-preferences.js');
+const prefs = await import('../shared/content-preferences.js');
 const disk = await import('./disk-space.mjs');
 const require = createRequire(import.meta.url);
-const rejectedVideos = require('../electron/rejected-videos.js');
+const rejectedVideos = require('../shared/rejected-videos.js');
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // One per run: every rule34video request goes through its pacing (≥ 400 ms apart, 60 s after a 429).
 const rule34video = streams.createRule34video();
@@ -491,7 +491,7 @@ function scoutContext(config, userData, incoming) {
   const library = libraryState(roots);
   const knownTopics = new Set(Object.values(config.settings?.library?.scriptTags || {}).map((r) => r?.topicId).filter((id) => id != null));
   try {
-    const links = require('../electron/eroscripts-links.js').readLinksFile(userData);
+    const links = require('../shared/eroscripts-links.js').readLinksFile(userData);
     for (const l of Object.values(links?.links || {})) if (l.topicId != null) knownTopics.add(l.topicId);
     for (const l of Object.values(links?.links || {})) if (l.creator) library.creators.add(lib.canonicalArtist(l.creator).toLowerCase());
   } catch { /* no links file yet */ }
@@ -1570,10 +1570,10 @@ async function main() {
   if (kind && !lockRun(userData, kind)) return 2;
 
   // The API module logs through electron-log; keep the CLI's output clean.
-  const log = require('../electron/logger.js');
+  const log = require('../shared/logger.js');
   log.transports.file.level = false;
   log.transports.console.level = false;
-  const { EroScriptsAPI } = require('../electron/eroscripts-api.js');
+  const { EroScriptsAPI } = require('../shared/eroscripts-api.js');
   const api = new EroScriptsAPI();
   api.restoreSession(session.cookie, session.username);
   vrbangers = vrbHost.createVrbangers({ userData, credentialsFile: opts.vrbCredentials, log: (m) => process.stderr.write(`  vrbangers.com: ${m}\n`) });

@@ -1,5 +1,5 @@
 //! The pornstar list and threshold, from the shared part of the content
-//! preferences (`pornstarTags` in `renderer/js/content-preferences.json`).
+//! preferences (`pornstarTags` in `shared/content-preferences.json`).
 //! Embedded at compile time, so `cargo run` rebuilds when the file changes;
 //! no list lives in Rust.
 
@@ -7,7 +7,7 @@ use crate::text;
 use serde::Deserialize;
 use std::collections::HashSet;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+const SHARED: &str = include_str!("../../../shared/content-preferences.json");
 
 /// One listed performer.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -52,7 +52,7 @@ pub fn load() -> Result<PornstarTags, String> {
 
 pub fn parse(raw: &str) -> Result<PornstarTags, String> {
     let prefs = serde_json::from_str::<Shared>(raw)
-        .map_err(|e| format!("renderer/js/content-preferences.json: {e}"))?
+        .map_err(|e| format!("shared/content-preferences.json: {e}"))?
         .pornstar_tags;
     let bad = |what: String| Err(format!("content-preferences.json: pornstarTags: {what}"));
     if prefs.min_scenes == 0 {

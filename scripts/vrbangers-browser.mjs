@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const SELF = fileURLToPath(import.meta.url);
 const IS_CLI = path.resolve(process.argv[1] || '') === SELF;
 
-// renderer/*.js is ESM inside a CommonJS package. Re-exec once so Node does
+// shared/*.js is ESM inside a CommonJS package. Re-exec once so Node does
 // not print MODULE_TYPELESS_PACKAGE_JSON on every run.
 if (IS_CLI && !process.execArgv.includes('--disable-warning=MODULE_TYPELESS_PACKAGE_JSON')) {
   const relaunch = spawnSync(process.execPath, [

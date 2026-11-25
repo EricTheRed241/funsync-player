@@ -1,7 +1,5 @@
-//! FunSync in Rust: one server that owns the library and serves the web UI
-//! (port 5300), built beside the Electron app to reach feature parity
-//! (`docs/rust-app/parity.md`). Phase 1: data folder, import from the old
-//! app (read-only), library scan, media streaming, thumbnails, scripts.
+//! FunSync: one server that owns the library and serves the web UI (port
+//! 5300): library scan and rules, media, devices, headsets, EroScripts.
 
 pub mod access;
 pub mod assoc;
@@ -13,7 +11,6 @@ pub mod delete;
 pub mod devices;
 pub mod edits;
 pub mod eroscripts;
-pub mod groupings;
 pub mod heresphere;
 pub mod import;
 pub mod log;

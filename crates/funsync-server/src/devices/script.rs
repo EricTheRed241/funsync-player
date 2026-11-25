@@ -1,5 +1,5 @@
 //! A video's scripts as TCode axes: the main script (L0), its companion
-//! axis files and the axes embedded in it (`renderer/js/embedded-multi-axis.js`).
+//! axis files and the axes embedded in it (`shared/embedded-multi-axis.js`).
 //! Hand-made axes win: once any exists, generated companions are not played.
 
 use std::collections::BTreeMap;

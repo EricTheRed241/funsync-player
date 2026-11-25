@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 pub const USAGE: &str = "\
 access-pin: the PIN every FunSync site on the home network asks other devices for
-(the app's backend on 5123, the web remote, the headset server, scout:report --lan)
+(the FunSync server on 5300: the web remote, the headset server and the sites it relays)
 
 Usage:
   npm run access:pin -- set <pin>       Set or change the PIN (4 to 12 digits)

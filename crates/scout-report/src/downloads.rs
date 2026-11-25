@@ -388,7 +388,7 @@ fn rights(s: &Swipes) -> impl Iterator<Item = (String, String)> + '_ {
 }
 
 /// Per topic, why its videos were turned down or removed (eroscripts-scout-rejected.json,
-/// electron/rejected-videos.js's reasons), each reason once, joined.
+/// shared/rejected-videos.js's reasons), each reason once, joined.
 fn rejected_reasons(rejected: &Value) -> HashMap<u64, String> {
     let mut by_topic: HashMap<u64, Vec<String>> = HashMap::new();
     for e in rejected

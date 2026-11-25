@@ -1,5 +1,5 @@
 {
-  "_comment": "The local sites the app runs and the backend serves on its own port (5123): each Rust site runs on 127.0.0.1:<port> (electron/sites.js starts it) and the backend relays <prefix>/… to it (backend/routes/sites.py); <prefix>/ is the site's <home> page. The nav bar on every page lists them after the web remote, each followed by its <pages> (a page of that site with a nav link of its own: <prefix><path>, and the backend's <path> redirects there).",
+  "_comment": "The local sites the FunSync server serves on its own port (5300): each Rust site runs on 127.0.0.1:<port> (`funsync-server --supervise` starts it) and the server relays <prefix>/… to it (crates/funsync-server/src/sites.rs); <prefix>/ is the site's <home> page. The nav bar on every page lists them after the web remote, each followed by its <pages> (a page of that site with a nav link of its own: <prefix><path>, and the server's <path> redirects there).",
   "sites": [
     { "name": "Swipe", "prefix": "/swipe", "package": "scout-report", "port": 5131, "home": "/swipe",
       "pages": [{ "name": "Downloads", "path": "/downloads" }] },

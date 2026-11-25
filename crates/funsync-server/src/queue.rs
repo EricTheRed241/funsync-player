@@ -1,7 +1,7 @@
-//! The play queue (`renderer/js/play-queue.js`): `player.userQueue` (the
+//! The play queue (ported from the old Electron app): `player.userQueue` (the
 //! user's additions), `player.queuePlayed` (`{path: epochMs}` played /
 //! skipped stamps) and `player.queueAutoFill`; the auto-filled part is
-//! computed on every read. API as `backend/routes/remote.py`.
+//! computed on every read. API under `/api/remote/queue`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use crate::server::AppState;
 
 const DAY_MS: f64 = 86_400_000.0;
 const PLAYED_CAP: usize = 1000;
-/// `QUEUE_AUTOFILL` of `renderer/js/content-preferences.js`.
+/// `QUEUE_AUTOFILL` of `shared/content-preferences.js`.
 const SIZE: usize = 10;
 const REPLAY_AFTER_MS: f64 = 30.0 * DAY_MS;
 

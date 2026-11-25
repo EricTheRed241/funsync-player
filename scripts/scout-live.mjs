@@ -3,12 +3,12 @@
 //
 // The scouts take animated and live action alike (user, 2026-11-07: the live
 // quota is gone). A favourite is a creator or actress the user likes
-// (FAVOURITES in renderer/js/content-preferences.js with the user's changes
+// (FAVOURITES in shared/content-preferences.js with the user's changes
 // from the web remote's Artists view, `library.favouriteArtists`; see
 // scoutPreferences): favourites skip the live-not-POV and FapTap focus rules
 // and rank higher.
 
-import { effectiveFavourites, favouriteScore } from '../renderer/js/favourite-artists.js';
+import { effectiveFavourites, favouriteScore } from '../shared/favourite-artists.js';
 
 // Letters and digits, single-spaced, like eroscripts-scout-lib's normName
 // (that module imports this one).

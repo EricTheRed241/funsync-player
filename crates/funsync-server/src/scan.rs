@@ -1,8 +1,8 @@
 //! Library scan: walk the source folders and pair every video with its
 //! funscript, variants, axis companions, subtitle and scout sidecar.
 //!
-//! A port of `electron/library-scan.js` (and `electron/script-variant.js`);
-//! the old app is the reference, so keep the two in step. Paths come from
+//! Ported from the old Electron app; `shared/library-scan.js` (and
+//! `shared/script-variant.js`) is the JS twin, so keep the two in step. Paths come from
 //! `read_dir`, so they keep the drive's own spelling (NFC / NFD).
 
 use std::collections::{HashMap, HashSet};

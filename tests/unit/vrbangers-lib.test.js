@@ -14,7 +14,7 @@ import {
   parseCredentials, reviveNuxt, findScene, parseVideoLink, sceneFolder, pickSceneLinks, chooseLink, VR_MAX_K,
   parseDuration, parseScenePage, nuxtDataOf, redactUrl, sceneUrl,
 } from '../../scripts/vrbangers-lib.mjs';
-import { VR_MAX_HEIGHT } from '../../renderer/js/content-preferences.js';
+import { VR_MAX_HEIGHT } from '../../shared/content-preferences.js';
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'vrbangers-scene.html');
 

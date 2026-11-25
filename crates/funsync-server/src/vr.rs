@@ -1,4 +1,4 @@
-//! The VR decision (`backend/routes/vr_api.py`, `detect_vr_format_for_video`):
+//! The VR decision (ported from the old backend):
 //! the VR Format panel's projection first, then Mark as VR / Flat, then the
 //! filename (`detect_vr_format`), then the frames (`crate::stereo`: two eyes
 //! side by side or one picture), then the frame shape (cached dimensions).
@@ -304,7 +304,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// Names and expectations from `backend/tests/test_vr_api.py`.
+    /// Names and expectations from the old backend's VR tests.
     #[test]
     fn filenames() {
         let cases: &[(&str, &str, &str, bool)] = &[
