@@ -652,7 +652,7 @@ fn fuzzy_tokens(s: &str) -> HashSet<String> {
         .collect()
 }
 
-fn fuzzy_score(a: &str, b: &str) -> u32 {
+pub fn fuzzy_score(a: &str, b: &str) -> u32 {
     let ta = fuzzy_tokens(a);
     let tb = fuzzy_tokens(b);
     if ta.is_empty() || tb.is_empty() {
