@@ -119,6 +119,16 @@ fn import_then_serve() {
     assert!(head.starts_with("HTTP/1.1 200"), "{head}");
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("app.js") && page.contains("/remote/extras.js"));
+    // The library rules ran after the scan; the old backend's flag endpoints.
+    let (_, body) = http(port, "GET", "/api/media/axis-flags", "");
+    let flags: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let path = videos[0]["path"].as_str().unwrap();
+    assert_eq!(flags["flags"][path], "handmade");
+    let (_, body) = http(port, "GET", "/api/media/vr-flags", "");
+    let flags: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(flags["flags"][path], false);
+    let (_, body) = http(port, "GET", "/api/remote/categories", "");
+    assert!(String::from_utf8_lossy(&body).contains("Hand-made axes"));
     let (_, body) = http(port, "GET", "/api/parity", "");
     let parity: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(parity["counts"]["done"].as_u64().unwrap() > 0);

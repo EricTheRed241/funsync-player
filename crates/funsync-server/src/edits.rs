@@ -6,7 +6,7 @@
 //! ≤ 2★ only stores the rating.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
@@ -15,50 +15,16 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use serde_json::{Map, Value, json};
-use unicode_normalization::UnicodeNormalization;
 
 use crate::data::{Library, now_ms};
+use crate::prefs::{
+    artist_of, canonical_artist, content_preferences as prefs, effective_tag_scores, fold,
+    normalize_tag_score,
+};
 use crate::remote::{duration, rating_entry};
 use crate::server::AppState;
 
 pub const NEEDS_REVIEW_PLAYLIST: &str = "Needs review";
-const TAG_SCORE_MAX: f64 = 10.0;
-/// `NOT_AN_ARTIST` / `ARTIST_ALIASES` of `renderer/js/content-preferences.js`.
-const NOT_AN_ARTIST: [&str; 12] = [
-    "unknown",
-    "misc",
-    "various",
-    "other",
-    "others",
-    "new folder",
-    "cock hero",
-    "fap hero",
-    "pmv",
-    "hmv",
-    "compilation",
-    "compilations",
-];
-const ARTIST_ALIASES: [(&str, &str); 6] = [
-    ("Rondoudou Media", "Rondoudou"),
-    ("RondoudouMedia", "Rondoudou"),
-    ("Horny Herring Studios", "Horny Herring"),
-    ("shantiaoxiaozhi", "shantianxiaozhi"),
-    ("S022", "miffn"),
-    ("S069", "miffn"),
-];
-
-/// `renderer/js/content-preferences.json`.
-pub static PREFS: LazyLock<Value> = LazyLock::new(|| {
-    serde_json::from_str(include_str!(
-        "../../../renderer/js/content-preferences.json"
-    ))
-    .expect("content-preferences.json")
-});
-
-pub fn prefs() -> &'static Value {
-    &PREFS
-}
-
 pub type HttpResult = Result<Json<Value>, Response>;
 
 pub fn bad(code: StatusCode, detail: impl Into<String>) -> Response {
@@ -106,17 +72,8 @@ pub fn normalize_rating(v: &Value) -> Option<f64> {
     number(v).filter(|r| (0.0..=5.0).contains(r) && (r * 2.0).fract() == 0.0)
 }
 
-/// Rounded to 0.5 (halves up) and clamped to ±10.
-pub fn normalize_tag_score(v: &Value) -> Option<f64> {
-    number(v).map(|n| ((n * 2.0 + 0.5).floor() / 2.0).clamp(-TAG_SCORE_MAX, TAG_SCORE_MAX) + 0.0)
-}
-
 pub fn tag_key(t: &str) -> String {
     t.trim().to_lowercase()
-}
-
-fn fold(s: &str) -> String {
-    s.nfc().collect::<String>().trim().to_lowercase()
 }
 
 fn same_name(a: &Value, b: &str) -> bool {
@@ -219,24 +176,6 @@ fn default_tag_score(key: &str) -> f64 {
         .map_or(0.0, |g| g.1)
 }
 
-/// Starting scores with `library.tagScores` on top, zeros left out
-/// (`effectiveTagScores`).
-pub fn effective_tag_scores(lib: &Library) -> Map<String, Value> {
-    let mut out: Map<String, Value> = tag_groups()
-        .into_iter()
-        .map(|(k, s, _)| (k, json!(s)))
-        .collect();
-    for (t, v) in lib.lib()["tagScores"].as_object().into_iter().flatten() {
-        if let (k, Some(s)) = (tag_key(t), normalize_tag_score(v))
-            && !k.is_empty()
-        {
-            out.insert(k, json!(s));
-        }
-    }
-    out.retain(|_, v| v.as_f64() != Some(0.0));
-    out
-}
-
 /// `library.tagScores` keeps only changes from the starting score.
 pub fn set_tag_score(lib: &mut Library, key: &str, score: f64) {
     let m = lib.lib_mut("tagScores");
@@ -251,60 +190,8 @@ pub fn set_tag_score(lib: &mut Library, key: &str, score: f64) {
     }
 }
 
-fn canonical_artist(name: &str) -> String {
-    let f = fold(name);
-    ARTIST_ALIASES
-        .iter()
-        .find(|(a, _)| fold(a) == f)
-        .map_or_else(|| name.to_string(), |(_, n)| n.to_string())
-}
-
 fn artist_key(name: &str) -> String {
     fold(&canonical_artist(name.trim()))
-}
-
-/// The first folder under the video's source, when the video sits a folder
-/// deeper (`artist-playlists.js::artistOf`).
-pub fn artist_of(path: &str, sources: &[String]) -> Option<String> {
-    let p = path.replace('\\', "/");
-    let root = sources
-        .iter()
-        .map(|s| s.replace('\\', "/").trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty() && fold(&p).starts_with(&format!("{}/", fold(s))))
-        .max_by_key(String::len)?;
-    let parts: Vec<&str> = p.get(root.len() + 1..)?.split('/').collect();
-    if parts.len() < 3 {
-        return None;
-    }
-    let a = canonical_artist(parts[0].trim());
-    (!a.is_empty() && !NOT_AN_ARTIST.contains(&fold(&a).as_str())).then_some(a)
-}
-
-/// FAVOURITES with `library.favouriteArtists` changes (`effectiveFavourites`).
-pub fn favourites(lib: &Library) -> Vec<String> {
-    let mut out: Vec<(String, String)> = prefs()["favourites"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(|n| (artist_key(n), canonical_artist(n)))
-        .collect();
-    for (n, fav) in lib.lib()["favouriteArtists"]
-        .as_object()
-        .into_iter()
-        .flatten()
-    {
-        let k = artist_key(n);
-        if k.is_empty() {
-            continue;
-        }
-        if *fav == false {
-            out.retain(|x| x.0 != k);
-        } else if *fav == true && !out.iter().any(|x| x.0 == k) {
-            out.push((k, canonical_artist(n.trim())));
-        }
-    }
-    out.into_iter().map(|x| x.1).collect()
 }
 
 /// `library.favouriteArtists` keeps only changes from FAVOURITES.
@@ -409,7 +296,10 @@ async fn tag_scores(State(st): State<Arc<AppState>>) -> Json<Value> {
         .collect();
     let r = &prefs()["ranking"];
     Json(json!({
-        "scores": effective_tag_scores(&lib),
+        "scores": effective_tag_scores(&lib.lib()["tagScores"])
+            .into_iter()
+            .map(|(k, s)| (k, json!(s)))
+            .collect::<Map<String, Value>>(),
         "pending": [],
         "recalculating": false,
         "groups": groups,
@@ -459,7 +349,10 @@ async fn artists(State(st): State<Arc<AppState>>) -> Json<Value> {
             g.2 += duration(&lib, &v.path);
         }
     }
-    let favs = favourites(&lib);
+    let favs: Vec<String> = crate::prefs::favourites(&lib)
+        .into_iter()
+        .map(|f| f.1)
+        .collect();
     let fav_keys: Vec<String> = favs.iter().map(|n| artist_key(n)).collect();
     let entry = |key: String, name: String, ids: Vec<String>, total: f64| {
         json!({
@@ -590,34 +483,23 @@ mod tests {
 
     #[test]
     fn tag_score_clamp_and_storage() {
-        assert_eq!(normalize_tag_score(&json!(1.26)), Some(1.5));
-        assert_eq!(normalize_tag_score(&json!(-1.25)), Some(-1.0));
-        assert_eq!(normalize_tag_score(&json!(99)), Some(10.0));
-        assert_eq!(normalize_tag_score(&json!("-42")), Some(-10.0));
-        assert_eq!(normalize_tag_score(&json!(true)), None);
         let mut l = lib();
         set_tag_score(&mut l, "riding", 0.0);
         set_tag_score(&mut l, "solo", 3.0);
-        let eff = effective_tag_scores(&l);
-        assert!(eff.get("riding").is_none());
-        assert_eq!(eff["solo"], json!(3.0));
-        assert_eq!(eff["cowgirl"], json!(2.0));
+        let eff = effective_tag_scores(&l.lib()["tagScores"]);
+        assert!(!eff.contains_key("riding"));
+        assert_eq!(eff["solo"], 3.0);
+        assert_eq!(eff["cowgirl"], 2.0);
         set_tag_score(&mut l, "riding", 2.0);
         assert!(l.lib()["tagScores"].get("riding").is_none());
     }
 
     #[test]
     fn artists_and_favourites() {
-        let src = vec!["/lib".to_string()];
-        assert_eq!(
-            artist_of("/lib/S022/scene/a.mp4", &src).as_deref(),
-            Some("miffn")
-        );
-        assert_eq!(artist_of("/lib/Misc/scene/a.mp4", &src), None);
-        assert_eq!(artist_of("/lib/Mira/a.mp4", &src), None);
         let mut l = lib();
         set_favourite_artist(&mut l, "Someone New", true);
-        assert!(favourites(&l).contains(&"Someone New".to_string()));
+        let favs = crate::prefs::favourites(&l);
+        assert!(favs.iter().any(|f| f.1 == "Someone New"));
         set_favourite_artist(&mut l, "someone new", false);
         assert_eq!(l.lib()["favouriteArtists"], json!({}));
     }

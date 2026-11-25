@@ -14,6 +14,7 @@ pub mod heresphere;
 pub mod import;
 pub mod log;
 pub mod media;
+pub mod prefs;
 pub mod queue;
 pub mod remote;
 pub mod scan;

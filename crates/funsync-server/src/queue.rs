@@ -15,7 +15,8 @@ use axum::routing::{get, post};
 use serde_json::{Map, Value, json};
 
 use crate::data::{Library, now_ms};
-use crate::edits::{HttpResult, NEEDS_REVIEW_PLAYLIST, applied, bad, body, prefs, video_path};
+use crate::edits::{HttpResult, NEEDS_REVIEW_PLAYLIST, applied, bad, body, video_path};
+use crate::prefs::content_preferences as prefs;
 use crate::remote::rating_entry;
 use crate::scan::Video;
 use crate::server::AppState;
