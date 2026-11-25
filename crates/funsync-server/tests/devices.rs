@@ -475,3 +475,135 @@ async fn routing_editor_sends_tcode_another_script_and_edge_holds_it() {
     let f = frame_starting(&mut device, "L0").await;
     assert_ne!(f, "L03000I17\n", "back on the main script");
 }
+
+/// A fake Intiface Central: answers the handshake with a rotator, an
+/// oscillating machine, a vibrator and a stroker, and forwards every
+/// command it gets.
+async fn fake_intiface(
+    listener: tokio::net::TcpListener,
+    out: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+) {
+    let (sock, _) = listener.accept().await.unwrap();
+    let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+    let devices = serde_json::json!([
+        {"DeviceIndex": 0, "DeviceName": "Rotator", "DeviceMessages": {"RotateCmd": [{"StepCount": 20}]}},
+        {"DeviceIndex": 1, "DeviceName": "Machine", "DeviceMessages": {"ScalarCmd": [{"ActuatorType": "Oscillate"}]}},
+        {"DeviceIndex": 2, "DeviceName": "Vibe", "DeviceMessages": {"ScalarCmd": [{"ActuatorType": "Vibrate"}]}},
+        {"DeviceIndex": 3, "DeviceName": "Stroker", "DeviceMessages": {"LinearCmd": [{"StepCount": 100}]}},
+    ]);
+    while let Some(Ok(Message::Text(t))) = ws.next().await {
+        let list: serde_json::Value = serde_json::from_str(&t).unwrap();
+        for m in list.as_array().unwrap() {
+            let (kind, body) = m.as_object().unwrap().iter().next().unwrap();
+            let id = &body["Id"];
+            let reply = match kind.as_str() {
+                "RequestServerInfo" => serde_json::json!([{"ServerInfo": {"Id": id,
+                    "ServerName": "fake", "MessageVersion": 3, "MaxPingTime": 0}}]),
+                "RequestDeviceList" => {
+                    serde_json::json!([{"DeviceList": {"Id": id, "Devices": devices}}])
+                }
+                _ => {
+                    let _ = out.send(serde_json::json!({ kind.as_str(): body }));
+                    serde_json::json!([{"Ok": {"Id": id}}])
+                }
+            };
+            ws.send(Message::text(reply.to_string())).await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn buttplug_devices_get_their_own_outputs() {
+    let intiface = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let bp_port = intiface.local_addr().unwrap().port();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(fake_intiface(intiface, tx));
+    let lib = tempfile::tempdir().unwrap();
+    std::fs::write(lib.path().join("Scene.mp4"), b"0").unwrap();
+    std::fs::write(
+        lib.path().join("Scene.funscript"),
+        br#"{"actions":[{"at":0,"pos":0},{"at":60000,"pos":100}]}"#,
+    )
+    .unwrap();
+    let (_srv, port, data) = serve(serde_json::json!({"settings": {
+        "library": {"sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]},
+        "buttplug": {"port": bp_port, "autoConnect": true,
+                     "deviceSettings": {"3:Stroker": {"inverted": true, "range": {"min": 0, "max": 50}},
+                                        "0:Rotator": {"rotateMode": "position"}}},
+    }}));
+    let id = loop {
+        if let Some(id) = get(port, "/api/videos").await[0]["id"].as_str() {
+            break id.to_string();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let devices = loop {
+        let d = get(port, "/api/devices").await;
+        if d["status"]["buttplug"]["deviceList"]
+            .as_array()
+            .is_some_and(|l| l.len() == 4)
+        {
+            break d;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let stroker = &devices["status"]["buttplug"]["deviceList"][3];
+    assert_eq!(stroker["key"], "3:Stroker");
+    assert_eq!(stroker["features"], serde_json::json!(["Linear"]));
+
+    // Play at 6 s: position 10, rising 100 units per minute.
+    let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
+    let (mut phone, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    phone
+        .send(Message::text(
+            r#"{"type":"state","at":6000,"paused":false,"rate":1}"#,
+        ))
+        .await
+        .unwrap();
+    let mut got = std::collections::HashMap::new();
+    while got.len() < 4 {
+        let m = tokio::time::timeout(Duration::from_secs(20), rx.recv())
+            .await
+            .expect("not every device got a command")
+            .unwrap();
+        let (kind, body) = m.as_object().unwrap().iter().next().unwrap();
+        // StartScanning and the like name no device.
+        let Some(index) = body["DeviceIndex"].as_u64() else {
+            continue;
+        };
+        // Outputs idle (0) until playback starts: keep the first live one.
+        let live = body["Rotations"][0]["Speed"].as_f64().unwrap_or(1.0) > 0.0
+            && body["Scalars"][0]["Scalar"].as_f64().unwrap_or(1.0) > 0.0;
+        if live {
+            got.entry(index).or_insert((kind.clone(), body.clone()));
+        }
+    }
+    assert_eq!(got[&0].0, "RotateCmd");
+    // Position mode: |10 - 50| * 2 = 80 % clockwise.
+    let speed = got[&0].1["Rotations"][0]["Speed"].as_f64().unwrap();
+    assert!((speed - 0.8).abs() < 0.02, "{speed}");
+    assert_eq!(got[&0].1["Rotations"][0]["Clockwise"], true);
+    assert_eq!(got[&1].0, "ScalarCmd");
+    assert_eq!(got[&1].1["Scalars"][0]["ActuatorType"], "Oscillate");
+    assert_eq!(got[&2].1["Scalars"][0]["ActuatorType"], "Vibrate");
+    assert_eq!(got[&3].0, "LinearCmd");
+    // Inverted 90, into 0..50 = 45.
+    let p = got[&3].1["Vectors"][0]["Position"].as_f64().unwrap();
+    assert!((p - 0.45).abs() < 0.01, "{p}");
+
+    // Each device is remembered as the renderer does.
+    let lib_file = data.path().join("library.json");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&lib_file).unwrap()).unwrap();
+        let known = &saved["config"]["settings"]["knownDevices"];
+        if known.as_array().is_some_and(|k| k.len() == 4) {
+            assert_eq!(known[3]["id"], "buttplug:Stroker#3");
+            assert_eq!(known[3]["buttplugIndex"], 3);
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{known}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}

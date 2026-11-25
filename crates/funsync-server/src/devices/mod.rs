@@ -72,6 +72,9 @@ struct Play {
     halted: bool,
     /// The Edge hold: devices idle while it lasts.
     edge: bool,
+    /// A multi association's vib script played on the Buttplug vibrators
+    /// (`buttplugVib`); empty when none.
+    vib: Arc<Vec<Action>>,
 }
 
 impl Play {
@@ -162,6 +165,8 @@ pub struct Devices {
     vr: Out<()>,
     vr_link: Mutex<vr::Link>,
     buttplug_names: Mutex<Vec<(u64, String)>>,
+    /// Each Buttplug device's outputs (`Vibrate`, `Linear`, `Rotate`, …).
+    buttplug_features: Mutex<HashMap<u64, Vec<String>>>,
     telem: Mutex<dashboard::Telem>,
 }
 
@@ -273,6 +278,8 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
                 if kind == "tcode" {
                     let (st3, cfg) = (st2.clone(), cfg.clone());
                     tokio::spawn(async move {
+                        let known = json!({"id": "tcode", "label": dashboard::label(&cfg), "type": "tcode"});
+                        register_known(&st3, vec![known]).await;
                         tokio::time::sleep(FUNSR_RESEND).await;
                         send_funsr(&st3, &cfg);
                     });
@@ -283,8 +290,30 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
                 "vr" => vr::session(&st2, &cfg, on).await,
                 _ => {
                     let port = cfg["port"].as_u64().unwrap_or(12345);
-                    buttplug::session(port, &mut d.buttplug.tx.subscribe(), &d.buttplug_names, on)
-                        .await
+                    let seen = |devs: &[buttplug::Device]| {
+                        *d.buttplug_names.lock().unwrap() =
+                            devs.iter().map(|x| (x.index, x.name.clone())).collect();
+                        *d.buttplug_features.lock().unwrap() = devs
+                            .iter()
+                            .map(|x| {
+                                (
+                                    x.index,
+                                    x.features().iter().map(|f| f.to_string()).collect(),
+                                )
+                            })
+                            .collect();
+                        let known = devs
+                            .iter()
+                            .map(|x| {
+                                json!({"id": format!("buttplug:{}#{}", x.name, x.index),
+                                "label": x.name, "type": "buttplug",
+                                "buttplugIndex": x.index, "name": x.name})
+                            })
+                            .collect();
+                        let st = st2.clone();
+                        tokio::spawn(async move { register_known(&st, known).await });
+                    };
+                    buttplug::session(port, &mut d.buttplug.tx.subscribe(), seen, on).await
                 }
             };
             let err = r.err().unwrap_or_default();
@@ -322,11 +351,10 @@ fn connect(st: &Arc<AppState>, kind: &'static str) {
     *st.devices.out_status(kind).1.lock().unwrap() = Some(h);
 }
 
-/// `(device index, pos, speed)` per routed Buttplug device, and the
-/// `(route slot, index)` pairs of routes found by name under a new index.
-type Routed = (Vec<(u64, f64, f64)>, Vec<(usize, u64)>);
+/// The routed Buttplug devices' `(index, motion)` at `t`, and the `(route
+/// slot, index)` pairs of routes found by name under a new index.
+type Routed = (Vec<(u64, buttplug::Motion)>, Vec<(usize, u64)>);
 
-/// Each routed Buttplug device's position and speed at `t`.
 fn route_frame(p: &Play, devices: &[(u64, String)], mode: &str, t: f64) -> Routed {
     let (mut out, mut healed, mut taken) = (Vec::new(), Vec::new(), Vec::new());
     for r in p.routes.iter() {
@@ -337,10 +365,61 @@ fn route_frame(p: &Play, devices: &[(u64, String)], mode: &str, t: f64) -> Route
         if r.index != Some(idx) {
             healed.push((r.slot, idx));
         }
-        let pos = interp::position(mode, &r.actions, t).unwrap_or(0.0).round();
-        out.push((idx, pos, interp::speed(&r.actions, t).round()));
+        out.push((idx, motion(mode, &r.actions, t)));
     }
     (out, healed)
+}
+
+fn motion(mode: &str, a: &[Action], t: f64) -> buttplug::Motion {
+    buttplug::Motion {
+        pos: interp::position(mode, a, t).unwrap_or(0.0).round(),
+        vel: interp::velocity(a, t).round(),
+    }
+}
+
+/// Keep the devices in `settings.knownDevices` as the renderer does
+/// (`_registerKnownDevice`): `tcode`, and each Buttplug device as
+/// `buttplug:<name>#<index>`, labelled `Name (device #N)` when names repeat.
+async fn register_known(st: &AppState, entries: Vec<Value>) {
+    let changed = {
+        let mut lib = st.library.write().await;
+        let settings = lib.config["settings"].as_object_mut();
+        let Some(settings) = settings else { return };
+        let known = settings.entry("knownDevices").or_insert_with(|| json!([]));
+        if !known.is_array() {
+            *known = json!([]);
+        }
+        let known = known.as_array_mut().unwrap();
+        let before = known.clone();
+        for entry in &entries {
+            match known.iter_mut().find(|k| k["id"] == entry["id"]) {
+                Some(k) => {
+                    for (key, v) in entry.as_object().unwrap() {
+                        k[key] = v.clone();
+                    }
+                }
+                None => known.push(entry.clone()),
+            }
+        }
+        for d in entries.iter().filter(|e| e["type"] == "buttplug") {
+            let name = d["name"].as_str().unwrap_or("");
+            let same: Vec<usize> = (0..known.len())
+                .filter(|i| known[*i]["type"] == "buttplug" && known[*i]["name"] == name)
+                .collect();
+            for i in &same {
+                let label = if same.len() > 1 {
+                    format!("{name} (device #{})", known[*i]["buttplugIndex"])
+                } else {
+                    name.to_string()
+                };
+                known[*i]["label"] = json!(label);
+            }
+        }
+        *known != before
+    };
+    if changed {
+        let _ = st.save().await;
+    }
 }
 
 /// Store `(route slot, key, value)` changes (new Buttplug index, script
@@ -370,6 +449,8 @@ fn ensure_ticker(st: &Arc<AppState>) {
         let mut iv = tokio::time::interval(Duration::from_secs_f64(TICK / 1000.0));
         iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last = HashMap::new();
+        // When playback started, for the Buttplug ramp-up.
+        let mut started: Option<Instant> = None;
         for n in 0u64.. {
             iv.tick().await;
             let play = d.play.lock().unwrap().clone();
@@ -379,10 +460,17 @@ fn ensure_ticker(st: &Arc<AppState>) {
                 d.telem.lock().unwrap().sample(sample);
             }
             let Some((p, (axes, t))) = play.as_ref().and_then(|p| Some((p, p.now()?))) else {
-                // Vibrators stop with the video; strokers hold.
+                started = None;
+                // Strokers hold; everything else idles.
                 d.buttplug.tx.send_if_modified(buttplug::Frame::still);
                 continue;
             };
+            let ramp = (started
+                .get_or_insert_with(Instant::now)
+                .elapsed()
+                .as_secs_f64()
+                / 2.0)
+                .min(1.0);
             let (tc, player) = (&s["tcode"], &s["player"]);
             let mode = player["smoothing"].as_str().unwrap_or("linear");
             if d.connected("tcode") {
@@ -433,11 +521,17 @@ fn ensure_ticker(st: &Arc<AppState>) {
                     }
                     out
                 });
+                let vib = (p.orgasm.is_none() && !p.vib.is_empty())
+                    .then(|| interp::position("step", &p.vib, t))
+                    .flatten();
                 let f = buttplug::Frame {
-                    pos: interp::position(mode, main, t).unwrap_or(0.0).round(),
-                    speed: interp::speed(main, t).round(),
-                    ms: TICK.round() as u32,
+                    main: motion(mode, main, t),
                     routed,
+                    vib,
+                    stopped: false,
+                    ramp,
+                    ms: TICK.round() as u32,
+                    settings: Arc::new(s["buttplug"]["deviceSettings"].clone()),
                 };
                 d.buttplug.tx.send_if_modified(|v| {
                     *v != f && {
@@ -532,6 +626,7 @@ async fn load_play(
         Some(v) => st.library.read().await.lib()["associations"][&v.path].clone(),
         None => Value::Null,
     };
+    let bp_vib = entry["active"] == "multi" && entry["multi"]["buttplugVib"] == true;
     let loaded = match video {
         Some(v) => {
             let (v, variant) = (v.clone(), variant.map(String::from));
@@ -610,10 +705,13 @@ async fn load_play(
             orgasm: None,
             halted: false,
             edge: false,
+            vib: Arc::default(),
         });
         if let Some(v) = video {
             (p.video_id, p.path, p.name) = (v.id.clone(), v.path.clone(), v.name.clone());
         }
+        let vib = a.iter().find(|x| bp_vib && x.0 == "V0");
+        p.vib = Arc::new(vib.map(|x| x.1.clone()).unwrap_or_default());
         p.axes = Arc::new(a);
         p.routes = Arc::new(r);
         p
@@ -850,6 +948,19 @@ async fn devices_json(st: &AppState) -> Value {
             .unwrap()
             .iter()
             .map(|d| &d.1)
+            .collect::<Vec<_>>()
+    );
+    // For the per-device settings: `<index>:<name>` is their key.
+    let features = st.devices.buttplug_features.lock().unwrap().clone();
+    bp["deviceList"] = json!(
+        st.devices
+            .buttplug_names
+            .lock()
+            .unwrap()
+            .iter()
+            .map(
+                |(i, n)| json!({"key": format!("{i}:{n}"), "name": n, "features": features.get(i)})
+            )
             .collect::<Vec<_>>()
     );
     s["status"] = json!({"tcode": status("tcode"), "buttplug": bp, "vr": vr::json(st)});
