@@ -58,6 +58,7 @@ pub struct AppState {
     pub media: Media,
     pub scanning: AtomicBool,
     pub started_at: u64,
+    pub devices: crate::devices::Devices,
 }
 
 impl AppState {
@@ -75,6 +76,7 @@ impl AppState {
             snapshot: RwLock::new(Arc::new(snapshot)),
             scanning: AtomicBool::new(false),
             started_at: now_ms(),
+            devices: Default::default(),
         }))
     }
 
@@ -201,6 +203,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::sites::routes())
         .merge(crate::settings::routes())
         .merge(crate::heresphere::routes())
+        .merge(crate::devices::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)
@@ -222,6 +225,7 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> R
         state.data_dir.display()
     );
     crate::settings::watch_drives(state.clone());
+    crate::devices::start(&state).await;
     let s = state.clone();
     tokio::spawn(async move {
         if let Err(e) = s.rescan().await {

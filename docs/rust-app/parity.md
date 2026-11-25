@@ -100,10 +100,10 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| Script loading (main, variant, axis) | partial | `GET /api/media/script/{id}?variant=&axis=` serves the files (hand-made axis beats generated); no playback yet |
+| Script loading (main, variant, axis) | partial | `GET /api/media/script/{id}?variant=&axis=` serves the files (hand-made axis beats generated); the server plays the main script and its axes on the devices; variants are not played yet |
 | Heatmap and gap indicators on the seek bar | done | web remote |
 | Script variants switch (V key) | not started | |
-| Multi-axis (TCode 10 axes, embedded axes) | not started | phase 5 |
+| Multi-axis (TCode 10 axes, embedded axes) | done | server engine (`src/devices/`): companion axes L1/L2/R0/R1/R2/V0/V1/V2/A0 and axes embedded in the main script (`additional_axes`, `raw`, `axes`, `channels`, sibling keys, inline TCode) |
 | Custom routing per device | not started | |
 | Speed stats | partial | from the imported `speedStatsCache`; not computed for new scripts |
 
@@ -111,22 +111,22 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| PCHIP / Makima interpolation | not started | phase 5 |
-| Speed limit | not started | phase 5 |
+| PCHIP / Makima interpolation | done | `settings.player.smoothing` (linear / pchip / makima), server engine |
+| Speed limit | done | `settings.player.speedLimit` (units/s), every axis |
 
 ## Devices
 
 | Feature | Status | Notes |
 |---|---|---|
-| Buttplug / Intiface from the page | not started | phase 2 |
-| TCode WebSocket (MiraBot, 60 Hz, 4 digits) from the page | not started | phase 2 |
-| TCode USB serial from the server | not started | phase 5 |
-| TCode UDP from the server | not started | phase 5 |
+| Buttplug / Intiface from the page | partial | decision change: **the server drives every device**, from the playback state the web remote streams over `/api/remote/sync`. Minimal Buttplug v3 client to Intiface (`ws://127.0.0.1:<buttplug.port>`): strokers follow the stroke (`LinearCmd`), vibrators its speed (`ScalarCmd`); no per-device modes, rotate or oscillate yet; not tested against a real Intiface |
+| TCode WebSocket (MiraBot, 60 Hz, 4 digits) from the page | done | from the server (decision change above): 60 Hz `L09999I17` frames, per-axis enable / min / max / invert from `settings.tcode.axes`, 3 or 4 digits (`precision`); Devices page `/remote/devices.html` |
+| TCode USB serial from the server | done | raw tty set up with `stty` (no serial crate), `settings.tcode.port` / `baudRate` |
+| TCode UDP from the server | done | `udpHost` / `udpPort` |
 | Browser serial relay | not planned | the server drives USB serial itself (decision 3); revisit if a device sits on another computer |
 | TCode device profiles (MiraBot, FUNSR MINI, Custom) | not started | |
-| Auto-connect, WebSocket reconnect | not started | |
-| Per-device offsets, Sync tab | not started | |
-| Generated axes playback, hand-made axes win | not started | phase 5 |
+| Auto-connect, WebSocket reconnect | done | `autoConnect` set by Connect / Disconnect; at start the server reconnects what was connected; retries every 5 s for a minute, then every minute |
+| Per-device offsets, Sync tab | partial | `tcode.defaultOffset` / `buttplug.defaultOffset` from the Devices page and the player's device pill (`set-offset`); no Sync tab |
+| Generated axes playback, hand-made axes win | done | generated companions play only when the script has no hand-made axis (companion or embedded) |
 
 ## EroScripts, scouts, jobs
 

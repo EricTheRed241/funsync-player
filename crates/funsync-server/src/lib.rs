@@ -6,6 +6,7 @@
 pub mod access;
 pub mod cli;
 pub mod data;
+pub mod devices;
 pub mod heresphere;
 pub mod import;
 pub mod media;
