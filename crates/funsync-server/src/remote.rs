@@ -17,14 +17,20 @@ use crate::vr;
 
 pub const WATCHED_COLLECTION_ID: &str = ":watched";
 
+/// This server's own `custom-thumbs` (posters saved from EroScripts), set
+/// when the data dir loads.
+pub static CUSTOM_THUMBS: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
 /// A video's uploaded poster (`library.customThumbnails[path]`, type
-/// `image`), only when it is a file inside the old app's `custom-thumbs`.
+/// `image`), only when it is a file inside the old app's `custom-thumbs`
+/// or this server's.
 pub fn poster(lib: &Library, path: &str) -> Option<std::path::PathBuf> {
     let c = &lib.lib()["customThumbnails"][path];
     if c["type"] != "image" {
         return None;
     }
-    let root = crate::data::default_old_user_data()?.join("custom-thumbs");
+    let old = crate::data::default_old_user_data().map(|d| d.join("custom-thumbs"));
+    let mut roots = old.iter().chain(CUSTOM_THUMBS.get());
     let img = std::path::PathBuf::from(c["imagePath"].as_str()?);
     let clean = img.components().all(|c| {
         matches!(
@@ -32,7 +38,7 @@ pub fn poster(lib: &Library, path: &str) -> Option<std::path::PathBuf> {
             std::path::Component::RootDir | std::path::Component::Normal(_)
         )
     });
-    (clean && img.starts_with(&root) && img.is_file()).then_some(img)
+    (clean && roots.any(|r| img.starts_with(r)) && img.is_file()).then_some(img)
 }
 
 /// `/api/media/thumb/<id>?v=<version>` (`thumb_url` of backend/routes/media.py):

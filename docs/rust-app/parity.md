@@ -46,7 +46,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 |---|---|---|
 | Library scan (pairing, variants, axis companions, subtitles, sidecars, fuzzy pass, AppleDouble skip, on-disk spelling) | done | port of `electron/library-scan.js`; on the real library (999 videos) every pairing, variant, subtitle, source and sidecar matches the JS scan |
 | Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | rule ported, `thumb-cache/` with the old names, VR one-eye / centre crops (`_sbs`, `_sbsc`, `_tb`, `_tbc`) from the VR decision; versioned URLs (`?v=`, immutable caching) in the web remote listing; no pinned frames, no cache pruning; headset URLs not versioned yet |
-| Posters and custom thumbnails (EroScripts, FapTap, rule34video) | partial | posters the old app saved (`customThumbnails`, files in its `custom-thumbs/`, read-only) are served; fetching new ones (EroScripts previews, FapTap, rule34video) is not ported |
+| Posters and custom thumbnails (EroScripts, FapTap, rule34video) | partial | posters the old app saved (`customThumbnails`, files in its `custom-thumbs/`, read-only) are served, and EroScripts post pictures picked by hand on the EroScripts page (saved in the Rust data dir's `custom-thumbs/`); automatic EroScripts previews, FapTap and rule34video covers are not ported |
 | Grid / list / folder views, hover preview | partial | the web remote's grid, list and folder views; no hover preview |
 | Sources: reorder, enable/disable, overlap, hot-plug | done | Settings page (`/remote/settings.html`, `src/settings.rs`): add, remove, enable, reorder, overlap warning; a source folder appearing or disappearing triggers a rescan (checked every 10 s) |
 | Manual script association | not started | |
@@ -132,8 +132,8 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| EroScripts search / download in the app, login | not started | |
-| Post previews as thumbnails | not started | |
+| EroScripts search / download in the app, login | partial | `/remote/eroscripts.html` + `/api/eroscripts/*`: Discourse login with 2FA or a pasted `_t` cookie (session in the Rust data dir, 0600), search with thumbnails and Paid badge, find scripts for an unscripted video, every script across the post and replies labelled by poster, pixeldrain listed, other hosts named; saving a `.funscript` next to its video (axis suffix kept, replace or variant on conflict, rescan) only while `FUNSYNC_OWNS_LIBRARY=1`, else 409. No `.zip` saving, no auto-match on video load, no session check at start, no `eroscripts:sync` links / scout |
+| Post previews as thumbnails | partial | by hand: *Use the post picture* saves the topic's poster-size picture into the Rust data dir's `custom-thumbs/` and records `customThumbnails` (served as the video's poster). Not automatic after a download, no perceptual-hash match against the video's frames, no resizing, no library-wide fetch |
 | Scouts, swipe deck, downloads, creators, job runner | done | the sites are relayed on 5300; `--supervise` builds and runs them and `job-runner serve` like the desktop app (a site whose port already answers is left alone). The scouts and jobs themselves stay their own crates |
 | `eroscripts:sync`, dedupe, reorganize, `upgrade:axes` CLIs | not planned | CLIs, unchanged; they keep writing side files both apps can read |
 

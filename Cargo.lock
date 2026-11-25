@@ -318,6 +318,7 @@ dependencies = [
  "scout-report",
  "serde",
  "serde_json",
+ "slr-scout",
  "tempfile",
  "tokio",
  "tokio-tungstenite",
