@@ -115,16 +115,32 @@ pub fn stat_key(path: &Path) -> std::io::Result<String> {
     Ok(format!("{:x}", md5::compute(format!("{}:{}", m.len(), ns)))[..8].to_string())
 }
 
-pub fn thumb_file_name(video_id: &str, stat_key: &str) -> String {
+/// `crop` is a `thumb_crop` key (`vr::thumb_crop`), part of the name as in
+/// the old cache.
+pub fn thumb_file_name(video_id: &str, stat_key: &str, crop: Option<&str>) -> String {
     format!(
-        "{video_id}_{stat_key}_single_{THUMB_MARKER}_{:04}_{THUMB_WIDTH}.jpg",
-        (THUMB_SEEK_PCT * 1000.0) as u32
+        "{video_id}_{stat_key}_single_{THUMB_MARKER}_{:04}_{THUMB_WIDTH}{}.jpg",
+        (THUMB_SEEK_PCT * 1000.0) as u32,
+        crop.map(|c| format!("_{c}")).unwrap_or_default()
     )
+}
+
+/// The ffmpeg filters before scaling (`THUMB_VR_CROPS`): one eye, then for
+/// a `…c` crop the middle of it.
+fn crop_filters(crop: Option<&str>) -> &'static str {
+    match crop {
+        Some("sbs") => "crop=iw/2:ih:0:0,",
+        Some("sbsc") => "crop=iw/2:ih:0:0,crop=trunc(iw*0.35)*2:trunc(ih*0.25)*2,",
+        Some("tb") => "crop=iw:ih/2:0:0,",
+        Some("tbc") => "crop=iw:ih/2:0:0,crop=trunc(iw*0.35)*2:trunc(ih*0.25)*2,",
+        _ => "",
+    }
 }
 
 pub struct Media {
     thumb_dir: PathBuf,
-    meta: Mutex<HashMap<(String, String), Metadata>>,
+    /// path → (stat key, metadata): a replaced file is probed again.
+    meta: Mutex<HashMap<String, (String, Metadata)>>,
     slots: Semaphore,
     ffmpeg: String,
     ffprobe: String,
@@ -142,11 +158,11 @@ impl Media {
     }
 
     pub async fn metadata(&self, path: &Path) -> Result<Metadata, String> {
-        let key = (
-            path.to_string_lossy().into_owned(),
-            stat_key(path).map_err(|e| e.to_string())?,
-        );
-        if let Some(m) = self.meta.lock().unwrap().get(&key) {
+        let p = path.to_string_lossy().into_owned();
+        let key = stat_key(path).map_err(|e| e.to_string())?;
+        if let Some((k, m)) = self.meta.lock().unwrap().get(&p)
+            && *k == key
+        {
             return Ok(*m);
         }
         let out = tokio::time::timeout(
@@ -175,12 +191,23 @@ impl Media {
             ));
         }
         let m = parse_probe(&out.stdout)?;
-        self.meta.lock().unwrap().insert(key, m);
+        self.meta.lock().unwrap().insert(p, (key, m));
         Ok(m)
     }
 
-    /// The cached thumbnail of a video, generated when missing.
-    pub async fn thumbnail(&self, video_id: &str, path: &Path) -> Result<PathBuf, String> {
+    /// Metadata probed earlier, without probing or statting the file.
+    pub fn cached(&self, path: &str) -> Option<Metadata> {
+        self.meta.lock().unwrap().get(path).map(|(_, m)| *m)
+    }
+
+    /// The cached thumbnail of a video, generated when missing; `crop` is a
+    /// VR crop (`vr::thumb_crop`).
+    pub async fn thumbnail(
+        &self,
+        video_id: &str,
+        path: &Path,
+        crop: Option<&str>,
+    ) -> Result<PathBuf, String> {
         let meta = std::fs::metadata(path).map_err(|e| format!("video not found: {e}"))?;
         if meta.len() == 0 {
             return Err("video is empty (0 bytes)".into());
@@ -188,6 +215,7 @@ impl Media {
         let out = self.thumb_dir.join(thumb_file_name(
             video_id,
             &stat_key(path).map_err(|e| e.to_string())?,
+            crop,
         ));
         if out.exists() {
             return Ok(out);
@@ -210,7 +238,7 @@ impl Media {
                 break;
             }
             let tmp = tmp_dir.join(format!("funsync-rust-thumb-{video_id}-{i}.jpg"));
-            match self.grab_frame(path, seek, &tmp, budget).await {
+            match self.grab_frame(path, seek, crop, &tmp, budget).await {
                 Ok(stats) => {
                     attempts.push((frame_score(stats), tmp));
                     if frame_problem(stats).is_none() {
@@ -251,12 +279,14 @@ impl Media {
         &self,
         path: &Path,
         seek: f64,
+        crop: Option<&str>,
         out: &Path,
         budget: Duration,
     ) -> Result<Option<FrameStats>, String> {
         let s = THUMB_STATS_SIZE;
         let graph = format!(
-            "[0:v]scale={THUMB_WIDTH}:-2,split=2[o][s];[s]scale={s}:{s}:flags=area,format=gray[g]"
+            "[0:v]{}scale={THUMB_WIDTH}:-2,split=2[o][s];[s]scale={s}:{s}:flags=area,format=gray[g]",
+            crop_filters(crop)
         );
         let child = Command::new(&self.ffmpeg)
             .args([
