@@ -214,6 +214,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::devices::routes())
         .merge(crate::edits::routes())
         .merge(crate::queue::routes())
+        .merge(crate::groupings::routes())
         .merge(crate::eroscripts::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
