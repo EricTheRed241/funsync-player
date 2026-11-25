@@ -32,10 +32,14 @@ fn main() -> ExitCode {
                 s.ratings
             );
         }),
-        Command::Serve { addr, data_dir } => server::AppState::load(data_dir).and_then(|st| {
+        Command::Serve {
+            addr,
+            data_dir,
+            supervise,
+        } => server::AppState::load(data_dir).and_then(|st| {
             tokio::runtime::Runtime::new()
                 .map_err(|e| e.to_string())?
-                .block_on(server::serve(st, addr))
+                .block_on(server::serve(st, addr, supervise))
         }),
     };
     match res {

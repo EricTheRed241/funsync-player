@@ -11,4 +11,5 @@ pub mod media;
 pub mod remote;
 pub mod scan;
 pub mod server;
+pub mod sites;
 pub mod vr;

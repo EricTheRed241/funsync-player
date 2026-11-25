@@ -28,10 +28,9 @@ use crate::scan::{self, Source, Video};
 const WEB_OVERLAY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/remote");
 const WEB_REMOTE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../backend/web-remote");
 const LOCALES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../renderer/locales");
-const STATUS_HTML: &str = include_str!("../web/status.html");
+const PARITY_HTML: &str = include_str!("../web/parity.html");
 const PARITY_MD: &str = include_str!("../../../docs/rust-app/parity.md");
 const NAV_JS: &str = include_str!("../../../backend/site-nav.js");
-const NAV_LINKS: &str = r#"window.FUNSYNC_NAV=[{"name":"Remote","href":"/remote/"},{"name":"Status","href":"/status"}];"#;
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,7 +186,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
             get(|| async { axum::response::Redirect::to("/remote/") }),
         )
         .route("/site-nav.js", get(nav))
-        .route("/status", get(status_page))
+        .route("/parity", get(parity_page))
         .route("/api/parity", get(parity))
         .route("/health", get(health))
         .route("/api/status", get(status))
@@ -199,6 +198,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .route("/api/media/script/{id}", get(script))
         .route("/api/media/subtitle/{id}", get(subtitle))
         .merge(crate::remote::routes())
+        .merge(crate::sites::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)
@@ -208,7 +208,10 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         ))
 }
 
-pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String> {
+pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> Result<(), String> {
+    if supervise {
+        crate::sites::supervise(&data::default_old_user_data().unwrap_or_default());
+    }
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("bind {addr}: {e}"))?;
@@ -241,14 +244,17 @@ async fn nav() -> impl IntoResponse {
             (header::CONTENT_TYPE, "text/javascript"),
             (header::CACHE_CONTROL, "no-cache"),
         ],
-        format!("{NAV_LINKS}\n{NAV_JS}"),
+        format!(
+            "window.FUNSYNC_NAV={};\n{NAV_JS}",
+            crate::sites::nav_links()
+        ),
     )
 }
 
-async fn status_page() -> impl IntoResponse {
+async fn parity_page() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        STATUS_HTML,
+        PARITY_HTML,
     )
 }
 
