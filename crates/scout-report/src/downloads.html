@@ -43,6 +43,10 @@ a:hover { text-decoration: underline; }
   overflow-wrap: anywhere; margin-top: 3px; }
 .problems { background: var(--warn-bg); color: var(--warn-fg); padding: 6px 12px; border-radius: 6px;
   white-space: pre-wrap; font-size: 13px; margin-bottom: 10px; }
+.blocked { background: var(--warn-bg); color: var(--warn-fg); padding: 8px 12px; border-radius: 8px;
+  font-size: 14px; margin-bottom: 10px; }
+.blocked b { display: block; margin-bottom: 2px; }
+.blocked ul { margin: 0; padding-left: 18px; }
 .tabs { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
 .tabs button { flex: 1; background: none; border: none; padding: 7px 4px; font: inherit; font-size: 13px;
   color: var(--muted); cursor: pointer; }
@@ -86,6 +90,7 @@ a:hover { text-decoration: underline; }
   <a href="./">Swipe</a>
 </header>
 <div class="job" id="job" hidden></div>
+<div class="blocked" id="blocked" hidden></div>
 <div class="problems" id="problems" hidden></div>
 <nav class="tabs" id="tabs">
   <button type="button" data-tab="waiting" title="Swiped right, not downloaded yet: the next download run takes them (SLR apart)">Waiting</button>
@@ -264,6 +269,12 @@ function render() {
   }
   renderJob();
   renderQuota();
+  // Why the download runs fetch nothing (more): library cap, drive space, SLR quota.
+  const why = (data && data.blocked) || [];
+  $('blocked').hidden = !why.length;
+  $('blocked').replaceChildren(...(why.length
+    ? [el('b', {}, 'Why downloads are paused'), el('ul', {}, why.map((b) => el('li', { 'data-reason': b.reason }, b.detail)))]
+    : []));
   $('problems').hidden = !(data && data.problems.length);
   $('problems').textContent = data ? data.problems.join('\n') : '';
   if (!data) {

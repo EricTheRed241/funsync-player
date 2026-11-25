@@ -10,7 +10,7 @@ use crate::free_space::{self, Drive};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
+pub(crate) const SHARED: &str = include_str!("../../../renderer/js/content-preferences.json");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

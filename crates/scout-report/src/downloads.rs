@@ -14,9 +14,11 @@
 //!   (`eroscripts-scout-rejected.json`'s reasons), or it left the waiting list or the scout's
 //!   file.
 //!
-//! Plus the download jobs (deploy/jobs.json) as the job runner last saw them, and when each
-//! runs next: the hourly ones, one per source so none waits behind another (DOWNLOAD_JOBS),
-//! and the weekly `slr-downloads`; running now (and its log's last line) or its last run.
+//! Plus why downloads are paused (`blocked`: the library cap, the drive's free space, a
+//! used-up SLR video quota; see [`blocked`]), and the download jobs (deploy/jobs.json) as the
+//! job runner last saw them, and when each runs next: the hourly ones, one per source so none
+//! waits behind another (DOWNLOAD_JOBS), and the weekly `slr-downloads`; running now (and its
+//! log's last line) or its last run.
 
 use crate::creators::Creators;
 use crate::frames;
@@ -63,6 +65,70 @@ pub struct Downloads {
     pub slr_job: Job,
     /// Files that exist but couldn't be read, library sources that can't be.
     pub problems: Vec<String>,
+    /// Why the download runs fetch nothing (more) right now; empty when nothing blocks.
+    pub blocked: Vec<Blocked>,
+}
+
+/// One reason downloads are paused: `library` (the library holds `libraryMaxVideos`),
+/// `drive` (less than `swipeDeck.minFreeGb` free) or `slr-quota` (the SLR queue waits for
+/// the account's weekly video quota).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Blocked {
+    pub reason: &'static str,
+    pub detail: String,
+}
+
+/// `libraryMaxVideos` (the shared preferences).
+fn library_max_videos() -> Result<usize, String> {
+    let shared: Value = serde_json::from_str(crate::drive::SHARED)
+        .map_err(|e| format!("content-preferences.json: {e}"))?;
+    shared["libraryMaxVideos"]
+        .as_u64()
+        .map(|n| n as usize)
+        .ok_or_else(|| "content-preferences.json: libraryMaxVideos must be a whole number".into())
+}
+
+/// Why downloads are paused: the library cap (`held` videos as the scouts count them,
+/// `cap`), the library drive's free space, and an SLR queue waiting for a used-up weekly
+/// video quota.
+pub fn blocked(
+    held: usize,
+    cap: Option<usize>,
+    drive: &crate::drive::Status,
+    slr: &[Item],
+    quota: &Value,
+) -> Vec<Blocked> {
+    let mut out = Vec::new();
+    if let Some(cap) = cap.filter(|&c| held >= c) {
+        out.push(Blocked {
+            reason: "library",
+            detail: format!(
+                "Library full: {held} / {cap} videos (libraryMaxVideos). Delete or rate down scenes to make room."
+            ),
+        });
+    }
+    if let (true, Some(d), Some(min)) = (drive.full, &drive.drive, drive.min_free_bytes) {
+        out.push(Blocked {
+            reason: "drive",
+            detail: format!(
+                "Library drive {} has {:.1} GB free, below {:.0} GB (swipeDeck.minFreeGb). Free space to make room.",
+                d.mount,
+                d.free as f64 / 1e9,
+                min as f64 / 1e9
+            ),
+        });
+    }
+    let videos = &quota["videos"];
+    if !slr.is_empty() && videos["remaining"].as_i64().is_some_and(|r| r <= 0) {
+        out.push(Blocked {
+            reason: "slr-quota",
+            detail: format!(
+                "SLR weekly video quota used up (0 of {} left): the SLR queue waits until it refills.",
+                videos["total"].as_i64().map_or("?".into(), |t| t.to_string())
+            ),
+        });
+    }
+    out
 }
 
 /// One right swipe.
@@ -279,6 +345,14 @@ pub fn load(user_data: &Path) -> Downloads {
         label: "SLR",
         ..job(user_data, SLR_JOB)
     };
+    let held = video_tags::library::video_count(
+        video_tags::library::enabled_sources(&config)
+            .iter()
+            .map(std::path::PathBuf::as_path),
+    );
+    let cap = library_max_videos().map_err(|e| problems.push(e)).ok();
+    let drive = crate::drive::status(user_data);
+    d.blocked = blocked(held, cap, &drive, &d.slr, &d.quota);
     d.problems = problems;
     d
 }
@@ -561,7 +635,8 @@ mod tests {
             "14": {"dir": "left", "at": "2026-11-22T00:00:00.000Z"},
             "15": {"dir": "right", "at": "2026-11-17T00:00:00.000Z"}}}),
         );
-        let recent = video_tags::timefmt::now_iso();
+        // A minute ahead, so it sorts above the post whose video was just written (same second).
+        let recent = video_tags::timefmt::iso_utc(SystemTime::now() + Duration::from_secs(60));
         write(
             &dir,
             Source::Pmvhaven.file(),
@@ -720,5 +795,59 @@ mod tests {
         assert_eq!(last_log_line(&log).as_deref(), Some("fetching a.mp4  55%"));
         assert_eq!(last_log_line(&dir.join("none.log")), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn says_why_downloads_are_paused() {
+        use crate::free_space::Drive;
+        let drive = |free: u64| {
+            crate::drive::judge(
+                vec![Drive {
+                    mount: "/Volumes/2TB".into(),
+                    free,
+                    total: 2_000_000_000_000,
+                }],
+                Some(50_000_000_000),
+                Vec::new(),
+            )
+        };
+        let quota = json!({"videos": {"remaining": 0, "total": 35}});
+        // Nothing blocks: room in the library and on the drive, nothing waiting on SLR.
+        assert_eq!(
+            blocked(999, Some(1000), &drive(500_000_000_000), &[], &quota),
+            []
+        );
+        let waiting = [Item::default()];
+        let b = blocked(1000, Some(1000), &drive(12_300_000_000), &waiting, &quota);
+        assert_eq!(
+            b.iter().map(|b| b.reason).collect::<Vec<_>>(),
+            ["library", "drive", "slr-quota"]
+        );
+        assert_eq!(
+            b[0].detail,
+            "Library full: 1000 / 1000 videos (libraryMaxVideos). Delete or rate down scenes to make room."
+        );
+        assert_eq!(
+            b[1].detail,
+            "Library drive /Volumes/2TB has 12.3 GB free, below 50 GB (swipeDeck.minFreeGb). Free space to make room."
+        );
+        assert_eq!(
+            b[2].detail,
+            "SLR weekly video quota used up (0 of 35 left): the SLR queue waits until it refills."
+        );
+        // Quota left, or not read yet: the SLR queue isn't blocked by it.
+        let roomy = drive(500_000_000_000);
+        assert_eq!(
+            blocked(
+                0,
+                None,
+                &roomy,
+                &waiting,
+                &json!({"videos": {"remaining": 3}})
+            ),
+            []
+        );
+        assert_eq!(blocked(0, None, &roomy, &waiting, &Value::Null), []);
+        assert_eq!(library_max_videos().unwrap(), 1000);
     }
 }
