@@ -91,6 +91,8 @@ fn parity_with_the_electron_app() {
     let dir =
         std::path::PathBuf::from(std::env::var("FUNSYNC_PARITY_DIR").expect("FUNSYNC_PARITY_DIR"));
     let old = data::load_library(&dir).unwrap();
+    // The frame check's results, when the data dir has them (frames_parity).
+    funsync_server::stereo::load(&dir);
     let mut snap: Snapshot =
         serde_json::from_slice(&std::fs::read(dir.join(data::SCAN_FILE)).unwrap()).unwrap();
     snap.embedded_axes = funsync_server::prefs::embedded_axes(&snap.videos);

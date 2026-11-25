@@ -67,7 +67,8 @@ pub struct Facts {
 }
 
 impl Facts {
-    pub fn of(lib: &Library, v: &Video, fmt: Format) -> Self {
+    /// `embedded`: videos whose main script carries axes (`Snapshot::embedded_axes`).
+    pub fn of(lib: &Library, v: &Video, fmt: Format, embedded: &HashSet<String>) -> Self {
         let l = lib.lib();
         let speed = v
             .funscript_path
@@ -78,7 +79,7 @@ impl Facts {
             is_3d: fmt.is_3d,
             avg_speed: speed.unwrap_or(0.0),
             duration: duration(lib, &v.path),
-            handmade: v.axes.iter().any(|a| !a.generated),
+            handmade: embedded.contains(&v.path) || v.axes.iter().any(|a| !a.generated),
             date_added: v.date_added,
             score: l["preferenceScores"][&v.path]
                 .as_f64()
@@ -339,7 +340,7 @@ async fn listing(st: &AppState, filter: &str) -> (Vec<(Video, Facts)>, f64) {
         .iter()
         .filter_map(|v| {
             let dims = st.media.cached(&v.path).map(|m| (m.width, m.height));
-            let f = Facts::of(&lib, v, vr::detect(&lib, v, dims));
+            let f = Facts::of(&lib, v, vr::detect(&lib, v, dims), &snap.embedded_axes);
             let keep = match filter {
                 "vr" => f.is_3d,
                 "flat" => !f.is_3d,
@@ -430,6 +431,7 @@ struct Scene {
     v: Video,
     width: u32,
     height: u32,
+    codec: String,
     fmt: Format,
     duration: u64,
     tags: Vec<String>,
@@ -442,19 +444,20 @@ struct Scene {
 async fn scene(st: &AppState, id: &str) -> Option<Scene> {
     let v = st.video(id).await?;
     // Probe this one video (cached), so the layout sees real dimensions.
-    let (width, height) = match st.media.metadata(Path::new(&v.path)).await {
-        Ok(m) if m.width > 0 && m.height > 0 => (m.width, m.height),
-        _ => (1920, 1080),
+    let (width, height, codec) = match st.media.metadata(Path::new(&v.path)).await {
+        Ok(m) if m.width > 0 && m.height > 0 => (m.width, m.height, m.codec),
+        _ => (1920, 1080, "h264".into()),
     };
     let snap = st.snapshot.read().await.clone();
     let lib = st.library.read().await;
     let queued = crate::queue::queued_paths(&lib, &snap.videos, now_ms() as f64);
     let fmt = vr::detect(&lib, &v, Some((width, height)));
-    let facts = Facts::of(&lib, &v, fmt);
+    let facts = Facts::of(&lib, &v, fmt, &snap.embedded_axes);
     let (rating, favorite) = rating_entry(&lib, &v.path);
     Some(Scene {
         width,
         height,
+        codec,
         fmt,
         duration: facts.duration as u64,
         tags: scene_tags(&lib, &v, &facts, &queued),
@@ -640,7 +643,7 @@ async fn deovr_scene(
             "stereoMode": s.fmt.stereo,
             "videoLength": s.duration,
             "thumbnailUrl": key(format!("{base}{}", s.thumb), &keys.thumb),
-            "encodings": [{"name": "h264", "videoSources": [{
+            "encodings": [{"name": s.codec, "videoSources": [{
                 "resolution": s.height, "height": s.height, "width": s.width,
                 "size": s.v.size, "url": key(format!("{base}/api/media/stream/{id}"), &keys.media)}]}],
             "fleshlight": fleshlight,
@@ -790,6 +793,17 @@ async fn hs_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_axes_count_as_hand_made() {
+        let v: Video = serde_json::from_value(json!({"id": "x", "name": "n", "path": "/e.mp4", "ext": ".mp4",
+            "funscriptPath": "/e.funscript", "fuzzyMatched": false, "subtitlePath": null, "variants": [],
+            "axes": [], "sourceName": "s", "dateAdded": 0.0, "size": 0}))
+        .unwrap();
+        let lib = Library::default();
+        assert!(!Facts::of(&lib, &v, vr::FLAT, &HashSet::new()).handmade);
+        assert!(Facts::of(&lib, &v, vr::FLAT, &HashSet::from([v.path.clone()])).handmade);
+    }
 
     fn facts(path: &str, score: Option<f64>, date_added: f64) -> Facts {
         Facts {

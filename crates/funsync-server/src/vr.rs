@@ -1,8 +1,7 @@
 //! The VR decision (`backend/routes/vr_api.py`, `detect_vr_format_for_video`):
 //! the VR Format panel's projection first, then Mark as VR / Flat, then the
-//! filename (`detect_vr_format`), then the frame shape (cached dimensions).
-//! The old backend's frame-based stereo check (`services/stereo_detect.py`)
-//! is not ported.
+//! filename (`detect_vr_format`), then the frames (`crate::stereo`: two eyes
+//! side by side or one picture), then the frame shape (cached dimensions).
 
 use std::sync::LazyLock;
 
@@ -255,10 +254,30 @@ pub fn detect(lib: &Library, v: &Video, dims: Option<(u32, u32)>) -> Format {
     if projection.is_some() || manual == Some("vr") {
         return DEFAULT_VR;
     }
-    if manual.is_none() && dims.is_some_and(|(w, h)| dims_suggest_vr(w, h)) {
-        return DEFAULT_VR;
+    if manual.is_none() {
+        match crate::stereo::layout(&v.path) {
+            // Each eye wider than 1.5:1 is flat 3D, else a 180° render.
+            Some("sbs") if dims.is_some_and(|(w, h)| h > 0 && w as f64 / 2.0 / h as f64 > 1.5) => {
+                return f("flat", "sbs");
+            }
+            Some("sbs") => return f("dome", "sbs"),
+            Some(_) => return by_name,
+            None => {}
+        }
+        if dims.is_some_and(|(w, h)| dims_suggest_vr(w, h)) {
+            return DEFAULT_VR;
+        }
     }
     by_name
+}
+
+/// Neither the user (VR Format, Mark as VR / Flat) nor the file name decides:
+/// the frames are looked at (`queue_dims_warmup`).
+pub fn needs_frames(lib: &Library, v: &Video) -> bool {
+    let l = lib.lib();
+    l["vrFormat"][&v.path]["projection"].is_null()
+        && l["manualVRType"][&v.path].is_null()
+        && !detect_vr_format(&v.name).is_3d
 }
 
 pub fn is_vr(lib: &Library, v: &Video) -> bool {
@@ -429,5 +448,31 @@ mod tests {
         assert_eq!(thumb_crop(f("flat", "sbs")), Some("sbs"));
         assert_eq!(thumb_crop(f("dome", "tb")), Some("tbc"));
         assert_eq!(thumb_crop(FLAT), None);
+    }
+
+    #[test]
+    fn the_frames_decide_what_nothing_else_does() {
+        let lib = |cfg| Library {
+            config: json!({"settings": {"library": cfg}}),
+            ..Default::default()
+        };
+        let empty = lib(json!({}));
+        let render = video("Frames render.mp4");
+        crate::stereo::set_layout(&render.path, Some("sbs"));
+        assert!(needs_frames(&empty, &render));
+        assert_eq!(detect(&empty, &render, None), f("dome", "sbs"));
+        assert_eq!(
+            detect(&empty, &render, Some((7680, 2160))),
+            f("flat", "sbs"),
+            "wide eyes: flat 3D"
+        );
+        let manual = lib(json!({"manualVRType": {"/v/Frames render.mp4": "flat"}}));
+        assert_eq!(detect(&manual, &render, None), FLAT);
+        assert!(!needs_frames(&manual, &render));
+        // One picture beats a VR-shaped frame.
+        let collage = video("Frames collage.mp4");
+        crate::stereo::set_layout(&collage.path, Some("mono"));
+        assert_eq!(detect(&empty, &collage, Some((4320, 2160))), FLAT);
+        assert!(!needs_frames(&empty, &video("Frames_180_sbs.mp4")));
     }
 }

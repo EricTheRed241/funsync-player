@@ -58,6 +58,11 @@ impl Snapshot {
     }
 }
 
+/// Probed durations and frame sizes, kept between runs.
+pub const MEDIA_CACHE_FILE: &str = "media-cache.json";
+/// Wait before each poster download (≤ 1 request/s per site).
+const POSTER_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub struct AppState {
     pub data_dir: PathBuf,
     pub library: RwLock<Library>,
@@ -77,8 +82,10 @@ impl AppState {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
         let _ = crate::remote::CUSTOM_THUMBS.set(data_dir.join("custom-thumbs"));
+        crate::stereo::load(&data_dir);
         Ok(Arc::new(Self {
-            media: Media::new(data_dir.join("thumb-cache")),
+            media: Media::new(data_dir.join("thumb-cache"))
+                .with_cache(data_dir.join(MEDIA_CACHE_FILE)),
             data_dir,
             library: RwLock::new(library),
             snapshot: RwLock::new(Arc::new(snapshot)),
@@ -144,7 +151,7 @@ impl AppState {
             eprintln!("funsync-server: library rules after the scan: {e}");
         }
         let s = self.clone();
-        tokio::spawn(async move { s.probe_durations().await });
+        tokio::spawn(async move { s.after_scan().await });
         out
     }
 
@@ -240,25 +247,33 @@ impl AppState {
         next.scan_ms = snap.scan_ms;
         next.unmatched_funscripts = snap.unmatched_funscripts;
         next.failed_paths = snap.failed_paths.clone();
+        next.embedded_axes = snap.embedded_axes.clone();
         *snap = Arc::new(next);
     }
 
-    /// ffprobe every video without a cached duration (`durationCache`, as
-    /// in the old app), one at a time, saving every 25.
-    async fn probe_durations(self: &Arc<Self>) {
+    /// What the old app and its backend do in the background after a scan,
+    /// one run at a time: ffprobe every video without a duration
+    /// (`durationCache`, saved every 25) or frame size (`media-cache.json`),
+    /// look at the frames of videos nothing else calls VR or flat
+    /// (`stereo`), run the library rules again when that changed anything,
+    /// import FapTap / rule34video posters (`posters`) and, after a scan
+    /// that read every source, drop thumbnails no video uses.
+    async fn after_scan(self: &Arc<Self>) {
+        static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _one = ONE.lock().await;
         let snap = self.snapshot.read().await.clone();
         let mut done = 0;
         for v in &snap.videos {
-            if self.library.read().await.lib()["durationCache"]
+            let known = self.library.read().await.lib()["durationCache"]
                 .get(&v.path)
-                .is_some()
-            {
+                .is_some();
+            if known && self.media.cached(&v.path).is_some() {
                 continue;
             }
             let Ok(md) = self.media.metadata(Path::new(&v.path)).await else {
                 continue;
             };
-            if md.duration > 0.0 {
+            if !known && md.duration > 0.0 {
                 self.library.write().await.lib_mut("durationCache")[&v.path] = json!(md.duration);
                 done += 1;
                 if done % 25 == 0 {
@@ -266,9 +281,66 @@ impl AppState {
                 }
             }
         }
-        // New durations move videos into Quick ones and the length collections.
-        if done > 0 {
+        self.media.save_cache();
+        let targets: Vec<(String, f64)> = {
+            let lib = self.library.read().await;
+            snap.videos
+                .iter()
+                .filter(|v| crate::vr::needs_frames(&lib, v))
+                .map(|v| {
+                    (
+                        v.path.clone(),
+                        self.media.cached(&v.path).map_or(0.0, |m| m.duration),
+                    )
+                })
+                .collect()
+        };
+        let st = self.clone();
+        let looked = tokio::task::spawn_blocking(move || crate::stereo::check(&st.media, &targets))
+            .await
+            .unwrap_or(0);
+        // New durations and VR decisions move videos between lists.
+        if done > 0 || looked > 0 {
             let _ = self.refresh_prefs().await;
+        }
+        let (st, videos) = (self.clone(), snap.videos.clone());
+        let posters = tokio::task::spawn_blocking(move || {
+            let dir = st.data_dir.join("custom-thumbs");
+            let http = slr_scout::http::Curl;
+            crate::posters::run(
+                &st.library,
+                &videos,
+                &st.media,
+                &dir,
+                &http,
+                POSTER_DELAY,
+                now_ms(),
+            )
+        })
+        .await
+        .unwrap_or_default();
+        if !posters.is_empty() {
+            let _ = self.save().await;
+        }
+        if snap.failed_paths.is_empty() && !snap.videos.is_empty() {
+            let keep = {
+                let lib = self.library.read().await;
+                snap.videos
+                    .iter()
+                    .map(|v| {
+                        let used = crate::media::stat_key(Path::new(&v.path)).ok().map(|key| {
+                            if crate::remote::poster(&lib, &v.path).is_some() {
+                                return HashSet::new();
+                            }
+                            let dims = self.media.cached(&v.path).map(|m| (m.width, m.height));
+                            let crop = crate::vr::thumb_crop(crate::vr::detect(&lib, v, dims));
+                            HashSet::from([crate::media::thumb_file_name(&v.id, &key, crop)])
+                        });
+                        (v.id.clone(), used)
+                    })
+                    .collect()
+            };
+            self.media.prune(&keep);
         }
     }
 
