@@ -13,8 +13,8 @@ fn interval(a: &[Action], t: f64) -> Option<usize> {
     i.checked_sub(1)
 }
 
-/// Position 0–100 at `t` ms with `mode` (`linear`, `pchip`, `makima`);
-/// the first / last position outside the script.
+/// Position 0–100 at `t` ms with `mode` (`linear`, `pchip`, `makima`,
+/// `step`: hold each action); the first / last position outside the script.
 pub fn position(mode: &str, a: &[Action], t: f64) -> Option<f64> {
     let (first, last) = (a.first()?, a.last()?);
     let Some(i) = interval(a, t) else {
@@ -29,6 +29,7 @@ pub fn position(mode: &str, a: &[Action], t: f64) -> Option<f64> {
     }
     let s = (t - a[i].at) / h;
     let d = match mode {
+        "step" => return Some(a[i].pos),
         "pchip" if a.len() > 2 => pchip_slope,
         "makima" if a.len() > 3 => makima_slope,
         _ => return Some(a[i].pos + s * (a[i + 1].pos - a[i].pos)),
@@ -82,10 +83,10 @@ fn makima_slope(a: &[Action], k: usize) -> f64 {
     }
 }
 
-/// Speed of the script segment at `t`, in position units per second.
-pub fn speed(a: &[Action], t: f64) -> f64 {
+/// Signed speed of the script segment at `t`, in position units per second.
+pub fn velocity(a: &[Action], t: f64) -> f64 {
     match interval(a, t) {
-        Some(i) if i + 1 < a.len() => slope(a, i).abs() * 1000.0,
+        Some(i) if i + 1 < a.len() => slope(a, i) * 1000.0,
         _ => 0.0,
     }
 }
@@ -156,7 +157,8 @@ mod tests {
         assert_eq!(speed_limit(0.0, 100.0, 100.0, 400.0), 60.0);
         assert_eq!(speed_limit(30.0, 0.0, 100.0, 400.0), 30.0);
         assert_eq!(speed_limit(100.0, 0.0, 100.0, 0.0), 100.0);
-        let a = acts(&[(0.0, 0.0), (500.0, 100.0)]);
-        assert_eq!(speed(&a, 10.0), 200.0);
+        let a = acts(&[(0.0, 100.0), (500.0, 0.0)]);
+        assert_eq!(velocity(&a, 10.0), -200.0);
+        assert_eq!(position("step", &a, 400.0), Some(100.0));
     }
 }

@@ -49,6 +49,12 @@
     <label>Offset (ms) <input name="defaultOffset" type="number"></label>
     <button data-a="connect">Connect</button> <button data-a="disconnect">Disconnect</button> <button data-a="">Save</button>
   </fieldset>
+  <fieldset id="bpDevices">
+    <legend>Buttplug devices</legend>
+    <p class="st">Connect Intiface to set each device up.</p>
+    <div></div>
+    <button id="bpSave" hidden>Save device settings</button>
+  </fieldset>
   <fieldset id="vr">
     <legend>PCVR companion bridge (HereSphere timestamp server)</legend>
     <p class="st"></p>
@@ -93,6 +99,7 @@ let data;
 
 function render(d, fill = true) {
   data = d;
+  renderBpDevices(d);
   for (const kind of ['tcode', 'buttplug', 'vr', 'player']) {
     const box = $('#' + kind), s = d[kind] || {};
     if (fill) for (const el of box.querySelectorAll('[name]')) el.value = s[el.name] ?? '';
@@ -213,6 +220,51 @@ $('#routeSave').onclick = () => saveRouting([...document.querySelectorAll('#rout
   .map((s) => ({ deviceId: s.dataset.device, scriptPath: s.value,
     ...(s.dataset.index != null ? { buttplugIndex: +s.dataset.index } : {}) })));
 $('#routeClear').onclick = () => saveRouting([]);
+// Per-device Buttplug settings (`buttplug.deviceSettings["<index>:<name>"]`).
+const MODES = ['speed', 'position', 'intensity'];
+const MODE_KEYS = { Vibrate: 'vibeMode', Oscillate: 'oscillateMode', Rotate: 'rotateMode', Constrict: 'scalarMode', Inflate: 'scalarMode' };
+let bpShown = '';
+function renderBpDevices(d) {
+  const list = d.status?.buttplug?.deviceList || [];
+  const sig = JSON.stringify(list);
+  if (sig === bpShown) return;
+  bpShown = sig;
+  const saved = d.buttplug?.deviceSettings || {};
+  const box = $('#bpDevices div');
+  box.replaceChildren(...list.map((dev) => {
+    const s = saved[dev.key] || {};
+    const f = document.createElement('fieldset');
+    f.dataset.key = dev.key;
+    const modes = [...new Set((dev.features || []).map((x) => MODE_KEYS[x]).filter(Boolean))];
+    const num = (k, sub, v) => `<input type=number data-k="${k}" data-sub="${sub}" value="${v ?? ''}" style="width:4rem">`;
+    f.innerHTML = `<legend></legend>`
+      + modes.map((k) => `<label>${k} <select data-k="${k}">${MODES.map((m) => `<option${(s[k] || (k === 'scalarMode' ? 'position' : 'speed')) === m ? ' selected' : ''}>${m}</option>`).join('')}</select></label>`).join('')
+      + `<label><input type=checkbox data-k="inverted" ${s.inverted ? 'checked' : ''}> Invert</label>`
+      + `<label>Range ${num('range', 'min', s.range?.min)}–${num('range', 'max', s.range?.max)}</label>`
+      + `<label>Floor / ceiling ${num('cutoff', 'min', s.cutoff?.min)}–${num('cutoff', 'max', s.cutoff?.max)}</label>`
+      + `<label>Max intensity % ${num('maxIntensity', '', s.maxIntensity ?? 70)}</label>`
+      + `<label><input type=checkbox data-k="rampUp" ${s.rampUp === false ? '' : 'checked'}> Ramp up (2 s)</label>`;
+    f.querySelector('legend').textContent = `${dev.name} (${(dev.features || []).join(', ')})`;
+    return f;
+  }));
+  $('#bpSave').hidden = !list.length;
+}
+$('#bpSave').onclick = () => {
+  const all = { ...(data.buttplug?.deviceSettings || {}) };
+  for (const f of document.querySelectorAll('#bpDevices fieldset[data-key]')) {
+    const s = { ...(all[f.dataset.key] || {}) };
+    for (const el of f.querySelectorAll('[data-k]')) {
+      const k = el.dataset.k;
+      if (el.type === 'checkbox') s[k] = el.checked;
+      else if (el.dataset.sub) {
+        if (el.value === '') delete s[k];
+        else s[k] = { ...(s[k] || {}), [el.dataset.sub]: +el.value };
+      } else s[k] = el.type === 'number' ? +el.value : el.value;
+    }
+    all[f.dataset.key] = s;
+  }
+  post({ kind: 'buttplug', settings: { deviceSettings: all } });
+};
 load(true);
 setInterval(() => load(false), 2000);
 </script>
