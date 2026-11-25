@@ -10,11 +10,8 @@
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use unicode_normalization::UnicodeNormalization;
-
-/// Videos the scouts count (`isVideoName` in scripts/eroscripts-scout-lib.mjs).
-pub const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mkv", "webm", "mov"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Source {
@@ -130,42 +127,10 @@ pub fn creators(sources: &[Source]) -> HashSet<String> {
     out
 }
 
-pub fn is_video_name(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| VIDEO_EXTS.iter().any(|v| e.eq_ignore_ascii_case(v)))
-}
-
-/// Videos in the enabled sources, up to four levels down, dot names
-/// skipped (AppleDouble `._*` included).
+/// Videos in the enabled sources, counted like every scout
+/// (video_tags::library::video_count).
 pub fn video_count(sources: &[Source]) -> usize {
-    fn walk(dir: &Path, depth: u32, n: &mut usize) {
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let Ok(name) = e.file_name().into_string() else {
-                continue;
-            };
-            if name.starts_with('.') {
-                continue;
-            }
-            let Ok(kind) = e.file_type() else { continue };
-            if kind.is_dir() {
-                if depth < 3 {
-                    walk(&e.path(), depth + 1, n);
-                }
-            } else if is_video_name(&name) {
-                *n += 1;
-            }
-        }
-    }
-    let mut n = 0;
-    for s in enabled(sources) {
-        walk(&s.path, 0, &mut n);
-    }
-    n
+    video_tags::library::video_count(enabled(sources).map(|s| s.path.as_path()))
 }
 
 /// Where SLR scenes go: the library source called `name`, else `<name>`

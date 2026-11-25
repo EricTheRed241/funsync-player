@@ -97,7 +97,7 @@ fn video_ext(url: &str) -> String {
     let path = url.split(['?', '#']).next().unwrap_or(url);
     let name = path.rsplit('/').next().unwrap_or(path);
     match name.rsplit_once('.') {
-        Some((_, ext)) if slr_library::is_video_name(name) => ext.to_ascii_lowercase(),
+        Some((_, ext)) if video_tags::library::is_video_name(name) => ext.to_ascii_lowercase(),
         _ => "mp4".into(),
     }
 }

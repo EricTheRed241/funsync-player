@@ -184,7 +184,7 @@ impl Index {
                 {
                     self.add_sidecar(&name, &v);
                 }
-            } else if library::is_video_name(&name) {
+            } else if video_tags::library::is_video_name(&name) {
                 self.add_file(&name);
             }
         }

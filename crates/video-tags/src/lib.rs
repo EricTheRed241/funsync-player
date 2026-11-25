@@ -9,6 +9,7 @@ pub mod access;
 pub mod cli;
 pub mod config;
 pub mod host;
+pub mod library;
 pub mod plan;
 pub mod proposals;
 pub mod rescan;
