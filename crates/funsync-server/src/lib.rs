@@ -6,6 +6,7 @@
 pub mod access;
 pub mod assoc;
 pub mod associate;
+pub mod autostart;
 pub mod cli;
 pub mod data;
 pub mod delete;

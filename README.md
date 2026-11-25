@@ -423,6 +423,7 @@ A local desktop video player with device synchronization for funscript playback.
 - It never deletes, renames or writes anything in the library, unless started with `FUNSYNC_OWNS_LIBRARY=1` (when it takes over from this app): then a rating at or below the delete rating (not a favourite) deletes the video as in *Triage deletes from disk*, and `POST /api/remote/delete-duplicate` deletes a duplicate; without it that request answers 409.
 - **Headsets log in with the PIN** (HereSphere / DeoVR: any username, the PIN as password) and get keyed media and thumbnail URLs, as with this app.
 - **After each scan, in the background** (as this app's backend does): every video without a duration or frame size is probed (kept in `media-cache.json`), videos neither you nor the file name call VR or flat have four frames looked at for two eyes side by side (kept in `vr-stereo-cache.json`), FapTap thumbnails that show the video and rule34video covers become posters (saved in the data folder's `custom-thumbs/`), and, after a scan that read every source, thumbnails no video uses are deleted from `thumb-cache/`.
+- **Start at login:** `funsync-server autostart install [serve flags, e.g. --lan --supervise]` installs the LaunchAgent `com.funsync.rust` (restarted whenever it stops); `autostart status`, `autostart uninstall`.
 
 ## Install
 

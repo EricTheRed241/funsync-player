@@ -1,4 +1,4 @@
-//! Command line: `serve` (default) and `import`.
+//! Command line: `serve` (default), `import` and `autostart`.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -11,6 +11,7 @@ funsync-server: FunSync in Rust (library server + web UI)
 Usage:
   funsync-server [serve] [--port N] [--lan] [--supervise] [--data-dir <dir>]
   funsync-server import [--from <old userData>] [--force] [--data-dir <dir>]
+  funsync-server autostart install [serve flags…] | uninstall | status
 
 serve    Serve http://127.0.0.1:<port>/ (default 5300) and scan the library
          at start. --lan listens on every interface; other devices then need
@@ -21,6 +22,8 @@ serve    Serve http://127.0.0.1:<port>/ (default 5300) and scan the library
 import   Copy library sources, playlists, categories and ratings from the old
          app's config.json (read-only) into <data-dir>/library.json.
          Refuses to replace an earlier import without --force.
+autostart  A LaunchAgent (com.funsync.rust) that runs `serve` with the given
+         flags at login and again whenever it stops.
 
 --data-dir  default $FUNSYNC_RUST_DATA, else
             ~/Library/Application Support/funsync-rust
@@ -42,9 +45,25 @@ pub enum Command {
         data_dir: PathBuf,
         force: bool,
     },
+    Autostart {
+        action: String,
+        serve_args: Vec<String>,
+    },
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
+    if args.first().map(String::as_str) == Some("autostart") {
+        let action = args
+            .get(1)
+            .cloned()
+            .ok_or("autostart needs install, uninstall or status")?;
+        let serve_args = args[2..].to_vec();
+        // The flags must be valid `serve` flags.
+        if !matches!(parse(&serve_args)?, Command::Serve { .. }) {
+            return Err("autostart takes serve flags only".into());
+        }
+        return Ok(Command::Autostart { action, serve_args });
+    }
     let mut it = args.iter().peekable();
     let sub = match it.peek().map(|s| s.as_str()) {
         Some("serve") | Some("import") => it.next().cloned(),

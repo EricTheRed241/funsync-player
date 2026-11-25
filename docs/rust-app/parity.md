@@ -145,4 +145,4 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | Export / import backups | done | Settings page: `GET /api/backup` (zip with `config.json` + `metadata.json`, derived caches left out), `POST /api/backup?mode=merge\|overwrite` (`mergeConfig` of `electron/data-export.js`); reads the old app's backups |
-| App autostart (LaunchAgent) | not planned | until the Rust app replaces the Electron one |
+| App autostart (LaunchAgent) | done | `funsync-server autostart install [serve flags…]` / `uninstall` / `status`: LaunchAgent `com.funsync.rust` runs `serve` with those flags at login and again whenever it stops (`KeepAlive`); stderr in `~/Library/Logs/funsync-rust/launchd.log`. Not installed while the Electron app is the daily app |
