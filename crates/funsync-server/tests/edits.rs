@@ -142,7 +142,10 @@ fn edits_over_http() {
         "/api/remote/playlists/add-video",
         json!({"videoId": id, "name": "Needs review"}),
     );
-    let pl = call(port, "GET", "/api/remote/playlists", None).1["playlists"][0].clone();
+    let pl = named(
+        &call(port, "GET", "/api/remote/playlists", None).1["playlists"],
+        "Needs review",
+    );
     assert_eq!(
         (pl["name"].clone(), pl["videoIds"].clone()),
         (json!("Needs review"), json!([id]))
@@ -157,7 +160,10 @@ fn edits_over_http() {
         "/api/remote/playlists/remove-video",
         json!({"videoId": id, "playlistId": pl["id"]}),
     );
-    let pl = call(port, "GET", "/api/remote/playlists", None).1["playlists"][0].clone();
+    let pl = named(
+        &call(port, "GET", "/api/remote/playlists", None).1["playlists"],
+        "Needs review",
+    );
     assert_eq!(pl["videoIds"], json!([other]));
 
     // Queue: Needs review isn't auto-filled; add puts it first.
@@ -228,5 +234,23 @@ fn edits_over_http() {
     assert_eq!(c["settings"]["library"]["tagScores"]["solo"], 10.0);
     assert_eq!(c["settings"]["player"]["userQueue"], json!([]));
     assert_eq!(c["settings"]["player"]["queueAutoFill"], false);
-    assert_eq!(c["playlists"][0]["name"], "Needs review");
+    // The library rules ran after the edits: the heart made Favorites, the
+    // favourite artist "Favourite artists".
+    let names: Vec<&str> = c["playlists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Favorites", "Needs review", "Favourite artists"]);
+}
+
+/// The playlist called `name` in a list.
+fn named(list: &Value, name: &str) -> Value {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == name)
+        .unwrap()
+        .clone()
 }

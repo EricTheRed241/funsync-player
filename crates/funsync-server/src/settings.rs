@@ -64,8 +64,8 @@ async fn get_settings(State(st): State<Arc<AppState>>) -> Json<Value> {
         "sources": list,
         "overlaps": overlaps(&sources),
         "watchedLast": crate::remote::watched_last(&lib),
-        "libraryMaxVideos": crate::edits::prefs()["libraryMaxVideos"],
-        "ratings": crate::edits::prefs()["ratings"],
+        "libraryMaxVideos": crate::prefs::content_preferences()["libraryMaxVideos"],
+        "ratings": crate::prefs::content_preferences()["ratings"],
     }))
 }
 

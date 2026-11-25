@@ -11,7 +11,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | Own data folder, `library.json` | done | `--data-dir`, `$FUNSYNC_RUST_DATA` |
-| Import from the old app (read-only) | done | sources, playlists, categories, `videoCategories`, the old `settings.library` (ratings, associations, scores, tag scores …) kept verbatim; the EroScripts session is not copied. `video-tags.json` / `pornstar-tags.json` are read live in phase 3 |
+| Import from the old app (read-only) | done | sources, playlists, categories, `videoCategories`, the old `settings.library` (ratings, associations, scores, tag scores …) kept verbatim; the EroScripts session is not copied. `eroscripts-links.json`, `video-tags.json` and `pornstar-tags.json` are read after each scan from the folder imported from (Side files) |
 | Health / status endpoint | done | `GET /health`, `GET /api/status` (sources present, videos, scan time, unreadable sources) |
 | Status API with devices, issues (`/api/status` of the old backend) | done | `/api/status` adds `issues` (TCode link waiting / reconnecting with attempts and last failure, no device connected), `devices` (TCode link: state, URL, since, attempts, retry, last error, commands and bytes; Buttplug devices), `session`, `phone`, `backend`, `desktop` (the server's engine, always connected); no VR bridge / headset parts |
 | Device dashboard (`/device`) | done | `backend/device-dashboard/` served unchanged (this computer only; 403 otherwise), fed by `GET /api/device/telemetry` from the server's engine: 1 s samples for 15 minutes, the last ~100 s of commands, 500 events (link connects, drops, failures, scripts loaded, phone take-overs); the web remote's newest phone is the playback source |
@@ -51,13 +51,13 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Sources: reorder, enable/disable, overlap, hot-plug | done | Settings page (`/remote/settings.html`, `src/settings.rs`): add, remove, enable, reorder, overlap warning; a source folder appearing or disappearing triggers a rescan (checked every 10 s) |
 | Manual script association | not started | |
 | Fuzzy search with exact-title precedence | done | the web remote's search (`library-search.js`) |
-| Sort (preference score default, name, date, duration, speed, rating) | partial | the web remote's sorts; scores are the imported snapshot until the server computes them |
+| Sort (preference score default, name, date, duration, speed, rating) | done | the web remote's sorts, on the scores and speed stats the server computes |
 | Playlists | done | listed and played; add / remove from the phone (`/api/remote/playlists/add-video`, `remove-video`); create, rename, delete, reorder and bulk add / remove on the Lists page (`/remote/manage.html`, `POST/DELETE /api/groupings/<kind>/<id>[/videos]`) |
-| Categories from EroScripts tags, VR, axis categories | partial | the imported categories are listed (`/api/remote/categories`); not computed by the server yet |
-| Artist playlists, aliases, playlist cleanup | not started | phase 3 |
-| Auto collections, score lists | partial | the imported collections are listed; not computed by the server yet |
-| Smart playlists (VR picks, Quick ones, Favorites) | not started | phase 3 |
-| Preference score and tag scores | not started | phase 3 (Rust `candidateScore` exists in `crates/slr-scout/src/score.rs`) |
+| Categories from EroScripts tags, VR, axis categories | done | `prefs::lists::categories` after each complete scan, with `library.autoCategories` (made once, added once, `vr` / `vr-manual`); axis kind from companions + embedded axes (`GET /api/media/axis-flags`, `GET /api/media/vr-flags` as the old backend). On the real library every tag and axis category matches the Electron app; VR: 154 / 154 kept, 2 videos extra (the old app's frame check called them flat). Videos the VR rule can't tell apart without that frame check are only taken out of VR when marked flat |
+| Artist playlists, aliases, playlist cleanup | done | ARTIST_PLAYLIST_MIN, ARTIST_ALIASES, Favourite artists (FAVOURITES + `library.favouriteArtists`), `library.artistPlaylists`; cleanup only after a scan that read every source. Real library: every artist playlist and Favourite artists identical |
+| Auto collections, score lists | done | AUTO_COLLECTIONS (tags, title words, length / `len-*` tags, FapTap) with `library.autoCollections`; SCORE_BANDS rewritten from the scores. Real library: every auto collection identical; score lists differ only by the VR videos below |
+| Smart playlists (VR picks, Quick ones, Favorites) | partial | rebuilt after each scan and new durations (`library.smartPlaylists`). Real library: Quick ones and Favorites identical, VR picks 34 of 40 (the 13 VR videos only the old app's frame check finds). Refreshed after every library edit too (rating, heart, tag score, favourite artist) |
+| Preference score and tag scores | partial | computed after each scan (`prefs::score`: RANKING, tag-score groups counted once, named groups from the title, favourite-artist bonus, known artists). Real library: 984 / 999 equal; the 15 others are the VR decision (13 VR only by frames, 2 VR-shaped frames the old app saw as flat). recomputed after tag-score and favourite-artist edits |
 | Multi-select bulk assignment | done | Lists page: tick videos (search, "only in this list"), then add to / remove from any playlist, category (with colour) or collection |
 | Ratings and favourites | done | `POST /api/remote/rating` (half stars, heart) saved to `library.ratings`; ≤ 2★ deletes nothing (read-only library) |
 | Watched videos last, Watched collection | done | from the ratings (`watched`, `watchedLast`, the `:watched` collection) |
@@ -68,8 +68,8 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| Video tags merge (`video-tags.json`) | not started | phase 3 |
-| Pornstar tags merge (`pornstar-tags.json`) | not started | phase 3 |
+| Video tags merge (`video-tags.json`) | done | with the scan sidecars and `eroscripts-links.json` into `library.scriptTags` (`addedTags`, VIDEO_TAGGER_TAGS), read-only; real library: all 1470 records identical |
+| Pornstar tags merge (`pornstar-tags.json`) | done | applied performers' tags, merged with the video tags |
 | Underage screener integration (review playlist, 1★) | not started | screener talks to the old backend today |
 
 ## Remote access / web UI
@@ -106,7 +106,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Multi-axis (TCode 10 axes, embedded axes) | done | server engine (`src/devices/`): companion axes L1/L2/R0/R1/R2/V0/V1/V2/A0 and axes embedded in the main script (`additional_axes`, `raw`, `axes`, `channels`, sibling keys, inline TCode) |
 | Custom routing per device | done | the video's association (`active: "custom"`, `custom.routes`) gives each Buttplug device its script (the main route plays the main script); index first when the name there still matches, else by name, and the new index is stored; unrouted devices get nothing. TCode routes and script-path recovery not ported; no editor (routes come from the import) |
 | Orgasm Switch from the phone | done | `orgasm-hold` (hold / toggle per `player.orgasmSwitchMode`) loops `player.orgasmConfig` (single, multi main + axes, custom → single or main route) on every device, video paused or not; toggle's second press stops the devices until playback starts again; `orgasm-state` keeps the phone's button honest. No Edge (Z) |
-| Speed stats | partial | from the imported `speedStatsCache`; not computed for new scripts |
+| Speed stats | done | `speedStatsCache` filled for new scripts after each scan (the old backend's rule: held positions left out, rounded half to even) |
 
 ## Script smoothing
 

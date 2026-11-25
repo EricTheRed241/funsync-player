@@ -12,7 +12,7 @@ mod dashboard;
 mod interp;
 mod profiles;
 mod routing;
-mod script;
+pub(crate) mod script;
 mod tcode;
 mod vr;
 

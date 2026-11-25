@@ -1,6 +1,7 @@
 //! HTTP: health, status, library listing, scan, media (stream, thumbnail,
 //! script, subtitle), the web UI and the parity dashboard.
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,6 +41,9 @@ pub struct Snapshot {
     pub videos: Vec<Video>,
     pub unmatched_funscripts: usize,
     pub failed_paths: Vec<String>,
+    /// Videos whose main script carries axes of its own (read once per scan).
+    #[serde(default)]
+    pub embedded_axes: HashSet<String>,
 }
 
 impl Snapshot {
@@ -99,15 +103,22 @@ impl AppState {
             })
             .collect();
         let started = std::time::Instant::now();
-        let res = tokio::task::spawn_blocking(move || scan::scan_library(&sources)).await;
+        let res = tokio::task::spawn_blocking(move || {
+            let r = scan::scan_library(&sources);
+            let ms = started.elapsed().as_millis() as u64;
+            let embedded = crate::prefs::embedded_axes(&r.videos);
+            (r, ms, embedded)
+        })
+        .await;
         let out = match res {
-            Ok(r) => {
+            Ok((r, scan_ms, embedded_axes)) => {
                 let snap = Snapshot {
                     scanned_at: Some(now_ms()),
-                    scan_ms: started.elapsed().as_millis() as u64,
+                    scan_ms,
                     unmatched_funscripts: r.unmatched_funscripts.len(),
                     failed_paths: r.failed_paths,
                     videos: r.videos,
+                    embedded_axes,
                 };
                 let bytes = serde_json::to_vec(&snap).map_err(|e| e.to_string());
                 *self.snapshot.write().await = Arc::new(snap);
@@ -121,9 +132,32 @@ impl AppState {
             Err(e) => Err(e.to_string()),
         };
         self.scanning.store(false, Ordering::SeqCst);
+        if out.is_ok()
+            && let Err(e) = self.refresh_prefs().await
+        {
+            eprintln!("funsync-server: library rules after the scan: {e}");
+        }
         let s = self.clone();
         tokio::spawn(async move { s.probe_durations().await });
         out
+    }
+
+    /// The rules the old app runs after a scan (`prefs::refresh`: tags,
+    /// categories, playlists, collections, scores),
+    /// on a blocking thread (it reads new scripts and the side files), then
+    /// saved. Does nothing after an incomplete scan.
+    pub async fn refresh_prefs(self: &Arc<Self>) -> Result<(), String> {
+        let st = self.clone();
+        let snap = self.snapshot.read().await.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut lib = st.library.blocking_write();
+            let side = crate::prefs::SideFiles::load(crate::prefs::side_dir(&lib).as_deref());
+            let dims = |p: &str| st.media.cached(p).map(|m| (m.width, m.height));
+            crate::prefs::refresh_with(&mut lib, &snap, Some(&side), now_ms(), dims)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        self.save().await
     }
 
     /// Write `library.json` (after an edit).
@@ -133,8 +167,15 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    /// Every library edit ends here: saves (score recomputation joins later).
+    /// Every library edit ends here: the library rules again (scores,
+    /// lists; tag merges and the playlist cleanup are for scans), then saved.
     pub async fn library_changed(&self) -> Result<(), String> {
+        let snap = self.snapshot.read().await.clone();
+        {
+            let mut lib = self.library.write().await;
+            let dims = |p: &str| self.media.cached(p).map(|m| (m.width, m.height));
+            crate::prefs::refresh_with(&mut lib, &snap, None, now_ms(), dims);
+        }
         self.save().await
     }
 
@@ -161,8 +202,9 @@ impl AppState {
                 }
             }
         }
+        // New durations move videos into Quick ones and the length collections.
         if done > 0 {
-            let _ = self.save().await;
+            let _ = self.refresh_prefs().await;
         }
     }
 
@@ -216,6 +258,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::queue::routes())
         .merge(crate::groupings::routes())
         .merge(crate::eroscripts::routes())
+        .merge(crate::prefs::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)

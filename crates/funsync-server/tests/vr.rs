@@ -51,7 +51,11 @@ fn heresphere_listing_and_scene() {
         "settings": {"library": {
             "sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}],
             "ratings": {flat.to_str().unwrap(): {"rating": 4, "updatedAt": 1}},
-            "preferenceScores": {vr.to_str().unwrap(): 21.2},
+            // Score 3 (VR) + 20 (tags), computed by the server after the scan;
+            // VR picks deleted by the user, so it isn't made again.
+            "scriptTags": {vr.to_str().unwrap(): {"tags": ["a", "b"]}},
+            "tagScores": {"a": 10, "b": 10},
+            "smartPlaylists": {"created": ["vr-picks"]},
             "durationCache": {vr.to_str().unwrap(): 700},
         }},
         "playlists": [{"id": "p", "name": "Picks", "videoPaths": [vr]}],
@@ -150,7 +154,11 @@ fn heresphere_listing_and_scene() {
             "Length:Medium (5-15m)",
             "Queue:Up next",
             "Playlist:Picks",
-            "Score:21.0",
+            "Category:VR",
+            "Category:Single-axis",
+            "Tag:a",
+            "Tag:b",
+            "Score:23.0",
             "5 min",
             "10 min"
         ]
