@@ -9,11 +9,12 @@ pub const USAGE: &str = "\
 funsync-server: FunSync in Rust (library server + web UI)
 
 Usage:
-  funsync-server [serve] [--port N] [--data-dir <dir>]
+  funsync-server [serve] [--port N] [--lan] [--data-dir <dir>]
   funsync-server import [--from <old userData>] [--force] [--data-dir <dir>]
 
-serve    Serve http://127.0.0.1:<port>/ (default 5300, loopback only) and
-         scan the library at start.
+serve    Serve http://127.0.0.1:<port>/ (default 5300) and scan the library
+         at start. --lan listens on every interface; other devices then need
+         the access PIN when the old app's access-pin.json sets one.
 import   Copy library sources, playlists, categories and ratings from the old
          app's config.json (read-only) into <data-dir>/library.json.
          Refuses to replace an earlier import without --force.
@@ -46,6 +47,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         _ => None,
     };
     let mut port = DEFAULT_PORT;
+    let mut lan = false;
     let mut data_dir = None;
     let mut from = None;
     let mut force = false;
@@ -54,6 +56,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         match a.as_str() {
             "-h" | "--help" => return Ok(Command::Help),
             "--port" => port = val("--port")?.parse().map_err(|_| "--port: not a port")?,
+            "--lan" if sub.as_deref() != Some("import") => lan = true,
             "--data-dir" => data_dir = Some(PathBuf::from(val("--data-dir")?)),
             "--from" if sub.as_deref() == Some("import") => {
                 from = Some(PathBuf::from(val("--from")?))
@@ -76,7 +79,14 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         });
     }
     Ok(Command::Serve {
-        addr: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+        addr: SocketAddr::from((
+            if lan {
+                Ipv4Addr::UNSPECIFIED
+            } else {
+                Ipv4Addr::LOCALHOST
+            },
+            port,
+        )),
         data_dir,
     })
 }

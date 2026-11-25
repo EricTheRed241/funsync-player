@@ -171,6 +171,11 @@ impl AppState {
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
+    router_with_pin(state, data::default_old_user_data().unwrap_or_default())
+}
+
+/// The app with the access PIN read from `pin_dir` (the old app's folder).
+pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
     let remote_files = ServeDir::new(WEB_OVERLAY).fallback(ServeDir::new(WEB_REMOTE));
     Router::new()
         .route(
@@ -197,6 +202,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            crate::access::Access::new(pin_dir),
+            crate::access::layer,
+        ))
 }
 
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String> {
@@ -213,7 +222,8 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
             eprintln!("funsync-server: startup scan failed: {e}");
         }
     });
-    axum::serve(listener, router(state))
+    let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
+    axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

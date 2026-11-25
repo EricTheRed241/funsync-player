@@ -3,6 +3,7 @@
 //! (`docs/rust-app/parity.md`). Phase 1: data folder, import from the old
 //! app (read-only), library scan, media streaming, thumbnails, scripts.
 
+pub mod access;
 pub mod cli;
 pub mod data;
 pub mod import;
