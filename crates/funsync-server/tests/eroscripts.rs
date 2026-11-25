@@ -2,20 +2,14 @@
 //! login with 2FA, search, a topic's scripts, saving a script next to its
 //! video, a post picture as the poster.
 
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use common::Kill;
 use serde_json::{Value, json};
-
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 /// The fake forum: canned answers by method + path.
 fn forum(listener: TcpListener) {
@@ -162,49 +156,28 @@ fn serve(
     fake_url: &str,
     session: Option<Value>,
 ) -> (Kill, u16, Vec<tempfile::TempDir>) {
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
-    let (lib, old, data) = (
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-    );
+    let lib = tempfile::tempdir().unwrap();
     for f in files {
         let p = lib.path().join(f);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, b"{}").unwrap();
     }
-    let cfg = json!({"settings": {"library": {"sources": [
-        {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}});
-    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
-    assert!(
-        Command::new(bin)
-            .args(["import", "--from"])
-            .arg(old.path())
-            .arg("--data-dir")
-            .arg(data.path())
-            .status()
-            .unwrap()
-            .success()
-    );
+    let data = common::import(&json!({"settings": {"library": {"sources": [
+        {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}}));
     if let Some(s) = session {
         std::fs::write(data.path().join("eroscripts-session.json"), s.to_string()).unwrap();
     }
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .env("FUNSYNC_EROSCRIPTS_URL", fake_url)
-            .env("FUNSYNC_PIXELDRAIN_URL", fake_url)
-            .env("FUNSYNC_OWNS_LIBRARY", "1")
-            .spawn()
-            .unwrap(),
-    );
-    (srv, port, vec![lib, old, data])
+    let (srv, port) = common::start(data.path(), &forum_env(fake_url));
+    (srv, port, vec![lib, data])
+}
+
+/// The server's settings for the fake forum.
+fn forum_env(fake_url: &str) -> [(&'static str, &str); 3] {
+    [
+        ("FUNSYNC_EROSCRIPTS_URL", fake_url),
+        ("FUNSYNC_PIXELDRAIN_URL", fake_url),
+        ("FUNSYNC_OWNS_LIBRARY", "1"),
+    ]
 }
 
 /// Poll `path` until `ok` holds for its answer.
@@ -317,45 +290,17 @@ fn call(port: u16, method: &str, path: &str, body: Option<Value>) -> (u16, Value
 
 #[test]
 fn login_search_topic_download_poster() {
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
     let fake = TcpListener::bind("127.0.0.1:0").unwrap();
     let fake_url = format!("http://{}", fake.local_addr().unwrap());
     std::thread::spawn(move || forum(fake));
 
     let lib = tempfile::tempdir().unwrap();
-    let old = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
     let video = lib.path().join("A/Scene.mp4");
     std::fs::create_dir_all(video.parent().unwrap()).unwrap();
     std::fs::write(&video, b"0123456789").unwrap();
-    let cfg = json!({"settings": {"library": {"sources": [
-        {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}});
-    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
-    assert!(
-        Command::new(bin)
-            .args(["import", "--from"])
-            .arg(old.path())
-            .arg("--data-dir")
-            .arg(data.path())
-            .status()
-            .unwrap()
-            .success()
-    );
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let _srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .env("FUNSYNC_EROSCRIPTS_URL", &fake_url)
-            .env("FUNSYNC_PIXELDRAIN_URL", &fake_url)
-            .env("FUNSYNC_OWNS_LIBRARY", "1")
-            .spawn()
-            .unwrap(),
-    );
+    let data = common::import(&json!({"settings": {"library": {"sources": [
+        {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}}));
+    let (_srv, port) = common::start(data.path(), &forum_env(&fake_url));
     let deadline = Instant::now() + Duration::from_secs(10);
     let id = loop {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {

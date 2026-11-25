@@ -1,17 +1,10 @@
 //! End to end: import from a fake old userData, serve, list, stream a range.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, Command};
 use std::time::{Duration, Instant};
-
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn http(port: u16, method: &str, path: &str, extra: &str) -> (String, Vec<u8>) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -31,42 +24,17 @@ fn http(port: u16, method: &str, path: &str, extra: &str) -> (String, Vec<u8>) {
 
 #[test]
 fn import_then_serve() {
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
     let lib = tempfile::tempdir().unwrap();
-    let old = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
     let scene = lib.path().join("Artist/Scene");
     std::fs::create_dir_all(&scene).unwrap();
     std::fs::write(scene.join("Scene.mp4"), b"0123456789").unwrap();
     std::fs::write(scene.join("Scene.funscript"), br#"{"actions":[]}"#).unwrap();
     std::fs::write(scene.join("Scene.twist.funscript"), br#"{"actions":[1]}"#).unwrap();
-    let cfg = serde_json::json!({
+    let data = common::import(&serde_json::json!({
         "settings": {"library": {"sources": [
             {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}
-    });
-    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
-
-    let st = Command::new(bin)
-        .args(["import", "--from"])
-        .arg(old.path())
-        .arg("--data-dir")
-        .arg(data.path())
-        .status()
-        .unwrap();
-    assert!(st.success());
-
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let _srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .spawn()
-            .unwrap(),
-    );
+    }));
+    let (_srv, port) = common::start(data.path(), &[]);
     let deadline = Instant::now() + Duration::from_secs(10);
     let videos: serde_json::Value = loop {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
