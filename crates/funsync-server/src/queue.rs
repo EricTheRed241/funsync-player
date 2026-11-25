@@ -58,6 +58,13 @@ fn review_paths(lib: &Library) -> HashSet<String> {
         .collect()
 }
 
+/// The whole queue in play order: the user's queue, then auto-fill.
+pub fn queued_paths(lib: &Library, videos: &[Video], now: f64) -> Vec<String> {
+    let mut q = manual(lib);
+    q.extend(auto_fill(lib, videos, now));
+    q
+}
+
 /// `autoFillQueue`: scripted videos not queued, not under review, not
 /// rated at or below the delete rating (hearts excepted); not played
 /// lately first (else the longest ago), unrated first, score high to low,

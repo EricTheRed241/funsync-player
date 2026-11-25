@@ -37,7 +37,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Feature | Status | Notes |
 |---|---|---|
 | One queue (user additions + auto-fill to 10) | done | `src/queue.rs`, port of `play-queue.js` (`player.userQueue` / `queuePlayed` / `queueAutoFill`, auto-fill from `preferenceScores`, review playlists and the delete rating skipped) |
-| Queue on every client (page, headset section, `Queue:Up next` tag) | partial | the web remote's Queue tab and queue buttons; no headset section yet |
+| Queue on every client (page, headset section, `Queue:Up next` tag) | done | the web remote's Queue tab and queue buttons; the HereSphere / DeoVR Queue section (your queue + auto-fill) and the `Queue:Up next` tag, editable in HereSphere |
 | Queue API (`/api/remote/queue*`) | done | `GET /queue`, `add` / `remove` / `played` / `clear` / `auto-fill`, applied at once |
 
 ## Library
@@ -88,10 +88,10 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header. Read-only (`write*` false, no event server); Queue is `player.userQueue` only (no auto-fill); Hand-made from companion files only (no embedded axes); no access PIN; no `?v=` thumb versions |
+| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue with auto-fill, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header; writable rating / heart / tags and `eventServer`. Hand-made from companion files only (no embedded axes); no access PIN; no `?v=` thumb versions |
 | DeoVR API | partial | `/deovr` and `/deovr/<id>` with the same sections and tags; encoding name always `h264`; no access PIN |
-| Rate / favourite / playlist / queue edits from the headset | not started | phase 4 |
-| Review on end from the headset | not started | phase 4 |
+| Rate / favourite / playlist / queue edits from the headset | done | HereSphere scene POST: rating, `isFavorite`, `Playlist:<name>` and `Queue:Up next` tags (only tags changed since the scene was served count); DeoVR is read-only, as before |
+| Review on end from the headset | done | `POST /heresphere/events/<id>`: a play takes the video out of the queue (once per video); a pause / close at ≥ 90 % of an unrated video files it under Needs review |
 | VR decision (projection, filename, frames, shape) | partial | VR Format projection, Mark as VR / Flat, filename rules (patterns, studio codes, `XXVR-123`, `VR180`, bare `VR`), ~2:1 ≥ 3200 wide fallback from probed dimensions (in memory, so a listing only sees videos probed since start); frame-based stereo detection (`stereo_detect.py`) not ported |
 | PCVR companion bridge (HereSphere timestamp API) | not started | |
 | Session status card, VR ↔ web remote mutex | not started | |
