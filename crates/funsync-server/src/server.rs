@@ -44,6 +44,9 @@ pub struct Snapshot {
     /// Videos whose main script carries axes of its own (read once per scan).
     #[serde(default)]
     pub embedded_axes: HashSet<String>,
+    /// Every funscript the scan found (the Associate page's choices).
+    #[serde(default)]
+    pub funscripts: Vec<String>,
 }
 
 impl Snapshot {
@@ -90,21 +93,23 @@ impl AppState {
         if self.scanning.swap(true, Ordering::SeqCst) {
             return Ok(false);
         }
-        let sources: Vec<Source> = self
-            .library
-            .read()
-            .await
-            .sources()
-            .into_iter()
-            .filter(|s| s.enabled)
-            .map(|s| Source {
-                name: s.name,
-                path: s.path,
-            })
-            .collect();
+        let (sources, associations) = {
+            let lib = self.library.read().await;
+            let sources: Vec<Source> = lib
+                .sources()
+                .into_iter()
+                .filter(|s| s.enabled)
+                .map(|s| Source {
+                    name: s.name,
+                    path: s.path,
+                })
+                .collect();
+            (sources, lib.lib()["associations"].clone())
+        };
         let started = std::time::Instant::now();
         let res = tokio::task::spawn_blocking(move || {
-            let r = scan::scan_library(&sources);
+            let mut r = scan::scan_library(&sources);
+            crate::associate::apply(&associations, &mut r.videos);
             let ms = started.elapsed().as_millis() as u64;
             let embedded = crate::prefs::embedded_axes(&r.videos);
             (r, ms, embedded)
@@ -119,6 +124,7 @@ impl AppState {
                     failed_paths: r.failed_paths,
                     videos: r.videos,
                     embedded_axes,
+                    funscripts: r.all_funscripts.into_iter().map(|f| f.path).collect(),
                 };
                 let bytes = serde_json::to_vec(&snap).map_err(|e| e.to_string());
                 *self.snapshot.write().await = Arc::new(snap);
@@ -308,6 +314,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::edits::routes())
         .merge(crate::queue::routes())
         .merge(crate::groupings::routes())
+        .merge(crate::associate::routes())
         .merge(crate::eroscripts::routes())
         .merge(crate::prefs::routes())
         .nest_service("/remote/", remote_files)

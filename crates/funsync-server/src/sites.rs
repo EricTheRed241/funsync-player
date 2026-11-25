@@ -71,6 +71,7 @@ pub fn nav_links() -> serde_json::Value {
     }
     links.push(serde_json::json!({"name": "Devices", "href": "/remote/devices.html"}));
     links.push(serde_json::json!({"name": "Lists", "href": "/remote/manage.html"}));
+    links.push(serde_json::json!({"name": "Associate", "href": "/remote/associate.html"}));
     links.push(serde_json::json!({"name": "Overview", "href": "/remote/overview.html"}));
     links.push(serde_json::json!({"name": "EroScripts", "href": "/remote/eroscripts.html"}));
     links.push(serde_json::json!({"name": "Settings", "href": "/remote/settings.html"}));

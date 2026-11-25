@@ -4,6 +4,7 @@
 //! app (read-only), library scan, media streaming, thumbnails, scripts.
 
 pub mod access;
+pub mod associate;
 pub mod cli;
 pub mod data;
 pub mod delete;
