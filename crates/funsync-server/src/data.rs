@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub const LIBRARY_FILE: &str = "library.json";
 pub const SCAN_FILE: &str = "scan.json";
@@ -24,9 +24,10 @@ fn yes() -> bool {
     true
 }
 
-/// What the server owns. The imported parts of the old app are kept as
-/// they were (`playlists`, `categories`, `videoCategories`, `oldLibrary` =
-/// the old `settings.library`) until phase 3 gives them a model.
+/// What the server owns. `config` has the old app's `config.json` shape
+/// (`settings.library`, `settings.player`, device settings, `playlists`,
+/// `categories`, `videoCategories`), so every rule ported from the old app
+/// reads the same keys, and a takeover is a copy.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Library {
@@ -37,15 +38,65 @@ pub struct Library {
     #[serde(default)]
     pub imported_at: Option<u64>,
     #[serde(default)]
-    pub sources: Vec<SourceEntry>,
-    #[serde(default)]
-    pub playlists: Value,
-    #[serde(default)]
-    pub categories: Value,
-    #[serde(default)]
-    pub video_categories: Value,
-    #[serde(default)]
-    pub old_library: Value,
+    pub config: Value,
+}
+
+impl Library {
+    /// `settings.library`, the old app's library state.
+    pub fn lib(&self) -> &Value {
+        &self.config["settings"]["library"]
+    }
+
+    /// Mutable `settings.library.<key>`, created as `{}` when missing.
+    pub fn lib_mut(&mut self, key: &str) -> &mut Value {
+        self.section_mut("library")
+            .entry(key)
+            .or_insert_with(|| json!({}))
+    }
+
+    /// Mutable `settings.<name>` object, created when missing.
+    pub fn section_mut(&mut self, name: &str) -> &mut serde_json::Map<String, Value> {
+        ensure_object(&mut self.config);
+        let settings = self
+            .config
+            .as_object_mut()
+            .unwrap()
+            .entry("settings")
+            .or_insert_with(|| json!({}));
+        ensure_object(settings);
+        let s = settings
+            .as_object_mut()
+            .unwrap()
+            .entry(name)
+            .or_insert_with(|| json!({}));
+        ensure_object(s);
+        s.as_object_mut().unwrap()
+    }
+
+    /// A top-level array (`playlists`, `categories`), created when missing.
+    pub fn top_array_mut(&mut self, key: &str) -> &mut Vec<Value> {
+        ensure_object(&mut self.config);
+        let v = self
+            .config
+            .as_object_mut()
+            .unwrap()
+            .entry(key)
+            .or_insert_with(|| json!([]));
+        if !v.is_array() {
+            *v = json!([]);
+        }
+        v.as_array_mut().unwrap()
+    }
+
+    pub fn sources(&self) -> Vec<SourceEntry> {
+        serde_json::from_value(self.lib()["sources"].clone()).unwrap_or_default()
+    }
+}
+
+fn ensure_object(v: &mut Value) {
+    if !v.is_object() {
+        *v = json!({});
+    }
 }
 
 pub fn default_data_dir() -> Option<PathBuf> {

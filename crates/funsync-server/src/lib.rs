@@ -7,5 +7,7 @@ pub mod cli;
 pub mod data;
 pub mod import;
 pub mod media;
+pub mod remote;
 pub mod scan;
 pub mod server;
+pub mod vr;

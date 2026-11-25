@@ -106,4 +106,19 @@ fn import_then_serve() {
     let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(status["videos"], 1);
     assert_eq!(status["sources"][0]["present"], true);
+
+    // The web remote's API and files.
+    let (_, body) = http(port, "GET", "/api/remote/videos", "");
+    let remote: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(remote["videos"][0]["name"], "Scene");
+    assert_eq!(
+        remote["videos"][0]["scriptUrl"],
+        format!("/api/media/script/{id}")
+    );
+    let (head, body) = http(port, "GET", "/remote/", "");
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert!(String::from_utf8_lossy(&body).contains("app.js"));
+    let (_, body) = http(port, "GET", "/api/parity", "");
+    let parity: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(parity["counts"]["done"].as_u64().unwrap() > 0);
 }

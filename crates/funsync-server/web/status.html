@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FunSync (Rust) · Status</title>
+<script src="/site-nav.js" defer></script>
+<style>
+  :root { color-scheme: dark; font: 14px/1.4 system-ui, sans-serif; }
+  body { margin: 0; background: #111216; color: #ddd; }
+  main { padding: 12px 16px; max-width: 1100px; }
+  h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 22px; }
+  .tiles { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tile { background: #1b1c22; border-radius: 6px; padding: 8px 12px; min-width: 110px; }
+  .tile b { display: block; font-size: 20px; }
+  .bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 10px 0; background: #333; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border-top: 1px solid #2a2b31; padding: 4px 6px; vertical-align: top; }
+  td:nth-child(3) { color: #999; font-size: 12px; }
+  .done { color: #6c6; } .partial { color: #db5; } .not-started { color: #888; } .not-planned { color: #a77; }
+  .bg-done { background: #3a3; } .bg-partial { background: #b93; } .bg-not-planned { background: #844; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FunSync (Rust) · Status</h1>
+  <div class="tiles" id="server"></div>
+  <h2>Parity with the Electron app</h2>
+  <div class="tiles" id="counts"></div>
+  <div class="bar" id="bar"></div>
+  <div id="sections"></div>
+</main>
+<script type="module">
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+const cls = (s) => s.replace(' ', '-');
+const tile = (label, value) => `<div class="tile">${esc(label)}<b>${esc(value)}</b></div>`;
+const ago = (ms) => (ms ? `${Math.round((Date.now() - ms) / 60000)} min ago` : 'never');
+async function load() {
+  const [st, p] = await Promise.all([fetch('/api/status').then((r) => r.json()), fetch('/api/parity').then((r) => r.json())]);
+  document.getElementById('server').innerHTML = [
+    tile('Videos', st.videos), tile('With a script', st.withScript),
+    tile('Last scan', st.scanning ? 'scanning…' : ago(st.scannedAt)),
+    tile('Sources', st.sources.filter((s) => s.present).length + ' / ' + st.sources.length + ' present'),
+    ...(st.failedPaths.length ? [tile('Unreadable', st.failedPaths.join(', '))] : []),
+  ].join('');
+  const order = ['done', 'partial', 'not started', 'not planned'];
+  const total = order.reduce((n, k) => n + (p.counts[k] || 0), 0);
+  document.getElementById('counts').innerHTML = order.map((k) => tile(k, p.counts[k] || 0)).join('') +
+    tile('Parity', Math.round(100 * ((p.counts.done || 0) + 0.5 * (p.counts.partial || 0)) / (total || 1)) + ' %');
+  document.getElementById('bar').innerHTML = order.map((k) =>
+    `<div class="bg-${cls(k)}" style="width:${100 * (p.counts[k] || 0) / (total || 1)}%"></div>`).join('');
+  document.getElementById('sections').innerHTML = p.sections.map((s) => `<h2>${esc(s.name)}</h2><table>` +
+    s.rows.map((r) => `<tr><td>${md(r.feature)}</td><td class="${cls(r.status)}">${r.status}</td><td>${md(r.notes)}</td></tr>`).join('') +
+    '</table>').join('');
+}
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>
