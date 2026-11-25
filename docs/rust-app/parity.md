@@ -48,7 +48,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Generated thumbnails (10 % / ≥ 10 s, bad-frame retries, shared cache) | partial | rule ported, `thumb-cache/` with the old names, VR one-eye / centre crops (`_sbs`, `_sbsc`, `_tb`, `_tbc`) from the VR decision; no versioned URLs / immutable caching, no pinned frames, no cache pruning |
 | Posters and custom thumbnails (EroScripts, FapTap, rule34video) | not started | |
 | Grid / list / folder views, hover preview | partial | the web remote's grid, list and folder views; no hover preview |
-| Sources: reorder, enable/disable, overlap, hot-plug | not started | enabled flag honoured, overlap deduped; no UI |
+| Sources: reorder, enable/disable, overlap, hot-plug | done | Settings page (`/remote/settings.html`, `src/settings.rs`): add, remove, enable, reorder, overlap warning; a source folder appearing or disappearing triggers a rescan (checked every 10 s) |
 | Manual script association | not started | |
 | Fuzzy search with exact-title precedence | done | the web remote's search (`library-search.js`) |
 | Sort (preference score default, name, date, duration, speed, rating) | partial | the web remote's sorts; scores are the imported snapshot until the server computes them |
@@ -141,5 +141,5 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| Export / import backups | not started | |
+| Export / import backups | done | Settings page: `GET /api/backup` (zip with `config.json` + `metadata.json`, derived caches left out), `POST /api/backup?mode=merge\|overwrite` (`mergeConfig` of `electron/data-export.js`); reads the old app's backups |
 | App autostart (LaunchAgent) | not planned | until the Rust app replaces the Electron one |
