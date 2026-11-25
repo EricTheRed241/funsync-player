@@ -79,7 +79,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | One web UI everywhere (phone first, desktop layout) | partial | the web remote (`backend/web-remote/`, unchanged, with `crates/funsync-server/web/remote/` overriding files when needed) at `/remote/`; desktop-only views (Overview, settings, devices) missing |
 | Triage from the phone (rating, heart, add to playlist) | done | `src/edits.rs`, applied to the library at once (no desktop edit queue) |
 | Review on end | done | the phone's flow (add to *Needs review* by name; a rating takes the video out) |
-| Tags / Artists views, tag scores, favourite artists | partial | views, tag scores, favourite artists and bonus are stored; Recalculate only saves until the server computes scores |
+| Tags / Artists views, tag scores, favourite artists | done | the web remote's views; tag scores, favourite artists and the bonus are stored and every change (and Recalculate) reruns the library rules (`library_changed` → `prefs::refresh`), so scores, score lists and smart playlists follow at once |
 | Player controls: own or browser | done | web remote |
 | PWA install | done | the web remote's manifest and service worker |
 | Local-only mode | done | loopback is the default; `--lan` opts in |
@@ -102,7 +102,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 |---|---|---|
 | Script loading (main, variant, axis) | done | `GET /api/media/script/{id}?variant=&axis=` serves the files (hand-made axis beats generated); the server plays the main script or the chosen variant with their axes on the devices |
 | Heatmap and gap indicators on the seek bar | done | web remote |
-| Script variants switch (V key) | partial | from the web remote's player (`switch-variant` → `variant-changed`): the server plays the variant with its own axis files, the video's hand-made axes fill in and beat generated ones; no V key (no desktop player) |
+| Script variants switch (V key) | done | the web remote player's variant menu (`switch-variant` → `variant-changed`): the server plays the variant with its own axis files, the video's hand-made axes fill in and beat generated ones; V / Shift+V cycle it (`extras.js`) |
 | Multi-axis (TCode 10 axes, embedded axes) | done | server engine (`src/devices/`): companion axes L1/L2/R0/R1/R2/V0/V1/V2/A0 and axes embedded in the main script (`additional_axes`, `raw`, `axes`, `channels`, sibling keys, inline TCode) |
 | Custom routing per device | done | the video's association (`active: "custom"`, `custom.routes`) gives TCode and each Buttplug device its script (the main route plays the main script); Buttplug devices by index first when the name there still matches, else by name, and the new index is stored; unrouted Buttplug devices get nothing; a route's script that moved is found by name in the video's folder and its new path stored. Editor on the Devices page (pick a video, a script per device; `GET` / `POST /api/devices/routing`, saved like `buildAssociationEntry('custom', …)` with `single` / `multi` kept) |
 | Orgasm Switch from the phone | done | `orgasm-hold` (hold / toggle per `player.orgasmSwitchMode`) loops `player.orgasmConfig` (single, multi main + axes, custom → single or main route) on every device, video paused or not; toggle's second press stops the devices until playback starts again; `orgasm-state` keeps the phone's button honest |
