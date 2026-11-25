@@ -58,12 +58,7 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
     let dev = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dev_port = dev.local_addr().unwrap().port();
 
-    let bin = env!("CARGO_BIN_EXE_funsync-server");
-    let (lib, old, data) = (
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-    );
+    let lib = tempfile::tempdir().unwrap();
     std::fs::write(lib.path().join("Scene.mp4"), b"0").unwrap();
     std::fs::write(
         lib.path().join("Scene.funscript"),
@@ -79,42 +74,14 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
     ] {
         std::fs::write(lib.path().join(f), flat).unwrap();
     }
-    let cfg = serde_json::json!({"settings": {
+    let (_srv, port, _data) = serve(serde_json::json!({"settings": {
         "library": {"sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]},
         "tcode": {"transport": "websocket", "wsUrl": format!("ws://127.0.0.1:{dev_port}"),
-                  "autoConnect": true, "axes": {"L0": {"min": 0, "max": 100}}},
-    }});
-    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
-    let ok = Command::new(bin)
-        .args(["import", "--from"])
-        .arg(old.path())
-        .arg("--data-dir")
-        .arg(data.path())
-        .status()
-        .unwrap();
-    assert!(ok.success());
-    // An import never carries auto-connect over (the desktop app holds its
-    // devices); this server was told to connect, as its Devices page does.
-    let lib_file = data.path().join("library.json");
-    let mut saved: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&lib_file).unwrap()).unwrap();
-    saved["config"]["settings"]["tcode"]["autoConnect"] = true.into();
-    std::fs::write(&lib_file, saved.to_string()).unwrap();
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let _srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .spawn()
-            .unwrap(),
-    );
+                  "axes": {"L0": {"min": 0, "max": 100}}},
+    }}));
 
     // The server auto-connects to the device.
-    let (sock, _) = tokio::time::timeout(Duration::from_secs(10), dev.accept())
+    let (sock, _) = tokio::time::timeout(Duration::from_secs(30), dev.accept())
         .await
         .expect("server never connected to the device")
         .unwrap();
@@ -267,7 +234,9 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
 }
 
 /// Import `cfg` into a temp data folder (auto-connect TCode again, as the
-/// Devices page would) and serve it.
+/// Devices page would) and serve it; returns once it answers. The port is
+/// picked free but another test may take it before the server binds it: a
+/// server that exits is started again on another port.
 fn serve(cfg: serde_json::Value) -> (Kill, u16, tempfile::TempDir) {
     let bin = env!("CARGO_BIN_EXE_funsync-server");
     let (old, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -285,28 +254,42 @@ fn serve(cfg: serde_json::Value) -> (Kill, u16, tempfile::TempDir) {
         serde_json::from_slice(&std::fs::read(&lib_file).unwrap()).unwrap();
     saved["config"]["settings"]["tcode"]["autoConnect"] = true.into();
     std::fs::write(&lib_file, saved.to_string()).unwrap();
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let srv = Kill(
-        Command::new(bin)
-            .args(["--port", &port.to_string(), "--data-dir"])
-            .arg(data.path())
-            .spawn()
-            .unwrap(),
-    );
-    (srv, port, data)
+    for _ in 0..5 {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut srv = Kill(
+            Command::new(bin)
+                .args(["--port", &port.to_string(), "--data-dir"])
+                .arg(data.path())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return (srv, port, data);
+            }
+            if srv.0.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    panic!("the server never started");
 }
 
-/// The next TCode frame the fake device gets that starts with `prefix`.
+/// The next TCode frame the fake device gets that starts with `prefix`
+/// (frames already queued that don't match are skipped; a generous budget,
+/// the suite runs many servers at once).
 async fn frame_starting(
     device: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     prefix: &str,
 ) -> String {
     loop {
-        let m = tokio::time::timeout(Duration::from_secs(5), device.next())
+        let m = tokio::time::timeout(Duration::from_secs(20), device.next())
             .await
             .unwrap_or_else(|_| panic!("no frame starting with {prefix}"))
             .unwrap()
@@ -315,6 +298,22 @@ async fn frame_starting(
         if f.starts_with(prefix) {
             return f;
         }
+    }
+}
+
+/// Poll `/api/status` until `ok` holds (20 s at most).
+async fn status_until(port: u16, ok: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let s = get(port, "/api/status").await;
+        if ok(&s) {
+            return s;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "status never got there: {s}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -344,7 +343,7 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
         "vr": {"lastHost": "127.0.0.1", "lastPort": hs_port},
         "player": {"orgasmConfig": {"active": "single", "single": finisher}},
     }}));
-    let (sock, _) = tokio::time::timeout(Duration::from_secs(10), dev.accept())
+    let (sock, _) = tokio::time::timeout(Duration::from_secs(30), dev.accept())
         .await
         .unwrap()
         .unwrap();
@@ -358,7 +357,7 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
 
     // The headset plays Scene.mp4 at 30 s: the bridge connects and drives.
     post(port, "/api/devices", r#"{"kind":"vr","action":"connect"}"#).await;
-    let (mut headset, _) = tokio::time::timeout(Duration::from_secs(10), hs.accept())
+    let (mut headset, _) = tokio::time::timeout(Duration::from_secs(30), hs.accept())
         .await
         .unwrap()
         .unwrap();
@@ -375,15 +374,20 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
+    // Wait on the server's state (one status reads its parts one after the
+    // other, so wait until they all agree), then on the frames it makes.
+    let s = status_until(port, |s| {
+        s["vrBridge"]["linkState"] == "receiving"
+            && s["sessions"]["current"]["state"] == "playing"
+            && s["session"]["source"] == "VR"
+    })
+    .await;
+    assert_eq!(s["vrBridge"]["video"], "Scene.mp4");
+    assert_eq!(s["sessions"]["current"]["source"], "vr");
+    assert_eq!(s["session"]["source"], "VR");
     let f = frame_starting(&mut device, "L0").await;
     let pos: u32 = f[2..6].parse().unwrap();
     assert!((4500..5600).contains(&pos), "{f}");
-    let s = get(port, "/api/status").await;
-    assert_eq!(s["vrBridge"]["connected"], true, "{s}");
-    assert_eq!(s["vrBridge"]["video"], "Scene.mp4");
-    assert_eq!(s["sessions"]["current"]["source"], "vr");
-    assert_eq!(s["sessions"]["current"]["state"], "playing");
-    assert_eq!(s["session"]["source"], "VR");
 
     // A phone opens the video: last wins, the bridge is dropped.
     let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
@@ -407,12 +411,22 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
         "Scene.mp4"
     );
 
-    // Hold the Orgasm Switch: the finisher loop plays though the video is paused.
+    // Hold the Orgasm Switch: the finisher loop plays though the video is
+    // paused (once the server says it's on; older VR frames may still be
+    // queued on the device socket).
     phone
         .send(Message::text(r#"{"type":"orgasm-hold","active":true}"#))
         .await
         .unwrap();
-    assert_eq!(frame_starting(&mut device, "L0").await, "L02000I17\n");
+    loop {
+        if let Some(Ok(Message::Text(t))) = phone.next().await {
+            let m: serde_json::Value = serde_json::from_str(&t).unwrap();
+            if m["type"] == "orgasm-state" && m["active"] == true {
+                break;
+            }
+        }
+    }
+    while frame_starting(&mut device, "L0").await != "L02000I17\n" {}
 }
 
 #[tokio::test]
@@ -437,7 +451,7 @@ async fn routing_editor_sends_tcode_another_script_and_edge_holds_it() {
         "tcode": {"transport": "websocket", "wsUrl": format!("ws://127.0.0.1:{dev_port}"),
                   "axes": {"L0": {"min": 0, "max": 100}}},
     }}));
-    let (sock, _) = tokio::time::timeout(Duration::from_secs(10), dev.accept())
+    let (sock, _) = tokio::time::timeout(Duration::from_secs(30), dev.accept())
         .await
         .unwrap()
         .unwrap();
