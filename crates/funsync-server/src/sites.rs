@@ -324,17 +324,17 @@ async fn keep_running(pkg: String, args: Vec<String>, port: Option<u16>, delay: 
                         .spawn()
                     {
                         Ok(mut child) => {
-                            eprintln!("[{pkg}] started (pid {:?})", child.id());
+                            crate::log::line(format!("[{pkg}] started (pid {:?})", child.id()));
                             let status = child.wait().await;
-                            eprintln!(
+                            crate::log::line(format!(
                                 "[{pkg}] exited ({status:?}); again in {} s",
                                 delay.as_secs()
-                            );
+                            ));
                         }
-                        Err(e) => eprintln!("[{pkg}] can't start: {e}"),
+                        Err(e) => crate::log::line(format!("[{pkg}] can't start: {e}")),
                     }
                 }
-                other => eprintln!("[{pkg}] build failed ({other:?})"),
+                other => crate::log::line(format!("[{pkg}] build failed ({other:?})")),
             }
         }
         tokio::time::sleep(delay).await;
