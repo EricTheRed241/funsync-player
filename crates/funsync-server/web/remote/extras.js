@@ -67,6 +67,14 @@
         if (document.pictureInPictureElement) document.exitPictureInPicture(); else v.requestPictureInPicture?.();
         break;
       case 'r': case 'R': v.style.objectFit = FITS[(FITS.indexOf(v.style.objectFit || 'contain') + 1) % FITS.length]; break;
+      case 'v': case 'V': {
+        // The player's variant menu (its radio rows); V next, Shift+V previous.
+        const rows = [...document.querySelectorAll('.player__variant-row-input')];
+        if (rows.length < 2) return;
+        const i = rows.findIndex((r) => r.checked);
+        rows[(i + (e.shiftKey ? rows.length - 1 : 1)) % rows.length].click();
+        break;
+      }
       case 'g': case 'G': {
         const at = await actionTimes(v);
         const t = v.currentTime;
