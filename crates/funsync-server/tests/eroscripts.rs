@@ -1,0 +1,293 @@
+//! End to end against a fake forum (a local HTTP server, never the network):
+//! login with 2FA, search, a topic's scripts, saving a script next to its
+//! video, a post picture as the poster.
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::process::{Child, Command};
+use std::time::{Duration, Instant};
+
+use serde_json::{Value, json};
+
+struct Kill(Child);
+impl Drop for Kill {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The fake forum: canned answers by method + path.
+fn forum(listener: TcpListener) {
+    for s in listener.incoming().flatten() {
+        let mut r = BufReader::new(s);
+        let mut line = String::new();
+        if r.read_line(&mut line).is_err() {
+            continue;
+        }
+        let mut headers = String::new();
+        let mut len = 0;
+        loop {
+            let mut h = String::new();
+            r.read_line(&mut h).unwrap();
+            if h.trim().is_empty() {
+                break;
+            }
+            if let Some(v) = h.to_lowercase().strip_prefix("content-length:") {
+                len = v.trim().parse().unwrap();
+            }
+            headers.push_str(&h);
+        }
+        let mut body = vec![0; len];
+        r.read_exact(&mut body).unwrap();
+        let body = String::from_utf8_lossy(&body);
+        let target = line.split(' ').nth(1).unwrap_or("");
+        let path = target.split('?').next().unwrap();
+        let authed = headers.contains("_t=TOKEN");
+        let (status, cookie, payload): (u16, &str, Value) = match path {
+            "/session/csrf.json" => (200, "_forum_session=s1", json!({"csrf": "tok"})),
+            "/session" if !headers.contains("tok") || !headers.contains("_forum_session=s1") => {
+                (403, "", json!({}))
+            }
+            "/session" if body.contains("second_factor_token=123456") => {
+                (200, "_t=TOKEN", json!({"user": {"username": "me"}}))
+            }
+            "/session" => (
+                200,
+                "",
+                json!({"error": "code", "reason": "invalid_second_factor"}),
+            ),
+            _ if !authed && !path.starts_with("/api/") && !path.starts_with("/pics/") => {
+                (403, "", json!({}))
+            }
+            "/categories.json" => (
+                200,
+                "",
+                json!({"category_list": {"categories": [{"id": 1, "slug": "scripts",
+                "subcategory_list": [{"id": 15, "slug": "paid-scripts"}, {"id": 14, "slug": "free-scripts"}]}]}}),
+            ),
+            "/search.json" => (
+                200,
+                "",
+                json!({"topics": [
+                {"id": 7, "title": "Free scene", "slug": "free-scene", "category_id": 14},
+                {"id": 8, "title": "Paid scene", "slug": "paid-scene", "category_id": 15}],
+                "posts": [{"topic_id": 7, "username": "maker"}]}),
+            ),
+            "/t/7.json" => (
+                200,
+                "",
+                json!({"title": "Free scene", "category_id": 14,
+                "thumbnails": [{"url": "/pics/p.jpg", "width": 800}],
+                "post_stream": {"stream": [1, 2], "posts": [{"id": 1, "post_number": 1, "username": "maker",
+                    "cooked": "<a href=\"/uploads/short-url/main.funscript\">Scene.funscript</a> <a href=\"https://pixeldrain.com/l/L1\">pd</a> <a href=\"https://mega.nz/x\">m</a>"}]}}),
+            ),
+            "/t/7/posts.json" => (
+                200,
+                "",
+                json!({"post_stream": {"posts": [{"id": 2, "post_number": 2, "username": "helper",
+                "cooked": "<a href=\"upload://twist.funscript\">Scene.twist.funscript</a>"}]}}),
+            ),
+            "/api/list/L1" => (
+                200,
+                "",
+                json!({"files": [{"id": "f1", "name": "Alt.funscript"}, {"id": "f2", "name": "v.mp4"}]}),
+            ),
+            "/uploads/short-url/main.funscript" | "/uploads/short-url/twist.funscript" => {
+                (200, "", json!({"actions": [{"at": 0, "pos": 50}]}))
+            }
+            "/pics/p.jpg" => (200, "", json!("jpeg")),
+            _ => (404, "", json!({})),
+        };
+        let payload = payload.to_string();
+        let set = if cookie.is_empty() {
+            String::new()
+        } else {
+            format!("Set-Cookie: {cookie}; path=/\r\n")
+        };
+        let mut s = r.into_inner();
+        let _ = write!(
+            s,
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{set}Content-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
+        );
+    }
+}
+
+fn call(port: u16, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let body = body.map(|b| b.to_string()).unwrap_or_default();
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf).unwrap();
+    let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let status = String::from_utf8_lossy(&buf[9..12]).parse().unwrap();
+    (
+        status,
+        serde_json::from_slice(&buf[split + 4..]).unwrap_or(Value::Null),
+    )
+}
+
+#[test]
+fn login_search_topic_download_poster() {
+    let bin = env!("CARGO_BIN_EXE_funsync-server");
+    let fake = TcpListener::bind("127.0.0.1:0").unwrap();
+    let fake_url = format!("http://{}", fake.local_addr().unwrap());
+    std::thread::spawn(move || forum(fake));
+
+    let lib = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let video = lib.path().join("A/Scene.mp4");
+    std::fs::create_dir_all(video.parent().unwrap()).unwrap();
+    std::fs::write(&video, b"0123456789").unwrap();
+    let cfg = json!({"settings": {"library": {"sources": [
+        {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}});
+    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
+    assert!(
+        Command::new(bin)
+            .args(["import", "--from"])
+            .arg(old.path())
+            .arg("--data-dir")
+            .arg(data.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let _srv = Kill(
+        Command::new(bin)
+            .args(["--port", &port.to_string(), "--data-dir"])
+            .arg(data.path())
+            .env("FUNSYNC_EROSCRIPTS_URL", &fake_url)
+            .env("FUNSYNC_PIXELDRAIN_URL", &fake_url)
+            .env("FUNSYNC_OWNS_LIBRARY", "1")
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let id = loop {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            let (_, v) = call(port, "GET", "/api/videos", None);
+            if let Some(id) = v[0]["id"].as_str() {
+                break id.to_string();
+            }
+        }
+        assert!(Instant::now() < deadline, "server never listed the video");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    let (code, _) = call(port, "GET", "/api/eroscripts/search?q=scene", None);
+    assert_eq!(code, 401);
+    let creds = json!({"username": "me", "password": "pw"});
+    let (_, v) = call(port, "POST", "/api/eroscripts/login", Some(creds.clone()));
+    assert_eq!(v["needsCode"], true);
+    let mut with_code = creds;
+    with_code["code"] = json!("123456");
+    let (_, v) = call(port, "POST", "/api/eroscripts/login", Some(with_code));
+    assert_eq!(v, json!({"ok": true, "username": "me"}));
+    let session = data.path().join("eroscripts-session.json");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&session).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let (_, v) = call(port, "GET", "/api/eroscripts/session", None);
+    assert_eq!(v["username"], "me");
+
+    let (_, v) = call(port, "GET", "/api/eroscripts/search?q=scene", None);
+    let paid: Vec<(&str, bool)> = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["title"].as_str().unwrap(), r["paid"] == true))
+        .collect();
+    assert_eq!(paid, [("Free scene", false), ("Paid scene", true)]);
+
+    let (_, t) = call(port, "GET", "/api/eroscripts/topic/7", None);
+    let att: Vec<(&str, &str, bool)> = t["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| {
+            (
+                a["name"].as_str().unwrap(),
+                a["username"].as_str().unwrap(),
+                a["byAuthor"] == true,
+            )
+        })
+        .collect();
+    assert_eq!(
+        att,
+        [
+            ("Scene.funscript", "maker", true),
+            ("Scene.twist.funscript", "helper", false)
+        ]
+    );
+    assert_eq!(t["linked"][0]["name"], "Alt.funscript");
+    assert_eq!(t["linked"][0]["url"], "https://pixeldrain.com/u/f1");
+    assert_eq!(t["external"].as_array().unwrap().len(), 2); // pixeldrain + MEGA
+    assert_eq!(t["preview"], format!("{fake_url}/pics/p.jpg"));
+
+    for a in t["attachments"].as_array().unwrap() {
+        let (code, v) = call(
+            port,
+            "POST",
+            "/api/eroscripts/download",
+            Some(json!({"videoId": id, "url": a["url"], "name": a["name"]})),
+        );
+        assert_eq!(code, 200, "{v}");
+    }
+    assert!(video.with_file_name("Scene.funscript").is_file());
+    assert!(video.with_file_name("Scene.twist.funscript").is_file());
+    let main = &t["attachments"][0];
+    let (code, v) = call(
+        port,
+        "POST",
+        "/api/eroscripts/download",
+        Some(json!({"videoId": id, "url": main["url"], "name": main["name"]})),
+    );
+    assert_eq!((code, v["exists"].clone()), (409, json!(true)));
+    let (code, _) = call(
+        port,
+        "POST",
+        "/api/eroscripts/download",
+        Some(json!({"videoId": id, "url": main["url"], "name": main["name"], "variant": "maker"})),
+    );
+    assert_eq!(code, 200);
+    assert!(video.with_file_name("Scene (maker).funscript").is_file());
+    let (_, v) = call(port, "GET", &format!("/api/videos/{id}"), None);
+    assert!(v["funscriptPath"].as_str().is_some(), "rescanned: {v}");
+
+    let (code, _) = call(
+        port,
+        "POST",
+        "/api/eroscripts/preview",
+        Some(json!({"videoId": id, "url": t["preview"]})),
+    );
+    assert_eq!(code, 200);
+    let (_, v) = call(port, "GET", "/api/remote/videos", None);
+    let thumb = v["videos"][0]["thumbUrl"].as_str().unwrap().to_string();
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        s,
+        "GET {thumb} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf).unwrap();
+    assert!(buf.ends_with(b"\"jpeg\""), "poster served");
+
+    let (_, v) = call(port, "POST", "/api/eroscripts/logout", None);
+    assert_eq!(v["ok"], true);
+    assert!(!session.exists());
+}
