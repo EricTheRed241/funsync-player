@@ -135,8 +135,96 @@ pub fn upkeep(lib: &mut Library, videos: &[Video], state: impl Fn(&str) -> PathS
             map.remove(&p);
             changed = true;
         }
+        for (video, e) in map.iter_mut() {
+            if !unavailable(video) {
+                changed |= heal_scripts(video, e, &state);
+            }
+        }
     }
     changed
+}
+
+/// The renderer's per-slot recovery: a `single`, `multi.main` or custom
+/// main-route script that is absent (the OS said so; an unreachable one is
+/// left alone) is re-pointed at the file of the same name next to the
+/// video, when that one is present. Nothing is pruned. True when healed.
+pub fn heal_scripts(
+    video: &str,
+    e: &mut serde_json::Value,
+    state: impl Fn(&str) -> PathState,
+) -> bool {
+    let Some(dir) = Path::new(video).parent() else {
+        return false;
+    };
+    let fix = |slot: &mut serde_json::Value| -> bool {
+        let Some(p) = slot.as_str() else {
+            return false;
+        };
+        let name = p.rsplit(['/', '\\']).next().unwrap_or("");
+        let cand = dir.join(name).to_string_lossy().into_owned();
+        if name.is_empty()
+            || cand == p
+            || state(p) != PathState::Absent
+            || state(&cand) != PathState::Present
+        {
+            return false;
+        }
+        *slot = serde_json::json!(cand);
+        true
+    };
+    // `get_mut`, not `[]`: indexing a missing slot would create it.
+    let mut healed = e.get_mut("single").is_some_and(&fix);
+    if let Some(main) = e.get_mut("multi").and_then(|m| m.get_mut("main")) {
+        healed |= fix(main);
+    }
+    if let Some(main) = e
+        .get_mut("custom")
+        .and_then(|c| c.get_mut("routes"))
+        .and_then(|r| r.as_array_mut())
+        .and_then(|r| r.iter_mut().find(|r| r["role"] == "main"))
+        .and_then(|m| m.get_mut("scriptPath"))
+    {
+        healed |= fix(main);
+    }
+    if healed {
+        // Keep the mirror fields in step (`buildAssociationEntry`).
+        let old = e.clone();
+        *e = crate::associate::entry(
+            &old,
+            old["active"].as_str(),
+            old["single"].as_str(),
+            Some(old["multi"].clone()),
+        );
+    }
+    healed
+}
+
+#[cfg(test)]
+mod heal_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn scripts_found_next_to_the_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_string_lossy().into_owned();
+        std::fs::write(dir.path().join("a.funscript"), b"{}").unwrap();
+        let video = format!("{d}/a.mp4");
+        let mut e = json!({"active": "multi", "single": "/gone/x/a.funscript",
+            "multi": {"main": "/gone/x/a.funscript", "axes": {}}, "custom": null});
+        assert!(heal_scripts(&video, &mut e, path_state));
+        let want = format!("{d}/a.funscript");
+        assert_eq!(
+            (e["single"].as_str(), e["multi"]["main"].as_str()),
+            (Some(&*want), Some(&*want))
+        );
+        assert_eq!(e["main"].as_str(), Some(&*want), "mirror field follows");
+        // Nothing to find, or an unreachable script: left alone.
+        let mut e = json!({"active": "single", "single": "/gone/x/b.funscript"});
+        assert!(!heal_scripts(&video, &mut e, path_state));
+        let mut e = json!({"active": "single", "single": "/gone/x/a.funscript"});
+        assert!(!heal_scripts(&video, &mut e, |_: &str| PathState::Unknown));
+    }
 }
 
 #[cfg(test)]
