@@ -340,7 +340,10 @@ async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok", "app": "funsync-server" }))
 }
 
+/// The server's own status, plus the old backend's device part (`issues`,
+/// `devices`, `session`, `phone`, `backend`, `desktop`).
 async fn status(State(st): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut out = crate::devices::status(&st).await;
     let lib = st.library.read().await;
     let snap = st.snapshot.read().await.clone();
     let sources: Vec<_> = lib
@@ -354,7 +357,7 @@ async fn status(State(st): State<Arc<AppState>>) -> impl IntoResponse {
             })
         })
         .collect();
-    Json(json!({
+    let own = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "dataDir": st.data_dir,
         "startedAt": st.started_at,
@@ -368,7 +371,11 @@ async fn status(State(st): State<Arc<AppState>>) -> impl IntoResponse {
         "withScript": snap.videos.iter().filter(|v| v.funscript_path.is_some()).count(),
         "unmatchedFunscripts": snap.unmatched_funscripts,
         "failedPaths": snap.failed_paths,
-    }))
+    });
+    for (k, v) in own.as_object().into_iter().flatten() {
+        out[k] = v.clone();
+    }
+    Json(out)
 }
 
 async fn videos(State(st): State<Arc<AppState>>) -> Response {

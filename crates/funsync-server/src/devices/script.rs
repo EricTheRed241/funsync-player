@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::interp::Action;
-use crate::scan::Video;
+use crate::scan::{Axis, Video};
 
 /// FunSync axis suffix ↔ TCode axis.
 const AXES: [(&str, &str); 9] = [
@@ -100,14 +100,45 @@ fn read(path: &str) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-/// `(TCode axis, actions)` for every axis the video plays; None without a
-/// playable main script.
-pub fn load(v: &Video) -> Option<Vec<(String, Vec<Action>)>> {
-    let main = read(v.funscript_path.as_deref()?)?;
+/// Axis companions next to a script: `<stem>.<axis>.funscript` and
+/// `<stem>.generated.<axis>.funscript`.
+fn companions(script: &str) -> Vec<Axis> {
+    let stem = script.strip_suffix(".funscript").unwrap_or(script);
+    let mut out = Vec::new();
+    for (axis, _) in AXES {
+        for (generated, mid) in [(false, ""), (true, "generated.")] {
+            let path = format!("{stem}.{mid}{axis}.funscript");
+            if std::path::Path::new(&path).is_file() {
+                out.push(Axis {
+                    axis: axis.into(),
+                    path,
+                    generated,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// `(TCode axis, actions)` for every axis the video plays (its main script,
+/// or the variant labelled `variant` with that variant's own axes; the
+/// video's hand-made axes fill in, and beat generated ones); None without a
+/// playable script.
+pub fn load(v: &Video, variant: Option<&str>) -> Option<Vec<(String, Vec<Action>)>> {
+    let (path, axes_files) = match variant {
+        None => (v.funscript_path.clone()?, v.axes.clone()),
+        Some(label) => {
+            let p = v.variants.iter().find(|x| x.label == label)?.path.clone();
+            let mut files: Vec<Axis> = v.axes.iter().filter(|a| !a.generated).cloned().collect();
+            files.extend(companions(&p));
+            (p, files)
+        }
+    };
+    let main = read(&path)?;
     let mut axes = vec![("L0".to_string(), actions(&main["actions"])?)];
     let mut by_suffix = embedded(&main);
-    let hand_made = !by_suffix.is_empty() || v.axes.iter().any(|a| !a.generated);
-    for a in &v.axes {
+    let hand_made = !by_suffix.is_empty() || axes_files.iter().any(|a| !a.generated);
+    for a in &axes_files {
         let Some(k) = suffix_of(&a.axis) else {
             continue;
         };
