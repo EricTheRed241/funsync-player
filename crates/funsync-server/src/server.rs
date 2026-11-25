@@ -69,6 +69,7 @@ impl AppState {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
+        let _ = crate::remote::CUSTOM_THUMBS.set(data_dir.join("custom-thumbs"));
         Ok(Arc::new(Self {
             media: Media::new(data_dir.join("thumb-cache")),
             data_dir,
@@ -213,6 +214,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .merge(crate::devices::routes())
         .merge(crate::edits::routes())
         .merge(crate::queue::routes())
+        .merge(crate::eroscripts::routes())
         .nest_service("/remote/", remote_files)
         .nest_service("/locales", ServeDir::new(LOCALES))
         .with_state(state)

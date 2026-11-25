@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FunSync · EroScripts</title>
+<script src="/site-nav.js" defer></script>
+<style>
+  :root { color-scheme: dark; font: 14px/1.4 system-ui, sans-serif; }
+  body { margin: 0; background: #111216; color: #ddd; }
+  main { padding: 12px 16px; max-width: 1000px; }
+  h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 20px; }
+  input, select { background: #1b1c22; color: #ddd; border: 1px solid #3a3b42; border-radius: 4px; padding: 5px 7px; }
+  button { background: #2a2b33; color: #ddd; border: 1px solid #44454d; border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+  form { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .muted { color: #888; font-size: 12px; } .err { color: #e77; } .paid { background: #a63; color: #fff; border-radius: 3px; padding: 0 5px; font-size: 11px; }
+  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .card { background: #1b1c22; border-radius: 6px; overflow: hidden; cursor: pointer; }
+  .card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #000; display: block; }
+  .card div { padding: 6px; }
+  table { border-collapse: collapse; width: 100%; } td { border-top: 1px solid #2a2b31; padding: 5px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>EroScripts</h1>
+  <section id="out" hidden>
+    <form id="login">
+      <input name="username" placeholder="Username or email" autocomplete="username">
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password">
+      <input name="code" placeholder="2FA code" hidden autocomplete="one-time-code">
+      <button>Log in</button>
+    </form>
+    <form id="cookie"><input name="cookie" placeholder="…or paste the _t cookie" size="40"><button>Use cookie</button></form>
+  </section>
+  <section id="in" hidden>
+    <p class="muted">Logged in as <b id="user"></b> <button id="logout">Log out</button></p>
+    <form id="search">
+      <input name="q" placeholder="Search scripts" size="40">
+      <select id="video"><option value="">Save to video…</option></select>
+      <button>Search</button>
+    </form>
+    <p class="muted">Videos without a script: <select id="unscripted"><option value="">Find scripts for…</option></select></p>
+    <p id="owns" class="muted"></p>
+    <div id="results" class="results"></div>
+    <div id="topic"></div>
+  </section>
+  <p id="msg" class="muted"></p>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const msg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = err ? 'err' : 'muted'; };
+async function call(url, body) {
+  const r = await fetch(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const v = await r.json().catch(() => ({}));
+  if (r.status === 401) refresh();
+  return { status: r.status, ...v };
+}
+let videos = [];
+async function refresh() {
+  const s = await call('/api/eroscripts/session');
+  $('out').hidden = s.loggedIn; $('in').hidden = !s.loggedIn; $('user').textContent = s.username || '';
+  $('owns').textContent = s.ownsLibrary ? '' : 'Scripts can be found here; saving them waits until FunSync in Rust owns the library.';
+  if (!s.loggedIn || videos.length) return;
+  videos = (await call('/api/remote/videos')).videos || [];
+  const opts = (list) => list.map((v) => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+  $('video').insertAdjacentHTML('beforeend', opts(videos));
+  $('unscripted').insertAdjacentHTML('beforeend', opts(videos.filter((v) => !v.hasFunscript)));
+}
+$('login').onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await call('/api/eroscripts/login', Object.fromEntries(new FormData(e.target)));
+  if (r.needsCode) { e.target.code.hidden = false; e.target.code.focus(); return msg('Enter the code from your authenticator app'); }
+  r.ok ? (msg(''), refresh()) : msg(r.error, true);
+};
+$('cookie').onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await call('/api/eroscripts/login', Object.fromEntries(new FormData(e.target)));
+  r.ok ? (msg(''), refresh()) : msg(r.error, true);
+};
+$('logout').onclick = async () => { await call('/api/eroscripts/logout', {}); refresh(); };
+async function search(q) {
+  msg('Searching…'); $('topic').innerHTML = '';
+  const r = await call(`/api/eroscripts/search?q=${encodeURIComponent(q)}`);
+  if (r.error) return msg(r.error, true);
+  msg(r.results.length ? '' : 'No scripts found');
+  $('results').innerHTML = r.results.map((t, i) => `<div class="card" data-i="${i}">
+    <img src="${esc(t.thumbnail || '')}" alt="" loading="lazy" referrerpolicy="no-referrer">
+    <div>${t.paid ? '<span class="paid">Paid</span> ' : ''}${esc(t.title)}<br><span class="muted">${esc(t.creator)} · ♥ ${t.likeCount}</span></div></div>`).join('');
+  $('results').onclick = (e) => { const c = e.target.closest('.card'); if (c) openTopic(r.results[c.dataset.i]); };
+}
+$('search').onsubmit = (e) => { e.preventDefault(); search(e.target.q.value); };
+$('unscripted').onchange = (e) => {
+  const v = videos.find((x) => x.id === e.target.value);
+  if (!v) return;
+  $('video').value = v.id; $('search').q.value = v.name; search(v.name);
+};
+async function openTopic(t) {
+  msg('Loading post…');
+  const d = await call(`/api/eroscripts/topic/${t.id}`);
+  if (d.error) return msg(d.error, true);
+  msg('');
+  const row = (a, i) => `<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.username)}${a.byAuthor ? ' (author)' : ''} · #${a.postNumber}</td>
+    <td>${/\.funscript$/i.test(a.name) ? `<button data-i="${i}">Save</button>` : `<a href="${esc(t.url)}" target="_blank">open post</a>`}</td></tr>`;
+  $('topic').innerHTML = `<h2>${d.paid ? '<span class="paid">Paid</span> ' : ''}<a href="${esc(t.url)}" target="_blank">${esc(t.title)}</a></h2>
+    ${d.preview ? `<button id="poster">Use the post picture as the video's thumbnail</button>` : ''}
+    <table>${d.attachments.map(row).join('') || '<tr><td class="muted">No script files on the forum</td></tr>'}</table>
+    ${d.linked.length ? `<h2>On pixeldrain</h2><table>${d.linked.map((a) => `<tr><td><a href="${esc(a.url)}" target="_blank">${esc(a.name)}</a></td><td class="muted">${esc(a.username)}</td></tr>`).join('')}</table>` : ''}
+    ${d.external.length ? `<p class="muted">Also hosted on: ${[...new Set(d.external.map((e) => e.host))].map(esc).join(', ')}</p>` : ''}`;
+  $('topic').querySelectorAll('button[data-i]').forEach((b) => (b.onclick = () => save(d.attachments[b.dataset.i])));
+  if ($('poster')) $('poster').onclick = async () => {
+    if (!$('video').value) return msg('Pick the video first', true);
+    const r = await call('/api/eroscripts/preview', { videoId: $('video').value, url: d.preview });
+    r.ok ? msg('Thumbnail saved') : msg(r.error, true);
+  };
+  $('topic').scrollIntoView({ behavior: 'smooth' });
+}
+async function save(a, extra = {}) {
+  const videoId = $('video').value;
+  if (!videoId) return msg('Pick the video to save the script for', true);
+  const r = await call('/api/eroscripts/download', { videoId, url: a.url, name: a.name, ...extra });
+  if (r.exists) {
+    const label = prompt(`${r.error}.\nType a variant name to keep both (empty: replace the existing script):`, a.username);
+    if (label === null) return;
+    return save(a, label.trim() ? { variant: label.trim() } : { replace: true });
+  }
+  r.ok ? msg(`Saved ${r.path}`) : msg(r.error, true);
+  if (r.ok) videos = [];
+}
+refresh();
+</script>
+</body>
+</html>

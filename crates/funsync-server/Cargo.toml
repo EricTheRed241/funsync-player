@@ -26,6 +26,7 @@ serde = { version = "1", features = ["derive"] }
 # The access PIN gate (scout_report::gate) and its token format (video_tags::access),
 # shared with the old backend so one login covers both apps.
 scout-report = { path = "../scout-report" }
+slr-scout = { path = "../slr-scout" }
 video-tags = { path = "../video-tags" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "process", "sync", "time", "signal", "io-util"] }
