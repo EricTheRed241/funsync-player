@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FunSync · Lists</title>
+<script src="/site-nav.js" defer></script>
+<style>
+  :root { color-scheme: dark; font: 14px/1.4 system-ui, sans-serif; }
+  body { margin: 0; background: #111216; color: #ddd; }
+  main { padding: 12px 16px; display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; }
+  @media (max-width: 700px) { main { grid-template-columns: 1fr; } }
+  h2 { font-size: 15px; margin: 6px 0; }
+  select, input, button { background: #1b1c22; color: #ddd; border: 1px solid #3a3b42; border-radius: 4px; padding: 5px 7px; font: inherit; }
+  button { cursor: pointer; background: #2a2b33; }
+  ul { list-style: none; padding: 0; margin: 8px 0; } li { padding: 5px 7px; border-radius: 4px; cursor: pointer; }
+  li.on { background: #2b3550; } .muted { color: #888; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; } td { border-top: 1px solid #2a2b31; padding: 3px 6px; }
+  tr.in td:nth-child(2) { color: #7c7; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <select id="kind"><option value="playlists">Playlists</option><option value="categories">Categories</option><option value="collections">Collections</option></select>
+    <ul id="lists"></ul>
+    <div class="bar"><input id="newName" placeholder="New list name"><button id="create">Create</button></div>
+    <div class="bar"><button id="rename">Rename</button><input id="color" type="color" title="Category colour"><button id="delete">Delete</button></div>
+  </section>
+  <section>
+    <h2 id="title">Pick a list</h2>
+    <div class="bar"><input id="q" type="search" placeholder="Search videos" size="30">
+      <label><input type="checkbox" id="onlyIn"> only in this list</label>
+      <button id="add">Add selected</button><button id="remove">Remove selected</button><span id="count" class="muted"></span></div>
+    <table id="videos"></table>
+  </section>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let videos = [];
+let lists = [];
+let current = null;
+const selected = new Set();
+const kind = () => $('kind').value;
+async function api(url, method = 'POST', body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  if (!r.ok) alert((await r.json()).error || r.status);
+}
+async function load() {
+  videos = (await (await fetch('/api/remote/videos')).json()).videos;
+  lists = (await (await fetch(`/api/remote/${kind()}`)).json())[kind()].filter((g) => !String(g.id).startsWith(':'));
+  current = lists.find((g) => g.id === current?.id) || null;
+  render();
+}
+function render() {
+  $('lists').innerHTML = lists.map((g) => `<li data-id="${esc(g.id)}" class="${g.id === current?.id ? 'on' : ''}">${esc(g.name)} <span class="muted">${g.videoCount}</span></li>`).join('');
+  $('title').textContent = current ? current.name : 'Pick a list';
+  const members = new Set(current?.videoIds || []);
+  const q = $('q').value.trim().toLowerCase();
+  const shown = videos.filter((v) => (!q || v.path.toLowerCase().includes(q)) && (!$('onlyIn').checked || members.has(v.id)));
+  $('videos').innerHTML = shown.slice(0, 500).map((v) => `<tr class="${members.has(v.id) ? 'in' : ''}">
+    <td><input type="checkbox" data-id="${v.id}" ${selected.has(v.id) ? 'checked' : ''}></td>
+    <td>${esc(v.name)}</td><td class="muted">${members.has(v.id) ? 'in list' : ''}</td></tr>`).join('');
+  $('count').textContent = `${selected.size} selected · ${shown.length} shown`;
+}
+$('kind').onchange = () => { current = null; load(); };
+$('lists').onclick = (e) => { const li = e.target.closest('li'); if (li) { current = lists.find((g) => g.id === li.dataset.id); render(); } };
+$('videos').onchange = (e) => { const id = e.target.dataset.id; if (id) { if (e.target.checked) selected.add(id); else selected.delete(id); render(); } };
+$('q').oninput = render;
+$('onlyIn').onchange = render;
+$('create').onclick = async () => { const name = $('newName').value.trim(); if (name) { await api(`/api/groupings/${kind()}`, 'POST', { name, color: $('color').value }); $('newName').value = ''; load(); } };
+$('rename').onclick = async () => { if (!current) return; const name = prompt('New name', current.name); if (name) { await api(`/api/groupings/${kind()}/${current.id}`, 'POST', { name }); load(); } };
+$('color').onchange = async () => { if (current && kind() === 'categories') { await api(`/api/groupings/${kind()}/${current.id}`, 'POST', { color: $('color').value }); load(); } };
+$('delete').onclick = async () => { if (current && confirm(`Delete "${current.name}"? The videos stay.`)) { await api(`/api/groupings/${kind()}/${current.id}`, 'DELETE'); current = null; load(); } };
+const members = (field) => async () => {
+  if (!current || !selected.size) return;
+  await api(`/api/groupings/${kind()}/${current.id}/videos`, 'POST', { [field]: [...selected] });
+  selected.clear();
+  load();
+};
+$('add').onclick = members('add');
+$('remove').onclick = members('remove');
+load();
+</script>
+</body>
+</html>

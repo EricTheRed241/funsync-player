@@ -8,6 +8,7 @@ pub mod cli;
 pub mod data;
 pub mod devices;
 pub mod edits;
+pub mod groupings;
 pub mod heresphere;
 pub mod import;
 pub mod log;

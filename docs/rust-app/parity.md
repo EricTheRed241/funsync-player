@@ -52,13 +52,13 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Manual script association | not started | |
 | Fuzzy search with exact-title precedence | done | the web remote's search (`library-search.js`) |
 | Sort (preference score default, name, date, duration, speed, rating) | partial | the web remote's sorts; scores are the imported snapshot until the server computes them |
-| Playlists | partial | listed and played; add / remove a video and create by name from the phone (`/api/remote/playlists/add-video`, `remove-video`); no rename / delete / reorder |
+| Playlists | done | listed and played; add / remove from the phone (`/api/remote/playlists/add-video`, `remove-video`); create, rename, delete, reorder and bulk add / remove on the Lists page (`/remote/manage.html`, `POST/DELETE /api/groupings/<kind>/<id>[/videos]`) |
 | Categories from EroScripts tags, VR, axis categories | partial | the imported categories are listed (`/api/remote/categories`); not computed by the server yet |
 | Artist playlists, aliases, playlist cleanup | not started | phase 3 |
 | Auto collections, score lists | partial | the imported collections are listed; not computed by the server yet |
 | Smart playlists (VR picks, Quick ones, Favorites) | not started | phase 3 |
 | Preference score and tag scores | not started | phase 3 (Rust `candidateScore` exists in `crates/slr-scout/src/score.rs`) |
-| Multi-select bulk assignment | not started | |
+| Multi-select bulk assignment | done | Lists page: tick videos (search, "only in this list"), then add to / remove from any playlist, category (with colour) or collection |
 | Ratings and favourites | done | `POST /api/remote/rating` (half stars, heart) saved to `library.ratings`; ≤ 2★ deletes nothing (read-only library) |
 | Watched videos last, Watched collection | done | from the ratings (`watched`, `watchedLast`, the `:watched` collection) |
 | Overview (capacity, ratings, artists, tag scores) | done | `/remote/overview.html` (nav: Overview): videos vs `libraryMaxVideos` with bar and GB per source, favourites / Keep / Unrated, star histogram, every rated or hearted video (rate it there, click to play); artists and tag scores open the web remote's Artists and Tags views |
