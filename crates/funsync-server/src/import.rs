@@ -65,6 +65,13 @@ pub fn import(old_user_data: &Path, data_dir: &Path, force: bool) -> Result<Impo
         config,
     };
     save_library(data_dir, &lib)?;
+    // The old backend's frame check results (same file and shape as
+    // crate::stereo's), so a fresh import doesn't look at every video again.
+    // Entries are keyed by size + mtime, so stale ones are redone anyway.
+    let stereo = old_user_data.join("vr-stereo-cache.json");
+    if stereo.is_file() && !data_dir.join("vr-stereo-cache.json").exists() {
+        std::fs::copy(&stereo, data_dir.join("vr-stereo-cache.json")).map_err(|e| e.to_string())?;
+    }
     let count = |v: &Value| match v {
         Value::Array(a) => a.len(),
         Value::Object(o) => o.len(),
@@ -91,6 +98,11 @@ mod tests {
             "tcode":{"autoConnect":true,"port":"/dev/tty.x"}},
             "playlists":[{"name":"P","videoPaths":[]}],"categories":[]}"#;
         std::fs::write(old.path().join("config.json"), cfg).unwrap();
+        std::fs::write(
+            old.path().join("vr-stereo-cache.json"),
+            r#"{"version":1,"entries":{}}"#,
+        )
+        .unwrap();
         let before = std::fs::read_dir(old.path()).unwrap().count();
         let s = import(old.path(), new.path(), false).unwrap();
         assert_eq!((s.sources, s.playlists, s.ratings), (1, 1, 1));
@@ -106,5 +118,6 @@ mod tests {
         );
         assert!(import(old.path(), new.path(), false).is_err());
         assert!(import(old.path(), new.path(), true).is_ok());
+        assert!(new.path().join("vr-stereo-cache.json").is_file());
     }
 }
