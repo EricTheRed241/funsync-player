@@ -61,7 +61,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Multi-select bulk assignment | not started | |
 | Ratings and favourites | done | `POST /api/remote/rating` (half stars, heart) saved to `library.ratings`; ≤ 2★ deletes nothing (read-only library) |
 | Watched videos last, Watched collection | done | from the ratings (`watched`, `watchedLast`, the `:watched` collection) |
-| Overview (capacity, ratings, artists, tag scores) | not started | |
+| Overview (capacity, ratings, artists, tag scores) | done | `/remote/overview.html` (nav: Overview): videos vs `libraryMaxVideos` with bar and GB per source, favourites / Keep / Unrated, star histogram, every rated or hearted video (rate it there, click to play); artists and tag scores open the web remote's Artists and Tags views |
 | Triage deletes (≤ 2★), duplicate deletes | not planned | read-only library until the user says the Rust app takes over |
 
 ## Side files
