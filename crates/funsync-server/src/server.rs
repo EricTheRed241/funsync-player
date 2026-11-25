@@ -166,8 +166,11 @@ impl AppState {
         self.save().await
     }
 
-    /// Write `library.json` (after an edit).
+    /// Write `library.json` (after an edit). One save at a time: two
+    /// concurrent saves could otherwise land an older snapshot last.
     pub async fn save(&self) -> Result<(), String> {
+        static SAVING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _one = SAVING.lock().await;
         let bytes = serde_json::to_vec(&*self.library.read().await).map_err(|e| e.to_string())?;
         data::write_atomic(&self.data_dir.join(data::LIBRARY_FILE), &bytes)
             .map_err(|e| e.to_string())

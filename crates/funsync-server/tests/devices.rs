@@ -334,7 +334,7 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
     let finisher = lib.path().join("finisher.json");
     std::fs::write(
         &finisher,
-        br#"{"actions":[{"at":0,"pos":50},{"at":1000,"pos":50}]}"#,
+        br#"{"actions":[{"at":0,"pos":20},{"at":1000,"pos":20}]}"#,
     )
     .unwrap();
     let (_srv, port, _data) = serve(serde_json::json!({"settings": {
@@ -412,7 +412,7 @@ async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
         .send(Message::text(r#"{"type":"orgasm-hold","active":true}"#))
         .await
         .unwrap();
-    assert_eq!(frame_starting(&mut device, "L0").await, "L05000I17\n");
+    assert_eq!(frame_starting(&mut device, "L0").await, "L02000I17\n");
 }
 
 #[tokio::test]
