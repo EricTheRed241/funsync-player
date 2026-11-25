@@ -15,7 +15,7 @@ The **status dashboard** at http://127.0.0.1:5300/status shows the counts, a pro
 | Health / status endpoint | done | `GET /health`, `GET /api/status` (sources present, videos, scan time, unreadable sources) |
 | Status API with devices, issues (`/api/status` of the old backend) | not started | phase 5 (devices on the server) |
 | Device dashboard (`/device`) | not started | |
-| Access PIN, LAN mode | not started | loopback only until the PIN gate is ported (`--lan` then) |
+| Access PIN, LAN mode | partial | `--lan` listens on every interface; the swipe deck's gate (`scout_report::gate`) with the old app's `access-pin.json`, so one login covers both apps (login page, cookie / `?k=`, lockout). Missing: headset body login and thumbnail-only keys (VR slice), WebSocket close 4401 (a refused socket gets 401) |
 | Nav bar | partial | `/site-nav.js` (the old nav script) links Remote and Status; the swipe deck, Downloads and Creators sites aren't proxied yet |
 | Log file | not started | stderr only |
 
@@ -82,7 +82,7 @@ The **status dashboard** at http://127.0.0.1:5300/status shows the counts, a pro
 | Tags / Artists views, tag scores, favourite artists | not started | |
 | Player controls: own or browser | done | web remote |
 | PWA install | done | the web remote's manifest and service worker |
-| Local-only mode | done | loopback is the default (it's the only mode so far) |
+| Local-only mode | done | loopback is the default; `--lan` opts in |
 
 ## VR content server
 

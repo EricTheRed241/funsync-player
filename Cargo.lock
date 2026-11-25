@@ -215,6 +215,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "md5",
+ "scout-report",
  "serde",
  "serde_json",
  "tempfile",
@@ -222,6 +223,7 @@ dependencies = [
  "tower",
  "tower-http",
  "unicode-normalization",
+ "video-tags",
 ]
 
 [[package]]
