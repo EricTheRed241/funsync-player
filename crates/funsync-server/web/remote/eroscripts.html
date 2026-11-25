@@ -42,6 +42,7 @@
       <button>Search</button>
     </form>
     <p class="muted">Videos without a script: <select id="unscripted"><option value="">Find scripts for…</option></select></p>
+    <p id="found" class="muted"></p>
     <p id="owns" class="muted"></p>
     <div id="results" class="results"></div>
     <div id="topic"></div>
@@ -61,13 +62,30 @@ async function call(url, body) {
 let videos = [];
 async function refresh() {
   const s = await call('/api/eroscripts/session');
-  $('out').hidden = s.loggedIn; $('in').hidden = !s.loggedIn; $('user').textContent = s.username || '';
+  const live = s.loggedIn && !s.expired;
+  $('out').hidden = live; $('in').hidden = !live; $('user').textContent = s.username || '';
+  if (s.expired) msg(`The EroScripts session of ${s.username} has expired — log in again`, true);
   $('owns').textContent = s.ownsLibrary ? '' : 'Scripts can be found here; saving them waits until FunSync in Rust owns the library.';
-  if (!s.loggedIn || videos.length) return;
+  if (!live || videos.length) return;
   videos = (await call('/api/remote/videos')).videos || [];
-  const opts = (list) => list.map((v) => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
-  $('video').insertAdjacentHTML('beforeend', opts(videos));
-  $('unscripted').insertAdjacentHTML('beforeend', opts(videos.filter((v) => !v.hasFunscript)));
+  $('video').insertAdjacentHTML('beforeend', videos.map((v) => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join(''));
+  matches();
+}
+// Auto-match: the server searches EroScripts for every video without a
+// script in the background; the ones with posts come first in the list.
+async function matches() {
+  const m = await call('/api/eroscripts/matches');
+  const hits = m.matches || {};
+  const list = videos.filter((v) => !v.hasFunscript)
+    .sort((a, b) => (hits[b.id]?.count || 0) - (hits[a.id]?.count || 0));
+  const keep = $('unscripted').value;
+  $('unscripted').innerHTML = '<option value="">Find scripts for…</option>' + list.map((v) =>
+    `<option value="${esc(v.id)}">${hits[v.id] ? `● ${esc(v.name)} — ${hits[v.id].count} found` : esc(v.name)}</option>`).join('');
+  $('unscripted').value = keep;
+  const n = Object.keys(hits).length;
+  $('found').textContent = `Scripts found on EroScripts for ${n} of ${m.scriptless} videos without a script` +
+    (m.running ? ` (checking: ${m.checked} of ${m.scriptless} looked up)` : '');
+  if (m.running) setTimeout(matches, 15000);
 }
 $('login').onsubmit = async (e) => {
   e.preventDefault();
@@ -103,7 +121,7 @@ async function openTopic(t) {
   if (d.error) return msg(d.error, true);
   msg('');
   const row = (a, i) => `<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.username)}${a.byAuthor ? ' (author)' : ''} · #${a.postNumber}</td>
-    <td>${/\.funscript$/i.test(a.name) ? `<button data-i="${i}">Save</button>` : `<a href="${esc(t.url)}" target="_blank">open post</a>`}</td></tr>`;
+    <td><button data-i="${i}">${/\.zip$/i.test(a.name) ? 'Save (unzip)' : 'Save'}</button></td></tr>`;
   $('topic').innerHTML = `<h2>${d.paid ? '<span class="paid">Paid</span> ' : ''}<a href="${esc(t.url)}" target="_blank">${esc(t.title)}</a></h2>
     ${d.preview ? `<button id="poster">Use the post picture as the video's thumbnail</button>` : ''}
     <table>${d.attachments.map(row).join('') || '<tr><td class="muted">No script files on the forum</td></tr>'}</table>
@@ -126,7 +144,7 @@ async function save(a, extra = {}) {
     if (label === null) return;
     return save(a, label.trim() ? { variant: label.trim() } : { replace: true });
   }
-  r.ok ? msg(`Saved ${r.path}`) : msg(r.error, true);
+  r.ok ? msg(`Saved ${(r.paths || [r.path]).join(', ')}`) : msg(r.error, true);
   if (r.ok) videos = [];
 }
 refresh();

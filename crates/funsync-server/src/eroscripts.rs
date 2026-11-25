@@ -11,7 +11,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Path as UrlPath, Query, State};
@@ -21,8 +23,8 @@ use axum::routing::{get, post};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use slr_scout::forum::{FORUM, decode_entities, script_axis};
-use slr_scout::http::{Curl, Http, Pacer, Request};
+use slr_scout::forum::{Attachment, FORUM, decode_entities, pick_scripts, script_axis};
+use slr_scout::http::{Curl, Http, Request};
 
 use crate::server::AppState;
 
@@ -107,10 +109,14 @@ pub enum Fail {
 impl IntoResponse for Fail {
     fn into_response(self) -> Response {
         let (code, body) = match self {
-            Fail::Auth => (
-                StatusCode::UNAUTHORIZED,
-                json!({"error": "Access denied — log in to EroScripts again", "authExpired": true}),
-            ),
+            Fail::Auth => {
+                // A forum refusal means the saved session is dead.
+                EXPIRED.store(true, Ordering::SeqCst);
+                (
+                    StatusCode::UNAUTHORIZED,
+                    json!({"error": "Access denied — log in to EroScripts again", "authExpired": true}),
+                )
+            }
             Fail::RateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
                 json!({"error": "Rate limited — try again in a moment", "rateLimited": true}),
@@ -394,15 +400,51 @@ pub fn search(cookie: &str, q: &str, page: u32) -> Result<Vec<Value>, Fail> {
     Ok(parse_search(&base, &data, &category_slugs(cookie)))
 }
 
-/// A forum upload link as a canonical forum URL, or None for other hosts.
+/// A forum upload link as a canonical forum URL (`forumUploadUrl`), or None
+/// for other hosts: `upload://` short links, `/uploads/…` on the forum, and
+/// originals (`…/original/4X/b/5/<sha1>.ext`, on the forum or its upload
+/// CDN) as their short URL, the SHA-1 in base 62.
 fn upload_url(base: &str, href: &str) -> Option<String> {
+    static ORIGINAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)/original/\d+X/(?:[0-9a-f]/)*([0-9a-f]{40})(\.[a-z0-9]+)$").unwrap()
+    });
     if let Some(rest) = href.strip_prefix("upload://") {
         return Some(format!("{base}/uploads/short-url/{rest}"));
     }
     let url = absolute(base, href);
-    let path = url.strip_prefix(base)?.split(['?', '#']).next()?;
-    path.starts_with("/uploads/")
-        .then(|| format!("{base}{path}"))
+    let url = url.split(['?', '#']).next()?;
+    let (path, on_forum) = match url.strip_prefix(base) {
+        Some(p) if p.starts_with("/uploads/") => (p, true),
+        Some(_) => return None,
+        None => (url.strip_prefix(UPLOAD_CDN.trim_end_matches('/'))?, false),
+    };
+    if let Some(c) = ORIGINAL.captures(path) {
+        let short = base62(&c[1].to_lowercase());
+        return Some(format!("{base}/uploads/short-url/{short}{}", &c[2]));
+    }
+    on_forum.then(|| format!("{base}{path}"))
+}
+
+/// A hex number in base 62 (`base62Sha1`).
+fn base62(hex: &str) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let mut n: Vec<u32> = hex.chars().filter_map(|c| c.to_digit(16)).collect();
+    let mut out = Vec::new();
+    while n.iter().any(|&d| d != 0) {
+        let mut rem = 0;
+        for d in n.iter_mut() {
+            let cur = rem * 16 + *d;
+            *d = cur / 62;
+            rem = cur % 62;
+        }
+        out.push(DIGITS[rem as usize]);
+    }
+    out.reverse();
+    if out.is_empty() {
+        "0".into()
+    } else {
+        String::from_utf8(out).unwrap()
+    }
 }
 
 fn url_file_name(url: &str) -> String {
@@ -684,6 +726,160 @@ pub fn script_target(video: &Path, name: &str, variant: Option<&str>) -> Option<
     Some(video.with_file_name(file))
 }
 
+/// The saved session turned out dead (at start, or on a forum refusal).
+static EXPIRED: AtomicBool = AtomicBool::new(false);
+
+/// `/session/current.json` for the saved cookie (`validateSession`): Some(false)
+/// when the forum refuses it, None when it can't tell (network, server error).
+fn validate(cookie: &str) -> Option<bool> {
+    match get_json(&format!("{}/session/current.json", base()), Some(cookie)) {
+        Ok(v) => Some(v["current_user"].is_object()),
+        Err(Fail::Auth) => Some(false),
+        Err(_) => None,
+    }
+}
+
+/// `{loggedIn, username, expired}` for the EroScripts page and `/api/status`.
+pub fn status(dir: &Path) -> Value {
+    let s = load_session(dir);
+    json!({"loggedIn": s.is_some(),
+        "expired": s.is_some() && EXPIRED.load(Ordering::SeqCst),
+        "username": s.map(|s| s.username)})
+}
+
+/// At start: check the saved session, then look for scripts for the
+/// scriptless videos once the startup scan has had time to finish.
+pub fn start(st: &Arc<AppState>) {
+    let st = st.clone();
+    tokio::spawn(async move {
+        let Some(s) = load_session(&st.data_dir) else {
+            return;
+        };
+        let cookie = s.cookie.clone();
+        match blocking(move || validate(&cookie)).await {
+            Some(false) => {
+                EXPIRED.store(true, Ordering::SeqCst);
+                crate::log::line("EroScripts: the saved session has expired; log in again");
+                return;
+            }
+            Some(true) => crate::log::line(format!("EroScripts: logged in as {}", s.username)),
+            None => crate::log::line("EroScripts: couldn't check the session (offline?)"),
+        }
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        spawn_matcher(st);
+    });
+}
+
+const MATCHES_FILE: &str = "eroscripts-matches.json";
+const MATCH_GAP: Duration = Duration::from_secs(5);
+const MATCH_RECHECK_MS: u64 = 7 * 24 * 3600 * 1000;
+static MATCHING: AtomicBool = AtomicBool::new(false);
+
+/// One video's search (`_autoMatchEroScripts`): how many posts its file
+/// name finds and the first one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Match {
+    pub checked_at: u64,
+    pub count: usize,
+    pub top: Value,
+}
+
+fn load_matches(dir: &Path) -> HashMap<String, Match> {
+    std::fs::read(dir.join(MATCHES_FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// The old app's auto-match, for the whole library instead of the video
+/// being opened: every video without a script is searched by its file name
+/// (one search every MATCH_GAP, again after a week), into
+/// `<data dir>/eroscripts-matches.json`; the EroScripts page shows the hits.
+pub fn spawn_matcher(st: Arc<AppState>) {
+    if EXPIRED.load(Ordering::SeqCst) || MATCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        while let Some(wait) = match_next(&st).await {
+            tokio::time::sleep(wait).await;
+        }
+        MATCHING.store(false, Ordering::SeqCst);
+    });
+}
+
+/// Search for the next unchecked scriptless video; how long to wait before
+/// the next one, None when done (or logged out / offline).
+async fn match_next(st: &AppState) -> Option<Duration> {
+    let cookie = load_session(&st.data_dir)?.cookie;
+    let mut matches = load_matches(&st.data_dir);
+    let now = crate::data::now_ms();
+    let snap = st.snapshot.read().await.clone();
+    let v = snap.videos.iter().find(|v| {
+        v.funscript_path.is_none()
+            && matches
+                .get(&v.path)
+                .is_none_or(|m| now.saturating_sub(m.checked_at) > MATCH_RECHECK_MS)
+    })?;
+    let q = Path::new(&v.name)
+        .file_stem()?
+        .to_string_lossy()
+        .into_owned();
+    match blocking(move || search(&cookie, &q, 1)).await {
+        Ok(r) => {
+            let top = r.first().map_or(
+                Value::Null,
+                |t| json!({"id": t["id"], "title": t["title"], "url": t["url"], "paid": t["paid"]}),
+            );
+            matches.insert(
+                v.path.clone(),
+                Match {
+                    checked_at: now,
+                    count: r.len(),
+                    top,
+                },
+            );
+            let bytes = serde_json::to_vec(&matches).ok()?;
+            crate::data::write_atomic(&st.data_dir.join(MATCHES_FILE), &bytes).ok()?;
+            Some(MATCH_GAP)
+        }
+        Err(Fail::RateLimited) => Some(Duration::from_secs(60)),
+        Err(Fail::Auth) => {
+            EXPIRED.store(true, Ordering::SeqCst);
+            None
+        }
+        Err(Fail::Other(_)) => None,
+    }
+}
+
+/// `{running, scriptless, checked, matches: {videoId: {count, top}}}` for
+/// the scriptless videos; asking starts a pass when none runs.
+async fn matches(State(st): State<Arc<AppState>>) -> Json<Value> {
+    if load_session(&st.data_dir).is_some() {
+        spawn_matcher(st.clone());
+    }
+    let all = load_matches(&st.data_dir);
+    let snap = st.snapshot.read().await.clone();
+    let scriptless: Vec<_> = snap
+        .videos
+        .iter()
+        .filter(|v| v.funscript_path.is_none())
+        .collect();
+    let found: serde_json::Map<String, Value> = scriptless
+        .iter()
+        .filter_map(|v| {
+            let m = all.get(&v.path).filter(|m| m.count > 0)?;
+            Some((v.id.clone(), json!({"count": m.count, "top": m.top})))
+        })
+        .collect();
+    Json(json!({
+        "running": MATCHING.load(Ordering::SeqCst),
+        "scriptless": scriptless.len(),
+        "checked": scriptless.iter().filter(|v| all.contains_key(&v.path)).count(),
+        "matches": found,
+    }))
+}
+
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/eroscripts/session", get(session))
@@ -691,6 +887,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/eroscripts/logout", post(logout))
         .route("/api/eroscripts/search", get(do_search))
         .route("/api/eroscripts/topic/{id}", get(do_topic))
+        .route("/api/eroscripts/matches", get(matches))
         .route("/api/eroscripts/download", post(download))
         .route("/api/eroscripts/preview", post(preview))
 }
@@ -704,11 +901,9 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 async fn session(State(st): State<Arc<AppState>>) -> Json<Value> {
-    let s = load_session(&st.data_dir);
-    Json(
-        json!({"loggedIn": s.is_some(), "username": s.map(|s| s.username),
-        "ownsLibrary": crate::data::owns_library()}),
-    )
+    let mut out = status(&st.data_dir);
+    out["ownsLibrary"] = json!(crate::data::owns_library());
+    Json(out)
 }
 
 #[derive(Deserialize, Default)]
@@ -731,7 +926,11 @@ async fn do_login(State(st): State<Arc<AppState>>, Json(b): Json<LoginBody>) -> 
     .await;
     match res {
         Ok(Login::In(s)) => match save_session(&st.data_dir, Some(&s)) {
-            Ok(()) => Json(json!({"ok": true, "username": s.username})).into_response(),
+            Ok(()) => {
+                EXPIRED.store(false, Ordering::SeqCst);
+                spawn_matcher(st.clone());
+                Json(json!({"ok": true, "username": s.username})).into_response()
+            }
             Err(e) => bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         },
         Ok(Login::NeedsCode) => Json(json!({"ok": false, "needsCode": true})).into_response(),
@@ -742,7 +941,10 @@ async fn do_login(State(st): State<Arc<AppState>>, Json(b): Json<LoginBody>) -> 
 
 async fn logout(State(st): State<Arc<AppState>>) -> Response {
     match save_session(&st.data_dir, None) {
-        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Ok(()) => {
+            EXPIRED.store(false, Ordering::SeqCst);
+            Json(json!({"ok": true})).into_response()
+        }
         Err(e) => bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
@@ -794,8 +996,76 @@ struct DownloadBody {
     variant: Option<String>,
 }
 
+/// GET a forum upload into `dest` with the session cookie. The forum answers
+/// a short URL with a redirect to its CDN, which is fetched without the
+/// cookie; curl writes the file itself, so a zip stays byte for byte.
+fn fetch_upload(cookie: &str, url: &str, dest: &Path) -> Result<(), String> {
+    let with_cookie = Request::get(url).header("Cookie", format!("_t={cookie}"));
+    let res = Curl.send(&with_cookie)?;
+    match res.status {
+        200..=299 => Curl.download(&with_cookie, dest),
+        300..=399 => {
+            let to = res
+                .header_values("location")
+                .next()
+                .ok_or("redirect without Location")?;
+            Curl.download(&Request::get(absolute(&base(), to)), dest)
+        }
+        401 | 403 => Err("Access denied — log in to EroScripts again".into()),
+        s => Err(format!("EroScripts answered HTTP {s}")),
+    }
+}
+
+/// The scripts a zip holds for `video` (`<stem>.funscript` and its axes,
+/// picked as for a post: the only main script, else the one whose name
+/// shares the most words with the video's), each with its target.
+pub fn zip_scripts(
+    bytes: &[u8],
+    video: &Path,
+    variant: Option<&str>,
+) -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("not a readable zip: {e}"))?;
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).map_err(|e| e.to_string())?;
+        let path = f.name().map_err(|e| e.to_string())?.into_owned();
+        let name = path.rsplit('/').next().unwrap_or("").to_string();
+        if f.is_dir()
+            || path.contains("__MACOSX")
+            || name.starts_with("._")
+            || script_axis(&name).is_none()
+        {
+            continue;
+        }
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        files.push((name, data));
+    }
+    let atts: Vec<Attachment> = files
+        .iter()
+        .map(|(n, _)| Attachment {
+            name: n.clone(),
+            url: n.clone(),
+        })
+        .collect();
+    let stem = video.file_stem().unwrap_or_default().to_string_lossy();
+    let (main, axes) =
+        pick_scripts(&atts, &stem).ok_or("no script in the zip goes with this video")?;
+    std::iter::once(main)
+        .chain(axes.into_iter().map(|(_, a)| a))
+        .map(|a| {
+            let data = files.iter().find(|(n, _)| *n == a.name).unwrap().1.clone();
+            let to = script_target(video, &a.name, variant).ok_or("bad script name")?;
+            Ok((to, data))
+        })
+        .collect()
+}
+
 /// Save a forum upload next to its video (only while this app owns the
-/// library), then rescan.
+/// library), then rescan. A `.zip` is unpacked: its script for the video and
+/// that script's axis files.
 async fn download(State(st): State<Arc<AppState>>, Json(b): Json<DownloadBody>) -> Response {
     if !crate::data::owns_library() {
         return bad(
@@ -809,51 +1079,84 @@ async fn download(State(st): State<Arc<AppState>>, Json(b): Json<DownloadBody>) 
     if !b.url.starts_with(&format!("{}/uploads/", base())) {
         return bad(StatusCode::BAD_REQUEST, "not an EroScripts upload");
     }
-    let Some(dest) = script_target(Path::new(&v.path), &b.name, b.variant.as_deref()) else {
+    let zip = b.name.to_lowercase().ends_with(".zip");
+    if !zip && script_axis(&b.name).is_none() {
         return bad(
             StatusCode::BAD_REQUEST,
-            "Only .funscript files can be saved here; open a .zip in the browser",
+            "only .funscript and .zip files can be saved",
         );
-    };
-    if dest.exists() && !b.replace {
-        return (
-            StatusCode::CONFLICT,
-            Json(
-                json!({"error": format!("{} already exists: replace it or save as a variant",
-                dest.file_name().unwrap_or_default().to_string_lossy()), "exists": true}),
-            ),
-        )
-            .into_response();
     }
     let c = match cookie(&st) {
         Ok(c) => c,
         Err(e) => return e.into_response(),
     };
-    let part = dest.with_extension("funscript.part");
+    let part = st.data_dir.join(format!(
+        "eroscripts-download-{}.part",
+        &format!("{:x}", md5::compute(&b.url))[..8]
+    ));
     let (url, p) = (b.url.clone(), part.clone());
     let got = blocking(move || {
-        slr_scout::forum::download_upload(
-            &Curl,
-            &mut Pacer::new(std::time::Duration::ZERO),
-            &c,
-            &url,
-            &p,
-        )
-        .map_err(|e| e.to_string())
-        .and_then(|_| {
-            let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
-            serde_json::from_slice::<Value>(&bytes)
-                .map(|_| ())
-                .map_err(|_| "the download isn't a funscript (logged out?)".to_string())
-        })
+        let r =
+            fetch_upload(&c, &url, &p).and_then(|_| std::fs::read(&p).map_err(|e| e.to_string()));
+        let _ = std::fs::remove_file(&p);
+        r
     })
     .await;
-    if let Err(e) = got.and_then(|_| std::fs::rename(&part, &dest).map_err(|e| e.to_string())) {
-        let _ = std::fs::remove_file(&part);
-        return bad(StatusCode::BAD_GATEWAY, e);
+    let video = Path::new(&v.path);
+    let variant = b.variant.as_deref();
+    let files = got.and_then(|bytes| {
+        if zip {
+            zip_scripts(&bytes, video, variant)
+        } else {
+            Ok(vec![(
+                script_target(video, &b.name, variant).unwrap(),
+                bytes,
+            )])
+        }
+    });
+    let files = match files {
+        Ok(f) => f,
+        Err(e) => return bad(StatusCode::BAD_GATEWAY, e),
+    };
+    if files
+        .iter()
+        .any(|(_, data)| serde_json::from_slice::<Value>(data).is_err())
+    {
+        return bad(
+            StatusCode::BAD_GATEWAY,
+            "the download isn't a funscript (logged out?)",
+        );
+    }
+    let taken: Vec<String> = files
+        .iter()
+        .filter(|(to, _)| to.exists())
+        .map(|(to, _)| {
+            to.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    if !taken.is_empty() && !b.replace {
+        return (
+            StatusCode::CONFLICT,
+            Json(
+                json!({"error": format!("{} already exists: replace it or save as a variant",
+                taken.join(", ")), "exists": true}),
+            ),
+        )
+            .into_response();
+    }
+    for (to, data) in &files {
+        let tmp = to.with_extension("funscript.part");
+        if let Err(e) = std::fs::write(&tmp, data).and_then(|_| std::fs::rename(&tmp, to)) {
+            let _ = std::fs::remove_file(&tmp);
+            return bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
     }
     let _ = st.rescan().await;
-    Json(json!({"ok": true, "path": dest})).into_response()
+    let paths: Vec<&PathBuf> = files.iter().map(|(to, _)| to).collect();
+    Json(json!({"ok": true, "path": paths[0], "paths": paths})).into_response()
 }
 
 #[derive(Deserialize)]
@@ -975,6 +1278,67 @@ mod tests {
         assert_eq!(r[0]["thumbnail"], format!("{B}/x.jpg"));
         assert_eq!(r[0]["title"], "Nine");
         assert_eq!(r[0]["paid"], false);
+    }
+
+    #[test]
+    fn originals_are_short_urls() {
+        let sha = "b57d3b5ad3bd7f3dde4f1d6c6e7c8c1b2a3f4e5d";
+        let short = format!("{B}/uploads/short-url/pTwJgK9XExoMMIf7DvTOC6yFHxr.funscript");
+        let cdn = format!("{UPLOAD_CDN}original/4X/b/5/7/{sha}.funscript?dl=1");
+        assert_eq!(upload_url(B, &cdn), Some(short.clone()));
+        let on_forum = format!("/uploads/default/original/3X/b/5/{sha}.funscript");
+        assert_eq!(upload_url(B, &on_forum), Some(short));
+        assert_eq!(upload_url(B, "/t/topic/1"), None);
+        assert_eq!(
+            upload_url(
+                B,
+                "https://eroscripts-discourse.eroscripts.com/other/x.funscript"
+            ),
+            None
+        );
+        assert_eq!(base62("0"), "0");
+        assert_eq!((base62("3d"), base62("3e")), ("Z".into(), "10".into()));
+    }
+
+    #[test]
+    fn zips_unpack_the_videos_script_and_axes() {
+        use std::io::Write;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in [
+            ("pack/Other Scene.funscript", "{}"),
+            ("pack/My Scene.funscript", r#"{"actions":[]}"#),
+            ("pack/My Scene.roll.funscript", "{}"),
+            ("__MACOSX/pack/._My Scene.funscript", "junk"),
+            ("pack/readme.txt", "hi"),
+        ] {
+            z.start_file(name, opts).unwrap();
+            z.write_all(body.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+        let v = Path::new("/lib/My Scene 4K.mp4");
+        let got: Vec<(String, String)> = zip_scripts(buf.get_ref(), v, None)
+            .unwrap()
+            .into_iter()
+            .map(|(p, d)| {
+                (
+                    p.to_string_lossy().into_owned(),
+                    String::from_utf8(d).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "/lib/My Scene 4K.funscript".into(),
+                    r#"{"actions":[]}"#.into()
+                ),
+                ("/lib/My Scene 4K.roll.funscript".into(), "{}".into()),
+            ]
+        );
+        assert!(zip_scripts(b"not a zip", v, None).is_err());
     }
 
     #[test]

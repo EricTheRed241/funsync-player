@@ -44,6 +44,26 @@ fn forum(listener: TcpListener) {
         let target = line.split(' ').nth(1).unwrap_or("");
         let path = target.split('?').next().unwrap();
         let authed = headers.contains("_t=TOKEN");
+        // A zip upload: the forum redirects to its CDN, which serves bytes.
+        if path == "/uploads/short-url/pack.zip" && authed {
+            let mut s = r.into_inner();
+            let _ = write!(
+                s,
+                "HTTP/1.1 302 Found\r\nLocation: /cdn/pack.zip\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            continue;
+        }
+        if path == "/cdn/pack.zip" {
+            let zip = pack_zip();
+            let mut s = r.into_inner();
+            let _ = write!(
+                s,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                zip.len()
+            );
+            let _ = s.write_all(&zip);
+            continue;
+        }
         let (status, cookie, payload): (u16, &str, Value) = match path {
             "/session/csrf.json" => (200, "_forum_session=s1", json!({"csrf": "tok"})),
             "/session" if !headers.contains("tok") || !headers.contains("_forum_session=s1") => {
@@ -60,6 +80,7 @@ fn forum(listener: TcpListener) {
             _ if !authed && !path.starts_with("/api/") && !path.starts_with("/pics/") => {
                 (403, "", json!({}))
             }
+            "/session/current.json" => (200, "", json!({"current_user": {"username": "me"}})),
             "/categories.json" => (
                 200,
                 "",
@@ -112,6 +133,167 @@ fn forum(listener: TcpListener) {
             payload.len()
         );
     }
+}
+
+/// A post's zip: the scene's script and its roll axis, plus macOS junk.
+fn pack_zip() -> Vec<u8> {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let mut z = zip::ZipWriter::new(&mut buf);
+    for (name, body) in [
+        (
+            "Scene/Scene.funscript",
+            r#"{"actions":[{"at":0,"pos":10}]}"#,
+        ),
+        ("Scene/Scene.roll.funscript", r#"{"actions":[]}"#),
+        ("__MACOSX/Scene/._Scene.funscript", "junk"),
+    ] {
+        z.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        z.write_all(body.as_bytes()).unwrap();
+    }
+    z.finish().unwrap();
+    buf.into_inner()
+}
+
+/// Import a library of `files` (relative paths, empty contents) and serve it
+/// against the fake forum; the data dir gets `session` as its saved login.
+fn serve(
+    files: &[&str],
+    fake_url: &str,
+    session: Option<Value>,
+) -> (Kill, u16, Vec<tempfile::TempDir>) {
+    let bin = env!("CARGO_BIN_EXE_funsync-server");
+    let (lib, old, data) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    for f in files {
+        let p = lib.path().join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"{}").unwrap();
+    }
+    let cfg = json!({"settings": {"library": {"sources": [
+        {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}});
+    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
+    assert!(
+        Command::new(bin)
+            .args(["import", "--from"])
+            .arg(old.path())
+            .arg("--data-dir")
+            .arg(data.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    if let Some(s) = session {
+        std::fs::write(data.path().join("eroscripts-session.json"), s.to_string()).unwrap();
+    }
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let srv = Kill(
+        Command::new(bin)
+            .args(["--port", &port.to_string(), "--data-dir"])
+            .arg(data.path())
+            .env("FUNSYNC_EROSCRIPTS_URL", fake_url)
+            .env("FUNSYNC_PIXELDRAIN_URL", fake_url)
+            .env("FUNSYNC_OWNS_LIBRARY", "1")
+            .spawn()
+            .unwrap(),
+    );
+    (srv, port, vec![lib, old, data])
+}
+
+/// Poll `path` until `ok` holds for its answer.
+fn until(port: u16, path: &str, ok: impl Fn(&Value) -> bool) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            let (_, v) = call(port, "GET", path, None);
+            if ok(&v) {
+                return v;
+            }
+        }
+        assert!(Instant::now() < deadline, "{path} never got there");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn session_check_auto_match_and_zip() {
+    let fake = TcpListener::bind("127.0.0.1:0").unwrap();
+    let fake_url = format!("http://{}", fake.local_addr().unwrap());
+    std::thread::spawn(move || forum(fake));
+    let (_srv, port, dirs) = serve(
+        &["A/Scene.mp4", "B/Done.mp4", "B/Done.funscript"],
+        &fake_url,
+        Some(json!({"cookie": "OLD", "username": "me"})),
+    );
+    // The saved session is checked at start: the forum refuses it.
+    let st = until(port, "/api/status", |v| v["eroscripts"]["expired"] == true);
+    assert_eq!(st["eroscripts"]["loggedIn"], true);
+
+    let (_, v) = call(
+        port,
+        "POST",
+        "/api/eroscripts/login",
+        Some(json!({"cookie": "_t=TOKEN"})),
+    );
+    assert_eq!(v, json!({"ok": true, "username": "me"}));
+    let (_, s) = call(port, "GET", "/api/eroscripts/session", None);
+    assert_eq!(s["expired"], false);
+
+    // Auto-match: the scriptless video is searched by its name.
+    let videos = until(port, "/api/remote/videos", |v| {
+        v["videos"].as_array().is_some_and(|a| a.len() == 2)
+    });
+    let scene = videos["videos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["name"] == "Scene")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let m = until(port, "/api/eroscripts/matches", |v| {
+        v["matches"].get(&scene).is_some()
+    });
+    assert_eq!(m["scriptless"], 1);
+    assert_eq!(m["matches"][&scene]["count"], 2);
+    assert_eq!(m["matches"][&scene]["top"]["title"], "Free scene");
+
+    // A zip is unpacked next to the video.
+    let (code, v) = call(
+        port,
+        "POST",
+        "/api/eroscripts/download",
+        Some(
+            json!({"videoId": scene, "url": format!("{fake_url}/uploads/short-url/pack.zip"), "name": "pack.zip"}),
+        ),
+    );
+    assert_eq!(code, 200, "{v}");
+    let dir = dirs[0].path().join("A");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("Scene.funscript")).unwrap(),
+        r#"{"actions":[{"at":0,"pos":10}]}"#
+    );
+    assert!(dir.join("Scene.roll.funscript").is_file());
+    assert!(!dir.join("._Scene.funscript").exists());
+    let (code, _) = call(
+        port,
+        "POST",
+        "/api/eroscripts/download",
+        Some(
+            json!({"videoId": scene, "url": format!("{fake_url}/uploads/short-url/pack.zip"), "name": "pack.zip"}),
+        ),
+    );
+    assert_eq!(code, 409);
+    let m = until(port, "/api/eroscripts/matches", |v| v["scriptless"] == 0);
+    assert_eq!(m["matches"], json!({}));
 }
 
 fn call(port: u16, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {

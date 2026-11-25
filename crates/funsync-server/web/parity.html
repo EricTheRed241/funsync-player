@@ -42,6 +42,7 @@ async function load() {
     tile('Videos', st.videos), tile('With a script', st.withScript),
     tile('Last scan', st.scanning ? 'scanning…' : ago(st.scannedAt)),
     tile('Sources', st.sources.filter((s) => s.present).length + ' / ' + st.sources.length + ' present'),
+    tile('EroScripts', st.eroscripts.loggedIn ? (st.eroscripts.expired ? 'session expired' : st.eroscripts.username) : 'logged out'),
     ...(st.failedPaths.length ? [tile('Unreadable', st.failedPaths.join(', '))] : []),
   ].join('');
   const order = ['done', 'partial', 'not started', 'not planned'];
