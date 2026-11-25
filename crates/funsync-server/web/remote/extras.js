@@ -114,6 +114,17 @@
         if (next !== undefined) v.currentTime = next;
         break;
       }
+      case 't': case 'T': {
+        // Pin this frame as the video's thumbnail; Shift+T takes the pin away.
+        const id = idOf(v);
+        const pct = e.shiftKey ? null : v.currentTime / (v.duration || Infinity);
+        if (!id || (!e.shiftKey && !(pct >= 0))) return;
+        const r = await fetch(`/api/media/pin-thumb/${id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pct }),
+        });
+        say(!r.ok ? 'Thumbnail not changed' : e.shiftKey ? 'Thumbnail pin removed' : `Thumbnail pinned at ${clock(v.currentTime)}`);
+        break;
+      }
       case 'z': case 'Z':
         if (!e.repeat) edge(true);
         break;

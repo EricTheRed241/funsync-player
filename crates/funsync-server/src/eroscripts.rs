@@ -890,6 +890,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/eroscripts/matches", get(matches))
         .route("/api/eroscripts/download", post(download))
         .route("/api/eroscripts/preview", post(preview))
+        .route(
+            "/api/eroscripts/previews",
+            get(previews_status).post(fetch_previews),
+        )
 }
 
 fn bad(code: StatusCode, msg: impl Into<String>) -> Response {
@@ -994,6 +998,10 @@ struct DownloadBody {
     replace: bool,
     #[serde(default)]
     variant: Option<String>,
+    /// The post the script comes from: its picture of the video becomes the
+    /// thumbnail when the video has none.
+    #[serde(default, rename = "topicId")]
+    topic_id: Option<u64>,
 }
 
 /// GET a forum upload into `dest` with the session cookie. The forum answers
@@ -1155,8 +1163,88 @@ async fn download(State(st): State<Arc<AppState>>, Json(b): Json<DownloadBody>) 
         }
     }
     let _ = st.rescan().await;
+    if let Some(topic) = b.topic_id {
+        auto_preview(st.clone(), v.path.clone(), topic);
+    }
     let paths: Vec<&PathBuf> = files.iter().map(|(to, _)| to).collect();
     Json(json!({"ok": true, "path": paths[0], "paths": paths})).into_response()
+}
+
+/// The forum for post previews: this session's cookie, `/t/<id>.json`.
+fn with_forum<T>(data_dir: &Path, f: impl FnOnce(&crate::previews::Forum) -> T) -> T {
+    let cookie = load_session(data_dir).map(|s| s.cookie);
+    let c = cookie.clone();
+    let topic = move |id: u64| get_json(&format!("{}/t/{id}.json", base()), c.as_deref()).ok();
+    f(&crate::previews::Forum {
+        base: base(),
+        cookie,
+        fetch: &crate::posters::Curl,
+        topic: &topic,
+    })
+}
+
+/// After a script download: the post's picture that shows the video, when
+/// the video has no custom thumbnail (in the background).
+fn auto_preview(st: Arc<AppState>, path: String, topic: u64) {
+    tokio::spawn(async move {
+        let _ = st.media.metadata(Path::new(&path)).await;
+        let s = st.clone();
+        let out = blocking(move || {
+            let dir = s.data_dir.join("custom-thumbs");
+            with_forum(&s.data_dir, |f| {
+                crate::previews::import(&s.library, &s.media, &dir, f, &path, topic, &[])
+            })
+        })
+        .await;
+        if matches!(out, crate::previews::Outcome::Imported(_)) {
+            let _ = st.save().await;
+        }
+    });
+}
+
+/// Spacing between posts in the batch (≤ 2 forum requests a second).
+const PREVIEW_BATCH_DELAY: Duration = Duration::from_millis(600);
+
+async fn previews_status() -> Json<Value> {
+    Json(crate::previews::STATUS.lock().unwrap().clone())
+}
+
+/// "Fetch EroScripts previews" for the whole library, in the background;
+/// `GET` the same path for its progress and summary.
+async fn fetch_previews(State(st): State<Arc<AppState>>) -> Response {
+    {
+        let mut s = crate::previews::STATUS.lock().unwrap();
+        if s["running"] == true {
+            return bad(StatusCode::CONFLICT, "already fetching previews");
+        }
+        *s = json!({"running": true, "phase": "revalidate", "done": 0, "total": 0});
+    }
+    tokio::spawn(async move {
+        let snap = st.snapshot.read().await.clone();
+        for v in &snap.videos {
+            if st.media.cached(&v.path).is_none() {
+                let _ = st.media.metadata(Path::new(&v.path)).await;
+            }
+        }
+        let s = st.clone();
+        let summary = blocking(move || {
+            let dir = s.data_dir.join("custom-thumbs");
+            with_forum(&s.data_dir, |f| {
+                crate::previews::batch(
+                    &s.library,
+                    &snap.videos,
+                    &s.media,
+                    &dir,
+                    f,
+                    PREVIEW_BATCH_DELAY,
+                )
+            })
+        })
+        .await;
+        let _ = st.save().await;
+        *crate::previews::STATUS.lock().unwrap() = json!({"running": false, "summary": summary});
+    });
+    Json(json!({"ok": true})).into_response()
 }
 
 #[derive(Deserialize)]
@@ -1164,43 +1252,38 @@ struct PreviewBody {
     #[serde(rename = "videoId")]
     video_id: String,
     url: String,
+    #[serde(default, rename = "topicId")]
+    topic_id: Option<u64>,
 }
 
-/// A post's picture as the video's poster: saved in `<data dir>/custom-thumbs/`
-/// and recorded in `customThumbnails` (the old app's shape).
+/// A post's picture picked by hand as the video's poster (`usePreviewCandidate`):
+/// downloaded from the forum or its CDN only, saved as a JPEG ≤ 640 wide in
+/// `<data dir>/custom-thumbs/` and kept as the user's own (`forced`).
 async fn preview(State(st): State<Arc<AppState>>, Json(b): Json<PreviewBody>) -> Response {
     let Some(v) = st.video(&b.video_id).await else {
         return bad(StatusCode::NOT_FOUND, "no such video");
     };
-    if !(b.url.starts_with(&format!("{}/", base())) || b.url.starts_with(UPLOAD_CDN)) {
-        return bad(StatusCode::BAD_REQUEST, "not an EroScripts picture");
-    }
-    let ext = match url_file_name(&b.url)
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_lowercase())
-    {
-        Some(e) if ["jpg", "jpeg", "png", "webp"].contains(&e.as_str()) => e,
-        _ => "jpg".into(),
-    };
     let dir = st.data_dir.join("custom-thumbs");
-    let dest = dir.join(format!(
-        "{}-{}.{ext}",
-        v.id,
-        &format!("{:x}", md5::compute(&b.url))[..8]
-    ));
-    let (url, d) = (b.url.clone(), dest.clone());
+    let dest = dir.join(format!("{:x}-eroscripts.jpg", md5::compute(&v.path)));
+    let (url, d, s) = (b.url.clone(), dest.clone(), st.clone());
     let got = blocking(move || {
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        Curl.download(&Request::get(url), &d)
+        let _ = std::fs::create_dir_all(&dir);
+        let part = d.with_extension("part");
+        let r = with_forum(&s.data_dir, |f| f.download(&url, &part)).and_then(|_| {
+            crate::posters::to_jpeg(&s.media, &part, &d)
+                .then_some(())
+                .ok_or_else(|| "Image could not be decoded".to_string())
+        });
+        let _ = std::fs::remove_file(&part);
+        r
     })
     .await;
     if let Err(e) = got {
-        let _ = std::fs::remove_file(&dest);
         return bad(StatusCode::BAD_GATEWAY, e);
     }
     st.library.write().await.lib_mut("customThumbnails")[&v.path] = json!({
-        "type": "image", "imagePath": dest, "source": "eroscripts", "url": b.url,
-        "setAt": crate::data::now_ms(),
+        "type": "image", "imagePath": dest, "source": "eroscripts", "topicId": b.topic_id,
+        "imageUrl": b.url, "forced": true,
     });
     match st.save().await {
         Ok(()) => Json(json!({"ok": true})).into_response(),

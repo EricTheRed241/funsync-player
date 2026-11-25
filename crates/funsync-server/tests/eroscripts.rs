@@ -12,6 +12,29 @@ use common::Kill;
 use serde_json::{Value, json};
 
 /// The fake forum: canned answers by method + path.
+/// A small PNG made by ffmpeg (empty without it): the post's picture.
+fn picture() -> Vec<u8> {
+    let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .unwrap_or("ffmpeg");
+    std::process::Command::new(ffmpeg)
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=640x360",
+            "-frames:v",
+            "1",
+        ])
+        .args(["-f", "image2pipe", "-c:v", "png", "-"])
+        .output()
+        .map(|o| o.stdout)
+        .unwrap_or_default()
+}
+
 fn forum(listener: TcpListener) {
     for s in listener.incoming().flatten() {
         let mut r = BufReader::new(s);
@@ -56,6 +79,17 @@ fn forum(listener: TcpListener) {
                 zip.len()
             );
             let _ = s.write_all(&zip);
+            continue;
+        }
+        if path == "/pics/p.jpg" {
+            let png = picture();
+            let mut s = r.into_inner();
+            let _ = write!(
+                s,
+                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                png.len()
+            );
+            let _ = s.write_all(&png);
             continue;
         }
         let (status, cookie, payload): (u16, &str, Value) = match path {
@@ -111,7 +145,6 @@ fn forum(listener: TcpListener) {
             "/uploads/short-url/main.funscript" | "/uploads/short-url/twist.funscript" => {
                 (200, "", json!({"actions": [{"at": 0, "pos": 50}]}))
             }
-            "/pics/p.jpg" => (200, "", json!("jpeg")),
             _ => (404, "", json!({})),
         };
         let payload = payload.to_string();
@@ -395,24 +428,41 @@ fn login_search_topic_download_poster() {
     let (_, v) = call(port, "GET", &format!("/api/videos/{id}"), None);
     assert!(v["funscriptPath"].as_str().is_some(), "rescanned: {v}");
 
+    let (code, v) = call(
+        port,
+        "POST",
+        "/api/eroscripts/preview",
+        Some(json!({"videoId": id, "url": t["preview"], "topicId": 7})),
+    );
+    if picture().is_empty() {
+        eprintln!("ffmpeg missing: poster not checked");
+    } else {
+        assert_eq!(code, 200, "{v}");
+        let (_, v) = call(port, "GET", "/api/remote/videos", None);
+        let thumb = v["videos"][0]["thumbUrl"].as_str().unwrap().to_string();
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            s,
+            "GET {thumb} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf).unwrap();
+        let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        assert_eq!(
+            buf[split + 4..split + 6],
+            [0xff, 0xd8],
+            "the post picture, as a JPEG"
+        );
+    }
+    // Pictures from anywhere else are refused.
     let (code, _) = call(
         port,
         "POST",
         "/api/eroscripts/preview",
-        Some(json!({"videoId": id, "url": t["preview"]})),
+        Some(json!({"videoId": id, "url": "https://evil.test/p.jpg"})),
     );
-    assert_eq!(code, 200);
-    let (_, v) = call(port, "GET", "/api/remote/videos", None);
-    let thumb = v["videos"][0]["thumbUrl"].as_str().unwrap().to_string();
-    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    write!(
-        s,
-        "GET {thumb} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
-    )
-    .unwrap();
-    let mut buf = Vec::new();
-    s.read_to_end(&mut buf).unwrap();
-    assert!(buf.ends_with(b"\"jpeg\""), "poster served");
+    assert_eq!(code, 502);
 
     let (_, v) = call(port, "POST", "/api/eroscripts/logout", None);
     assert_eq!(v["ok"], true);

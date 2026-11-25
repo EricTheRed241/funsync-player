@@ -44,6 +44,7 @@
     <p class="muted">Videos without a script: <select id="unscripted"><option value="">Find scripts for…</option></select></p>
     <p id="found" class="muted"></p>
     <p id="owns" class="muted"></p>
+    <p class="muted"><button id="previews">Fetch EroScripts previews</button> <span id="previewsMsg">Re-checks the thumbnails FunSync set from posts and FapTap, then gives every video with a known post and no thumbnail the post picture that shows it.</span></p>
     <div id="results" class="results"></div>
     <div id="topic"></div>
   </section>
@@ -115,7 +116,26 @@ $('unscripted').onchange = (e) => {
   if (!v) return;
   $('video').value = v.id; $('search').q.value = v.name; search(v.name);
 };
+$('previews').onclick = async () => {
+  const r = await call('/api/eroscripts/previews', {});
+  if (r.error) return msg(r.error, true);
+  previewStatus();
+};
+async function previewStatus() {
+  const s = await call('/api/eroscripts/previews');
+  $('previews').disabled = !!s.running;
+  if (s.running) {
+    $('previewsMsg').textContent = `${s.phase === 'revalidate' ? 'Checking set thumbnails' : 'Fetching previews'}: ${s.done} of ${s.total}`;
+    return setTimeout(previewStatus, 2000);
+  }
+  const m = s.summary;
+  if (m) $('previewsMsg').textContent = `Set ${m.imported}, removed ${m.revalidated.removed} that didn't show their video, `
+    + `no match ${m.noMatch}, no picture ${m.noImage}, failed ${m.failed} (${m.known} videos with a known post).`;
+}
+previewStatus();
+let topicId = null;
 async function openTopic(t) {
+  topicId = t.id;
   msg('Loading post…');
   const d = await call(`/api/eroscripts/topic/${t.id}`);
   if (d.error) return msg(d.error, true);
@@ -130,7 +150,7 @@ async function openTopic(t) {
   $('topic').querySelectorAll('button[data-i]').forEach((b) => (b.onclick = () => save(d.attachments[b.dataset.i])));
   if ($('poster')) $('poster').onclick = async () => {
     if (!$('video').value) return msg('Pick the video first', true);
-    const r = await call('/api/eroscripts/preview', { videoId: $('video').value, url: d.preview });
+    const r = await call('/api/eroscripts/preview', { videoId: $('video').value, url: d.preview, topicId: t.id });
     r.ok ? msg('Thumbnail saved') : msg(r.error, true);
   };
   $('topic').scrollIntoView({ behavior: 'smooth' });
@@ -138,7 +158,7 @@ async function openTopic(t) {
 async function save(a, extra = {}) {
   const videoId = $('video').value;
   if (!videoId) return msg('Pick the video to save the script for', true);
-  const r = await call('/api/eroscripts/download', { videoId, url: a.url, name: a.name, ...extra });
+  const r = await call('/api/eroscripts/download', { videoId, url: a.url, name: a.name, topicId, ...extra });
   if (r.exists) {
     const label = prompt(`${r.error}.\nType a variant name to keep both (empty: replace the existing script):`, a.username);
     if (label === null) return;
