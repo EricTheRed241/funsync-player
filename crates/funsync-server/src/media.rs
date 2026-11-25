@@ -201,6 +201,24 @@ impl Media {
         }
     }
 
+    /// A live, lower-bitrate copy of `path` from `start` seconds (the web
+    /// remote's Quality setting): fragmented MP4 on the child's stdout, the
+    /// child killed when it is dropped (the player went away or seeked).
+    pub fn transcode(
+        &self,
+        path: &str,
+        start: f64,
+        height: u32,
+    ) -> std::io::Result<tokio::process::Child> {
+        tokio::process::Command::new(&self.ffmpeg)
+            .args(transcode_args(path, start, height))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    }
+
     /// Run ffmpeg with `args`, blocking: its output when it exits 0 within
     /// `timeout` (killed after that).
     pub fn ffmpeg_blocking<I, S>(&self, args: I, timeout: Duration) -> Option<Vec<u8>>
@@ -494,10 +512,91 @@ fn find_binary(name: &str) -> String {
     name.to_string()
 }
 
+/// The bitrate a transcoded stream gets per output height: enough for the
+/// height, well under what 2.4 GHz Wi-Fi carries to a second device.
+pub fn transcode_bitrate_mbps(height: u32) -> u32 {
+    if height >= 1080 { 8 } else { 4 }
+}
+
+/// ffmpeg arguments for `Media::transcode`: seek to `start`, scale down to
+/// at most `height` lines (never up), H.264 at `transcode_bitrate_mbps` on the
+/// Mac's hardware decoder and encoder (half the CPU of software decoding; 4K60
+/// still runs at twice real time; software x264 elsewhere), stereo AAC,
+/// fragmented MP4 so the browser can play it while it is written.
+pub fn transcode_args(path: &str, start: f64, height: u32) -> Vec<String> {
+    let mbps = transcode_bitrate_mbps(height);
+    let mac = cfg!(target_os = "macos");
+    let encoder: &[&str] = if mac {
+        &["-c:v", "h264_videotoolbox", "-allow_sw", "1"]
+    } else {
+        &["-c:v", "libx264", "-preset", "veryfast"]
+    };
+    let mut a: Vec<String> = ["-nostdin", "-hide_banner", "-loglevel", "error"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if mac {
+        a.extend(["-hwaccel", "videotoolbox"].map(String::from));
+    }
+    a.push("-ss".into());
+    a.push(format!("{:.3}", start.max(0.0)));
+    a.extend(["-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-vf"].map(String::from));
+    a.push(format!(
+        "scale=-2:'min({height},ih)':flags=bicubic,format=yuv420p"
+    ));
+    a.extend(encoder.iter().map(|s| s.to_string()));
+    a.extend([
+        "-b:v".to_string(),
+        format!("{mbps}M"),
+        "-maxrate".to_string(),
+        format!("{}M", mbps + mbps / 2),
+        "-bufsize".to_string(),
+        format!("{}M", mbps * 2),
+    ]);
+    a.extend(
+        [
+            "-g",
+            "60",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "160k",
+            "-ac",
+            "2",
+            "-movflags",
+            "frag_keyframe+empty_moov+default_base_moof",
+            "-f",
+            "mp4",
+            "pipe:1",
+        ]
+        .map(String::from),
+    );
+    a
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn transcode_seeks_scales_down_only_and_streams_fragmented_mp4() {
+        let a = transcode_args("/v/clip.mp4", 75.5, 1080);
+        let at = |k: &str| a.iter().position(|x| x == k).unwrap();
+        assert_eq!(a[at("-ss") + 1], "75.500");
+        assert!(at("-ss") < at("-i"), "input seek, not decode-and-discard");
+        assert_eq!(a[at("-i") + 1], "/v/clip.mp4");
+        assert!(a[at("-vf") + 1].starts_with("scale=-2:'min(1080,ih)'"));
+        assert_eq!(a[at("-b:v") + 1], "8M");
+        assert_eq!(
+            a[at("-movflags") + 1],
+            "frag_keyframe+empty_moov+default_base_moof"
+        );
+        assert_eq!(a.last().unwrap(), "pipe:1");
+        let b = transcode_args("/v/clip.mp4", -3.0, 720);
+        assert_eq!(b[b.iter().position(|x| x == "-ss").unwrap() + 1], "0.000");
+        assert_eq!(b[b.iter().position(|x| x == "-b:v").unwrap() + 1], "4M");
+    }
 
     #[test]
     fn frame_checks() {

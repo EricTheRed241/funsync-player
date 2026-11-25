@@ -590,15 +590,66 @@ async fn send_file(path: &str, req: Request, content_type: Option<&'static str>)
     }
 }
 
+#[derive(Deserialize)]
+struct StreamQuery {
+    /// Output height of a live transcode (`1080`, `720`); absent = the file as is.
+    quality: Option<u32>,
+    /// Where a transcode starts, in seconds.
+    t: Option<f64>,
+}
+
 async fn stream(
     State(st): State<Arc<AppState>>,
     UrlPath(id): UrlPath<String>,
+    Query(q): Query<StreamQuery>,
     req: Request,
 ) -> Response {
     let Some(v) = st.video(&id).await else {
         return err(StatusCode::NOT_FOUND, "no such video");
     };
-    send_file(&v.path, req, None).await
+    match q.quality {
+        Some(h @ (720 | 1080)) => transcoded(&st.media, &v.path, q.t.unwrap_or(0.0), h),
+        Some(_) => err(StatusCode::BAD_REQUEST, "quality: 1080 or 720"),
+        None => send_file(&v.path, req, None).await,
+    }
+}
+
+/// A live transcode as one unseekable fragmented-MP4 response; the client
+/// seeks by asking again with a new `t`. Dropping the body (the player moved
+/// on) drops the child, which kills ffmpeg.
+fn transcoded(media: &Media, path: &str, start: f64, height: u32) -> Response {
+    if !Path::new(path).is_file() {
+        return err(StatusCode::NOT_FOUND, "file missing");
+    }
+    let mut child = match media.transcode(path, start, height) {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let Some(out) = child.stdout.take() else {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg has no stdout");
+    };
+    let body = futures_util::stream::unfold((child, out), |(child, mut out)| async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = vec![0u8; 64 * 1024];
+        match out.read(&mut buf).await {
+            Ok(0) | Err(_) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                Some((
+                    Ok::<_, std::io::Error>(axum::body::Bytes::from(buf)),
+                    (child, out),
+                ))
+            }
+        }
+    });
+    (
+        [
+            (header::CONTENT_TYPE, "video/mp4"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Body::from_stream(body),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]

@@ -123,3 +123,94 @@ fn import_then_serve() {
     );
     assert_eq!(pin(r#"{"pct": null}"#), before);
 }
+
+fn ffmpeg_bin(name: &str) -> Option<String> {
+    [
+        format!("/opt/homebrew/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+    ]
+    .into_iter()
+    .find(|p| std::path::Path::new(p).exists())
+}
+
+/// The web remote's Quality setting: `?quality=720&t=1` streams a live,
+/// scaled-down transcode starting 1 s in; an unknown quality is refused.
+#[test]
+fn stream_quality_transcodes_from_a_time() {
+    let (Some(ffmpeg), Some(ffprobe)) = (ffmpeg_bin("ffmpeg"), ffmpeg_bin("ffprobe")) else {
+        eprintln!("ffmpeg missing: transcode not checked");
+        return;
+    };
+    let lib = tempfile::tempdir().unwrap();
+    let scene = lib.path().join("Artist/Clip");
+    std::fs::create_dir_all(&scene).unwrap();
+    let clip = scene.join("Clip.mp4");
+    let made = std::process::Command::new(&ffmpeg)
+        .args(["-nostdin", "-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg("testsrc=size=1920x1080:rate=30:duration=4")
+        .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .arg(&clip)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    std::fs::write(scene.join("Clip.funscript"), br#"{"actions":[]}"#).unwrap();
+    let data = common::import(&serde_json::json!({
+        "settings": {"library": {"sources": [
+            {"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]}}
+    }));
+    let (_srv, port) = common::start(data.path(), &[]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let id = loop {
+        let (_, body) = http(port, "GET", "/api/videos", "");
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        if let Some(id) = v[0]["id"].as_str() {
+            break id.to_string();
+        }
+        assert!(Instant::now() < deadline, "server never listed the video");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    // HTTP/1.0: the streamed body comes close-delimited, not chunked.
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        s,
+        "GET /api/media/stream/{id}?quality=720&t=1 HTTP/1.0\r\nHost: x\r\n\r\n"
+    )
+    .unwrap();
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf).unwrap();
+    let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&buf[..split]).to_lowercase();
+    assert!(
+        head.starts_with("http/1.0 200") || head.starts_with("http/1.1 200"),
+        "{head}"
+    );
+    assert!(head.contains("content-type: video/mp4"), "{head}");
+    let out = data.path().join("out.mp4");
+    std::fs::write(&out, &buf[split + 4..]).unwrap();
+    let probe = std::process::Command::new(&ffprobe)
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
+        .args(["stream=height:format=duration", "-of", "default=nw=1"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&probe.stdout);
+    assert!(text.contains("height=720"), "{text}");
+    let secs: f64 = text
+        .lines()
+        .find_map(|l| l.strip_prefix("duration="))
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(0.0);
+    assert!(
+        (2.5..=3.5).contains(&secs),
+        "starts 1 s in: {secs} s of a 4 s clip"
+    );
+
+    let (head, _) = http(
+        port,
+        "GET",
+        &format!("/api/media/stream/{id}?quality=4320"),
+        "",
+    );
+    assert!(head.starts_with("HTTP/1.1 400"), "{head}");
+}

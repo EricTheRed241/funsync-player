@@ -1403,6 +1403,26 @@ body::-webkit-scrollbar {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.player__quality {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px auto 0;
+  font-size: 13px;
+  color: var(--text-secondary, rgba(255,255,255,0.65));
+}
+
+.player__quality select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--border, rgba(255,255,255,0.18));
+  border-radius: 8px;
+  background: var(--bg-card, transparent);
+  color: inherit;
+  font-size: 13px;
+}
+
 .player__sync-pill {
   margin: 10px 16px 0;
   padding: 8px 14px;

@@ -38,6 +38,7 @@ import {
 } from './artists.js';
 import { SerialRelaySink, looksLikeDesktopChromium } from './serial-relay.js';
 import { installLoginRedirect } from './login-redirect.js';
+import { QUALITIES, getQuality, setQuality, playTranscoded } from './stream-quality.js';
 
 // Access PIN: a 401 from the backend means this device must log in again.
 installLoginRedirect();
@@ -3192,12 +3193,22 @@ async function renderPlayer(id) {
   videoWrap.className = 'player__video-wrap';
   const videoEl = document.createElement('video');
   videoEl.className = 'player__video';
-  videoEl.src = video.streamUrl;
   // Custom controls (V4) — stock browser chrome replaced by our overlay,
   // built after the wrapper is assembled below. Unless the user has asked
   // for the browser's own player back (see useNativeControls).
   const nativeControls = useNativeControls();
   videoEl.controls = nativeControls;
+  // Quality (stream-quality.js): with FunSync's controls the player can play
+  // a live lower-bitrate copy; the browser's own controls get the file, whose
+  // seek bar can't follow a transcode.
+  const quality = nativeControls ? 'original' : getQuality();
+  if (quality === 'original') {
+    videoEl.src = video.streamUrl;
+  } else {
+    const start = pendingResumeSec ?? 0;
+    pendingResumeSec = null;
+    playTranscoded(videoEl, { base: video.streamUrl, quality, duration: video.duration || 0, start });
+  }
   videoEl.playsInline = true;
   videoEl.preload = 'metadata';
   if (video.subtitleUrl) {
@@ -3440,6 +3451,28 @@ async function renderPlayer(id) {
     render();
   });
   wrap.appendChild(controlsToggle);
+
+  // Quality: the original file, or a live 1080p / 720p copy for weak Wi-Fi.
+  if (!nativeControls) {
+    const qualityRow = document.createElement('label');
+    qualityRow.className = 'player__quality';
+    qualityRow.append(document.createTextNode(t('webRemote.player.quality')));
+    const select = document.createElement('select');
+    for (const q of QUALITIES) {
+      const opt = document.createElement('option');
+      opt.value = q;
+      opt.textContent = t(q === 'original' ? 'webRemote.player.qualityOriginal' : `webRemote.player.quality${q}`);
+      opt.selected = q === quality;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => {
+      pendingResumeSec = videoEl.currentTime || 0;
+      setQuality(select.value);
+      render();
+    });
+    qualityRow.appendChild(select);
+    wrap.appendChild(qualityRow);
+  }
 
   // Device-sync status pill above the video. Populated by server messages.
   const pill = document.createElement('div');
