@@ -99,3 +99,61 @@ fn poster_plan_after_an_import() {
         println!("    {} {} (old attempt {tried})", j.path, j.url);
     }
 }
+
+/// The pHash match against the old app's own verdicts: every poster it set
+/// by itself (EroScripts previews, FapTap thumbnails, all accepted, with
+/// their `matchScore`) is checked again here, reading only.
+#[test]
+#[ignore]
+fn poster_match_agrees_with_the_old_app() {
+    let old_dir = funsync_server::data::default_old_user_data().unwrap();
+    let cfg: Value =
+        serde_json::from_slice(&std::fs::read(old_dir.join("config.json")).unwrap()).unwrap();
+    let cache: Value = std::fs::read(old_dir.join("preview-match-cache.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let tmp = tempfile::tempdir().unwrap();
+    let media = Media::new(tmp.path().join("thumbs"));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (mut same, mut kept, mut total) = (0, 0, 0);
+    for (path, e) in cfg["settings"]["library"]["customThumbnails"]
+        .as_object()
+        .unwrap()
+    {
+        let (Some(img), Some(old)) = (e["imagePath"].as_str(), e["matchScore"].as_u64()) else {
+            continue;
+        };
+        if !std::path::Path::new(path).is_file() || !std::path::Path::new(img).is_file() {
+            continue;
+        }
+        let _ = rt.block_on(media.metadata(std::path::Path::new(path)));
+        total += 1;
+        let got = funsync_server::previews::distance(&media, path, std::path::Path::new(img));
+        if got == Some(old as u32) {
+            same += 1;
+        }
+        if got.is_some_and(|d| d <= funsync_server::posters::MATCH_THRESHOLD) {
+            kept += 1;
+        } else {
+            println!("would remove: {path} (old {old}, new {got:?})");
+        }
+        if got != Some(old as u32) {
+            // The same poster file against the old app's own frame hashes
+            // (`preview-match-cache.json`): tells the image side from the video side.
+            let old_frames: Vec<u64> = cache["entries"][path.as_str()]["hashes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|h| u64::from_str_radix(h["hash"].as_str()?, 16).ok())
+                .collect();
+            let image = funsync_server::posters::image_hashes(&media, std::path::Path::new(img));
+            let against_old = funsync_server::posters::closest(&image, &old_frames);
+            println!(
+                "distance: old {old} new {got:?}, file vs the old frames {against_old:?} {} {}",
+                e["source"], e["imageUrl"]
+            );
+        }
+    }
+    println!("{kept} / {total} kept, {same} with the same distance");
+}

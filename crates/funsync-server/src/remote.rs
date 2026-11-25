@@ -41,6 +41,13 @@ pub fn poster(lib: &Library, path: &str) -> Option<std::path::PathBuf> {
     (clean && roots.any(|r| img.starts_with(r)) && img.is_file()).then_some(img)
 }
 
+/// The frame the user pinned as a video's thumbnail
+/// (`customThumbnails[path].seekPct`, clamped to 0–0.999), `_pin_for`.
+pub fn pin(lib: &Library, path: &str) -> Option<f64> {
+    let p = lib.lib()["customThumbnails"][path]["seekPct"].as_f64()?;
+    p.is_finite().then(|| p.clamp(0.0, 0.999))
+}
+
 /// `/api/media/thumb/<id>?v=<version>` (`thumb_url` of backend/routes/media.py):
 /// a new poster, VR crop or replaced file is a new URL, so clients may keep
 /// each version for good.
@@ -51,11 +58,12 @@ pub fn thumb_url(lib: &Library, v: &Video) -> String {
             format!("poster:{}:{mtime:?}", p.display())
         }
         None => format!(
-            "frame:{}:{:?}:{}:{}",
+            "frame:{}:{:?}:{}:{}:{:?}",
             crate::media::THUMB_MARKER,
             vr::thumb_crop(vr::detect(lib, v, None)),
             v.size,
-            v.date_added
+            v.date_added,
+            pin(lib, &v.path),
         ),
     };
     format!(

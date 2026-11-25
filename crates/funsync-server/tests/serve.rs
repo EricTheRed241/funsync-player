@@ -97,6 +97,31 @@ fn import_then_serve() {
     assert_eq!(flags["flags"][path], false);
     let (_, body) = http(port, "GET", "/api/remote/categories", "");
     assert!(String::from_utf8_lossy(&body).contains("Hand-made axes"));
+    // Pin a frame as the thumbnail (T in the player), then take the pin away.
+    let pin = |body: &str| {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            s,
+            "POST /api/media/pin-thumb/{id} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut buf = String::new();
+        s.read_to_string(&mut buf).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(buf.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        v["thumbUrl"].as_str().unwrap().to_string()
+    };
+    let before = remote["videos"][0]["thumbUrl"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(
+        pin(r#"{"pct": 0.42}"#),
+        before,
+        "a pin is a new thumbnail version"
+    );
+    assert_eq!(pin(r#"{"pct": null}"#), before);
     let (_, body) = http(port, "GET", "/api/parity", "");
     let parity: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(parity["counts"]["done"].as_u64().unwrap() > 0);

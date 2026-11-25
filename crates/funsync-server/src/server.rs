@@ -306,7 +306,7 @@ impl AppState {
         let (st, videos) = (self.clone(), snap.videos.clone());
         let posters = tokio::task::spawn_blocking(move || {
             let dir = st.data_dir.join("custom-thumbs");
-            let http = slr_scout::http::Curl;
+            let http = crate::posters::Curl;
             crate::posters::run(
                 &st.library,
                 &videos,
@@ -334,7 +334,8 @@ impl AppState {
                             }
                             let dims = self.media.cached(&v.path).map(|m| (m.width, m.height));
                             let crop = crate::vr::thumb_crop(crate::vr::detect(&lib, v, dims));
-                            HashSet::from([crate::media::thumb_file_name(&v.id, &key, crop)])
+                            let pin = crate::remote::pin(&lib, &v.path);
+                            HashSet::from([crate::media::thumb_file_name(&v.id, &key, crop, pin)])
                         });
                         (v.id.clone(), used)
                     })
@@ -383,6 +384,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
         .route("/api/scan", post(scan_now))
         .route("/api/media/stream/{id}", get(stream))
         .route("/api/media/thumb/{id}", get(thumb))
+        .route("/api/media/pin-thumb/{id}", post(pin_thumb))
         .route("/api/media/script/{id}", get(script))
         .route("/api/media/subtitle/{id}", get(subtitle))
         .merge(crate::remote::routes())
@@ -612,6 +614,43 @@ async fn stream(
     send_file(&v.path, req, None).await
 }
 
+#[derive(Deserialize)]
+struct PinBody {
+    pct: Option<f64>,
+}
+
+/// Pin the frame at `pct` (0–1 of the length) as the video's thumbnail,
+/// replacing any custom one as the old app's frame picker does; `pct` null
+/// takes a pin away (the generated frame comes back).
+async fn pin_thumb(
+    State(st): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Json(b): Json<PinBody>,
+) -> Response {
+    let Some(v) = st.video(&id).await else {
+        return err(StatusCode::NOT_FOUND, "no such video");
+    };
+    {
+        let mut lib = st.library.write().await;
+        let thumbs = lib.lib_mut("customThumbnails");
+        match b.pct.filter(|p| p.is_finite()) {
+            Some(p) => thumbs[&v.path] = json!({"seekPct": p.clamp(0.0, 0.999)}),
+            None if thumbs
+                .get(&v.path)
+                .is_some_and(|t| t["seekPct"].is_number()) =>
+            {
+                thumbs.as_object_mut().map(|m| m.remove(&v.path));
+            }
+            None => {}
+        }
+    }
+    if let Err(e) = st.library_changed().await {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    let url = crate::remote::thumb_url(&*st.library.read().await, &v);
+    Json(json!({"ok": true, "thumbUrl": url})).into_response()
+}
+
 async fn thumb(
     State(st): State<Arc<AppState>>,
     UrlPath(id): UrlPath<String>,
@@ -646,8 +685,16 @@ async fn thumb(
             .await
             .ok()
             .map(|m| (m.width, m.height));
-        let crop = crate::vr::thumb_crop(crate::vr::detect(&*st.library.read().await, &v, dims));
-        match st.media.thumbnail(&v.id, Path::new(&v.path), crop).await {
+        let (crop, pin) = {
+            let lib = st.library.read().await;
+            let crop = crate::vr::thumb_crop(crate::vr::detect(&lib, &v, dims));
+            (crop, crate::remote::pin(&lib, &v.path))
+        };
+        match st
+            .media
+            .thumbnail(&v.id, Path::new(&v.path), crop, pin)
+            .await
+        {
             Ok(p) => (p, "image/jpeg", "public, max-age=86400"),
             Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, e),
         }

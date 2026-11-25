@@ -20,6 +20,7 @@ pub mod log;
 pub mod media;
 pub mod posters;
 pub mod prefs;
+pub mod previews;
 pub mod queue;
 pub mod remote;
 pub mod scan;

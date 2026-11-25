@@ -124,11 +124,18 @@ pub fn stat_key(path: &Path) -> std::io::Result<String> {
 }
 
 /// `crop` is a `thumb_crop` key (`vr::thumb_crop`), part of the name as in
-/// the old cache.
-pub fn thumb_file_name(video_id: &str, stat_key: &str, crop: Option<&str>) -> String {
+/// the old cache; `pin` a frame the user pinned (0–0.999 of the length),
+/// marked `e` (exact).
+pub fn thumb_file_name(
+    video_id: &str,
+    stat_key: &str,
+    crop: Option<&str>,
+    pin: Option<f64>,
+) -> String {
     format!(
-        "{video_id}_{stat_key}_single_{THUMB_MARKER}_{:04}_{THUMB_WIDTH}{}.jpg",
-        (THUMB_SEEK_PCT * 1000.0) as u32,
+        "{video_id}_{stat_key}_single_{THUMB_MARKER}{}_{:04}_{THUMB_WIDTH}{}.jpg",
+        if pin.is_some() { "e" } else { "" },
+        (pin.unwrap_or(THUMB_SEEK_PCT) * 1000.0) as u32,
         crop.map(|c| format!("_{c}")).unwrap_or_default()
     )
 }
@@ -300,12 +307,14 @@ impl Media {
     }
 
     /// The cached thumbnail of a video, generated when missing; `crop` is a
-    /// VR crop (`vr::thumb_crop`).
+    /// VR crop (`vr::thumb_crop`). A pinned frame (`pin`) is grabbed exactly
+    /// there: no keyframe skipping, no 10 s minimum, no retries.
     pub async fn thumbnail(
         &self,
         video_id: &str,
         path: &Path,
         crop: Option<&str>,
+        pin: Option<f64>,
     ) -> Result<PathBuf, String> {
         let meta = std::fs::metadata(path).map_err(|e| format!("video not found: {e}"))?;
         if meta.len() == 0 {
@@ -315,6 +324,7 @@ impl Media {
             video_id,
             &stat_key(path).map_err(|e| e.to_string())?,
             crop,
+            pin,
         ));
         if out.exists() {
             return Ok(out);
@@ -331,16 +341,23 @@ impl Media {
         let tmp_dir = std::env::temp_dir();
         let mut attempts: Vec<(f64, PathBuf)> = Vec::new();
         let mut result = Ok(());
-        for (i, seek) in seek_positions(md.duration).into_iter().enumerate() {
+        let positions = match pin {
+            Some(p) => vec![md.duration * p],
+            None => seek_positions(md.duration),
+        };
+        for (i, seek) in positions.into_iter().enumerate() {
             let budget = deadline.saturating_duration_since(Instant::now());
             if budget < Duration::from_secs(1) {
                 break;
             }
             let tmp = tmp_dir.join(format!("funsync-rust-thumb-{video_id}-{i}.jpg"));
-            match self.grab_frame(path, seek, crop, &tmp, budget).await {
+            match self
+                .grab_frame(path, seek, crop, &tmp, budget, pin.is_some())
+                .await
+            {
                 Ok(stats) => {
                     attempts.push((frame_score(stats), tmp));
-                    if frame_problem(stats).is_none() {
+                    if pin.is_some() || frame_problem(stats).is_none() {
                         break;
                     }
                 }
@@ -381,22 +398,23 @@ impl Media {
         crop: Option<&str>,
         out: &Path,
         budget: Duration,
+        exact: bool,
     ) -> Result<Option<FrameStats>, String> {
         let s = THUMB_STATS_SIZE;
         let graph = format!(
             "[0:v]{}scale={THUMB_WIDTH}:-2,split=2[o][s];[s]scale={s}:{s}:flags=area,format=gray[g]",
             crop_filters(crop)
         );
+        // Exact: `-ss` before `-i` without keyframe skipping is frame-accurate.
+        let skip: &[&str] = if exact {
+            &[]
+        } else {
+            &["-skip_frame", "nokey"]
+        };
         let child = Command::new(&self.ffmpeg)
-            .args([
-                "-v",
-                "error",
-                "-skip_frame",
-                "nokey",
-                "-ss",
-                &format!("{seek}"),
-                "-i",
-            ])
+            .args(["-v", "error"])
+            .args(skip)
+            .args(["-ss", &format!("{seek}"), "-i"])
             .arg(path)
             .args([
                 "-filter_complex",
@@ -525,10 +543,25 @@ mod tests {
     }
 
     #[test]
+    fn pinned_frames_have_their_own_exact_names() {
+        let auto = thumb_file_name("aaaaaaaaaaaa", "11111111", None, None);
+        let pinned = thumb_file_name("aaaaaaaaaaaa", "11111111", Some("sbs"), Some(0.4567));
+        assert_eq!(
+            auto,
+            format!("aaaaaaaaaaaa_11111111_single_{THUMB_MARKER}_0100_320.jpg")
+        );
+        assert_eq!(
+            pinned,
+            format!("aaaaaaaaaaaa_11111111_single_{THUMB_MARKER}e_0456_320_sbs.jpg")
+        );
+        assert!(THUMB_NAME.is_match(&pinned), "pruning knows them");
+    }
+
+    #[test]
     fn prune_keeps_what_videos_use() {
         let d = tempfile::tempdir().unwrap();
         let media = Media::new(d.path().to_path_buf());
-        let name = |id: &str, key: &str, crop| thumb_file_name(id, key, crop);
+        let name = |id: &str, key: &str, crop| thumb_file_name(id, key, crop, None);
         let files = [
             name("aaaaaaaaaaaa", "11111111", None),
             name("aaaaaaaaaaaa", "22222222", None),

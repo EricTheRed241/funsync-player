@@ -15,13 +15,14 @@
 //! rule34video cover also replaces an EroScripts preview or FapTap
 //! thumbnail); uploads and picks by hand stay. Images are saved as JPEG
 //! (≤ 640 wide) in this server's `custom-thumbs/` and recorded in
-//! `customThumbnails`. Blocking; network through an `Http` client.
+//! `customThumbnails`. Blocking; network through a `Fetch` client that
+//! never follows a redirect by itself, so every hop is checked against the
+//! allowed hosts (`fetch_image`).
 
 use std::path::Path;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use slr_scout::http::{Http, Request};
 use tokio::sync::RwLock;
 
 use crate::data::Library;
@@ -32,6 +33,7 @@ pub const FAPTAP_ATTEMPTS: &str = "faptapThumbnails";
 pub const RULE34_ATTEMPTS: &str = "rule34videoThumbnails";
 const RULE34_RETRY_MS: u64 = 24 * 60 * 60 * 1000;
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_REDIRECTS: usize = 3;
 const MAX_WIDTH: u32 = 640;
 /// Bits of 64 two pHashes may differ by and still be the same picture.
 pub const MATCH_THRESHOLD: u32 = 12;
@@ -47,6 +49,156 @@ const SAMPLE_BIG_FILE_SEEKS: usize = 24;
 const PASS_TIMEOUT: Duration = Duration::from_secs(90);
 const FRAME_TIMEOUT: Duration = Duration::from_secs(25);
 
+/// What one GET answered (no redirect followed).
+#[derive(Debug, Clone, Default)]
+pub struct Reply {
+    pub status: u16,
+    pub location: Option<String>,
+    pub content_type: String,
+}
+
+/// One GET that doesn't follow redirects; a 2xx body is written to `dest`.
+pub trait Fetch: Sync {
+    fn get(
+        &self,
+        url: &str,
+        headers: &[(&'static str, String)],
+        dest: &Path,
+    ) -> Result<Reply, String>;
+}
+
+/// curl, without `-L`, capped at MAX_BYTES and 20 s.
+pub struct Curl;
+
+impl Fetch for Curl {
+    fn get(
+        &self,
+        url: &str,
+        headers: &[(&'static str, String)],
+        dest: &Path,
+    ) -> Result<Reply, String> {
+        let mut cmd = std::process::Command::new("curl");
+        cmd.args([
+            "-s",
+            "-S",
+            "--max-time",
+            "20",
+            "--max-filesize",
+            &MAX_BYTES.to_string(),
+        ])
+        .args(["-A", slr_scout::http::USER_AGENT, "-D", "-", "-o"])
+        .arg(dest);
+        for (k, v) in headers {
+            cmd.arg("-H").arg(format!("{k}: {v}"));
+        }
+        let out = cmd
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|e| format!("can't run curl: {e}"))?;
+        if out.status.code() == Some(63) {
+            return Err("Image too large".into());
+        }
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        let mut reply = Reply::default();
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            if let Some(rest) = line.strip_prefix("HTTP/") {
+                reply.status = rest
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+            } else if let Some((k, v)) = line.split_once(':') {
+                match k.trim().to_ascii_lowercase().as_str() {
+                    "location" => reply.location = Some(v.trim().into()),
+                    "content-type" => reply.content_type = v.trim().to_ascii_lowercase(),
+                    _ => {}
+                }
+            }
+        }
+        Ok(reply)
+    }
+}
+
+/// `to` (a `Location`) against the URL that answered it.
+fn join_url(base: &str, to: &str) -> String {
+    if to.starts_with("https://") || to.starts_with("http://") {
+        return to.into();
+    }
+    if let Some(rest) = to.strip_prefix("//") {
+        return format!("https://{rest}");
+    }
+    let host_start = base.find("://").map_or(0, |i| i + 3);
+    let host_end = base[host_start..]
+        .find('/')
+        .map_or(base.len(), |i| host_start + i);
+    if to.starts_with('/') {
+        return format!("{}{to}", &base[..host_end]);
+    }
+    let dir = base
+        .rfind('/')
+        .filter(|&i| i >= host_end)
+        .unwrap_or(host_end);
+    format!("{}/{to}", &base[..dir])
+}
+
+/// Download an image into `dest` (`downloadImage`): every redirect hop
+/// `allowed` (each allow-list takes https only), at most 3 redirects, an image content type, at
+/// most 5 MB. `headers` per URL (a cookie for the forum only).
+pub fn fetch_image(
+    fetch: &dyn Fetch,
+    url: &str,
+    allowed: &dyn Fn(&str) -> bool,
+    headers: &dyn Fn(&str) -> Vec<(&'static str, String)>,
+    dest: &Path,
+) -> Result<(), String> {
+    let mut current = url.to_string();
+    for _ in 0..=MAX_REDIRECTS {
+        if !allowed(&current) {
+            return Err("Unsupported image link".into());
+        }
+        let mut h = headers(&current);
+        h.push(("Accept", "image/*".into()));
+        let r = fetch.get(&current, &h, dest)?;
+        match r.status {
+            300..=399 => {
+                let to = r
+                    .location
+                    .ok_or_else(|| format!("Image download failed ({})", r.status))?;
+                current = join_url(&current, &to);
+            }
+            200..=299 if !r.content_type.starts_with("image/") => return Err("Not an image".into()),
+            200..=299 if std::fs::metadata(dest).map_or(true, |m| m.len() > MAX_BYTES) => {
+                return Err("Image too large".into());
+            }
+            200..=299 => return Ok(()),
+            s => return Err(format!("Image download failed ({s})")),
+        }
+    }
+    Err("Too many redirects".into())
+}
+
+/// `src` as a JPEG at most 640 wide (`importThumbnail`).
+pub(crate) fn to_jpeg(media: &Media, src: &Path, dest: &Path) -> bool {
+    let scale = format!("scale='min({MAX_WIDTH},iw)':-2");
+    let args: [&std::ffi::OsStr; 12] = [
+        "-v".as_ref(),
+        "error".as_ref(),
+        "-i".as_ref(),
+        src.as_os_str(),
+        "-frames:v".as_ref(),
+        "1".as_ref(),
+        "-vf".as_ref(),
+        scale.as_ref(),
+        "-q:v".as_ref(),
+        "3".as_ref(),
+        "-y".as_ref(),
+        dest.as_os_str(),
+    ];
+    media.ffmpeg_blocking(args, FRAME_TIMEOUT).is_some() && dest.is_file()
+}
 /// One poster to try.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
@@ -235,49 +387,87 @@ pub fn best_distance(image: u64, frames: &[u64]) -> Option<u32> {
 }
 
 /// An image too small or of the wrong shape to be a frame (`dimensionExclusion`).
-fn misshapen(w: usize, h: usize) -> bool {
+pub(crate) fn misshapen(w: usize, h: usize) -> bool {
     let aspect = w as f64 / h as f64;
     w.max(h) < 320 || !(1.2..=3.2).contains(&aspect)
 }
 
-/// A file's first frame as grey pixels, at its own size (ffmpeg → PGM).
-fn decode_gray(media: &Media, file: &Path) -> Option<(usize, usize, Vec<u8>)> {
-    let args: [&std::ffi::OsStr; 12] = [
+/// Up to 6 frames, evenly spread, of a picture (an animated GIF / WebP has
+/// several; its first 60 are looked at) as grey pixels at the picture's own
+/// size (ffmpeg → PGM).
+fn decode_frames(media: &Media, file: &Path) -> Vec<(usize, usize, Vec<u8>)> {
+    let args: [&std::ffi::OsStr; 13] = [
         "-v".as_ref(),
         "error".as_ref(),
         "-i".as_ref(),
         file.as_os_str(),
         "-frames:v".as_ref(),
-        "1".as_ref(),
+        "60".as_ref(),
         "-f".as_ref(),
         "image2pipe".as_ref(),
         "-c:v".as_ref(),
         "pgm".as_ref(),
         "-pix_fmt".as_ref(),
         "gray".as_ref(),
+        "-".as_ref(),
     ];
-    let out = media.ffmpeg_blocking(args.iter().copied().chain(["-".as_ref()]), FRAME_TIMEOUT)?;
-    // "P5 <w> <h> <max>" and one whitespace byte, then the pixels.
-    let mut fields = Vec::new();
+    let out = media
+        .ffmpeg_blocking(args, FRAME_TIMEOUT)
+        .unwrap_or_default();
+    // Each frame: "P5 <w> <h> <max>", one whitespace byte, the pixels.
+    let mut frames = Vec::new();
     let mut i = 0;
-    while fields.len() < 4 && i < out.len() {
-        while i < out.len() && out[i].is_ascii_whitespace() {
-            i += 1;
+    loop {
+        let mut fields = Vec::new();
+        while fields.len() < 4 && i < out.len() {
+            while i < out.len() && out[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let start = i;
+            while i < out.len() && !out[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            fields.push(String::from_utf8_lossy(&out[start..i]).into_owned());
         }
-        let start = i;
-        while i < out.len() && !out[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        fields.push(String::from_utf8_lossy(&out[start..i]).into_owned());
+        let dims = (
+            fields.get(1).and_then(|f| f.parse().ok()),
+            fields.get(2).and_then(|f| f.parse().ok()),
+        );
+        let (Some("P5"), (Some(w), Some(h))) = (fields.first().map(String::as_str), dims) else {
+            break;
+        };
+        let Some(px) = out.get(i + 1..i + 1 + w * h) else {
+            break;
+        };
+        frames.push((w, h, px.to_vec()));
+        i += 1 + w * h;
     }
-    let (w, h): (usize, usize) = (fields.get(1)?.parse().ok()?, fields.get(2)?.parse().ok()?);
-    let px = out.get(i + 1..i + 1 + w * h)?.to_vec();
-    (fields[0] == "P5").then_some((w, h, px))
+    let n = frames.len().min(6);
+    (0..n)
+        .map(|k| frames[k * frames.len() / n].clone())
+        .collect()
+}
+
+/// A picture's hashes (each looked-at frame of an animation), none when it
+/// can't be read, is too small or of the wrong shape, or is flat.
+pub fn image_hashes(media: &Media, file: &Path) -> Vec<u64> {
+    decode_frames(media, file)
+        .into_iter()
+        .filter(|(w, h, _)| !misshapen(*w, *h))
+        .map(|(w, h, px)| phash(&px, w, h, (0.0, 0.0, w as f64, h as f64)))
+        .filter(|(_, c)| *c >= MIN_CONTRAST)
+        .map(|(h, _)| h)
+        .collect()
+}
+
+/// The closest pair between a picture's hashes and the video's frames.
+pub fn closest(image: &[u64], frames: &[u64]) -> Option<u32> {
+    image.iter().filter_map(|h| best_distance(*h, frames)).min()
 }
 
 /// Grey frames across the video at 128 wide: every keyframe of the middle
 /// 90 % (thinned to 400), else evenly spaced seeks (`sample_gray_frames`).
-fn sample_video(media: &Media, path: &str) -> (usize, usize, Vec<Vec<u8>>) {
+pub(crate) fn sample_video(media: &Media, path: &str) -> (usize, usize, Vec<Vec<u8>>) {
     let Some(m) = media
         .cached(path)
         .filter(|m| m.duration > 0.0 && m.width > 0 && m.height > 0)
@@ -393,7 +583,7 @@ pub fn run(
     videos: &[Video],
     media: &Media,
     dir: &Path,
-    http: &dyn Http,
+    http: &dyn Fetch,
     delay: Duration,
     now: u64,
 ) -> Vec<(Job, Outcome)> {
@@ -411,7 +601,7 @@ fn import(
     lib: &RwLock<Library>,
     media: &Media,
     dir: &Path,
-    http: &dyn Http,
+    http: &dyn Fetch,
     job: &Job,
     now: u64,
 ) -> Outcome {
@@ -456,74 +646,51 @@ fn import(
             settle("unusable", json!({}))
         }
     };
-    let valid = if faptap {
-        is_faptap_url(&job.url)
-    } else {
-        is_rule34video_poster_url(&job.url)
-    };
-    if !valid {
-        return unusable();
-    }
     let stem = format!("{:x}-{source}", md5::compute(&job.path));
     let part = dir.join(format!("{stem}.part"));
     let _ = std::fs::create_dir_all(dir);
-    let mut req = Request::get(job.url.clone()).header("Accept", "image/*");
-    if !faptap {
-        req = req.header("Referer", "https://rule34video.com/");
-    }
-    let got = http.download(&req, &part);
+    let allowed_url: &dyn Fn(&str) -> bool = if faptap {
+        &is_faptap_url
+    } else {
+        &is_rule34video_poster_url
+    };
+    let headers = |_: &str| {
+        let referer = (!faptap).then(|| ("Referer", "https://rule34video.com/".to_string()));
+        referer.into_iter().collect()
+    };
+    let got = fetch_image(http, &job.url, allowed_url, &headers, &part);
     let finish = |o: Outcome| {
         let _ = std::fs::remove_file(&part);
         o
     };
     if let Err(e) = got {
-        let gone = e.contains("404") || e.contains("410");
-        return finish(match (gone, faptap) {
-            (true, true) => settle("gone", json!({})),
-            (true, false) => settle("unusable", json!({})),
+        // Answers that won't change on the next try (`SETTLED_ERROR`).
+        let gone = e.contains("(404)") || e.contains("(410)");
+        let settled = gone
+            || [
+                "Not an image",
+                "Image too large",
+                "Unsupported image link",
+                "Too many redirects",
+            ]
+            .contains(&e.as_str());
+        return finish(match (faptap, gone, settled) {
+            (true, true, _) => settle("gone", json!({})),
+            (false, _, true) => settle("unusable", json!({})),
             _ => fail(),
         });
-    }
-    if std::fs::metadata(&part).map_or(true, |m| m.len() > MAX_BYTES) {
-        return finish(unusable());
     }
     let mut distance = None;
     if faptap {
         let (w, h, frames) = sample_video(media, &job.path);
         let video: Vec<u64> = frames.iter().flat_map(|f| frame_hashes(f, w, h)).collect();
-        let image = decode_gray(media, &part)
-            .filter(|(iw, ih, _)| !misshapen(*iw, *ih))
-            .map(|(iw, ih, px)| phash(&px, iw, ih, (0.0, 0.0, iw as f64, ih as f64)))
-            .filter(|(_, c)| *c >= MIN_CONTRAST);
-        distance = image.and_then(|(hash, _)| best_distance(hash, &video));
+        distance = closest(&image_hashes(media, &part), &video);
         if distance.is_none_or(|d| d > MATCH_THRESHOLD) {
             return finish(settle("no-match", json!({"distance": distance})));
         }
     }
     let dest = dir.join(format!("{stem}.jpg"));
-    let scale = format!("scale='min({MAX_WIDTH},iw)':-2");
-    let args: [&std::ffi::OsStr; 10] = [
-        "-v".as_ref(),
-        "error".as_ref(),
-        "-i".as_ref(),
-        part.as_os_str(),
-        "-frames:v".as_ref(),
-        "1".as_ref(),
-        "-vf".as_ref(),
-        scale.as_ref(),
-        "-q:v".as_ref(),
-        "3".as_ref(),
-    ];
-    let converted = media
-        .ffmpeg_blocking(
-            args.iter()
-                .copied()
-                .chain(["-y".as_ref(), dest.as_os_str()]),
-            FRAME_TIMEOUT,
-        )
-        .is_some()
-        && dest.is_file();
-    if !converted {
+    if !to_jpeg(media, &part, &dest) {
         return finish(unusable());
     }
     let mut l = lib.blocking_write();
@@ -553,9 +720,8 @@ fn import(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use slr_scout::http::Response;
 
     #[test]
     fn hosts_and_slots() {
@@ -662,19 +828,89 @@ mod tests {
         );
     }
 
-    /// Serves the files of a map; 404 otherwise.
-    struct Fake(std::collections::HashMap<String, Vec<u8>>);
-    impl Http for Fake {
-        fn send(&self, _: &Request) -> Result<Response, String> {
-            Err("unused".into())
+    /// Serves the images of a map; `redirect:<url>` answers 302 there; 404 otherwise.
+    pub(crate) struct Fake(pub(crate) std::collections::HashMap<String, Vec<u8>>);
+    impl Fetch for Fake {
+        fn get(
+            &self,
+            url: &str,
+            _: &[(&'static str, String)],
+            dest: &Path,
+        ) -> Result<Reply, String> {
+            let Some(body) = self.0.get(url) else {
+                return Ok(Reply {
+                    status: 404,
+                    ..Default::default()
+                });
+            };
+            if let Some(to) = std::str::from_utf8(body)
+                .ok()
+                .and_then(|b| b.strip_prefix("redirect:"))
+            {
+                return Ok(Reply {
+                    status: 302,
+                    location: Some(to.into()),
+                    ..Default::default()
+                });
+            }
+            std::fs::write(dest, body).map_err(|e| e.to_string())?;
+            Ok(Reply {
+                status: 200,
+                content_type: "image/jpeg".into(),
+                ..Default::default()
+            })
         }
-        fn download(&self, req: &Request, dest: &Path) -> Result<(), String> {
-            let body = self
-                .0
-                .get(&req.url)
-                .ok_or("The requested URL returned error: 404")?;
-            std::fs::write(dest, body).map_err(|e| e.to_string())
-        }
+    }
+
+    #[test]
+    fn every_redirect_hop_is_checked() {
+        let d = tempfile::tempdir().unwrap();
+        let dest = d.path().join("x");
+        let http = Fake(
+            [
+                (
+                    "https://faptap.net/a.webp".to_string(),
+                    b"redirect:/cdn/a.webp".to_vec(),
+                ),
+                ("https://faptap.net/cdn/a.webp".to_string(), b"img".to_vec()),
+                (
+                    "https://faptap.net/b.webp".to_string(),
+                    b"redirect:https://evil.test/b.webp".to_vec(),
+                ),
+                (
+                    "https://faptap.net/c.webp".to_string(),
+                    b"redirect:/c.webp".to_vec(),
+                ),
+            ]
+            .into(),
+        );
+        let get = |u: &str| fetch_image(&http, u, &is_faptap_url, &|_| Vec::new(), &dest);
+        assert_eq!(get("https://faptap.net/a.webp"), Ok(()));
+        assert_eq!(std::fs::read(&dest).unwrap(), b"img");
+        assert_eq!(
+            get("https://faptap.net/b.webp"),
+            Err("Unsupported image link".into())
+        );
+        assert_eq!(
+            get("https://faptap.net/c.webp"),
+            Err("Too many redirects".into())
+        );
+        assert_eq!(
+            get("https://faptap.net/gone.webp"),
+            Err("Image download failed (404)".into())
+        );
+        assert_eq!(
+            get("http://faptap.net/a.webp"),
+            Err("Unsupported image link".into())
+        );
+        assert_eq!(
+            join_url("https://h.test/a/b.jpg", "c.jpg"),
+            "https://h.test/a/c.jpg"
+        );
+        assert_eq!(
+            join_url("https://h.test/a/b.jpg", "//cdn.test/x"),
+            "https://cdn.test/x"
+        );
     }
 
     #[test]
