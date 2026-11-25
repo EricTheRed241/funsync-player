@@ -42,6 +42,26 @@
   document.addEventListener('ended', () => { replay.style.display = 'block'; }, true);
   document.addEventListener('play', () => { replay.style.display = 'none'; }, true);
 
+  // A-B loop (A / B set the points, Escape clears) and a small status toast.
+  const loop = { a: null, b: null, v: null };
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2000;display:none;white-space:pre;'
+    + 'font:13px/1.4 system-ui;padding:8px 12px;border-radius:8px;background:#000c;color:#fff;pointer-events:none';
+  document.addEventListener('DOMContentLoaded', () => document.body.append(toast));
+  let toastTimer = 0;
+  const say = (text, ms = 2500) => {
+    toast.textContent = text;
+    toast.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.style.display = 'none'; }, ms);
+  };
+  const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  document.addEventListener('timeupdate', (e) => {
+    const v = e.target;
+    if (v === loop.v && loop.a !== null && loop.b !== null && v.currentTime >= loop.b) v.currentTime = loop.a;
+  }, true);
+  document.addEventListener('emptied', (e) => { if (e.target === loop.v) loop.a = loop.b = null; }, true);
+
   document.addEventListener('keydown', async (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
     const v = video();
@@ -66,6 +86,18 @@
       case 'p': case 'P':
         if (document.pictureInPictureElement) document.exitPictureInPicture(); else v.requestPictureInPicture?.();
         break;
+      case 'a': case 'A': loop.v = v; loop.a = v.currentTime; if (loop.b !== null && loop.b <= loop.a) loop.b = null; say(`Loop A ${clock(loop.a)}`); break;
+      case 'b': case 'B':
+        if (loop.a === null || v.currentTime <= loop.a) { say('Set A first (before B)'); break; }
+        loop.b = v.currentTime;
+        say(`Loop ${clock(loop.a)} → ${clock(loop.b)}`);
+        break;
+      case 'Escape': if (loop.a === null) return; loop.a = loop.b = null; say('Loop cleared'); break;
+      case 'i': case 'I':
+        say(`${decodeURIComponent((document.title || '').trim())}\n${clock(v.currentTime)} / ${clock(v.duration || 0)}`
+          + ` · ${v.videoWidth}×${v.videoHeight} · ${v.playbackRate}×${loop.a !== null ? `\nLoop ${clock(loop.a)} → ${loop.b !== null ? clock(loop.b) : '…'}` : ''}`, 4000);
+        break;
+      case 'h': case 'H': window.open('/remote/devices.html', 'funsync-devices'); break;
       case 'r': case 'R': v.style.objectFit = FITS[(FITS.indexOf(v.style.objectFit || 'contain') + 1) % FITS.length]; break;
       case 'v': case 'V': {
         // The player's variant menu (its radio rows); V next, Shift+V previous.
