@@ -100,6 +100,40 @@ fn read(path: &str) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+/// A funscript file's actions (at least 2).
+pub fn read_actions(path: &str) -> Option<Vec<Action>> {
+    actions(&read(path)?)
+}
+
+/// The Orgasm Switch plan (`settings.player.orgasmConfig`, an association
+/// entry): `single` plays one script, `multi` a main script and its axes,
+/// `custom` falls back to `single` or the main route's script.
+pub fn orgasm(cfg: &Value) -> Option<Vec<(String, Vec<Action>)>> {
+    let main_route = || {
+        cfg["custom"]["routes"]
+            .as_array()?
+            .iter()
+            .find(|r| r["role"] == "main")?["scriptPath"]
+            .as_str()
+    };
+    let (main, axes) = match cfg["active"].as_str()? {
+        "single" => (cfg["single"].as_str()?, None),
+        "multi" => (
+            cfg["multi"]["main"].as_str()?,
+            cfg["multi"]["axes"].as_object(),
+        ),
+        "custom" => (cfg["single"].as_str().or_else(main_route)?, None),
+        _ => return None,
+    };
+    let mut out = vec![("L0".to_string(), read_actions(main)?)];
+    for (suffix, p) in axes.into_iter().flatten() {
+        if let (Some(id), Some(a)) = (tcode_of(suffix), p.as_str().and_then(read_actions)) {
+            out.push((id.to_string(), a));
+        }
+    }
+    Some(out)
+}
+
 /// Axis companions next to a script: `<stem>.<axis>.funscript` and
 /// `<stem>.generated.<axis>.funscript`.
 fn companions(script: &str) -> Vec<Axis> {

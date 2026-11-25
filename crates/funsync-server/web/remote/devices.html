@@ -49,6 +49,18 @@
     <label>Offset (ms) <input name="defaultOffset" type="number"></label>
     <button data-a="connect">Connect</button> <button data-a="disconnect">Disconnect</button> <button data-a="">Save</button>
   </fieldset>
+  <fieldset id="vr">
+    <legend>PCVR companion bridge (HereSphere timestamp server)</legend>
+    <p class="st"></p>
+    <label>Host <input name="lastHost" placeholder="127.0.0.1"> port <input name="lastPort" type="number" placeholder="23554"></label>
+    <label>Offset (ms) <input name="offset" type="number"></label>
+    <button data-a="connect">Connect</button> <button data-a="disconnect">Disconnect</button> <button data-a="">Save</button>
+  </fieldset>
+  <fieldset id="sessions">
+    <legend>Session</legend>
+    <p class="st"></p>
+    <details><summary>History</summary><ol reversed></ol></details>
+  </fieldset>
   <fieldset id="player">
     <legend>Smoothing</legend>
     <label>Interpolation <select name="smoothing">
@@ -61,12 +73,14 @@
 <script>
 const AXES = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'V0', 'A0'];
 const $ = (s, r = document) => r.querySelector(s);
-const NUM = ['baudRate', 'udpPort', 'port', 'defaultOffset', 'speedLimit'];
+const NUM = ['baudRate', 'udpPort', 'port', 'defaultOffset', 'speedLimit', 'lastPort', 'offset'];
+const SOURCE = { 'web-remote': 'Web remote', vr: 'VR' };
+const when = (ms) => (ms ? new Date(ms).toLocaleString() : '');
 let data;
 
 function render(d, fill = true) {
   data = d;
-  for (const kind of ['tcode', 'buttplug', 'player']) {
+  for (const kind of ['tcode', 'buttplug', 'vr', 'player']) {
     const box = $('#' + kind), s = d[kind] || {};
     if (fill) for (const el of box.querySelectorAll('[name]')) el.value = s[el.name] ?? '';
   }
@@ -77,13 +91,23 @@ function render(d, fill = true) {
     $('#dag').value = f.dag ?? ''; $('#dkp').value = f.dkp ?? ''; $('#dsp').value = f.dsp ?? '';
     $('#tcode tbody').innerHTML = '';
   }
-  for (const kind of ['tcode', 'buttplug']) {
+  for (const kind of ['tcode', 'buttplug', 'vr']) {
     const box = $('#' + kind);
     const st = d.status[kind];
+    const err = st?.error || st?.lastError;
     if (st) $('.st', box).textContent = st.connected
-      ? 'Connected' + (st.devices?.length ? ': ' + st.devices.join(', ') : '')
-      : 'Not connected' + (st.error ? ` (${st.error})` : '');
+      ? 'Connected' + (st.devices?.length ? ': ' + st.devices.join(', ') : '') + (st.video ? `, playing ${st.video}` : '')
+      : 'Not connected' + (err ? ` (${err})` : '');
   }
+  const cur = d.sessions?.current;
+  $('#sessions .st').textContent = cur
+    ? `${SOURCE[cur.source]} (${cur.identifier}): ${cur.state}${cur.videoName ? `, ${cur.videoName}` : ''}`
+    : 'No session';
+  $('#sessions ol').innerHTML = (d.sessions?.history || []).slice().reverse().map((s) => {
+    const li = document.createElement('li');
+    li.textContent = `${when(s.startedAt)} – ${SOURCE[s.source]} (${s.identifier}): ${(s.videos || []).map((v) => v.name).join(', ') || 'no video'}`;
+    return li.outerHTML;
+  }).join('');
   const body = $('#tcode tbody');
   if (!body.children.length) body.innerHTML = AXES.map(a => {
     const x = (d.tcode?.axes || {})[a] || {};

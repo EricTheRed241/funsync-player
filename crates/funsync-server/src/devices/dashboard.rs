@@ -161,7 +161,8 @@ pub fn sample(st: &AppState, play: Option<&Play>, s: &Value) -> Value {
     });
     let active = d.connected("tcode") || d.connected("buttplug");
     json!({
-        "source": play.map(|_| "phone"),
+        "source": play.map(|p| if p.source == "vr" { "vr" } else { "phone" }),
+        "vr": super::vr::json(st),
         "script": play.map(|p| json!({"name": p.name, "actions": p.axes[0].1.len(),
             "durationMs": p.axes[0].1.last().map(|a| a.at)})),
         "sync": {
@@ -204,25 +205,42 @@ pub async fn status(st: &AppState) -> Value {
     if !d.connected("tcode") && !d.connected("buttplug") {
         issues.push("No device is connected.".to_string());
     }
+    let vr_bridge = super::vr::json(st);
+    if vr_bridge["linkState"] == "waiting" {
+        issues.push(
+            "VR companion bridge is connected but has had no packets from the player for over 5 s."
+                .to_string(),
+        );
+    }
     let play = d.play.lock().unwrap().clone();
     let phone = d.phone.lock().unwrap().clone();
+    let names: Vec<String> = d
+        .buttplug_names
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|x| x.1.clone())
+        .collect();
     let now = now_ms();
     json!({
         "issues": issues,
         "devices": {
             "tcode": {"connected": d.connected("tcode"), "profile": profiles::active(tc),
                       "label": label(tc), "link": link},
-            "buttplug": {"connected": d.connected("buttplug"),
-                         "devices": *d.buttplug_names.lock().unwrap()},
+            "buttplug": {"connected": d.connected("buttplug"), "devices": names},
         },
-        "session": play.as_ref().map(|p| json!({"source": "web remote",
+        "vrBridge": vr_bridge,
+        "session": play.as_ref().map(|p| json!({
+            "source": if p.source == "vr" { "VR" } else { "web remote" },
             "state": if p.paused { "paused" } else { "playing" },
             "videoId": p.video_id, "video": p.name, "positionMs": p.time().round()})),
+        "sessions": super::sessions_json(st).await,
         "phone": {
             "connected": phone.is_some(),
             "ip": phone.as_ref().map(|p| &p.0), "videoId": phone.as_ref().map(|p| &p.1),
-            "video": play.as_ref().map(|p| &p.name),
-            "lastState": play.as_ref().map(|p| json!({"at": p.at.round(), "paused": p.paused})),
+            "video": play.as_ref().filter(|p| p.source != "vr").map(|p| &p.name),
+            "lastState": play.as_ref().filter(|p| p.source != "vr")
+                .map(|p| json!({"at": p.at.round(), "paused": p.paused})),
         },
         "backend": {"pid": std::process::id(), "startedAt": iso(st.started_at),
                     "uptimeS": (now - st.started_at) / 1000,
@@ -309,6 +327,7 @@ async fn telemetry(
                 "seq": seq, "t": at, "linkState": s["tcode"]["link"]["state"],
                 "sent": s["tcode"]["link"]["sent"]["commands"],
                 "mediaMs": s["sync"]["mediaTimeMs"], "paused": s["sync"]["paused"],
+                "vrPacketAgeMs": s["vr"]["lastPacketAgeMs"], "vrJitterMs": s["vr"]["jitterMs"],
             })).collect::<Vec<_>>(),
             "commands": t.commands.iter().filter(|x| x.0 > cmd_since)
                 .map(|(t, cmd)| json!({"t": t, "cmd": cmd})).collect::<Vec<_>>(),

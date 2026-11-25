@@ -133,7 +133,7 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
     let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
     let (mut phone, _) = tokio_tungstenite::connect_async(url).await.unwrap();
     let mut got = Vec::new();
-    while got.len() < 2 {
+    while got.len() < 3 {
         if let Some(Ok(Message::Text(t))) = phone.next().await {
             got.push(serde_json::from_str::<serde_json::Value>(&t).unwrap());
         }
@@ -141,6 +141,8 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
     assert_eq!(got[0]["type"], "script-ready");
     assert_eq!(got[1]["type"], "device-status");
     assert_eq!(got[1]["devices"][0]["kind"], "tcode");
+    assert_eq!(got[2]["type"], "orgasm-state");
+    assert_eq!(got[2]["configured"], false);
 
     for m in [
         r#"{"type":"hello","duration":60}"#,
@@ -262,4 +264,153 @@ async fn phone_playback_drives_a_tcode_websocket_device() {
     )
     .await;
     assert_eq!(d["tcode"]["wsUrl"], format!("ws://127.0.0.1:{dev_port}"));
+}
+
+/// Import `cfg` into a temp data folder (auto-connect TCode again, as the
+/// Devices page would) and serve it.
+fn serve(cfg: serde_json::Value) -> (Kill, u16, tempfile::TempDir) {
+    let bin = env!("CARGO_BIN_EXE_funsync-server");
+    let (old, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(old.path().join("config.json"), cfg.to_string()).unwrap();
+    let ok = Command::new(bin)
+        .args(["import", "--from"])
+        .arg(old.path())
+        .arg("--data-dir")
+        .arg(data.path())
+        .status()
+        .unwrap();
+    assert!(ok.success());
+    let lib_file = data.path().join("library.json");
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&lib_file).unwrap()).unwrap();
+    saved["config"]["settings"]["tcode"]["autoConnect"] = true.into();
+    std::fs::write(&lib_file, saved.to_string()).unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let srv = Kill(
+        Command::new(bin)
+            .args(["--port", &port.to_string(), "--data-dir"])
+            .arg(data.path())
+            .spawn()
+            .unwrap(),
+    );
+    (srv, port, data)
+}
+
+/// The next TCode frame the fake device gets that starts with `prefix`.
+async fn frame_starting(
+    device: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    prefix: &str,
+) -> String {
+    loop {
+        let m = tokio::time::timeout(Duration::from_secs(5), device.next())
+            .await
+            .unwrap_or_else(|_| panic!("no frame starting with {prefix}"))
+            .unwrap()
+            .unwrap();
+        let f = m.into_text().unwrap().to_string();
+        if f.starts_with(prefix) {
+            return f;
+        }
+    }
+}
+
+#[tokio::test]
+async fn headset_bridge_then_phone_take_over_and_orgasm_switch() {
+    let dev = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dev_port = dev.local_addr().unwrap().port();
+    let hs = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hs_port = hs.local_addr().unwrap().port();
+    let lib = tempfile::tempdir().unwrap();
+    std::fs::write(lib.path().join("Scene.mp4"), b"0").unwrap();
+    std::fs::write(
+        lib.path().join("Scene.funscript"),
+        br#"{"actions":[{"at":0,"pos":0},{"at":60000,"pos":100}]}"#,
+    )
+    .unwrap();
+    let finisher = lib.path().join("finisher.json");
+    std::fs::write(
+        &finisher,
+        br#"{"actions":[{"at":0,"pos":50},{"at":1000,"pos":50}]}"#,
+    )
+    .unwrap();
+    let (_srv, port, _data) = serve(serde_json::json!({"settings": {
+        "library": {"sources": [{"id": "1", "name": "Lib", "path": lib.path(), "enabled": true}]},
+        "tcode": {"transport": "websocket", "wsUrl": format!("ws://127.0.0.1:{dev_port}"),
+                  "axes": {"L0": {"min": 0, "max": 100}}},
+        "vr": {"lastHost": "127.0.0.1", "lastPort": hs_port},
+        "player": {"orgasmConfig": {"active": "single", "single": finisher}},
+    }}));
+    let (sock, _) = tokio::time::timeout(Duration::from_secs(10), dev.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut device = tokio_tungstenite::accept_async(sock).await.unwrap();
+    let id = loop {
+        if let Some(id) = get(port, "/api/videos").await[0]["id"].as_str() {
+            break id.to_string();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    // The headset plays Scene.mp4 at 30 s: the bridge connects and drives.
+    post(port, "/api/devices", r#"{"kind":"vr","action":"connect"}"#).await;
+    let (mut headset, _) = tokio::time::timeout(Duration::from_secs(10), hs.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::spawn(async move {
+        for i in 0.. {
+            let p = serde_json::json!({"path": "C:\\VR\\Scene.mp4",
+                "currentTime": 30.0 + i as f64 * 0.1, "playbackSpeed": 1, "playerState": 0})
+            .to_string();
+            let mut buf = (p.len() as u32).to_le_bytes().to_vec();
+            buf.extend(p.as_bytes());
+            if headset.write_all(&buf).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    let f = frame_starting(&mut device, "L0").await;
+    let pos: u32 = f[2..6].parse().unwrap();
+    assert!((4500..5600).contains(&pos), "{f}");
+    let s = get(port, "/api/status").await;
+    assert_eq!(s["vrBridge"]["connected"], true, "{s}");
+    assert_eq!(s["vrBridge"]["video"], "Scene.mp4");
+    assert_eq!(s["sessions"]["current"]["source"], "vr");
+    assert_eq!(s["sessions"]["current"]["state"], "playing");
+    assert_eq!(s["session"]["source"], "VR");
+
+    // A phone opens the video: last wins, the bridge is dropped.
+    let url = format!("ws://127.0.0.1:{port}/api/remote/sync?videoId={id}");
+    let (mut phone, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let mut configured = None;
+    while configured.is_none() {
+        if let Some(Ok(Message::Text(t))) = phone.next().await {
+            let m: serde_json::Value = serde_json::from_str(&t).unwrap();
+            if m["type"] == "orgasm-state" {
+                configured = Some(m["configured"].clone());
+            }
+        }
+    }
+    assert_eq!(configured, Some(true.into()));
+    let s = get(port, "/api/status").await;
+    assert_eq!(s["vrBridge"]["connected"], false, "{s}");
+    assert_eq!(s["sessions"]["current"]["source"], "web-remote");
+    assert_eq!(s["sessions"]["history"][0]["source"], "vr");
+    assert_eq!(
+        s["sessions"]["history"][0]["videos"][0]["name"],
+        "Scene.mp4"
+    );
+
+    // Hold the Orgasm Switch: the finisher loop plays though the video is paused.
+    phone
+        .send(Message::text(r#"{"type":"orgasm-hold","active":true}"#))
+        .await
+        .unwrap();
+    assert_eq!(frame_starting(&mut device, "L0").await, "L05000I17\n");
 }

@@ -10,12 +10,25 @@ use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 
 /// What the engine sends: stroke position 0–100, stroke speed (units/s),
-/// move time in ms.
-#[derive(Clone, Copy, Default, PartialEq)]
+/// move time in ms. With custom routing, `routed` holds `(device index,
+/// pos, speed)` per routed device and the other devices get nothing.
+#[derive(Clone, Default, PartialEq)]
 pub struct Frame {
     pub pos: f64,
     pub speed: f64,
     pub ms: u32,
+    pub routed: Option<Vec<(u64, f64, f64)>>,
+}
+
+impl Frame {
+    /// Stop the vibrators (strokers hold); true when anything changed.
+    pub fn still(&mut self) -> bool {
+        let mut changed = std::mem::replace(&mut self.speed, 0.0) != 0.0;
+        for r in self.routed.iter_mut().flatten() {
+            changed |= std::mem::replace(&mut r.2, 0.0) != 0.0;
+        }
+        changed
+    }
 }
 
 struct Device {
@@ -37,11 +50,12 @@ fn device(d: &Value) -> Device {
     }
 }
 
-/// Run against Intiface until the socket fails; `names` mirrors the device list.
+/// Run against Intiface until the socket fails; `names` mirrors the device
+/// list as `(index, name)`.
 pub async fn session(
     port: u64,
     rx: &mut watch::Receiver<Frame>,
-    names: &Mutex<Vec<String>>,
+    names: &Mutex<Vec<(u64, String)>>,
     connected: impl FnOnce(),
 ) -> Result<(), String> {
     let (ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}"))
@@ -70,15 +84,22 @@ pub async fn session(
         tokio::select! {
             r = rx.changed() => {
                 r.map_err(|e| e.to_string())?;
-                let f = *rx.borrow_and_update();
+                let f = rx.borrow_and_update().clone();
                 for d in &devices {
+                    let (pos, speed) = match &f.routed {
+                        None => (f.pos, f.speed),
+                        Some(r) => match r.iter().find(|x| x.0 == d.index) {
+                            Some(x) => (x.1, x.2),
+                            None => continue,
+                        },
+                    };
                     if d.linear {
                         let v = json!({"DeviceIndex": d.index, "Vectors":
-                            [{"Index": 0, "Duration": f.ms, "Position": f.pos / 100.0}]});
+                            [{"Index": 0, "Duration": f.ms, "Position": pos / 100.0}]});
                         tx.send(msg("LinearCmd", v)).await.map_err(|e| e.to_string())?;
                     }
                     if d.vibrators > 0 {
-                        let s = (f.speed / 400.0).clamp(0.0, 1.0);
+                        let s = (speed / 400.0).clamp(0.0, 1.0);
                         let scalars: Vec<Value> = (0..d.vibrators)
                             .map(|i| json!({"Index": i, "Scalar": s, "ActuatorType": "Vibrate"}))
                             .collect();
@@ -103,7 +124,7 @@ pub async fn session(
                         devices.retain(|d| d.index != i);
                     }
                 }
-                *names.lock().unwrap() = devices.iter().map(|d| d.name.clone()).collect();
+                *names.lock().unwrap() = devices.iter().map(|d| (d.index, d.name.clone())).collect();
             }
         }
     }

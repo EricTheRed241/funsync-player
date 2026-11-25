@@ -93,8 +93,8 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Rate / favourite / playlist / queue edits from the headset | done | HereSphere scene POST: rating, `isFavorite`, `Playlist:<name>` and `Queue:Up next` tags (only tags changed since the scene was served count); DeoVR is read-only, as before |
 | Review on end from the headset | done | `POST /heresphere/events/<id>`: a play takes the video out of the queue (once per video); a pause / close at ≥ 90 % of an unrated video files it under Needs review |
 | VR decision (projection, filename, frames, shape) | partial | VR Format projection, Mark as VR / Flat, filename rules (patterns, studio codes, `XXVR-123`, `VR180`, bare `VR`), ~2:1 ≥ 3200 wide fallback from probed dimensions (in memory, so a listing only sees videos probed since start); frame-based stereo detection (`stereo_detect.py`) not ported |
-| PCVR companion bridge (HereSphere timestamp API) | not started | |
-| Session status card, VR ↔ web remote mutex | not started | |
+| PCVR companion bridge (HereSphere timestamp API) | done | the server's TCP client to the timestamp server (`settings.vr.lastHost` / `lastPort`, 23554; 4-byte length + JSON, keep-alive every second, dropped after 8 s without packets) drives the same engine with `settings.vr.offset`; the headset's video is found by this server's stream URL or by file name (normalized as the old app does); Connect / Disconnect on the Devices page (reconnects at start when left connected); `vrBridge` in `/api/status` and the dashboard (link state, packet age, jitter, video) |
+| Session status card, VR ↔ web remote mutex | done | last wins: a phone opening a video disconnects the VR bridge, the bridge's first packet kicks the phone; current session and the last 50 (`settings.sessions.history`, the old app's shape) in `/api/status` `sessions` and on the Devices page (Session card with history), not a docked card |
 
 ## Funscript support
 
@@ -104,7 +104,8 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Heatmap and gap indicators on the seek bar | done | web remote |
 | Script variants switch (V key) | partial | from the web remote's player (`switch-variant` → `variant-changed`): the server plays the variant with its own axis files, the video's hand-made axes fill in and beat generated ones; no V key (no desktop player) |
 | Multi-axis (TCode 10 axes, embedded axes) | done | server engine (`src/devices/`): companion axes L1/L2/R0/R1/R2/V0/V1/V2/A0 and axes embedded in the main script (`additional_axes`, `raw`, `axes`, `channels`, sibling keys, inline TCode) |
-| Custom routing per device | not started | |
+| Custom routing per device | done | the video's association (`active: "custom"`, `custom.routes`) gives each Buttplug device its script (the main route plays the main script); index first when the name there still matches, else by name, and the new index is stored; unrouted devices get nothing. TCode routes and script-path recovery not ported; no editor (routes come from the import) |
+| Orgasm Switch from the phone | done | `orgasm-hold` (hold / toggle per `player.orgasmSwitchMode`) loops `player.orgasmConfig` (single, multi main + axes, custom → single or main route) on every device, video paused or not; toggle's second press stops the devices until playback starts again; `orgasm-state` keeps the phone's button honest. No Edge (Z) |
 | Speed stats | partial | from the imported `speedStatsCache`; not computed for new scripts |
 
 ## Script smoothing
@@ -120,7 +121,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 |---|---|---|
 | Buttplug / Intiface from the page | partial | decision change: **the server drives every device**, from the playback state the web remote streams over `/api/remote/sync`. Minimal Buttplug v3 client to Intiface (`ws://127.0.0.1:<buttplug.port>`): strokers follow the stroke (`LinearCmd`), vibrators its speed (`ScalarCmd`); no per-device modes, rotate or oscillate yet; not tested against a real Intiface |
 | TCode WebSocket (MiraBot, 60 Hz, 4 digits) from the page | done | from the server (decision change above): 60 Hz `L09999I17` frames, per-axis enable / min / max / invert from `settings.tcode.axes`, 3 or 4 digits (`precision`); Devices page `/remote/devices.html` |
-| TCode USB serial from the server | done | raw tty set up with `stty` (no serial crate), `settings.tcode.port` / `baudRate` |
+| TCode USB serial from the server | done | raw tty set up with `stty` (no serial crate), `settings.tcode.port` / `baudRate`; a missing port is looked for every 5 s (plug in later or replug) |
 | TCode UDP from the server | done | `udpHost` / `udpPort` |
 | Browser serial relay | not planned | the server drives USB serial itself (decision 3); revisit if a device sits on another computer |
 | TCode device profiles (MiraBot, FUNSR MINI, Custom) | done | `POST /api/devices {kind:"tcode", profile}` and the Devices page: saves the current profile under `tcode.profiles.saved`, loads the next one's (or its defaults) and connects it unless it was disconnected; FUNSR MINI stroke length / speed / start position (`DAG` / `DKP` / `DSP`) sent at once and 2.5 s after each connect; the device pill names the profile. No floor / ceiling, generated motion or browser relay |
