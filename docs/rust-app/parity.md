@@ -17,7 +17,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 | Device dashboard (`/device`) | done | `backend/device-dashboard/` served unchanged (this computer only; 403 otherwise), fed by `GET /api/device/telemetry` from the server's engine: 1 s samples for 15 minutes, the last ~100 s of commands, 500 events (link connects, drops, failures, scripts loaded, phone take-overs); the web remote's newest phone is the playback source |
 | Access PIN, LAN mode | partial | `--lan` listens on every interface; the swipe deck's gate (`scout_report::gate`) with the old app's `access-pin.json`, so one login covers both apps (login page, cookie / `?k=`, lockout). Missing: headset body login and thumbnail-only keys (VR slice), WebSocket close 4401 (a refused socket gets 401) |
 | One port + nav bar for the Rust sites (swipe deck, Downloads, creators, status) | done | `src/sites.rs`: `deploy/sites.json` relayed under their prefixes (base href + nav injected, `Location` mapped, bare page paths redirect), nav from the same file plus Parity |
-| Log file | not started | stderr only |
+| Log file | done | `~/Library/Logs/funsync-rust/server.log` (`$FUNSYNC_RUST_LOG`), rotated to `server.old.log` at 1 GB; every request (client, method, path, status, time) except a successful loopback `/health`, plus the server's own lines |
 
 ## Video Player
 

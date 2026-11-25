@@ -10,6 +10,7 @@ pub mod devices;
 pub mod edits;
 pub mod heresphere;
 pub mod import;
+pub mod log;
 pub mod media;
 pub mod queue;
 pub mod remote;

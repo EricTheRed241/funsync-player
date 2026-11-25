@@ -220,6 +220,7 @@ pub fn router_with_pin(state: Arc<AppState>, pin_dir: PathBuf) -> Router {
             crate::access::Access::new(pin_dir),
             crate::access::layer,
         ))
+        .layer(axum::middleware::from_fn(crate::log::requests))
 }
 
 /// The web remote's pages get `extras.js` (web/remote/extras.js: the desktop
@@ -253,16 +254,16 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr, supervise: bool) -> R
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("bind {addr}: {e}"))?;
-    eprintln!(
+    crate::log::line(format!(
         "funsync-server: http://{addr}/ (data {})",
         state.data_dir.display()
-    );
+    ));
     crate::settings::watch_drives(state.clone());
     crate::devices::start(&state).await;
     let s = state.clone();
     tokio::spawn(async move {
         if let Err(e) = s.rescan().await {
-            eprintln!("funsync-server: startup scan failed: {e}");
+            crate::log::line(format!("funsync-server: startup scan failed: {e}"));
         }
     });
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
