@@ -88,7 +88,7 @@ The **parity dashboard** at http://127.0.0.1:5300/parity (nav bar: Parity) shows
 
 | Feature | Status | Notes |
 |---|---|---|
-| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, URLs from the Host header. Read-only (`write*` false, no event server); Queue is `player.userQueue` only (no auto-fill); Hand-made from companion files only (no embedded axes); no access PIN; no `?v=` thumb versions |
+| HereSphere API (sections, scene tags, scripts) | partial | `/heresphere` (`?filter=` vr, flat, scripted) and `/heresphere/<id>`: the old sections (Needs review, Queue, score lists, VR/Flat, speed, length, Hand-made, Recently Added, triage, playlists; watched last), scene media/scripts/subtitles/tags/chapters, versioned thumbnail URLs, URLs from the Host header. Read-only (`write*` false, no event server); Queue is `player.userQueue` only (no auto-fill); Hand-made from companion files only (no embedded axes); no headset PIN login (HereSphere / DeoVR body password) |
 | DeoVR API | partial | `/deovr` and `/deovr/<id>` with the same sections and tags; encoding name always `h264`; no access PIN |
 | Rate / favourite / playlist / queue edits from the headset | not started | phase 4 |
 | Review on end from the headset | not started | phase 4 |

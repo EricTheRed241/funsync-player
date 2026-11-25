@@ -60,6 +60,8 @@ pub struct Facts {
     pub handmade: bool,
     pub date_added: f64,
     pub score: Option<f64>,
+    /// `/api/media/thumb/<id>?v=…` (`remote::thumb_url`).
+    pub thumb: String,
 }
 
 impl Facts {
@@ -79,6 +81,7 @@ impl Facts {
             score: l["preferenceScores"][&v.path]
                 .as_f64()
                 .filter(|s| s.is_finite()),
+            thumb: crate::remote::thumb_url(lib, v),
         }
     }
 
@@ -406,7 +409,7 @@ async fn deovr_library(
         json!({
             "title": stem(v),
             "videoLength": f.duration as u64,
-            "thumbnailUrl": format!("{base}/api/media/thumb/{}", v.id),
+            "thumbnailUrl": format!("{base}{}", f.thumb),
             "video_url": format!("{base}/deovr/{}", v.id),
         })
     })
@@ -427,6 +430,7 @@ struct Scene {
     tags: Vec<String>,
     rating: f64,
     favorite: bool,
+    thumb: String,
 }
 
 async fn scene(st: &AppState, id: &str) -> Option<Scene> {
@@ -448,6 +452,7 @@ async fn scene(st: &AppState, id: &str) -> Option<Scene> {
         tags: scene_tags(&lib, &v, &facts),
         rating,
         favorite,
+        thumb: facts.thumb.clone(),
         v,
     })
 }
@@ -531,7 +536,7 @@ async fn hs_scene(
             "access": 1,
             "title": stem(&s.v),
             "description": "",
-            "thumbnailImage": format!("{base}/api/media/thumb/{id}"),
+            "thumbnailImage": format!("{base}{}", s.thumb),
             "dateReleased": "",
             "dateAdded": "",
             "duration": s.duration * 1000,
@@ -593,7 +598,7 @@ async fn deovr_scene(
             "screenType": s.fmt.screen,
             "stereoMode": s.fmt.stereo,
             "videoLength": s.duration,
-            "thumbnailUrl": format!("{base}/api/media/thumb/{id}"),
+            "thumbnailUrl": format!("{base}{}", s.thumb),
             "encodings": [{"name": "h264", "videoSources": [{
                 "resolution": s.height, "height": s.height, "width": s.width,
                 "size": s.v.size, "url": format!("{base}/api/media/stream/{id}")}]}],
