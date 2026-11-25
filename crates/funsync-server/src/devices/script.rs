@@ -160,7 +160,14 @@ fn companions(script: &str) -> Vec<Axis> {
 /// playable script.
 pub fn load(v: &Video, variant: Option<&str>) -> Option<Vec<(String, Vec<Action>)>> {
     let (path, axes_files) = match variant {
-        None => (v.funscript_path.clone()?, v.axes.clone()),
+        None => {
+            let files = if v.manual_axes.is_empty() {
+                &v.axes
+            } else {
+                &v.manual_axes
+            };
+            (v.funscript_path.clone()?, files.clone())
+        }
         Some(label) => {
             let p = v.variants.iter().find(|x| x.label == label)?.path.clone();
             let mut files: Vec<Axis> = v.axes.iter().filter(|a| !a.generated).cloned().collect();

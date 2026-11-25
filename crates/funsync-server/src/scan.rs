@@ -88,6 +88,11 @@ pub struct Video {
     /// Axis companions of the video's main script (or of the video's own
     /// name when the scene ships axes only), hand-made and generated.
     pub axes: Vec<Axis>,
+    /// Axis files a manual `multi` association plays instead (devices only;
+    /// the axis kind, categories and scores keep following `axes`, as the
+    /// old backend registered the scan's pairing).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub manual_axes: Vec<Axis>,
     pub source_name: String,
     /// mtime in ms, the old app's "date added".
     pub date_added: f64,
@@ -500,6 +505,7 @@ pub fn scan_library(sources: &[Source]) -> ScanResult {
             subtitle_path: sub_i.map(|i| subs[i].path.clone()),
             variants,
             axes: Vec::new(),
+            manual_axes: Vec::new(),
             source_name,
             date_added,
             size,

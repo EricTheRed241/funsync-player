@@ -47,9 +47,7 @@ pub fn apply(associations: &Value, videos: &mut [Video]) {
                         })
                     })
                     .collect();
-                if !axes.is_empty() {
-                    v.axes = axes;
-                }
+                v.manual_axes = axes;
             }
             _ => {}
         }
@@ -141,7 +139,8 @@ async fn show(State(st): State<Arc<AppState>>, UrlPath(id): UrlPath<String>) -> 
     let entry = st.library.read().await.lib()["associations"][&v.path].clone();
     Json(json!({
         "video": {"id": v.id, "name": v.name, "path": v.path},
-        "current": {"funscriptPath": v.funscript_path, "axes": v.axes},
+        "current": {"funscriptPath": v.funscript_path,
+            "axes": if v.manual_axes.is_empty() { &v.axes } else { &v.manual_axes }},
         "entry": entry,
         "axisNames": AXIS_SUFFIXES,
         "suggestions": suggestions,
@@ -229,8 +228,12 @@ mod tests {
         let mut vids = vec![video("/a.mp4"), video("/b.mp4"), video("/c.mp4")];
         apply(&assoc, &mut vids);
         assert_eq!(vids[0].funscript_path.as_deref(), Some(m.as_str()));
-        assert_eq!(vids[0].axes.len(), 1);
-        assert!(vids[0].axes[0].generated);
+        assert_eq!(vids[0].manual_axes.len(), 1);
+        assert!(vids[0].manual_axes[0].generated);
+        assert!(
+            vids[0].axes.is_empty(),
+            "the scan's axes (axis kind) stay as scanned"
+        );
         assert!(vids[1].funscript_path.is_none());
         assert!(vids[2].funscript_path.is_none());
     }
