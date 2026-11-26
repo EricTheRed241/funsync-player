@@ -34,6 +34,9 @@
 // `swipeDeck.yesCreatorBonus` (JSON only, read by crates/scout-report): score points the swipe
 // deck adds to cards of the creators you said yes to on the Creators site (swiped yes,
 // favourites, pornstar list).
+// `swipeDeck.recency` (JSON only, read by crates/scout-report): the swipe deck's bonus for new
+// cards, `maxBonus` points for one dated today, halving every `halfLifeDays` (by a post's
+// creation or a scene's release date), so every tab leads with the best and the newest.
 
 import data from './content-preferences.json' with { type: 'json' };
 

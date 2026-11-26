@@ -238,10 +238,15 @@ pub fn route(method: &str, target: &str, body: &[u8], user_data: &Path) -> Respo
 /// The deck request from the query: `limit=N` (default DEFAULT_LIMIT, at most MAX_LIMIT),
 /// `seed=N` (shuffle a little), `jitter=N` (how much, in score points: 0 ..= MAX_JITTER;
 /// default the tab's), `exclude=<source>:<id>,…` (the cards the page holds: `eroscripts:<topic
-/// id>`, a scene source's `<source>:<id>` or `library:<video id>`; at most MAX_EXCLUDE), and
-/// `stack=multi|vr|flat|slr|free|dupes` (default multi).
+/// id>`, a scene source's `<source>:<id>` or `library:<video id>`; at most MAX_EXCLUDE),
+/// `years=N` (only cards dated within N years; 0 = all; default the tab's, deck::FLAT_YEARS on
+/// Flat) and `stack=multi|vr|flat|slr|free|dupes` (default multi). Today is the server's date
+/// (the recency bonus and the years window count from it).
 fn deal(query: &str) -> Result<deck::Deal, String> {
-    let mut d = deck::Deal::default();
+    let mut d = deck::Deal {
+        today: today(),
+        ..deck::Deal::default()
+    };
     for (key, v) in query.split('&').filter_map(|p| p.split_once('=')) {
         match key {
             "limit" => {
@@ -269,6 +274,19 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
                     })?;
                 d.jitter = Some(n);
             }
+            "years" => {
+                d.years = Some(
+                    v.parse::<u32>()
+                        .ok()
+                        .filter(|n| *n <= deck::MAX_YEARS)
+                        .ok_or_else(|| {
+                            format!(
+                                "years must be a whole number from 0 to {}, got {v:?}\n",
+                                deck::MAX_YEARS
+                            )
+                        })?,
+                );
+            }
             "exclude" => {
                 for item in v.split(',').filter(|s| !s.is_empty()) {
                     d.exclude.insert(exclude_key(item).ok_or_else(|| {
@@ -291,6 +309,20 @@ fn deal(query: &str) -> Result<deck::Deal, String> {
         }
     }
     Ok(d)
+}
+
+/// The server's date (deck::today); in unit tests the thread's TEST_TODAY (None leaves the
+/// recency bonus and the years window out, so other tests don't depend on the calendar).
+fn today() -> Option<i64> {
+    #[cfg(test)]
+    return TEST_TODAY.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    Some(deck::today())
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_TODAY: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
 }
 
 /// One `exclude` item as a card key (deck::DeckCard::key): `eroscripts:<topic id>` (plain
@@ -922,6 +954,9 @@ mod tests {
             "/api/deck?jitter=x",
             "/api/deck?jitter=NaN",
             "/api/deck?jitter=inf",
+            "/api/deck?years=101",
+            "/api/deck?years=-1",
+            "/api/deck?years=x",
         ] {
             assert_eq!(route("GET", bad, b"", &dir).status, 400, "{bad}");
         }

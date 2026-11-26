@@ -208,6 +208,8 @@ a.badge { color: var(--fg); }
 }
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; color: var(--muted); text-align: center; padding: 20px; }
+.empty .older { font: inherit; font-weight: 600; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 16px; cursor: pointer; }
 .actions { display: flex; justify-content: center; align-items: center; gap: 24px;
   padding: 12px 0 calc(10px + env(safe-area-inset-bottom)); }
 .round { width: 64px; height: 64px; border-radius: 50%; font-size: 28px; line-height: 1; cursor: pointer; padding: 0;
@@ -274,9 +276,10 @@ a.badge { color: var(--fg); }
 'use strict';
 const BATCH = 20;
 const REFILL_AT = 5;
-// The deal's shuffle: the server shifts every score by up to ±4 on Multi (it stays close to
-// score order), ±3 on VR and ±10 on Flat (low scorers come up too) for this seed, unless ⚙ sets
-// another amplitude for the tab; Shuffle (or a page reload) deals a new order.
+// The deal's order: score plus a bonus for new cards (the server's swipeDeck.recency), each
+// shifted by up to ±4 on Multi, ±3 on VR and Flat and ±2 on SLR for this seed, unless ⚙ sets
+// another amplitude for the tab; Shuffle (or a page reload) deals a new order. Flat deals the
+// last year; Load older (when it runs out) goes a year further back.
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 let seed = newSeed();
 let generation = 0;     // bumped by Refresh / Shuffle / a tab change: answers to older deck requests are dropped
@@ -321,7 +324,7 @@ const SITE_NAMES = { vrbangers: 'VRBangers', vrconk: 'VRConk', eroscripts: 'EroS
 const sourceName = (c) => SITE_NAMES[c.site] || SOURCE_NAMES[sourceOf(c)] || sourceOf(c);
 // ⚙ shuffle amplitude per tab, in score points; unset = the server's default (deck.rs
 // MULTI_JITTER / VR_JITTER / FLAT_JITTER / SLR_JITTER), shown as the placeholder. Remembered on this device.
-const JITTER_DEFAULT = { multi: 4, vr: 3, flat: 10, slr: 2 };
+const JITTER_DEFAULT = { multi: 4, vr: 3, flat: 3, slr: 2 };
 const JITTER_MAX = 30;
 const validJitter = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= JITTER_MAX;
 let jitters = (() => {
@@ -332,6 +335,9 @@ let jitters = (() => {
     return {};
   }
 })();
+// Years back a tab deals (`years`), when Load older asked for more than its default (Flat: the
+// last year, deck.rs FLAT_YEARS); 0 = every card. This visit only.
+const yearsBack = {};
 const $ = (id) => document.getElementById(id);
 const deckEl = $('deck');
 
@@ -420,7 +426,7 @@ function badges(c) {
   const src = el('span', { class: 'badge b-src-' + kind, title: 'From ' + sourceName(c) }, sourceName(c));
   const who = c.creator ? el('span', { class: 'badge b-creator', title: 'A creator you said yes to on the Creators site (score bonus)' }, '👤 ' + c.creator) : null;
   if (isScene(c)) return [src, who, ...sceneBadges(c)].filter(Boolean);
-  const out = [src, who, el('span', { class: 'badge b-score', title: 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))].filter(Boolean);
+  const out = [src, who, el('span', { class: 'badge b-score', title: 'Score' + newer(c) }, c.score == null ? '★ –' : '★ ' + fmt(c.score))].filter(Boolean);
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: c.videos > 1 ? 'Length of the first video' : 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
   const multi = c.axisType ? c.axisType === 'multi' : typeof c.axes === 'number' && c.axes > 1;
@@ -453,7 +459,7 @@ const scriptLabel = (s) => 'script: ' + (SCRIPT_SOURCES[s] || s || 'none');
 function sceneBadges(c) {
   const parts = c.scoreParts || {};
   const why = Object.entries(parts).map(([k, v]) => `${k} ${signed(v)}`).join(', ');
-  const out = [el('span', { class: 'badge b-score', title: why ? 'Score: ' + why : 'Score' }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
+  const out = [el('span', { class: 'badge b-score', title: (why ? 'Score: ' + why : 'Score') + newer(c) }, c.score == null ? '★ –' : '★ ' + fmt(c.score))];
   if (c.runtimeMs) out.push(el('span', { class: 'badge b-time', title: 'Length' }, '⏱ ' + clock(c.runtimeMs)));
   out.push(c.vr ? el('span', { class: 'badge b-vr' }, c.passthrough ? 'VR · passthrough' : 'VR') : el('span', { class: 'badge b-flat' }, 'Flat'));
   if (c.fps) out.push(el('span', { class: 'badge b-time', title: 'Frame rate' }, fmt(c.fps) + ' fps'));
@@ -1025,7 +1031,8 @@ function render(enterFrom) {
         el('span', {}, (wanted ? 'Delete the marked copies above, or undo a swipe. ' : '')
           + (lastDeck ? `Pairs under ${Math.round(lastDeck.floorConfidence)}% confidence aren't shown.` : '')),
         el('span', {}, 'npm run dedupe:scenes measures frames of same-length videos, which makes the confidence surer.')]
-      : [`Nothing left to swipe on ${STACK_NAMES[stack]}.`,
+      : [`Nothing left to swipe on ${STACK_NAMES[stack]}${lastDeck && lastDeck.years ? ` from the last ${lastDeck.years === 1 ? 'year' : lastDeck.years + ' years'}` : ''}.`,
+        lastDeck && lastDeck.older ? el('button', { type: 'button', class: 'older', onclick: loadOlder }, olderLabel(lastDeck.older)) : null,
         el('span', {}, TAB_SCOUTS[stack].map((s) => 'npm run ' + s).join(', ') + ' find more.')]));
     return;
   }
@@ -1327,7 +1334,8 @@ function more() {
   const held = [...queue, ...skipped].map(keyOf).join(',');
   serial(async () => {
     const jitter = jitters[stack] == null ? '' : `&jitter=${jitters[stack]}`;
-    const res = await fetch(`api/deck?stack=${stack}&limit=${BATCH}&seed=${seed}${jitter}&exclude=${held}`, { cache: 'no-store' });
+    const years = yearsBack[stack] == null ? '' : `&years=${yearsBack[stack]}`;
+    const res = await fetch(`api/deck?stack=${stack}&limit=${BATCH}&seed=${seed}${jitter}${years}&exclude=${held}`, { cache: 'no-store' });
     if (!res.ok) throw new Error((await res.text()).trim() || res.status);
     return res.json();
   }).then((d) => {
@@ -1392,6 +1400,20 @@ function reload() {
   more();
   render();
 }
+
+/** The Load-older button: the next window back (`older.years`; 0 = every card, undated ones too). */
+function olderLabel(older) {
+  const n = `${older.count} more card${older.count === 1 ? '' : 's'}`;
+  return older.years ? `Load older: up to ${older.years} years back (${n})` : `Load the cards without a date (${n})`;
+}
+
+function loadOlder() {
+  yearsBack[stack] = lastDeck.older.years;
+  reload();
+}
+
+/** A card's recency bonus for the score's hover (it ranks the card, it isn't in the score). */
+const newer = (c) => (c.newBonus ? `; new: ${signed(c.newBonus)} in the order` : '');
 
 /**
  * Deal the deck again from the server (new images, runtimes and heat strips the scout saved since,
