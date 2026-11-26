@@ -209,6 +209,9 @@ pub struct SceneCard {
     pub images: Vec<String>,
     pub score: Option<f64>,
     pub score_parts: Value,
+    /// The recency bonus a deal ranked it with (deck::Recency; not part of `score`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_bonus: Option<f64>,
     pub vr: bool,
     pub creampie: bool,
     pub runtime_ms: Option<u64>,
@@ -329,6 +332,7 @@ pub fn card(source: Source, id: String, s: &Value) -> SceneCard {
         images: scene_images(s),
         score: num("score"),
         score_parts: s.get("scoreParts").cloned().unwrap_or(Value::Null),
+        new_bonus: None,
         vr: flag(s, "vr"),
         creampie: flag(s, "creampie"),
         runtime_ms: seconds

@@ -6,9 +6,13 @@
 //! card's tab: multi-axis (a post's `axisType` "multi", a scene's `script.axes`) → Multi,
 //! else VR or Flat by its `vr`.
 //!
-//! Highest score first (the scouts' download order); with a `seed`, each card's score is
-//! shifted by up to the deal's jitter (the request's `jitter`, else the tab's MULTI_JITTER,
-//! VR_JITTER or FLAT_JITTER) either way, so the order wanders a little. Scores, tag scores and
+//! Ordered by score plus a recency bonus (`swipeDeck.recency` in the shared preferences: newest
+//! posts and scenes up to `maxBonus` points, halving every `halfLifeDays` of age, by a post's
+//! creation date or a scene's release date), so the best and the newest come first; with a
+//! `seed`, each card is shifted by up to the deal's jitter (the request's `jitter`, else the
+//! tab's MULTI_JITTER, VR_JITTER, FLAT_JITTER or SLR_JITTER) either way, so the order wanders a
+//! little. Flat deals only the last FLAT_YEARS year(s) unless the request asks for more
+//! (`years`); the deck says what an older window would add (`older`). Scores, tag scores and
 //! creampie come from the scouts' files (`score`, `tagScores`, `creampie`); Rust only adds
 //! the yes-creator bonus (`swipeDeck.yesCreatorBonus`) to a yes creator's cards. Dealt cards
 //! name the creators in them (`people`, crate::creators::Creators::add_people), each with her
@@ -38,10 +42,16 @@ pub const VR_JITTER: f64 = 3.0;
 /// Score points a seeded SLR deal moves each card by, at most, either way: every SLR download
 /// costs the account's quota, so the order stays closest to the score.
 pub const SLR_JITTER: f64 = 2.0;
-/// Score points a seeded Flat deal moves each card by, at most, either way: wide enough
-/// (scores run about -4 … 24) that low-scoring posts and videos surface too and the whole
-/// stack gets swiped.
-pub const FLAT_JITTER: f64 = 10.0;
+/// Score points a seeded Flat deal moves each card by, at most, either way (10 until
+/// 2026-11-26; the user: "change default for flat from wiggle 10 to wiggle 3", score and
+/// recency lead the order).
+pub const FLAT_JITTER: f64 = 3.0;
+/// Years back the Flat tab deals by default (`years`): older cards wait behind the page's
+/// Load-older button (user, 2026-11-26).
+pub const FLAT_YEARS: u32 = 1;
+/// Most years a deck request may ask for (`years=N`; 0 = every card, undated ones too).
+pub const MAX_YEARS: u32 = 100;
+const DAYS_PER_YEAR: i64 = 365;
 /// Largest jitter a deck request may ask for (`jitter=N`), in score points.
 pub const MAX_JITTER: f64 = 30.0;
 /// Images per card (the scouts save at most this many).
@@ -121,6 +131,12 @@ pub struct Deal {
     /// (DeckCard::key): ids of different sources may be equal.
     pub exclude: HashSet<String>,
     pub stack: Stack,
+    /// Deal only cards dated within this many years (0 = all, undated included). None = the
+    /// stack's default: FLAT_YEARS on Flat, all elsewhere.
+    pub years: Option<u32>,
+    /// Today as days since 1970-01-01, for the recency bonus and the years window; None (tests
+    /// of score order) leaves both out.
+    pub today: Option<i64>,
 }
 
 impl Default for Deal {
@@ -131,6 +147,8 @@ impl Default for Deal {
             jitter: None,
             exclude: HashSet::new(),
             stack: Stack::default(),
+            years: None,
+            today: None,
         }
     }
 }
@@ -155,8 +173,82 @@ pub struct Deck {
     pub quota_error: Option<String>,
     /// Files that exist but couldn't be read or parsed.
     pub problems: Vec<String>,
+    /// The years window this deal used (None: every card).
+    pub years: Option<u32>,
+    /// What the next older window adds, when cards are left out by `years`.
+    pub older: Option<Older>,
     /// The first `limit` cards, in deck order.
     pub cards: Vec<DeckCard>,
+}
+
+/// The next window back: ask `years=<years>` (0 = every card, the undated too) to add `count`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Older {
+    pub years: u32,
+    pub count: usize,
+}
+
+/// `swipeDeck.recency`: a card's bonus for being new.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recency {
+    /// Points a card dated today gets.
+    pub max_bonus: f64,
+    /// Days after which the bonus has halved.
+    pub half_life_days: f64,
+}
+
+impl Recency {
+    /// The shared preferences' (`shared/content-preferences.json`).
+    pub fn shared() -> Recency {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Shared {
+            swipe_deck: SwipeDeck,
+        }
+        #[derive(serde::Deserialize)]
+        struct SwipeDeck {
+            recency: Recency,
+        }
+        serde_json::from_str::<Shared>(crate::creators::SHARED)
+            .expect("shared/content-preferences.json: swipeDeck.recency")
+            .swipe_deck
+            .recency
+    }
+
+    /// The bonus for a card `age` days old (a future date counts as today).
+    pub fn bonus(self, age: i64) -> f64 {
+        self.max_bonus * 0.5f64.powf(age.max(0) as f64 / self.half_life_days)
+    }
+}
+
+/// Days since 1970-01-01 of a date or time starting `YYYY-MM-DD`; None otherwise.
+pub fn day_of(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 10 || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // Days from civil (H. Hinnant).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
+}
+
+/// Today, as days since 1970-01-01 (UTC).
+pub fn today() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| (d.as_secs() / 86_400) as i64)
 }
 
 /// One card; its `source` says where its swipe goes.
@@ -196,6 +288,32 @@ impl DeckCard {
             DeckCard::Scene(s) => s.score,
         }
         .unwrap_or(f64::NEG_INFINITY)
+    }
+
+    /// The day the card dates from: a post's creation, a scene's release (or a creator post's
+    /// creation); None when unknown.
+    fn day(&self) -> Option<i64> {
+        match self {
+            DeckCard::Post(p) => p.created.as_deref(),
+            DeckCard::Scene(s) => s.date.as_deref(),
+        }
+        .and_then(day_of)
+    }
+
+    fn new_bonus(&self) -> f64 {
+        match self {
+            DeckCard::Post(p) => p.new_bonus,
+            DeckCard::Scene(s) => s.new_bonus,
+        }
+        .unwrap_or(0.0)
+    }
+
+    fn set_new_bonus(&mut self, bonus: Option<f64>) {
+        let rounded = bonus.map(|b| (b * 10.0).round() / 10.0);
+        match self {
+            DeckCard::Post(p) => p.new_bonus = rounded,
+            DeckCard::Scene(s) => s.new_bonus = rounded,
+        }
     }
 
     /// What the seeded jitter is drawn from: a post's topic id (as before scenes joined the
@@ -242,6 +360,9 @@ pub struct Card {
     /// frames on disk (`/frames/eroscripts/…`, crate::frames).
     pub images: Vec<String>,
     pub score: Option<f64>,
+    /// The recency bonus this deal ranked it with (Recency; not part of `score`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_bonus: Option<f64>,
     pub vr: bool,
     pub axis_type: Option<String>,
     pub axes: Axes,
@@ -426,19 +547,75 @@ pub fn load(user_data: &Path, deal: &Deal) -> Deck {
 }
 
 impl Deck {
-    /// Reorder by `seed` (shifting scores by up to the deal's jitter), leave out `exclude`
+    /// With `today`: leave out cards older than the years window (`older` says what the next
+    /// window back adds; `remaining` counts the window) and give each card its recency bonus.
+    /// Then order by score + recency bonus (+ the seeded jitter), leave out `exclude`
     /// (`remaining` still counts them), and keep the first `limit`.
     pub fn deal(&mut self, deal: &Deal) {
-        if let Some(seed) = deal.seed {
+        self.deal_with(deal, Recency::shared());
+    }
+
+    fn deal_with(&mut self, deal: &Deal, recency: Recency) {
+        if let Some(today) = deal.today {
+            let years = deal
+                .years
+                .or((deal.stack == Stack::Flat).then_some(FLAT_YEARS))
+                .filter(|y| *y > 0);
+            if let Some(years) = years {
+                let within = |c: &DeckCard| {
+                    c.day()
+                        .is_some_and(|d| today - d < i64::from(years) * DAYS_PER_YEAR)
+                };
+                let (keep, older): (Vec<DeckCard>, Vec<DeckCard>) =
+                    self.cards.drain(..).partition(within);
+                self.cards = keep;
+                self.older = next_window(today, &older);
+                self.years = Some(years);
+                self.remaining = self.cards.len();
+            }
+            for c in &mut self.cards {
+                let bonus = c.day().map(|d| recency.bonus(today - d));
+                c.set_new_bonus(bonus);
+            }
+        }
+        if deal.seed.is_some() || deal.today.is_some() {
             let amp = deal.jitter.unwrap_or_else(|| deal.stack.jitter());
+            let seed = deal.seed;
             sort(&mut self.cards, |c| {
-                c.score() + jitter(seed, c.jitter_id(), amp)
+                c.score() + c.new_bonus() + seed.map_or(0.0, |s| jitter(s, c.jitter_id(), amp))
             });
         }
         if !deal.exclude.is_empty() {
             self.cards.retain(|c| !deal.exclude.contains(&c.key()));
         }
         self.cards.truncate(deal.limit);
+    }
+}
+
+/// The next years window back from the cards a window left out: the smallest one that adds a
+/// dated card, else (only undated cards left) every card.
+fn next_window(today: i64, older: &[DeckCard]) -> Option<Older> {
+    if older.is_empty() {
+        return None;
+    }
+    let ages: Vec<i64> = older
+        .iter()
+        .filter_map(|c| c.day())
+        .map(|d| today - d)
+        .collect();
+    match ages.iter().min() {
+        Some(&youngest) => {
+            let years = (youngest / DAYS_PER_YEAR + 1).min(i64::from(MAX_YEARS)) as u32;
+            let limit = i64::from(years) * DAYS_PER_YEAR;
+            Some(Older {
+                years,
+                count: ages.iter().filter(|a| **a < limit).count(),
+            })
+        }
+        None => Some(Older {
+            years: 0,
+            count: older.len(),
+        }),
     }
 }
 
@@ -562,6 +739,8 @@ pub fn build(f: &Files, stack: Stack) -> Deck {
         quota: slr.get("quota").cloned().unwrap_or(Value::Null),
         quota_error: str_of(slr, "quotaError"),
         problems: Vec::new(),
+        years: None,
+        older: None,
         cards,
     }
 }
@@ -581,6 +760,7 @@ fn card(id: u64, cand: &Value, rec: Option<&Value>, shared: &HashMap<&str, usize
         author: str_of(rec, "author").or_else(|| str_of(cand, "author")),
         images: images(rec, shared),
         score: cand.get("score").and_then(Value::as_f64),
+        new_bonus: None,
         vr: cand.get("vr").and_then(Value::as_bool).unwrap_or(false),
         axis_type: str_of(cand, "axisType"),
         axes: axes(scenes),
@@ -1585,5 +1765,124 @@ mod tests {
         assert!(before.cards.iter().any(|c| c.key() == "eroscripts:11"));
         assert!(!d.cards.iter().any(|c| c.key() == "eroscripts:11"));
         assert_eq!(d.wanted, build(&files(), Stack::Flat).wanted + 1);
+    }
+
+    #[test]
+    fn dates_count_days_since_1970() {
+        assert_eq!(day_of("1970-01-01"), Some(0));
+        assert_eq!(day_of("2026-11-26"), Some(20_783));
+        assert_eq!(day_of("2026-11-26T23:59:59Z"), Some(20_783));
+        assert_eq!(
+            day_of("2024-03-01"),
+            Some(day_of("2024-02-29").unwrap() + 1)
+        );
+        for bad in ["", "2026-13-01", "26-11-2026", "2026/11/26", "soon"] {
+            assert_eq!(day_of(bad), None, "{bad}");
+        }
+        let r = Recency {
+            max_bonus: 8.0,
+            half_life_days: 120.0,
+        };
+        assert_eq!(
+            (r.bonus(0), r.bonus(-5), r.bonus(120), r.bonus(240)),
+            (8.0, 8.0, 4.0, 2.0)
+        );
+        // The shared preferences parse.
+        assert!(Recency::shared().max_bonus > 0.0);
+    }
+
+    fn dated(id: &str, score: f64, date: Option<&str>) -> DeckCard {
+        DeckCard::Scene(SceneCard {
+            source: "pmvhaven",
+            id: id.into(),
+            score: Some(score),
+            date: date.map(String::from),
+            ..SceneCard::default()
+        })
+    }
+
+    fn deck_of(cards: Vec<DeckCard>) -> Deck {
+        Deck {
+            remaining: cards.len(),
+            wanted: 0,
+            last_scan_at: None,
+            generated_at: BTreeMap::new(),
+            quota: Value::Null,
+            quota_error: None,
+            problems: Vec::new(),
+            years: None,
+            older: None,
+            cards,
+        }
+    }
+
+    #[test]
+    fn new_cards_rise_and_flat_deals_the_last_year_first() {
+        let today = day_of("2026-11-26").unwrap();
+        let recency = Recency {
+            max_bonus: 8.0,
+            half_life_days: 120.0,
+        };
+        let cards = || {
+            vec![
+                dated("old-best", 12.0, Some("2025-06-01")),
+                dated("new", 6.0, Some("2026-11-20")),
+                dated("mid", 9.0, Some("2026-07-01")),
+                dated("two-years", 20.0, Some("2024-08-01")),
+                dated("three-years", 20.0, Some("2023-05-01")),
+                dated("undated", 30.0, None),
+            ]
+        };
+        let keys = |d: &Deck| d.cards.iter().map(DeckCard::id).collect::<Vec<_>>();
+        // Multi: no window; a week-old 6 (+7.7) and a 5-month-old 9 (+3.4) pass a 1½-year-old 12
+        // (+0.3); undated cards get no bonus.
+        let mut d = deck_of(cards());
+        d.deal_with(
+            &Deal {
+                today: Some(today),
+                ..Deal::default()
+            },
+            recency,
+        );
+        assert_eq!(
+            keys(&d),
+            [
+                "undated",
+                "two-years",
+                "three-years",
+                "new",
+                "mid",
+                "old-best"
+            ]
+        );
+        assert_eq!((d.years, &d.older, d.remaining), (None, &None, 6));
+        // Flat: the last year only; the next window back (2 years) adds old-best.
+        let flat = |years| {
+            let mut d = deck_of(cards());
+            d.deal_with(
+                &Deal {
+                    stack: Stack::Flat,
+                    today: Some(today),
+                    years,
+                    ..Deal::default()
+                },
+                recency,
+            );
+            d
+        };
+        let d = flat(None);
+        assert_eq!(keys(&d), ["new", "mid"]);
+        assert_eq!(
+            (d.years, d.older.clone(), d.remaining),
+            (Some(1), Some(Older { years: 2, count: 1 }), 2)
+        );
+        let d = flat(Some(2));
+        assert_eq!(keys(&d), ["new", "mid", "old-best"]);
+        assert_eq!(d.older, Some(Older { years: 3, count: 1 }));
+        // Only undated cards left behind: the next window is every card.
+        let d = flat(Some(4));
+        assert_eq!(d.older, Some(Older { years: 0, count: 1 }));
+        let d = flat(Some(0));
+        assert_eq!((d.years, &d.older, d.remaining), (None, &None, 6));
     }
 }

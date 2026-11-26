@@ -208,7 +208,14 @@ fn swipes_through_the_deck() {
             .collect()
     };
     assert_eq!(ids(&deck), [31]);
+    // Flat deals the last year by default: these posts have no date, so they wait behind the
+    // older window (`years=0`: every card).
     let flat: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat").2).unwrap();
+    assert_eq!(
+        (ids(&flat), flat["remaining"].as_u64(), &flat["older"]),
+        (vec![], Some(0), &json!({"years": 0, "count": 2}))
+    );
+    let flat: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat&years=0").2).unwrap();
     assert_eq!(
         (ids(&flat), flat["remaining"].as_u64()),
         (vec![33, 32], Some(2))
@@ -249,7 +256,7 @@ fn swipes_through_the_deck() {
         (vec![], Some(0), Some(1))
     );
     // Each tab counts its own right swipes: 31's is Multi's.
-    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat").2).unwrap();
+    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat&years=0").2).unwrap();
     assert_eq!(ids(&deck), [33]);
     assert_eq!(
         (deck["remaining"].as_u64(), deck["wanted"].as_u64()),
@@ -266,7 +273,7 @@ fn swipes_through_the_deck() {
     // Undo brings the card back and drops the entry.
     let (status, v) = post(port, "/api/swipe/undo", r#"{"id":32}"#);
     assert_eq!((status, v["removed"].as_bool()), (200, Some(true)));
-    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat").2).unwrap();
+    let deck: Value = serde_json::from_slice(&get(port, "/api/deck?stack=flat&years=0").2).unwrap();
     assert_eq!(ids(&deck), [33, 32]);
     let file: Value =
         serde_json::from_slice(&fs::read(ud.join("eroscripts-scout-swipes.json")).unwrap())
@@ -386,8 +393,8 @@ fn every_source_deals_into_the_tabs_and_swipes_into_its_own_file() {
         slr_tab["cards"][1]["slrVideo"]["url"],
         "https://www.sexlikereal.com/scenes/b-66249"
     );
-    // Flat: FapTap and PMVHaven.
-    let flat = deck("/api/deck?stack=flat");
+    // Flat: FapTap and PMVHaven (undated: every year, `years=0`).
+    let flat = deck("/api/deck?stack=flat&years=0");
     assert_eq!(
         cards(&flat),
         ["faptap:1957860091331874817", "pmvhaven:pmv1"]

@@ -103,6 +103,7 @@
   "swipeDeck": {
     "minFreeGb": 50,
     "yesCreatorBonus": 4,
+    "recency": { "maxBonus": 8, "halfLifeDays": 120 },
     "duplicates": {
       "minConfidence": 70,
       "floorConfidence": 40,

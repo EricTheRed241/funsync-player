@@ -38,10 +38,14 @@ SexLikeReal, so costs the account's quota: SLR scenes, posts and creator posts w
 is on SLR), Multi (default: multi-axis posts and scenes whose script has axes besides
 stroke), VR (the rest that's VR) and Flat (the rest); no other tab shows SLR videos. A
 scene a waiting post brings (the same SLR scene id, or the same VRBangers page) only shows
-as the post: its script is free. Each deal shifts every score by up to 4 either way on
-Multi (MULTI_JITTER: it stays close to score order), up to 3 on VR (VR_JITTER), 2 on SLR
-(SLR_JITTER) and up to 10 on Flat (FLAT_JITTER: low scorers come up too); the page's ⚙
-sets each amplitude from 0 (strictly by score) to 30, per device (/api/deck?jitter=N).
+as the post: its script is free. Cards go by score plus a bonus for being new
+(swipeDeck.recency in shared/content-preferences.json: up to 8 points for a post or scene
+dated today, halving every 120 days), so the best and the newest come first. Each deal
+shifts every card by up to 4 either way on Multi (MULTI_JITTER), 3 on VR (VR_JITTER) and
+Flat (FLAT_JITTER; 10 until 2026-11-26) and 2 on SLR (SLR_JITTER); the page's ⚙ sets each
+amplitude from 0 (strictly by score) to 30, per device (/api/deck?jitter=N). Flat deals the
+last year only (FLAT_YEARS); when it runs out the page offers the next year back
+(/api/deck?years=N, 0 = every card; the deck's `older` says what that adds).
 On a wide window (900 px and up) the card puts the image on the left and every
 detail beside it: all tags with their tag scores, likes, hosts, size, dates and the
 scene list (a scene: performers, studio, script, score parts). Right = wanted: the
